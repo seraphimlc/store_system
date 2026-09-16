@@ -91,9 +91,9 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
     per_point：该月点数单价（默认取月绩效表锁存值，再退全局 250）。
     """
     from app.models import PersonDailyStat
-    from app.services import v3_perf
+    from app.services import perf
     if per_point is None:
-        per_point = v3_perf.month_per_point(db, month)
+        per_point = perf.month_per_point(db, month)
     st, en = _month_bounds(month)
     # 员工集合：该月统计表 ∪ 对账文件
     codes = {r.person_code for r in db.query(PersonDailyStat).filter(
@@ -139,9 +139,9 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         # 奖金：每满 bonus_group 点发 bonus_amount 円，整月滚动、不跨月。
         # 上半月奖金 = h1÷门槛×奖额（余点带向下半月）；
         # 下半月奖金 = (h1余 + h2)÷门槛×奖额 − 上半月已发（当月累计滚动）
-        from app.services import v3_perf
-        g, amt = v3_perf.bonus_params(month)
-        settle_amt = v3_perf.salary_for(sp, per_point, month)
+        from app.services import perf
+        g, amt = perf.bonus_params(month)
+        settle_amt = perf.salary_for(sp, per_point, month)
         b1 = (h1 // g) * amt
         h1_rem = h1 % g
         b2 = ((h1_rem + h2) // g) * amt

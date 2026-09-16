@@ -12,7 +12,7 @@ from collections import defaultdict
 from openpyxl import load_workbook
 import app.db as appdb
 from app.models import FormalRecord, RawRecord
-from app.services import v3_perf, v3_period
+from app.services import perf, period
 
 
 def norm(s):
@@ -74,20 +74,20 @@ db.commit()
 print("标记 raw:", raw_updated, "| 已删 formal:", len(to_del))
 
 # 重算 8 月：统计表 → 月绩效 → 薪资找平
-v3_perf.sync_month_stats(db, MONTH)
-v3_perf.sync_month_perf(db, MONTH)
-v3_period.sync_period_table(db, MONTH)
+perf.sync_month_stats(db, MONTH)
+perf.sync_month_perf(db, MONTH)
+period.sync_period_table(db, MONTH)
 
 # 新基准
 fr2 = db.query(FormalRecord).filter(
     FormalRecord.japan_date >= f"{MONTH}-01",
     FormalRecord.japan_date < "2026-09-01").all()
-mp = v3_perf.month_perf(db, MONTH)
+mp = perf.month_perf(db, MONTH)
 print("\n修复后 8 月基准:")
 print("  formal:", len(fr2), "点数:", sum(x.points for x in fr2))
 print("  月绩效:", len(mp), "人 工资:", sum(x["salary"] for x in mp),
       "奖金:", sum((x["points"] // 68) * 3000 for x in mp))
-rows = v3_period.period_rows(db, MONTH)
+rows = period.period_rows(db, MONTH)
 print("  薪资找平:", len(rows), "行 分期已发:",
       sum(r["half1_amt"] + r["half2_amt"] for r in rows),
       "对账金额:", sum(r["settle_amt"] for r in rows))

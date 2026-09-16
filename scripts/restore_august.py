@@ -6,13 +6,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import app.db as appdb
 from app.models import FormalRecord, PersonDailyStat
-from app.services import v3_flow
+from app.services import flow
 
 db = appdb.SessionLocal()
 print("恢复前 formal8:", db.query(FormalRecord).filter(
     FormalRecord.japan_date >= "2026-08-01",
     FormalRecord.japan_date < "2026-09-01").count())
-res = v3_flow.rebuild_month(db, "2026-08")
+res = flow.rebuild_month(db, "2026-08")
 print("rebuild_month:", {k: res.get(k) for k in ("ok", "formal_before", "formal_after", "points_before", "points_after", "msg") if k in res})
 db.commit()
 f8 = db.query(FormalRecord).filter(

@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import app.db as appdb
 from app.models import RawRecord, FormalRecord
-from app.services import v3_perf, v3_period
+from app.services import perf, period
 from datetime import date as _d
 
 
@@ -48,18 +48,18 @@ db.commit()
 print("恢复 raw valid:", restored)
 
 # 重算 8 月
-v3_perf.sync_month_stats(db, "2026-08")
-v3_perf.sync_month_perf(db, "2026-08")
-v3_period.sync_period_table(db, "2026-08")
+perf.sync_month_stats(db, "2026-08")
+perf.sync_month_perf(db, "2026-08")
+period.sync_period_table(db, "2026-08")
 
 fr = db.query(FormalRecord).filter(
     FormalRecord.japan_date >= "2026-08-01", FormalRecord.japan_date < "2026-09-01").all()
-mp = v3_perf.month_perf(db, "2026-08")
+mp = perf.month_perf(db, "2026-08")
 print("恢复后 8 月基准:")
 print("  formal:", len(fr), "点数:", sum(x.points for x in fr))
 print("  月绩效:", len(mp), "人 总点:", sum(x["points"] for x in mp),
       "工资:", sum(x["amount"] for x in mp))
-rows = v3_period.period_rows(db, "2026-08")
+rows = period.period_rows(db, "2026-08")
 print("  找平:", len(rows), "分期已发:", sum(r["half1_amt"]+r["half2_amt"] for r in rows),
       "偏差:", sum(r["diff"] for r in rows), "点")
 db.close()

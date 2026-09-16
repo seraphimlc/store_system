@@ -3,7 +3,7 @@
 
 对账文件可能有两种形态：
   A) 期望的"最终有效店"清单（store 维度）——与 formal_records.store 对比
-  B) 期望的"每人点数"（人维度）——与 v3_perf.month_perf 对比
+  B) 期望的"每人点数"（人维度）——与 perf.month_perf 对比
 解析器返回统一 dict，再由 compare_* 计算差异；差异写入 ReconResult。
 """
 import datetime as _dt
@@ -125,9 +125,9 @@ def parse_person_points(path, month: str = ""):
 
 
 def compare_person_points(db, report: dict, month: str):
-    """report: {code/name: 期望点数}；与本系统 v3_perf 对比 → 差异行。"""
-    from app.services import v3_perf
-    mine = {x["code"]: x for x in v3_perf.month_perf(db, month)}
+    """report: {code/name: 期望点数}；与本系统 perf 对比 → 差异行。"""
+    from app.services import perf
+    mine = {x["code"]: x for x in perf.month_perf(db, month)}
     persons = {p.code: p.display_name for p in db.query(Person).all()}
     diffs = []
     for key, exp in report.items():
@@ -151,8 +151,8 @@ def system_only_codes(db, report: dict, month: str):
     对账文件通常=公司期望发薪名单；系统有而对账无 → 漏列/漏发风险，
     需要人工核对（对账本身只遍历对账文件里的人，不会报警）。
     """
-    from app.services import v3_perf
-    mine = {x["code"]: x for x in v3_perf.month_perf(db, month)}
+    from app.services import perf
+    mine = {x["code"]: x for x in perf.month_perf(db, month)}
     matched = set()
     for key in report:
         rec = mine.get(key)
@@ -387,7 +387,7 @@ def start_task(db, month: str, filename: str, content: bytes,
 
 def _local_daily_from_stats(db, month: str):
     """先查统计表 person_daily_stats（空则先刷）→ {code: {date: {cnt,pts}}}。"""
-    from app.services import v3_perf as _vp
+    from app.services import perf as _vp
     from app.models import PersonDailyStat
     if not month or len(month) != 7:
         return {}
@@ -409,7 +409,7 @@ def run_task(db, task_id: int):
     from app.models import ReconDataRow, ReconDayRow, ReconResult
     import os as _os
     from app.config import get_settings
-    from app.services import v3_perf as _vp
+    from app.services import perf as _vp
     t = db.get(ReconTask, task_id)
     if t is None:
         return None
@@ -537,8 +537,8 @@ def run_task(db, task_id: int):
         # 任务完成 → 自动生成该月分期对账偏差表（失败不影响任务）
         if month:
             try:
-                from app.services import v3_period
-                v3_period.sync_period_table(db, month)
+                from app.services import period
+                period.sync_period_table(db, month)
             except Exception:  # noqa: BLE001
                 db.rollback()
         return t
@@ -791,7 +791,7 @@ def build_interpret_prompt(db, task_id: int) -> str:
     - 约束：不得编造数字、不得臆测文件外原因、中文、限字数。
     """
     from app.models import Person, ReconDayRow, ReconResult, ReconTask
-    from app.services import v3_perf
+    from app.services import perf
     t = db.get(ReconTask, task_id)
     month = (t.params or {}).get("month", "")
     s = (t.summary or {})
@@ -806,7 +806,7 @@ def build_interpret_prompt(db, task_id: int) -> str:
                      f"{att.get('only_system')}，仅对账有 {att.get('only_report')}"
                      f"（原因拆分 {att.get('only_report_reason')}），净差 {att.get('net')}")
     # 系统合计 与 对账侧合计（人月点数）
-    comp = v3_perf.company_summary(db, month) if month else {}
+    comp = perf.company_summary(db, month) if month else {}
     if comp:
         lines.append(f"- 系统当月合计：有效店 {comp.get('records')}，1点/2点 "
                      f"{comp.get('p1')}/{comp.get('p2')}，总点 {comp.get('total_points')}，"
@@ -890,9 +890,9 @@ def _next_month(month: str) -> str:
 
 def _diff_amount(system_pts, report_pts, month: str = None) -> int:
     """差异应补金额（円）：按工资规则（对应月份门槛）分别折算后相减。"""
-    from app.services import v3_perf
-    return v3_perf.salary_for(report_pts or 0, month=month) \
-        - v3_perf.salary_for(system_pts or 0, month=month)
+    from app.services import perf
+    return perf.salary_for(report_pts or 0, month=month) \
+        - perf.salary_for(system_pts or 0, month=month)
 
 
 def ai_employee_notes(db, task_id: int) -> dict:
@@ -978,9 +978,9 @@ def confirm_adjust(db, task_id: int, person_code: str,
                 "record": old}
     # 找平按点数记录（对账比系统多 → 下月补正数；系统比对账多 → 负数扣回）
     # 锁存发生当月的点数单价：下月纠偏金额=点数×当时单价，不随本月单价变化
-    from app.services import v3_perf
+    from app.services import perf
     amount = (rr.report_value or 0) - (rr.system_value or 0)
-    pp = v3_perf.month_per_point(db, month)
+    pp = perf.month_per_point(db, month)
     rec = AdjustRecord(
         month=month, applied_to_month=nxt, person_code=person_code,
         amount=amount, per_point=pp,
@@ -1049,7 +1049,7 @@ def build_report(db, task_id: int, author_name: str = ""):
                             ReconTask)
     from openpyxl import Workbook
     from openpyxl.styles import Font
-    from app.services import v3_perf
+    from app.services import perf
     from datetime import datetime
 
     cur = db.get(ReconTask, task_id)
@@ -1070,8 +1070,8 @@ def build_report(db, task_id: int, author_name: str = ""):
     adj_total = sum(a.amount or 0 for a in adj)
 
     # 系统正式口径合计（该月）
-    comp = v3_perf.company_summary(db, month) if month else {}
-    adjust_map = v3_perf.adjust_map(db, month)
+    comp = perf.company_summary(db, month) if month else {}
+    adjust_map = perf.adjust_map(db, month)
     payroll_total = comp.get("total_amount", 0) + sum(adjust_map.values()) * 250
 
     bold = Font(bold=True)

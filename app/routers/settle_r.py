@@ -13,7 +13,7 @@ from app.db import get_db
 from app.models import (AppealRecord, FormalRecord, ImportFile, Person,
                         RawRecord, User)
 from app.routers.auth_r import csrf_ok, require_login
-from app.services import v3_flow
+from app.services import flow
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -52,8 +52,8 @@ def my_appeal_page(request: Request,
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
     code = user.person_code
-    days = v3_flow.appeal_list(db, code)
-    appeal_map = v3_flow.appeal_map(db, code)
+    days = flow.appeal_list(db, code)
+    appeal_map = flow.appeal_map(db, code)
     total_appealable = sum(len(v) for _, v in days)
     return templates.TemplateResponse("my_appeal.html", {
         "request": request, "current_user": user, "msg": msg,
@@ -72,7 +72,7 @@ def my_appeal(raw_id: int, request: Request, reason: str = Form(""),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     try:
-        v3_flow.create_appeal(db, raw_id, user.person_code, reason)
+        flow.create_appeal(db, raw_id, user.person_code, reason)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return RedirectResponse(f"/my/appeal?msg=已申诉，等待管理员处理",
@@ -138,7 +138,7 @@ def confirm_admin(request: Request,
                               RawRecord.clean_status.in_(
                                   ("master_late", "from_sub")))
                       .order_by(RawRecord.modified_raw.desc()).all())
-    appeal_map = v3_flow.appeal_map(db, staff or "")
+    appeal_map = flow.appeal_map(db, staff or "")
     return templates.TemplateResponse("confirm_admin.html", {
         "request": request, "current_user": user, "msg": msg,
         "rows": rows, "appeal_rows": appeal_rows, "imp_id": imp_id,
@@ -156,7 +156,7 @@ def finalize_file(fid: int, request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    res = v3_flow.finalize_import(db, fid, user.id)
+    res = flow.finalize_import(db, fid, user.id)
     if not res["ok"]:
         raise HTTPException(400, res.get("msg", "无法入正式表"))
     return RedirectResponse(f"/confirm-admin?imp_id={fid}"
@@ -173,7 +173,7 @@ def resolve_appeal(fid: int, appeal_id: int, request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    res = v3_flow.resolve_appeal(db, appeal_id, decision, user.id, file_id=fid)
+    res = flow.resolve_appeal(db, appeal_id, decision, user.id, file_id=fid)
     if not res["ok"]:
         raise HTTPException(404, res.get("msg", "申诉不存在或已处理"))
     return RedirectResponse(f"/confirm-admin?imp_id={fid}"
@@ -189,25 +189,25 @@ def my_perf(request: Request,
     """员工看自己当月的绩效：日明细（日期可选）+ 月汇总（只含正式表有效店）。"""
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
-    from app.services import v3_perf
+    from app.services import perf
     code = user.person_code
     mine = [r for r in db.query(FormalRecord).filter(
         FormalRecord.person_code == code).all()]
     months = sorted({(str(r.japan_date or ""))[:7] for r in mine if r.japan_date})
     if month not in months:
         month = months[-1] if months else ""
-    daily = [d for d in v3_perf.daily_perf(db, month)
+    daily = [d for d in perf.daily_perf(db, month)
              if d["code"] == code]
     dates = sorted({str(d["date"]) for d in daily})
     if not date or date not in dates:
         date = dates[-1] if dates else ""
     if date:
         daily = [d for d in daily if str(d["date"]) == date]
-    me = next((m for m in v3_perf.month_perf(db, month)
+    me = next((m for m in perf.month_perf(db, month)
                if m["code"] == code), None)
     summary = None
     if me:
-        adj = v3_perf.adjust_map(db, month).get(code, 0)
+        adj = perf.adjust_map(db, month).get(code, 0)
         summary = {"records": me["records"], "p1": me["p1"], "p2": me["p2"],
                    "points": me["points"], "amount": me["amount"],
                    "adjust": adj, "payable": me["amount"] + adj,
@@ -221,29 +221,29 @@ def my_perf(request: Request,
 # ---------------- V3 绩效 / 工资 ----------------
 @router.get("/perf", response_class=HTMLResponse)
 @router.get("/v3/perf", response_class=HTMLResponse)
-def v3_perf(request: Request,
+def perf(request: Request,
             user: Optional[User] = Depends(require_login),
             db: Session = Depends(get_db), month: str = "",
             date: str = "", staff: str = "", period: str = "half1"):
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import v3_perf
+    from app.services import perf
     months = sorted({(str(r.japan_date or ""))[:7]
                      for r in db.query(FormalRecord).all()
                      if r.japan_date})
     if month not in months:
         month = months[-1] if months else ""
-    rows = v3_perf.month_perf(db, month)
-    summary = v3_perf.company_summary(db, month)
+    rows = perf.month_perf(db, month)
+    summary = perf.company_summary(db, month)
     # 上月找平 = 上月未找平余量（diff−adjust，同一张表 payroll_period_rows）
-    from app.services import v3_period
-    adj = v3_period.carry_map(db, month) if month else {}
+    from app.services import period as _payroll
+    adj = _payroll.carry_map(db, month) if month else {}
     adj_map = {k: v[0] for k, v in adj.items()}          # 余量(点)
     adj_amt_map = {k: v[1] for k, v in adj.items()}      # 余量金额(×上月单价)
     adj_total = sum(adj_map.values())
     adj_amt_total = sum(adj_amt_map.values())
-    per_point = month and v3_perf.month_per_point(db, month) or 250
-    payroll_rows = v3_period.period_rows(db, month) if month else []
+    per_point = month and perf.month_per_point(db, month) or 250
+    payroll_rows = _payroll.period_rows(db, month) if month else []
     payroll_total = {
         "settle_amt": sum(r["settle_amt"] for r in payroll_rows),
         "diff_amt": sum(r["diff_amt"] for r in payroll_rows),
@@ -262,7 +262,7 @@ def v3_perf(request: Request,
         half_map[r["code"]] = (r["half1"], r["half1_amt"], r["half1_bonus"],
                                r["half2"], r["half2_amt"], r["half2_bonus"])
     # 按期的 有效店/1点/2点（期视图这三列只看该期，避免全月数据误导）
-    half_stats = v3_period.half_stats_map(db, month) if month else {}
+    half_stats = _payroll.half_stats_map(db, month) if month else {}
     # 两期应付（金额找平）：上半月应付=上半月金额+上月金额余量(正补负扣)；
     # 若上半月不够扣(为负)→上半月发0、剩余负数转到下半月继续扣。
     pay_map = {}
@@ -276,7 +276,7 @@ def v3_perf(request: Request,
             pay_map[r["code"]] = (p1, hf[4])
     if period not in ("half1", "half2"):
         period = "half1"
-    bonus_g, bonus_a = v3_perf.bonus_params(month)
+    bonus_g, bonus_a = perf.bonus_params(month)
     page_state = {
         "page": "perf", "month": month, "period": period,
         "employees": len(rows),
@@ -288,7 +288,7 @@ def v3_perf(request: Request,
         "per_point": per_point,
         "bonus_group": bonus_g, "bonus_amount": bonus_a,
     }
-    return templates.TemplateResponse("v3_perf.html", {
+    return templates.TemplateResponse("perf.html", {
         "request": request, "current_user": user, "month": month,
         "months": months, "rows": rows, "period": period,
         "summary": summary, "adj_map": adj_map, "adj_total": adj_total,
@@ -313,13 +313,13 @@ def v3_set_per_point(request: Request, month: str = Form(""),
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import v3_perf
+    from app.services import perf
     from urllib.parse import quote as _q
     if per_point <= 0 or not month:
         return RedirectResponse(
             f"/perf?month={month}&msg={_q('单价需为正整数')}",
             status_code=303)
-    v3_perf.set_month_per_point(db, month, per_point)
+    perf.set_month_per_point(db, month, per_point)
     return RedirectResponse(
         f"/perf?month={month}&msg="
         f"{_q(f'{month} 点数单价已设为 {per_point}円/点（工资/找平金额已重算；已确认找平按当时单价不变）')}",
@@ -328,20 +328,20 @@ def v3_set_per_point(request: Request, month: str = Form(""),
 
 @router.get("/perf/daily", response_class=HTMLResponse)
 @router.get("/v3/perf/daily", response_class=HTMLResponse)
-def v3_perf_daily(request: Request,
+def perf_daily(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), month: str = "",
                   date: str = "", staff: str = ""):
     """日绩效明细（独立页面，从绩效工资点「详细」进入）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import v3_perf
+    from app.services import perf
     months = sorted({(str(r.japan_date or ""))[:7]
                      for r in db.query(FormalRecord).all()
                      if r.japan_date})
     if month not in months:
         month = months[-1] if months else ""
-    daily = v3_perf.daily_perf(db, month)
+    daily = perf.daily_perf(db, month)
     dates = sorted({str(d["date"]) for d in daily})
     staff_opts = sorted({(d["code"], d["name"]) for d in daily})
     if date and date not in dates:
@@ -363,14 +363,14 @@ def v3_perf_daily(request: Request,
 
 @router.get("/perf/export")
 @router.get("/v3/perf/export")
-def v3_perf_export(request: Request, user: Optional[User] =
+def perf_export(request: Request, user: Optional[User] =
                    Depends(require_login),
                    db: Session = Depends(get_db), month: str = "",
                    period: str = "half1"):
     """导出发薪表 Excel（按期：上半月/下半月 + 日明细）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import v3_perf
+    from app.services import perf
     from openpyxl import Workbook
     from openpyxl.styles import Font
     months = sorted({(str(r.japan_date or ""))[:7]
@@ -378,11 +378,11 @@ def v3_perf_export(request: Request, user: Optional[User] =
                      if r.japan_date})
     if month not in months:
         month = months[-1] if months else ""
-    rows = v3_perf.month_perf(db, month)
-    daily = v3_perf.daily_perf(db, month)
-    summary = v3_perf.company_summary(db, month)
-    from app.services import v3_period
-    adj = v3_period.carry_map(db, month) if month else {}
+    rows = perf.month_perf(db, month)
+    daily = perf.daily_perf(db, month)
+    summary = perf.company_summary(db, month)
+    from app.services import period as _payroll
+    adj = _payroll.carry_map(db, month) if month else {}
     adj_map = {k: v[0] for k, v in adj.items()}
     adj_amt_map = {k: v[1] for k, v in adj.items()}
     adj_total = sum(adj_map.values())
@@ -394,11 +394,11 @@ def v3_perf_export(request: Request, user: Optional[User] =
     # 两期发薪：half1=上半月(20日发)，half2=下半月(次月5日发)
     if period not in ("half1", "half2"):
         period = "half1"
-    payroll_rows = v3_period.period_rows(db, month) if month else []
+    payroll_rows = _payroll.period_rows(db, month) if month else []
     half_map = {r["code"]: (r["half1"], r["half1_amt"], r["half1_bonus"],
                             r["half2"], r["half2_amt"], r["half2_bonus"])
                 for r in payroll_rows}
-    half_stats = (v3_period.half_stats_map(db, month) if month else {})
+    half_stats = (_payroll.half_stats_map(db, month) if month else {})
     is_h1 = period == "half1"
     ws1.title = ("上半月发薪1-15" if is_h1 else "下半月发薪16-月末") + (
         f"·{month}" if month else "")
@@ -470,7 +470,7 @@ def v3_perf_export(request: Request, user: Optional[User] =
 # ---------------- V3 月度对账 ----------------
 @router.get("/recon", response_class=HTMLResponse)
 @router.get("/v3/recon", response_class=HTMLResponse)
-def v3_recon_page(request: Request,
+def recon_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), msg: str = "",
                   task_id: int = 0):
@@ -500,8 +500,8 @@ def v3_recon_page(request: Request,
     diff_rows = []
     next_month = ""
     if cur:
-        from app.services import v3_recon as vr
-        from app.services import v3_perf as _vp
+        from app.services import recon as vr
+        from app.services import perf as _vp
 
         def _pay_diff(_db, sys_p, rep_p, mth):
             pp = _vp.month_per_point(_db, mth)
@@ -539,7 +539,7 @@ def v3_recon_page(request: Request,
         "diff_count": (cur.summary or {}).get("diff_count", 0) if cur else 0,
         "ai_ready": bool(cur and (cur.summary or {}).get("ai_interpret")),
     }
-    return templates.TemplateResponse("v3_recon.html", {
+    return templates.TemplateResponse("recon.html", {
         "request": request, "current_user": user, "msg": msg,
         "tasks": tasks, "cur": cur, "diffs": diff_rows,
         "sys_rows": sys_rows, "next_month": next_month,
@@ -548,7 +548,7 @@ def v3_recon_page(request: Request,
 
 @router.post("/recon/upload2")
 @router.post("/v3/recon/upload2")
-async def v3_recon_upload2(request: Request, month: str = Form(""),
+async def recon_upload2(request: Request, month: str = Form(""),
                            csrf_token: str = Form(...),
                            file=File(...),
                            user: Optional[User] = Depends(require_login),
@@ -560,8 +560,8 @@ async def v3_recon_upload2(request: Request, month: str = Form(""),
     content = await file.read()
     import os as _os
     try:
-        from app.services import v3_recon
-        t, older = v3_recon.submit_task(
+        from app.services import recon
+        t, older = recon.submit_task(
             db, month, file.filename, content, user.id,
             sync=_os.environ.get("RECON_SYNC") == "1")
     except Exception as e:  # noqa: BLE001
@@ -590,8 +590,8 @@ def recon_interpret(task_id: int, request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import v3_recon
-    res = v3_recon.interpret_task(db, task_id)
+    from app.services import recon
+    res = recon.interpret_task(db, task_id)
     msg = res.get("msg", "") or ("已生成 AI 解读" if res.get("ok") else "失败")
     return RedirectResponse(f"/v3/recon?task_id={task_id}&msg={msg}",
                             status_code=303)
@@ -609,7 +609,7 @@ def recon_adjust(task_id: int, code: str, request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import v3_recon as vr
+    from app.services import recon as vr
     if action == "add":
         res = vr.confirm_adjust(db, task_id, code, user.id)
         msg = (f"已确认找平：{res['amount']:+d} 円记入下月工资"
@@ -625,7 +625,7 @@ def recon_adjust(task_id: int, code: str, request: Request,
 
 @router.get("/recon/export")
 @router.get("/v3/recon/export")
-def v3_recon_export(request: Request, task_id: int = 0,
+def recon_export(request: Request, task_id: int = 0,
                     user: Optional[User] = Depends(require_login),
                     db: Session = Depends(get_db)):
     """导出对账差异 Excel：差异明细 + 反向名单（系统有而对账文件无）。"""
@@ -693,14 +693,14 @@ def v3_recon_export(request: Request, task_id: int = 0,
 
 @router.get("/recon/report")
 @router.get("/v3/recon/report")
-def v3_recon_report(request: Request, task_id: int = 0,
+def recon_report(request: Request, task_id: int = 0,
                     user: Optional[User] = Depends(require_login),
                     db: Session = Depends(get_db)):
     """一键生成《月度对账报告.xlsx》（摘要+差异+反向名单+找平留痕）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import v3_recon
-    wb = v3_recon.build_report(db, task_id, user.display_name)
+    from app.services import recon
+    wb = recon.build_report(db, task_id, user.display_name)
     if wb is None:
         raise HTTPException(404, "对账任务不存在")
     from fastapi.responses import StreamingResponse
@@ -720,7 +720,7 @@ def v3_recon_report(request: Request, task_id: int = 0,
 
 @router.get("/recon/result")
 @router.get("/v3/recon/result")
-def v3_recon_result(request: Request, task_id: int = 0,
+def recon_result(request: Request, task_id: int = 0,
                     user: Optional[User] = Depends(require_login),
                     db: Session = Depends(get_db)):
     """下载对账任务产物 Excel（离线任务完成后落盘；历史任务兜底现算）。"""
@@ -742,8 +742,8 @@ def v3_recon_result(request: Request, task_id: int = 0,
         with open(fp, "rb") as f:
             bio.write(f.read())
     else:
-        from app.services import v3_recon
-        wb = v3_recon.build_report(db, task_id, user.display_name)
+        from app.services import recon
+        wb = recon.build_report(db, task_id, user.display_name)
         if wb is None:
             raise HTTPException(404, "对账任务不存在")
         wb.save(bio)
@@ -765,7 +765,7 @@ def _month_of_modified(rr):
 
 @router.get("/month", response_class=HTMLResponse)
 @router.get("/v3/month", response_class=HTMLResponse)
-def v3_month_page(request: Request,
+def month_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), month: str = "",
                   msg: str = "", err: str = ""):
@@ -774,7 +774,7 @@ def v3_month_page(request: Request,
         return _denied()
     from sqlalchemy import func
     from app.models import AppealRecord
-    from app.services import v3_perf
+    from app.services import perf
     months = sorted({r[0] for r in db.query(
         func.substr(RawRecord.modified_raw, 1, 7)).all() if r[0]})
     if month not in months:
@@ -800,8 +800,8 @@ def v3_month_page(request: Request,
                if (str(f.japan_date or ""))[:7] == month]
         info["formal"] = len(frs)
         info["points"] = sum(f.points or 0 for f in frs)
-        mp = v3_perf.month_perf(db, month)
-        info["wage"] = sum(v3_perf.salary_for(m["points"], month=month) for m in mp)
+        mp = perf.month_perf(db, month)
+        info["wage"] = sum(perf.salary_for(m["points"], month=month) for m in mp)
         # 涉及文件
         fids = [r[0] for r in db.query(RawRecord.import_id).filter(
             RawRecord.modified_raw.like(month + "%")).distinct().all()]
@@ -822,7 +822,7 @@ def v3_month_page(request: Request,
             not x["synced"] for x in info["files"])
     page_state = {"page": "month", "month": month, "info": info,
                   "need_rebuild": info.get("need_rebuild", False)}
-    return templates.TemplateResponse("v3_month.html", {
+    return templates.TemplateResponse("month.html", {
         "request": request, "current_user": user, "month": month,
         "months": months, "info": info, "msg": msg, "err": err,
         "page_state": page_state})
@@ -830,7 +830,7 @@ def v3_month_page(request: Request,
 
 @router.post("/month/rebuild")
 @router.post("/v3/month/rebuild")
-def v3_month_rebuild(request: Request, month: str = Form(""),
+def month_rebuild(request: Request, month: str = Form(""),
                      csrf_token: str = Form(...),
                      user: Optional[User] = Depends(require_login),
                      db: Session = Depends(get_db)):
@@ -840,8 +840,8 @@ def v3_month_rebuild(request: Request, month: str = Form(""),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from urllib.parse import quote as _q
-    # 月份格式（含年份范围）校验的唯一关口在 v3_flow.rebuild_month，此处只消费结果
-    res = v3_flow.rebuild_month(db, month, user.id)
+    # 月份格式（含年份范围）校验的唯一关口在 flow.rebuild_month，此处只消费结果
+    res = flow.rebuild_month(db, month, user.id)
     if not res["ok"]:
         return RedirectResponse(f"/v3/month?month={_q(month)}"
                                 f"&err={_q(res.get('msg', '无法重算'))}",
@@ -863,7 +863,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
     """薪资找平：月 × 员工 分期对账偏差表（独立页面，可按员工定位）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import v3_period
+    from app.services import period as _payroll
     from app.models import PayrollPeriodRow, PersonDailyStat
     months = sorted(
         {(str(r.ref_date or ""))[:7] for r in db.query(PersonDailyStat).all()
@@ -872,7 +872,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
            if r.month >= "2026-07"})
     if month not in months:
         month = months[-1] if months else ""
-    rows = v3_period.period_rows(db, month) if month else []
+    rows = _payroll.period_rows(db, month) if month else []
     # 员工定位：从绩效行「找平」按钮带着 staff 参数进来 → 该员工排最前（不隐藏其他人）
     if staff and rows:
         rows = sorted(rows, key=lambda r: (r["code"] != staff, r["code"]))
@@ -891,7 +891,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
     page_state = {"page": "payroll_settle", "month": month,
                   "rows": len(rows), "total": total,
                   "adjusted": sum(1 for r in rows if r["adj"])}
-    from app.services import v3_perf as _vp
+    from app.services import perf as _vp
     bonus_g, bonus_a = _vp.bonus_params(month)
     return templates.TemplateResponse("payroll_settle.html", {
         "request": request, "current_user": user, "month": month,
@@ -909,10 +909,10 @@ def payroll_settle_generate(request: Request, month: str = Form(""),
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import v3_period
+    from app.services import period as _payroll
     from urllib.parse import quote as _q
     try:
-        res = v3_period.sync_period_table(db, month)
+        res = _payroll.sync_period_table(db, month)
         return RedirectResponse(
             f"/payroll-settle?month={month}&msg={_q('已生成/更新 ' + str(res.get('rows', 0)) + ' 人')}",
             status_code=303)
@@ -934,9 +934,9 @@ def payroll_settle_update(month: str, person_code: str, request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import v3_period
+    from app.services import period as _payroll
     from urllib.parse import quote as _q
-    res = v3_period.set_period_values(
+    res = _payroll.set_period_values(
         db, month, person_code, half1_amount, half2_amount,
         user_id=user.id, adjust_delta=adjust_delta)
     return RedirectResponse(
@@ -953,7 +953,7 @@ def payroll_settle_export(request: Request,
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from fastapi.responses import StreamingResponse
-    from app.services import v3_period
+    from app.services import period as _payroll
     wb = Workbook()
     ws = wb.active
     ws.title = "月度分期对账偏差"
@@ -964,7 +964,7 @@ def payroll_settle_export(request: Request,
                "找平(点)", "找平金额(円)"])
     for c in range(1, 18):
         ws.cell(1, c).font = Font(bold=True)
-    for r in v3_period.period_rows(db, month):
+    for r in _payroll.period_rows(db, month):
         ws.append([month, r["code"], r["name"], r["half1"], r["half1_amt"],
                    r["half2"], r["half2_amt"],
                    r["half1_bonus"] + r["half2_bonus"],

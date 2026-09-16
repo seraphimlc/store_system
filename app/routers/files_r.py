@@ -89,7 +89,7 @@ async def upload_files(request: Request,
             msgs.append(f"{up.filename}: {e}")
     # V3 流程：店铺主从档/判定/员工建档
     try:
-        from app.services import v3_flow as _v3
+        from app.services import flow as _v3
         for imp_id in parsed_ids:
             r = _v3.process_import(db, imp_id)
             j = r["judge"]
@@ -112,13 +112,13 @@ def file_report(fid: int, request: Request,
     """按导入文件汇总 raw 判定结果（V3 口径：有效/同店跨日/从档/重复/空白 + 申诉）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import v3_report
-    r = v3_report.import_report(db, fid, bucket=bucket, q=q, page=page)
+    from app.services import report
+    r = report.import_report(db, fid, bucket=bucket, q=q, page=page)
     if r is None:
         return RedirectResponse("/files?msg=文件不存在", status_code=303)
     return templates.TemplateResponse("file_report.html", {
         "request": request, "current_user": user, **r, "msg": msg,
-        "bucket_opts": v3_report.BUCKET_OPTS})
+        "bucket_opts": report.BUCKET_OPTS})
 
 
 @router.post("/files/{fid}/records/adjust")

@@ -8,8 +8,8 @@ from urllib.parse import unquote
 
 import app.db as appdb
 from app.models import AppealRecord, FormalRecord, RawRecord, User
-from app.services import v3_flow
-from tests_web.test_v3_flow import (_csrf_of, _seed_admin, _up, db_fresh)
+from app.services import flow
+from tests_web.test_flow import (_csrf_of, _seed_admin, _up, db_fresh)
 
 
 def _login_admin(client):
@@ -43,7 +43,7 @@ def test_finalize_existing_file_still_works(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     _login_admin(client)
     csrf = _csrf_of(client, "/confirm-admin")
     r = client.post(f"/files/{imp.id}/finalize", data={"csrf_token": csrf},
@@ -75,12 +75,12 @@ def test_resolve_appeal_wrong_file_rejected(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), fa.id)
-    v3_flow.process_import(db_fresh(), fb.id)
+    flow.process_import(db_fresh(), fa.id)
+    flow.process_import(db_fresh(), fb.id)
     db = appdb.SessionLocal()
     late = db.query(RawRecord).filter(RawRecord.import_id == fb.id,
                                       RawRecord.clean_status == "master_late").one()
-    v3_flow.create_appeal(db, late.id, "111", "确实又去了")
+    flow.create_appeal(db, late.id, "111", "确实又去了")
     ap = db.query(AppealRecord).filter(
         AppealRecord.raw_record_id == late.id).one()
     late_id, ap_id = late.id, ap.id
@@ -137,7 +137,7 @@ def test_month_rebuild_invalid_month_format(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     _login_admin(client)
     csrf = _csrf_of(client, "/month")
     for bad in ("", "2026-13", "202613", "2026/08", "八月",
@@ -175,10 +175,10 @@ def test_month_rebuild_fullwidth_month_does_not_wipe_formal(client, tmp_path):
          "YES", "YES", "YES"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     # 先正常入表：8 月正式表 2 行（作为「不得被清空」的基线）
-    assert v3_flow.finalize_import(db, imp.id)["added"] == 2
+    assert flow.finalize_import(db, imp.id)["added"] == 2
     before_ids = {f.raw_record_id for f in db.query(FormalRecord).all()}
     assert len(before_ids) == 2
     db.close()
@@ -224,12 +224,12 @@ def test_rebuild_month_canonical_key_even_if_guard_bypassed(client, tmp_path,
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    assert v3_flow.finalize_import(db, imp.id)["added"] == 2
+    assert flow.finalize_import(db, imp.id)["added"] == 2
     # 绕过格式守卫（int("２０２６") == 2026，年份范围检查天然通过）
     monkeypatch.setattr(_re_mod, "fullmatch", lambda *a, **k: object())
-    res = v3_flow.rebuild_month(db, "\uff12\uff10\uff12\uff16-08")
+    res = flow.rebuild_month(db, "\uff12\uff10\uff12\uff16-08")
     assert res["ok"] is True, res
     # 解析后 ym = "2026-08"：删/建范围一致 → 2 行仍在（若 LIKE 用原始全角串则会是 0 行）
     assert res["formal_after"] == 2, res
@@ -239,20 +239,20 @@ def test_rebuild_month_canonical_key_even_if_guard_bypassed(client, tmp_path,
 
 
 def test_rebuild_month_service_guard_rejects_bad_month(client, tmp_path):
-    """服务层为月份校验唯一关口：直接调 v3_flow.rebuild_month 亦须拒绝
+    """服务层为月份校验唯一关口：直接调 flow.rebuild_month 亦须拒绝
     （含年份越界/尾随换行/Unicode 数字），返回 ok=False + 统一 err 文案。"""
     _seed_admin(client)
     db = appdb.SessionLocal()
     for bad in ("", "2026-13", "0000-01", "9999-12", "2026-08\n",
                 "٢٠٢٦-08"):
-        res = v3_flow.rebuild_month(db, bad)
+        res = flow.rebuild_month(db, bad)
         assert res["ok"] is False, f"{bad!r} → {res}"
         assert res["msg"] == "月份格式不正确（应为 YYYY-MM）", f"{bad!r}"
     # 合法月仍放行到正常分支（无数据 → ok=True，0 文件）
-    ok = v3_flow.rebuild_month(db, "2026-08")
+    ok = flow.rebuild_month(db, "2026-08")
     assert ok["ok"] is True and ok["files"] == []
     # 年份边界内（9998-12 需 date(9999,1,1)）不越界
-    edge = v3_flow.rebuild_month(db, "9998-12")
+    edge = flow.rebuild_month(db, "9998-12")
     assert edge["ok"] is True, edge
     db.close()
 
@@ -267,9 +267,9 @@ def test_month_rebuild_valid_month_still_works(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     db.close()
     _login_admin(client)
     csrf = _csrf_of(client, "/month")
@@ -295,10 +295,10 @@ def test_month_rebuild_pending_appeal_err_branch_still_works(client, tmp_path):
          "YES", "YES", "NO"],          # master_late → 申诉 pending
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     late = db.query(RawRecord).filter(RawRecord.clean_status == "master_late").one()
-    v3_flow.create_appeal(db, late.id, "111", "确实又去了")
+    flow.create_appeal(db, late.id, "111", "确实又去了")
     late_id = late.id
     db.close()
     _login_admin(client)

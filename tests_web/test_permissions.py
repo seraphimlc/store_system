@@ -6,7 +6,7 @@ import app.db as appdb
 from app.models import (FormalRecord, ImportFile, Person, PersonDailyStat,
                         RawRecord, User)
 from app.auth import hash_password
-from tests_web.test_v3_flow import _seed_admin
+from tests_web.test_flow import _seed_admin
 
 
 def _staff(client, username, display, person_code, password="demo123"):
@@ -98,7 +98,7 @@ def test_staff_cannot_appeal_others_record(client):
     raw_id = rr.id
     db.close()
     _staff(client, "emp1", "员工甲", "P1")
-    from tests_web.test_v3_flow import _csrf_of
+    from tests_web.test_flow import _csrf_of
     csrf = _csrf_of(client, "/my/appeal")
     r = client.post(f"/my/appeal/{raw_id}",
                     data={"reason": "不是我的", "csrf_token": csrf})

@@ -283,7 +283,7 @@ def set_month_per_point(db, month: str, per_point: int) -> dict:
         r.salary = salary_for(r.points, per_point, month)
     db.commit()
     # 薪资找平表按新单价重算（对账金额/分期金额/偏差金额）
-    from app.services import v3_period
-    v3_period.sync_period_table(db, month, per_point=per_point)
+    from app.services import period
+    period.sync_period_table(db, month, per_point=per_point)
     return {"ok": True, "month": month, "per_point": per_point,
             "rows": len(rows)}

@@ -372,7 +372,7 @@ def finalize_import(db, import_id: int, actor_id=None) -> dict:
         db.add(_formal_for_raw(rr))
         added += 1
     db.commit()
-    from app.services import v3_perf as _perf
+    from app.services import perf as _perf
     months = sorted({(r[0] or "")[:7] for r in db.query(
         RawRecord.modified_raw).filter(
             RawRecord.import_id == import_id,
@@ -480,7 +480,7 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
     after = db.query(FormalRecord).filter(
         FormalRecord.japan_date >= lo, FormalRecord.japan_date < hi).all()
     pts_after = sum(f.points or 0 for f in after)
-    from app.services import v3_perf as _perf
+    from app.services import perf as _perf
     _perf.sync_month_stats(db, ym)        # 同步 person_daily_stats（用规范月串）
     return {"ok": True, "files": files, "formal_before": len(before),
             "formal_after": len(after), "points_before": pts_before,

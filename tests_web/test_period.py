@@ -5,7 +5,7 @@ from datetime import date, datetime
 import app.db as appdb
 from app.models import (PayrollPeriodRow, Person, PersonDailyStat,
                         ReconDataRow, ReconTask)
-from app.services import v3_period
+from app.services import period
 
 
 def test_sync_formula_and_prev_adjust(client):
@@ -32,9 +32,9 @@ def test_sync_formula_and_prev_adjust(client):
     db.add(ReconDataRow(task_id=t.id, ref_date=date(2026, 8, 1),
                         person_code="111", person_name="甲", points=10, cnt=1))
     db.commit()
-    res = v3_period.sync_period_table(db, "2026-08")
+    res = period.sync_period_table(db, "2026-08")
     assert res["rows"] == 1
-    rows = v3_period.period_rows(db, "2026-08")
+    rows = period.period_rows(db, "2026-08")
     r = rows[0]
     assert r["half1"] == 1 and r["half2"] == 3      # 上半月1 / 下半月3
     assert r["settle"] == 10                          # 对账点数（全量）
@@ -68,15 +68,15 @@ def test_prev_adjust_chain_carry(client):
         db.add(PersonDailyStat(person_code=code,
                                ref_date=date(2026, 8, 10), points=10))
     db.commit()
-    v3_period.sync_period_table(db, "2026-08")
-    rows = {r["code"]: r for r in v3_period.period_rows(db, "2026-08")}
+    period.sync_period_table(db, "2026-08")
+    rows = {r["code"]: r for r in period.period_rows(db, "2026-08")}
     # 8月：两期=2,500、diff=+2,500；A 上月结转-25,000 吸收2,500后剩-22,500
     #   → 结转9月 = −2,500 + (−22,500) = −25,000；B 无结转 → 结转9月 = −2,500
     assert rows["A"]["prev_amt"] == -25000        # 上月修正列=上月结转
     assert rows["B"]["prev_amt"] == 0             # B 无结转
     assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"] == -2500  # 负=扣款
     # carry_map（发薪表上月找平列）：上月结转余额（正补/负扣）
-    cm = v3_period.carry_map(db, "2026-08")
+    cm = period.carry_map(db, "2026-08")
     assert cm["A"] == [0, -25000] and cm.get("B") is None
     db.close()
 
@@ -88,26 +88,26 @@ def test_adjust_auto_equals_diff_amount(client):
     db.add(PersonDailyStat(person_code="111", ref_date=date(2026, 8, 1),
                            points=5))
     db.commit()
-    v3_period.sync_period_table(db, "2026-08")
-    rows = v3_period.period_rows(db, "2026-08")
+    period.sync_period_table(db, "2026-08")
+    rows = period.period_rows(db, "2026-08")
     assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -5 * 250  # 负=扣款
     assert rows[0]["diff"] == -5                       # 偏差点数=参考值
-    v3_period.sync_period_table(db, "2026-08")         # 重新生成
-    rows = v3_period.period_rows(db, "2026-08")
+    period.sync_period_table(db, "2026-08")         # 重新生成
+    rows = period.period_rows(db, "2026-08")
     assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -5 * 250  # 负=扣款  # 自动保持
     db.close()
 
 
 def test_payroll_settle_page_readonly(client):
     """薪资找平页面只读：找平自动=金额差，无输入框/保存（去掉点击操作）。"""
-    from tests_web.test_v3_flow import _seed_admin
+    from tests_web.test_flow import _seed_admin
     _seed_admin(client)
     db = appdb.SessionLocal()
     db.add(Person(code="111", display_name="甲"))
     db.add(PersonDailyStat(person_code="111", ref_date=date(2026, 8, 1),
                            points=5))
     db.commit()
-    v3_period.sync_period_table(db, "2026-08")
+    period.sync_period_table(db, "2026-08")
     db.close()
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
@@ -125,7 +125,7 @@ def test_per_point_lock_and_change(client):
     """单价按月可变：设置本月单价只影响本月；已确认找平按当时单价不变。"""
     import app.db as appdb
     from app.models import (Person, PersonDailyStat, AdjustRecord)
-    from app.services import v3_period, v3_perf
+    from app.services import period, perf
     db = appdb.SessionLocal()
     from app.models import MonthPerfRecord
     db.add(Person(code="111", display_name="甲"))
@@ -134,52 +134,52 @@ def test_per_point_lock_and_change(client):
     # 直插一条月绩效行（绕开 formal 依赖），作为该月单价载体
     db.add(MonthPerfRecord(month="2026-08", person_code="111",
                            records=40, p1=40, p2=0, points=80,
-                           salary=v3_perf.salary_for(80), per_point=250))
+                           salary=perf.salary_for(80), per_point=250))
     db.commit()
-    sync1 = v3_period.sync_period_table(db, "2026-08")
-    rows = v3_period.period_rows(db, "2026-08")
+    sync1 = period.sync_period_table(db, "2026-08")
+    rows = period.period_rows(db, "2026-08")
     r = rows[0]
     # 默认单价 250：下半月 0，上半月 80 点 → 分期=80×250+3000=23000
     assert r["half1_amt"] == 80 * 250 + 3000
     # 8月确认一条找平（锁存当时单价250）
-    per_point = v3_perf.month_per_point(db, "2026-08")
+    per_point = perf.month_per_point(db, "2026-08")
     assert per_point == 250
     rec = AdjustRecord(month="2026-08", applied_to_month="2026-09",
                        person_code="111", amount=10, per_point=per_point,
                        source_task_id=0, reason="测试")
     db.add(rec); db.commit()
     # 设置 8 月单价为 300：月绩效工资与薪资找平重算，但找平记录仍 250
-    v3_perf.set_month_per_point(db, "2026-08", 300)
-    rows = v3_period.period_rows(db, "2026-08")
+    perf.set_month_per_point(db, "2026-08", 300)
+    rows = period.period_rows(db, "2026-08")
     assert rows[0]["half1_amt"] == 80 * 300 + 3000   # 按新单价重算
     mp = db.query(MonthPerfRecord).filter(
         MonthPerfRecord.month == "2026-08").first()
     assert mp.per_point == 300 and mp.salary == 80 * 300 + 3000
     rec = db.query(AdjustRecord).first()
     assert rec.per_point == 250 and rec.amount == 10   # 锁存不动
-    assert v3_perf.adjust_map(db, "2026-09") == {"111": [10, 10 * 250]}
+    assert perf.adjust_map(db, "2026-09") == {"111": [10, 10 * 250]}
     db.close()
 
 
 def test_bonus_configurable(client, monkeypatch):
     """奖金门槛/金额可配置：改 BONUS_GROUP/BONUS_AMOUNT 后工资按新值算。"""
     import app.config as cfg
-    from app.services import v3_perf
+    from app.services import perf
     monkeypatch.setenv("BONUS_GROUP", "50")
     monkeypatch.setenv("BONUS_AMOUNT", "2000")
     cfg.get_settings.cache_clear()
     try:
-        assert v3_perf.salary_for(100) == 100 * 250 + 2 * 2000   # 100//50=2
-        g, a = v3_perf.bonus_params()
+        assert perf.salary_for(100) == 100 * 250 + 2 * 2000   # 100//50=2
+        g, a = perf.bonus_params()
         assert (g, a) == (50, 2000)
-        g9, _ = v3_perf.bonus_params("2026-09")       # 9月起按月规则 75
+        g9, _ = perf.bonus_params("2026-09")       # 9月起按月规则 75
         assert g9 == 75
-        g8, _ = v3_perf.bonus_params("2026-08")       # 8月未命中按月规则 → 50
+        g8, _ = perf.bonus_params("2026-08")       # 8月未命中按月规则 → 50
         assert g8 == 50
     finally:
         monkeypatch.delenv("BONUS_GROUP", raising=False)
         monkeypatch.delenv("BONUS_AMOUNT", raising=False)
         cfg.get_settings.cache_clear()
-    assert v3_perf.salary_for(100) == 100 * 250 + 1 * 3000       # 恢复默认 68/3000
-    assert v3_perf.salary_for(160, month="2026-09") == 160 * 250 + 2 * 3000  # 默认规则9月起75
-    assert v3_perf.salary_for(150, month="2026-08") == 150 * 250 + 2 * 3000  # 8月仍68(150//68=2)
+    assert perf.salary_for(100) == 100 * 250 + 1 * 3000       # 恢复默认 68/3000
+    assert perf.salary_for(160, month="2026-09") == 160 * 250 + 2 * 3000  # 默认规则9月起75
+    assert perf.salary_for(150, month="2026-08") == 150 * 250 + 2 * 3000  # 8月仍68(150//68=2)

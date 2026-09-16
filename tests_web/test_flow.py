@@ -8,7 +8,7 @@ from app.auth import hash_password
 from app.models import (AppealRecord, FormalRecord, ImportFile, Person,
                         RawRecord, StoreEntity, User)
 from app.services.importer import parse_file, upload_and_store
-from app.services import v3_flow, v3_period
+from app.services import flow, period
 from tests.helpers import write_workbook
 
 H = ["Store ID", "Store Name-Local", "Store Name-English", "Modified Time",
@@ -43,7 +43,7 @@ def test_v3_basic_flow(client, tmp_path):
         ["S-B", "乙店", "", "2026-07-01 10:00:00", "甲(111)", "R2",
          "YES", "YES", "NO"],
     ], tmp_path)
-    r = v3_flow.process_import(db, imp1.id)
+    r = flow.process_import(db, imp1.id)
     assert r["judge"]["valid"] == 2 and r["appealable"] == 0
     # 店铺都建了主档（第一家）
     ents = db.query(StoreEntity).all()
@@ -61,7 +61,7 @@ def test_v3_sub_entity_and_crossfile(client, tmp_path):
         ["S-OLD", "松屋", "", "2026-07-01 09:00:00", "甲(111)", "R1",
          "YES", "YES", "NO"],
     ], tmp_path)
-    v3_flow.process_import(db, imp1.id)
+    flow.process_import(db, imp1.id)
     # 文件2：新编号 S-NEW 店名松屋（同店新编号→从档）+ 同日同店 S-OLD 重复
     imp2 = _up(db, admin, "g2.xlsx", [
         ["S-NEW", "松屋", "", "2026-07-01 11:00:00", "甲(111)", "R2",
@@ -69,7 +69,7 @@ def test_v3_sub_entity_and_crossfile(client, tmp_path):
         ["S-OLD", "松屋", "", "2026-07-01 12:00:00", "甲(111)", "R3",
          "YES", "YES", "NO"],
     ], tmp_path)
-    r = v3_flow.process_import(db, imp2.id)
+    r = flow.process_import(db, imp2.id)
     # 同名归并应自动发生：S-NEW 成为 S-OLD 的从档（松屋同一家店）
     old = db.query(StoreEntity).filter(StoreEntity.store_id_raw == "S-OLD").one()
     new = db.query(StoreEntity).filter(StoreEntity.store_id_raw == "S-NEW").one()
@@ -97,8 +97,8 @@ def test_v3_valid_auto_finalize(client, tmp_path):
         ["S-B", "乙店", "", "2026-07-01 10:00:00", "甲(111)", "R2",
          "YES", "YES", "NO"],
     ], tmp_path)
-    v3_flow.process_import(db, imp.id)
-    res = v3_flow.finalize_import(db, imp.id)
+    flow.process_import(db, imp.id)
+    res = flow.finalize_import(db, imp.id)
     assert res["ok"] is True and res["added"] == 2
     assert db.query(FormalRecord).filter(
         FormalRecord.import_id == imp.id).count() == 2
@@ -119,7 +119,7 @@ def _upload_and_v3(client, tmp_path, rows, fname):
     admin = db.query(User).filter(User.username == "admin").one()
     imp = _up(db, admin, fname, rows, tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     return imp.id
 
 
@@ -139,7 +139,7 @@ def test_my_appeal_empty_when_all_valid(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     _seed_staff(client)
     client.post("/login", data={"username": "emp1", "password": "pw123456"},
                 follow_redirects=False)
@@ -183,13 +183,13 @@ def test_my_appeal_flow(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     late = db.query(RawRecord).filter(RawRecord.import_id == imp.id,
                                       RawRecord.clean_status == "master_late").one()
     late_id = late.id
     # master_late 默认不入正式表：此刻入表仅最早那条(1)，不阻塞
-    res = v3_flow.finalize_import(db, imp.id)
+    res = flow.finalize_import(db, imp.id)
     assert res["ok"] is True and res["added"] == 1
     db.query(FormalRecord).filter(FormalRecord.import_id == imp.id).delete()
     db.commit()
@@ -228,14 +228,14 @@ def test_my_appeal_flow(client, tmp_path):
     rr = db.get(RawRecord, late_id)
     assert rr.clean_status == "valid" and rr.confirm_state == "approved"
     # 无未决申诉 → 入正式表（有效 2 条：最早 + 申诉认可）
-    res = v3_flow.finalize_import(db, imp.id)
+    res = flow.finalize_import(db, imp.id)
     assert res["ok"] is True and res["added"] == 2
     db.close()
 
 
-def test_v3_perf_salary(client, tmp_path):
+def test_perf_salary(client, tmp_path):
     """入正式表后，绩效/工资按68规则正确。"""
-    from app.services import v3_perf
+    from app.services import perf
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -246,14 +246,14 @@ def test_v3_perf_salary(client, tmp_path):
          "YES", "YES", "YES"],  # 8/2≥7/9, Deploy YES → 2点
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    res = v3_flow.finalize_import(db, imp.id)
+    res = flow.finalize_import(db, imp.id)
     assert res["ok"] is True and res["added"] == 2
-    mp = v3_perf.month_perf(db, "2026-08")
+    mp = perf.month_perf(db, "2026-08")
     me = next(x for x in mp if x["code"] == "111")
     assert me["points"] == 3 and me["amount"] == 750  # 3×250
-    s = v3_perf.company_summary(db, "2026-08")
+    s = perf.company_summary(db, "2026-08")
     assert s["total_amount"] == 750
     db.close()
     # 路由渲染：发薪表（新设计：总金额/找平金额/应该付金额）
@@ -280,7 +280,7 @@ def test_v3_blank_row_not_anchor(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     rows = {r.modified_raw: r for r in db.query(RawRecord).filter(
         RawRecord.import_id == imp.id).all()}
@@ -302,7 +302,7 @@ def test_v3_same_day_two_visible_only_first_valid(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     rows = {r.modified_raw: r for r in db.query(RawRecord).filter(
         RawRecord.import_id == imp.id).all()}
@@ -324,7 +324,7 @@ def test_v3_space_diff_name_not_merged(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     rows = {r.store_id_raw: r for r in db.query(RawRecord).filter(
         RawRecord.import_id == imp.id).all()}
@@ -351,7 +351,7 @@ def test_v3_cross_month_visit_not_suppressed(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     rows = {r.modified_raw: r for r in db.query(RawRecord).filter(
         RawRecord.import_id == imp.id).all()}
@@ -360,9 +360,9 @@ def test_v3_cross_month_visit_not_suppressed(client, tmp_path):
     db.close()
 
 
-def test_v3_recon_person_points(client, tmp_path):
+def test_recon_person_points(client, tmp_path):
     """对账：导入人员点数表，与系统正式数据对比出差异。"""
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -373,9 +373,9 @@ def test_v3_recon_person_points(client, tmp_path):
         ["S2", "店2", "", "2026-08-02 09:00:00", "甲(111)", "R2",
          "YES", "YES", "YES"],
     ], tmp_path)
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    res = v3_flow.finalize_import(db, imp.id)
+    res = flow.finalize_import(db, imp.id)
     assert res["ok"] is True and res["added"] == 2
     db.close()
     # 对账文件：甲期望 5 点（与系统 3 点差 2）
@@ -385,7 +385,7 @@ def test_v3_recon_person_points(client, tmp_path):
                         [["甲", "111", 5]])])
     content = open(p, "rb").read()
     db = appdb.SessionLocal()
-    tk = v3_recon.create_recon(db, "2026-08", "recon.xlsx", content, admin.id)
+    tk = recon.create_recon(db, "2026-08", "recon.xlsx", content, admin.id)
     assert tk.summary.get("kind") == "person_points"
     from app.models import ReconResult
     diffs = db.query(ReconResult).filter(ReconResult.task_id == tk.id).all()
@@ -395,10 +395,10 @@ def test_v3_recon_person_points(client, tmp_path):
     db.close()
 
 
-def test_v3_recon_all_match_zero_diff_rows(client, tmp_path):
+def test_recon_all_match_zero_diff_rows(client, tmp_path):
     """对账两侧点数全一致时：差异数=0，不落任何 ReconResult 行
     （回归：曾把比对行数当差异数，全对齐仍显示“差异 34 条”）。"""
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -407,9 +407,9 @@ def test_v3_recon_all_match_zero_diff_rows(client, tmp_path):
          "YES", "YES", "NO"],    # 1点
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     db.close()
     # 外部对账与系统一致：甲 1 点
     from tests.helpers import write_workbook
@@ -418,7 +418,7 @@ def test_v3_recon_all_match_zero_diff_rows(client, tmp_path):
     write_workbook(p, [("对账", [["姓名", "编号", "总点数"]],
                         [["甲", "111", 1]])])
     db = appdb.SessionLocal()
-    tk = v3_recon.create_recon(db, "2026-08", "recon_ok.xlsx",
+    tk = recon.create_recon(db, "2026-08", "recon_ok.xlsx",
                                open(p, "rb").read(), admin.id)
     assert tk.summary.get("compared") == 1
     assert tk.summary.get("diff_count") == 0     # 全对齐 → 差异 0
@@ -445,8 +445,8 @@ def test_admin_staff_picker_and_staff_self_lock(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp_a.id)
-    v3_flow.process_import(db_fresh(), imp_b.id)
+    flow.process_import(db_fresh(), imp_a.id)
+    flow.process_import(db_fresh(), imp_b.id)
     # 员工账号
     db = appdb.SessionLocal()
     if not db.query(User).filter(User.username == "emp1").first():
@@ -497,7 +497,7 @@ def test_confirm_and_appeal_flow(client, tmp_path):
          "YES", "YES", "NO"],                     # master_late#2（用于申诉）
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     late = db.query(RawRecord).filter(RawRecord.import_id == imp.id,
                                       RawRecord.clean_status == "master_late",
@@ -564,10 +564,10 @@ def test_appeal_grouped_by_day_and_dup_hidden(client, tmp_path):
          "YES", "YES", "NO"],          # 与 R2 跨日 → master_late
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp1.id)
-    v3_flow.process_import(db_fresh(), imp2.id)
+    flow.process_import(db_fresh(), imp1.id)
+    flow.process_import(db_fresh(), imp2.id)
     db = appdb.SessionLocal()
-    days = v3_flow.appeal_list(db, "111")
+    days = flow.appeal_list(db, "111")
     # 8/4、8/2 各 1 条 master_late 可申诉（倒序）；8/1(valid)不出现
     assert [(d, len(v)) for d, v in days] == [("2026-08-04", 1),
                                               ("2026-08-02", 1)]
@@ -588,19 +588,19 @@ def test_cross_day_dup_auto_hidden(client, tmp_path):
          "YES", "YES", "NO"],          # 同日同店 → cross_file_dup
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp1.id)
-    v3_flow.process_import(db_fresh(), imp2.id)
+    flow.process_import(db_fresh(), imp1.id)
+    flow.process_import(db_fresh(), imp2.id)
     db = appdb.SessionLocal()
     dup = db.query(RawRecord).filter(
         RawRecord.clean_status == "cross_file_dup").one()
     assert dup.confirm_state == "auto_ok"
-    assert v3_flow.appeal_list(db, "111") == []   # 无可申诉
+    assert flow.appeal_list(db, "111") == []   # 无可申诉
     db.close()
 
 
 def test_my_perf_page_staff_own_report(client, tmp_path):
     """员工端 /my/perf：只显示本人日明细与月汇总（正式表有效店）。"""
-    from app.services import v3_perf
+    from app.services import perf
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -611,9 +611,9 @@ def test_my_perf_page_staff_own_report(client, tmp_path):
          "YES", "YES", "YES"],   # 2点
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    res = v3_flow.finalize_import(db, imp.id)
+    res = flow.finalize_import(db, imp.id)
     assert res["ok"] and res["added"] == 2
     db.close()
     _seed_staff(client)
@@ -640,9 +640,9 @@ def test_rebuild_month_no_double_count_on_backfill(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), f1.id)
+    flow.process_import(db_fresh(), f1.id)
     db = appdb.SessionLocal()
-    assert v3_flow.finalize_import(db, f1.id)["ok"] is True
+    assert flow.finalize_import(db, f1.id)["ok"] is True
     db.close()
     # 补传文件2：店X 8/3（更早）→ 单独 finalize 会双算
     f2 = _up(db, admin, "m2.xlsx", [
@@ -650,14 +650,14 @@ def test_rebuild_month_no_double_count_on_backfill(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), f2.id)
+    flow.process_import(db_fresh(), f2.id)
     db = appdb.SessionLocal()
-    assert v3_flow.finalize_import(db, f2.id)["ok"] is True
+    assert flow.finalize_import(db, f2.id)["ok"] is True
     assert db.query(FormalRecord).count() == 2      # 双算：8/3 + 8/5 都在
     db.close()
     # 按结算月重算：只保留当月最早(8/3)
     db = appdb.SessionLocal()
-    res = v3_flow.rebuild_month(db, "2026-08")
+    res = flow.rebuild_month(db, "2026-08")
     assert res["ok"] is True
     assert res["formal_before"] == 2 and res["formal_after"] == 1
     assert res["points_after"] == 1
@@ -681,19 +681,19 @@ def test_rebuild_month_keeps_approved_appeal(client, tmp_path):
          "YES", "YES", "NO"],                     # master_late → 申诉认可
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
     late = db.query(RawRecord).filter(
         RawRecord.clean_status == "master_late").one()
-    v3_flow.create_appeal(db, late.id, "111", "确实又去了")
+    flow.create_appeal(db, late.id, "111", "确实又去了")
     ap = db.query(AppealRecord).filter(
         AppealRecord.raw_record_id == late.id).one()
-    assert v3_flow.resolve_appeal(db, ap.id, "accept", admin.id)["ok"]
-    assert v3_flow.finalize_import(db, imp.id)["added"] == 2
+    assert flow.resolve_appeal(db, ap.id, "accept", admin.id)["ok"]
+    assert flow.finalize_import(db, imp.id)["added"] == 2
     db.close()
     # 重算 7 月：申诉认可的那条必须仍在
     db = appdb.SessionLocal()
-    res = v3_flow.rebuild_month(db, "2026-07")
+    res = flow.rebuild_month(db, "2026-07")
     assert res["ok"] is True
     assert res["formal_after"] == 2
     rr = db.get(RawRecord, late.id)
@@ -703,7 +703,7 @@ def test_rebuild_month_keeps_approved_appeal(client, tmp_path):
     db.close()
 
 
-def test_v3_month_page_and_rebuild_route(client, tmp_path):
+def test_month_page_and_rebuild_route(client, tmp_path):
     """管理端 /month：页面统计可见；重建按钮提交成功。"""
     _seed_admin(client)
     db = appdb.SessionLocal()
@@ -713,9 +713,9 @@ def test_v3_month_page_and_rebuild_route(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     db.close()
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
@@ -730,10 +730,10 @@ def test_v3_month_page_and_rebuild_route(client, tmp_path):
     assert r.status_code == 303
 
 
-def test_v3_recon_sys_only_and_export(client, tmp_path):
+def test_recon_sys_only_and_export(client, tmp_path):
     """对账反向名单 + 差异导出：
     系统有记录而对账文件没列的人进 summary.sys_only，并在页面/导出中出现。"""
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -744,15 +744,15 @@ def test_v3_recon_sys_only_and_export(client, tmp_path):
          "YES", "YES", "YES"],                     # 乙 2点
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     # 对账文件只列甲 → 乙出现在反向名单
     from tests.helpers import write_workbook
     p = str(tmp_path / "so2.xlsx")
     write_workbook(p, [("对账", [["姓名", "编号", "总点数"]],
                         [["甲", "111", 1]])])
-    tk = v3_recon.create_recon(db, "2026-08", "so2.xlsx",
+    tk = recon.create_recon(db, "2026-08", "so2.xlsx",
                                open(p, "rb").read(), admin.id)
     assert tk.summary["diff_count"] == 0
     assert set(tk.summary["sys_only"]) == {"222"}
@@ -768,10 +768,10 @@ def test_v3_recon_sys_only_and_export(client, tmp_path):
     assert "spreadsheetml" in r.headers.get("content-type", "")
 
 
-def test_v3_recon_adjust_flow(client, tmp_path):
+def test_recon_adjust_flow(client, tmp_path):
     """找平闭环：对账差异确认 → 生成下月调差记录（幂等/可取消），页面展示。"""
     from app.models import AdjustRecord
-    from app.services import v3_perf, v3_recon
+    from app.services import perf, recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -782,15 +782,15 @@ def test_v3_recon_adjust_flow(client, tmp_path):
          "YES", "YES", "YES"],   # 2点 → 共 3 点（工资 750）
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     # 对账文件报 5 点 → 系统差 -2 → 找平 +2 点（金额=+2×250 自动）
     from tests.helpers import write_workbook
     p = str(tmp_path / "ad2.xlsx")
     write_workbook(p, [("对账", [["姓名", "编号", "总点数"]],
                         [["甲", "111", 5]])])
-    tk = v3_recon.create_recon(db, "2026-08", "ad2.xlsx",
+    tk = recon.create_recon(db, "2026-08", "ad2.xlsx",
                                open(p, "rb").read(), admin.id)
     assert tk.summary["diff_count"] == 1
     db.close()
@@ -803,15 +803,15 @@ def test_v3_recon_adjust_flow(client, tmp_path):
     assert "自动" in page
     # 自动找平：sync 后 payroll 找平金额 = 金额差（含奖金）
     db = appdb.SessionLocal()
-    v3_period.sync_period_table(db, "2026-08")
-    rows = {r["code"]: r for r in v3_period.period_rows(db, "2026-08")}
+    period.sync_period_table(db, "2026-08")
+    rows = {r["code"]: r for r in period.period_rows(db, "2026-08")}
     assert rows["111"]["adj_amt"] == rows["111"]["diff_amt"]
     db.close()
 
 
-def test_v3_recon_report_generation(client, tmp_path):
+def test_recon_report_generation(client, tmp_path):
     """一键月度对账报告：build_report 生成 4-sheet 工作簿；路由可下载。"""
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -822,16 +822,16 @@ def test_v3_recon_report_generation(client, tmp_path):
          "YES", "YES", "YES"],   # 2点 → 3 点
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     from tests.helpers import write_workbook
     p = str(tmp_path / "rp2.xlsx")
     write_workbook(p, [("对账", [["姓名", "编号", "总点数"]],
                         [["甲", "111", 5]])])   # 期望 5 → 差异 -2
-    tk = v3_recon.create_recon(db, "2026-08", "rp2.xlsx",
+    tk = recon.create_recon(db, "2026-08", "rp2.xlsx",
                                open(p, "rb").read(), admin.id)
-    wb = v3_recon.build_report(db, tk.id, "管理员甲")
+    wb = recon.build_report(db, tk.id, "管理员甲")
     assert wb is not None
     names = wb.sheetnames
     assert names == ["对账报告摘要", "差异明细", "系统有而对账文件无", "找平确认"]
@@ -853,10 +853,10 @@ def test_v3_recon_report_generation(client, tmp_path):
     assert "spreadsheetml" in r.headers.get("content-type", "")
 
 
-def test_v3_recon_daily_records(client, tmp_path):
+def test_recon_daily_records(client, tmp_path):
     """日级对账：上传逐条巡店明细 → 员工×日 问题行 + 人月差异 + 报告日级页签。"""
     from app.models import ReconDayRow
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -867,9 +867,9 @@ def test_v3_recon_daily_records(client, tmp_path):
          "YES", "YES", "YES"],    # 2点 → 系统月 3 点
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     db.close()
     # 对账文件：逐条巡店明细（08-02 那笔 deploy=NO → 对账侧 1 点）
     HD = ["Store ID", "Store Name-Local", "Modified Time", "Submitter",
@@ -881,7 +881,7 @@ def test_v3_recon_daily_records(client, tmp_path):
         ["S2", "店2", "2026-08-02 09:00:00", "甲(111)", "YES", "NO"],
     ])])
     db = appdb.SessionLocal()
-    tk = v3_recon.create_recon(db, "2026-08", "dy2.xlsx",
+    tk = recon.create_recon(db, "2026-08", "dy2.xlsx",
                                open(p, "rb").read(), admin.id)
     s = tk.summary or {}
     assert s["kind"] == "daily_records"
@@ -895,7 +895,7 @@ def test_v3_recon_daily_records(client, tmp_path):
     db.close()
     # 报告含日级页签
     db = appdb.SessionLocal()
-    wb = v3_recon.build_report(db, tk.id, "管理员")
+    wb = recon.build_report(db, tk.id, "管理员")
     assert "员工×日对账明细" in wb.sheetnames
     ws = wb["员工×日对账明细"]
     cells = [str(c) for row in ws.iter_rows(values_only=True) for c in row]
@@ -910,11 +910,11 @@ def test_v3_recon_daily_records(client, tmp_path):
     assert "点数不一致" in page
 
 
-def test_v3_recon_task_stats_and_product(client, tmp_path):
+def test_recon_task_stats_and_product(client, tmp_path):
     """任务化：状态 done + 统计表(person_daily_stats) + 对账数据表全量落库
     + 下载对账结果 Excel。"""
     from app.models import PersonDailyStat, ReconDataRow
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -925,9 +925,9 @@ def test_v3_recon_task_stats_and_product(client, tmp_path):
          "YES", "YES", "YES"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     # finalize 钩子应已写统计表
     stats = db.query(PersonDailyStat).filter(
         PersonDailyStat.person_code == "111").all()
@@ -940,7 +940,7 @@ def test_v3_recon_task_stats_and_product(client, tmp_path):
         ["S1", "店1", "2026-08-01 09:00:00", "甲(111)", "YES", "NO"],
         ["S2", "店2", "2026-08-02 09:00:00", "甲(111)", "YES", "NO"],
     ])])
-    tk = v3_recon.create_recon(db, "2026-08", "tp2.xlsx",
+    tk = recon.create_recon(db, "2026-08", "tp2.xlsx",
                                open(p, "rb").read(), admin.id)
     assert tk.status == "done"
     assert tk.summary.get("kind") == "daily_records"
@@ -957,7 +957,7 @@ def test_v3_recon_task_stats_and_product(client, tmp_path):
     assert "已完成" in page and "下载对账结果" in page
 
 
-def test_v3_recon_reupload_same_month_rebuilds(client, tmp_path):
+def test_recon_reupload_same_month_rebuilds(client, tmp_path):
     """同月重传 → 旧任务标记「上一版」保留，新任务为当前（重新对账）。"""
     _seed_admin(client)
     db = appdb.SessionLocal()
@@ -967,9 +967,9 @@ def test_v3_recon_reupload_same_month_rebuilds(client, tmp_path):
          "YES", "YES", "NO"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     from tests.helpers import write_workbook
     HD = ["Store ID", "Store Name-Local", "Modified Time", "Submitter",
           "A+ POSM Visible", "NEW A+ POSM"]
@@ -978,11 +978,11 @@ def test_v3_recon_reupload_same_month_rebuilds(client, tmp_path):
         ["S1", "店1", "2026-08-01 09:00:00", "甲(111)", "YES", "NO"],
     ])])
     content = open(p, "rb").read()
-    from app.services import v3_recon
-    t1, older1 = v3_recon.submit_task(db, "2026-08", "第一版.xlsx",
+    from app.services import recon
+    t1, older1 = recon.submit_task(db, "2026-08", "第一版.xlsx",
                                       content, admin.id, sync=True)
     assert older1 == []
-    t2, older2 = v3_recon.submit_task(db, "2026-08", "第二版.xlsx",
+    t2, older2 = recon.submit_task(db, "2026-08", "第二版.xlsx",
                                       content, admin.id, sync=True)
     assert older2 == [t1.id]                    # 旧任务被标记上一版
     from app.models import ReconTask
@@ -1004,7 +1004,7 @@ def test_v3_recon_reupload_same_month_rebuilds(client, tmp_path):
 
 def test_recon_attribution_and_ai_placeholder(client, tmp_path):
     """对账自动归因写入 summary；AI 解读在未配置模型时给出友好提示。"""
-    from app.services import v3_recon
+    from app.services import recon
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -1015,9 +1015,9 @@ def test_recon_attribution_and_ai_placeholder(client, tmp_path):
          "YES", "YES", "YES"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     from tests.helpers import write_workbook
     HD = ["Store ID", "Store Name-Local", "Modified Time", "Submitter",
           "A+ POSM Visible", "NEW A+ POSM"]
@@ -1026,12 +1026,12 @@ def test_recon_attribution_and_ai_placeholder(client, tmp_path):
         ["S1", "店1", "2026-08-01 09:00:00", "甲(111)", "YES", "NO"],
         ["S2", "店2", "2026-08-02 09:00:00", "甲(111)", "YES", "NO"],
     ])])
-    tk = v3_recon.create_recon(db, "2026-08", "at2.xlsx",
+    tk = recon.create_recon(db, "2026-08", "at2.xlsx",
                                open(p, "rb").read(), admin.id)
     att = (tk.summary or {}).get("attribution") or {}
     assert att.get("consistent") == 2 and att.get("only_system") == 0
     assert att.get("only_report") == 0 and att.get("net") == 0
-    wb = v3_recon.build_report(db, tk.id, "管理员")
+    wb = recon.build_report(db, tk.id, "管理员")
     assert "差异归因" in wb.sheetnames
     db.close()
     client.post("/login", data={"username": "admin", "password": "pw123456"},
@@ -1059,9 +1059,9 @@ def test_daily_perf_filterable(client, tmp_path):
          "YES", "YES", "YES"],
     ], tmp_path)
     db.close()
-    v3_flow.process_import(db_fresh(), imp.id)
+    flow.process_import(db_fresh(), imp.id)
     db = appdb.SessionLocal()
-    v3_flow.finalize_import(db, imp.id)
+    flow.finalize_import(db, imp.id)
     db.close()
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)

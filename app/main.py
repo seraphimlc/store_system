@@ -9,14 +9,14 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
     from app.routers import (auth_r, files_r, perf_r,
-                        stores_r, accounts_r, info_r, v3_r)
+                        stores_r, accounts_r, info_r, settle_r)
     app.include_router(auth_r.router)
     app.include_router(files_r.router)
     app.include_router(perf_r.router)
     app.include_router(stores_r.router)
     app.include_router(accounts_r.router)
     app.include_router(info_r.router)
-    app.include_router(v3_r.router)
+    app.include_router(settle_r.router)
 
     from fastapi import Depends
     from fastapi.responses import JSONResponse
