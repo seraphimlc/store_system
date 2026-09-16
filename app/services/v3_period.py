@@ -140,8 +140,8 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         # 上半月奖金 = h1÷门槛×奖额（余点带向下半月）；
         # 下半月奖金 = (h1余 + h2)÷门槛×奖额 − 上半月已发（当月累计滚动）
         from app.services import v3_perf
-        g, amt = v3_perf.bonus_params()
-        settle_amt = v3_perf.salary_for(sp, per_point)
+        g, amt = v3_perf.bonus_params(month)
+        settle_amt = v3_perf.salary_for(sp, per_point, month)
         b1 = (h1 // g) * amt
         h1_rem = h1 % g
         b2 = ((h1_rem + h2) // g) * amt

@@ -276,7 +276,7 @@ def v3_perf(request: Request,
             pay_map[r["code"]] = (p1, hf[4])
     if period not in ("half1", "half2"):
         period = "half1"
-    bonus_g, bonus_a = v3_perf.bonus_params()
+    bonus_g, bonus_a = v3_perf.bonus_params(month)
     page_state = {
         "page": "perf", "month": month, "period": period,
         "employees": len(rows),
@@ -505,7 +505,7 @@ def v3_recon_page(request: Request,
 
         def _pay_diff(_db, sys_p, rep_p, mth):
             pp = _vp.month_per_point(_db, mth)
-            return _vp.salary_for(rep_p, pp) - _vp.salary_for(sys_p, pp)  # 负=扣款/正=补款
+            return _vp.salary_for(rep_p, pp, mth) - _vp.salary_for(sys_p, pp, mth)  # 负=扣款/正=补款
 
         amap = vr.task_adjust_map(db, task_id)
         next_month = vr._next_month((cur.params or {}).get("month", ""))
@@ -801,7 +801,7 @@ def v3_month_page(request: Request,
         info["formal"] = len(frs)
         info["points"] = sum(f.points or 0 for f in frs)
         mp = v3_perf.month_perf(db, month)
-        info["wage"] = sum(v3_perf.salary_for(m["points"]) for m in mp)
+        info["wage"] = sum(v3_perf.salary_for(m["points"], month=month) for m in mp)
         # 涉及文件
         fids = [r[0] for r in db.query(RawRecord.import_id).filter(
             RawRecord.modified_raw.like(month + "%")).distinct().all()]
@@ -892,7 +892,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
                   "rows": len(rows), "total": total,
                   "adjusted": sum(1 for r in rows if r["adj"])}
     from app.services import v3_perf as _vp
-    bonus_g, bonus_a = _vp.bonus_params()
+    bonus_g, bonus_a = _vp.bonus_params(month)
     return templates.TemplateResponse("payroll_settle.html", {
         "request": request, "current_user": user, "month": month,
         "months": months, "rows": rows, "total": total, "staff": staff,

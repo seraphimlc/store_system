@@ -21,22 +21,53 @@ BONUS_AMOUNT = 3000     # 兼容默认（旧引用）
 PER_POINT = 250
 
 
-def salary_for(points: int, per_point: int = None) -> int:
-    """每点 per_point 円（默认 250）+ 奖金：每满 bonus_group 点奖 bonus_amount 円（整月滚动、不跨月）。
+def _schedule():
+    """解析按月门槛规则 "2026-09=75,2027-01=80" → [(month, group)]（升序）。"""
+    raw = getattr(_get_settings(), "bonus_group_schedule", "") or ""
+    out = []
+    for part in raw.split(","):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        m, g = part.split("=", 1)
+        m, g = m.strip(), g.strip()
+        if len(m) == 7 and g.isdigit():
+            out.append((m, int(g)))
+    return sorted(out)
 
-    例：1033 点 → 15×3000=45,000；不跨月（月初重新从 0 累计）。
+
+def _bonus_cfg(month: str = None):
+    """返回 (门槛, 奖额)：门槛按月份取按月规则（未命中用默认 bonus_group）。"""
+    s = _get_settings()
+    group, amount = s.bonus_group, s.bonus_amount
+    if month:
+        for m, g in _schedule():
+            if month >= m:
+                group = g
+    return group, amount
+
+
+FULL_GROUP = 68          # 兼容默认（旧引用）
+BONUS_AMOUNT = 3000     # 兼容默认（旧引用）
+PER_POINT = 250
+
+
+def salary_for(points: int, per_point: int = None, month: str = None) -> int:
+    """每点 per_point 円（默认 250）+ 奖金：每满门槛点奖奖额円（整月滚动、不跨月）。
+
+    门槛按月可变（如 2026-09 起 68→75，见 BONUS_GROUP_SCHEDULE）；不跨月（月初从 0 累计）。
     """
     if points <= 0:
         return 0
     pp = per_point if per_point is not None else PER_POINT
-    g, amt = _bonus_cfg()
+    g, amt = _bonus_cfg(month)
     bonus = (points // g) * amt
     return points * pp + bonus
 
 
-def bonus_params() -> tuple:
+def bonus_params(month: str = None) -> tuple:
     """供页面/文档展示当前奖金配置：(门槛, 金额)。"""
-    return _bonus_cfg()
+    return _bonus_cfg(month)
 
 
 def _fetch(db):
@@ -119,7 +150,7 @@ def sync_month_perf(db, month: str) -> int:
             db.add(MonthPerfRecord(
                 month=month, person_code=code,
                 records=d["records"], p1=d["p1"], p2=d["p2"],
-                points=points, salary=salary_for(points, per_point),
+                points=points, salary=salary_for(points, per_point, month),
                 per_point=per_point,
                 rate37=rate, pass37=rate >= 0.37,
                 created_at=__import__("datetime").datetime.utcnow()))
@@ -129,7 +160,7 @@ def sync_month_perf(db, month: str) -> int:
             row.p2 = d["p2"]
             row.points = points
             row.per_point = per_point
-            row.salary = salary_for(points, per_point)
+            row.salary = salary_for(points, per_point, month)
             row.rate37 = rate
             row.pass37 = rate >= 0.37
     # 该月已无正式记录的人（离职/数据清理）同步移除
@@ -249,7 +280,7 @@ def set_month_per_point(db, month: str, per_point: int) -> dict:
         MonthPerfRecord.month == month).all()
     for r in rows:
         r.per_point = per_point
-        r.salary = salary_for(r.points, per_point)
+        r.salary = salary_for(r.points, per_point, month)
     db.commit()
     # 薪资找平表按新单价重算（对账金额/分期金额/偏差金额）
     from app.services import v3_period

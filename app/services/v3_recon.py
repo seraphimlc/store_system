@@ -888,11 +888,11 @@ def _next_month(month: str) -> str:
     return f"{y}-{m0 + 1:02d}"
 
 
-def _diff_amount(system_pts, report_pts) -> int:
-    """差异应补金额（円）：按工资规则分别折算后相减。"""
+def _diff_amount(system_pts, report_pts, month: str = None) -> int:
+    """差异应补金额（円）：按工资规则（对应月份门槛）分别折算后相减。"""
     from app.services import v3_perf
-    return v3_perf.salary_for(report_pts or 0) - v3_perf.salary_for(
-        system_pts or 0)
+    return v3_perf.salary_for(report_pts or 0, month=month) \
+        - v3_perf.salary_for(system_pts or 0, month=month)
 
 
 def ai_employee_notes(db, task_id: int) -> dict:
@@ -1146,7 +1146,7 @@ def build_report(db, task_id: int, author_name: str = ""):
             name = (r.note or "").replace(" 点数差异", "") or r.submitter_code
             ws2.append([name, r.submitter_code, r.system_value or 0,
                         r.report_value or 0, r.diff or 0,
-                        _diff_amount(r.system_value or 0, r.report_value or 0),
+                        _diff_amount(r.system_value or 0, r.report_value or 0, month),
                         notes.get(r.submitter_code, "")])
 
     # Sheet3 反向名单

@@ -172,8 +172,14 @@ def test_bonus_configurable(client, monkeypatch):
         assert v3_perf.salary_for(100) == 100 * 250 + 2 * 2000   # 100//50=2
         g, a = v3_perf.bonus_params()
         assert (g, a) == (50, 2000)
+        g9, _ = v3_perf.bonus_params("2026-09")       # 9月起按月规则 75
+        assert g9 == 75
+        g8, _ = v3_perf.bonus_params("2026-08")       # 8月未命中按月规则 → 50
+        assert g8 == 50
     finally:
         monkeypatch.delenv("BONUS_GROUP", raising=False)
         monkeypatch.delenv("BONUS_AMOUNT", raising=False)
         cfg.get_settings.cache_clear()
     assert v3_perf.salary_for(100) == 100 * 250 + 1 * 3000       # 恢复默认 68/3000
+    assert v3_perf.salary_for(160, month="2026-09") == 160 * 250 + 2 * 3000  # 默认规则9月起75
+    assert v3_perf.salary_for(150, month="2026-08") == 150 * 250 + 2 * 3000  # 8月仍68(150//68=2)
