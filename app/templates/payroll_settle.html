@@ -66,29 +66,14 @@
       <td class="num" style="font-weight:700;color:{% if r.diff >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{{ '%+d' % r.diff }}</td>
       <td class="num" style="font-weight:700;color:{% if r.diff_amt >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">¥{{ '{:,}'.format(r.diff_amt) }}</td>
       <td class="num" style="font-weight:700;color:{% if r.adj_amt >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{% if r.adj_amt %}¥{{ '{:,}'.format(r.adj_amt) }}{% else %}¥0{% endif %}</td>
-      <td>
-        <form method="post" action="/payroll-settle/{{ month }}/{{ r.code }}/update"
-              style="display:flex;gap:.2rem;align-items:center">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-          <input type="hidden" name="half1_amount" value="{{ r.half1_amt }}">
-          <input type="hidden" name="half2_amount" value="{{ r.half2_amt }}">
-          <input type="number" name="adjust_delta"
-                 value="{{ r.diff_amt - r.adj_amt }}"
-                 style="width:6rem" step="1"
-                 data-testid="adjust-delta-{{ r.code }}"
-                 title="剩余未找平金额(円)=金额差−已找平：填0表示不追加；保存后累计入执行值(按金额找平,含奖金)">円
-          <button class="btn ghost" style="padding:.12rem .45rem;font-size:.78rem"
-                  data-testid="adjust-save-{{ r.code }}">保存</button>
-        </form>
-      </td>
+      <td class="hint">自动</td>
     </tr>
     {% endfor %}
   </table></div>
   <p class="hint" style="margin-top:.5rem">
-    「本月对账偏差」= 系统按公式算的<b>参考值</b>（每次生成自动刷新，不接受手改）：对账点数−(上半月+下半月)＋上月修正，金额=点×单价。
-    「找平」= 人工<b>实际执行</b>的累计值（默认 0）。输入框显示<b>剩余未找平（=偏差−已找平）</b>：
-    偏差-190、已找平-190 → 输入框自动归 0；需要追加时填增量，点「保存」累计入执行值（金额=点×该月单价，留痕）。
-    「上月修正」= 上月「找平」点数递延（上月没找平的部分自动带到本月）。
+    「本月对账偏差(金额)」= 系统已发金额 − 对账金额（含奖金），自动算的<b>参考值</b>；
+    「找平(执行)」= <b>自动 = 金额差</b>（无人工调整，页面只读）：发薪时在上半月工资里扣/补，上半月不够扣 → 下半月继续扣，两期都不够 → 余额递延下月。
+    「上月修正(金额)」= 上月两期工资扣不完的余额（递延到本月继续扣）。
   </p>
 </div>
 {% endif %}

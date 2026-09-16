@@ -8,7 +8,7 @@ from app.auth import hash_password
 from app.models import (AppealRecord, FormalRecord, ImportFile, Person,
                         RawRecord, StoreEntity, User)
 from app.services.importer import parse_file, upload_and_store
-from app.services import v3_flow
+from app.services import v3_flow, v3_period
 from tests.helpers import write_workbook
 
 H = ["Store ID", "Store Name-Local", "Store Name-English", "Modified Time",
@@ -794,37 +794,18 @@ def test_v3_recon_adjust_flow(client, tmp_path):
                                open(p, "rb").read(), admin.id)
     assert tk.summary["diff_count"] == 1
     db.close()
-    # 页面：确认前出现按钮与金额
+    # 页面：找平自动（无确认按钮），显示金额差
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
-    csrf = _csrf_of(client, f"/recon?task_id={tk.id}")
     page = client.get(f"/recon?task_id={tk.id}").text
-    assert "确认找平 → 2026-09" in page
-    assert "应找平(点)" in page
-    # 服务层确认 → 调差 +500 记入下月（幂等）
+    assert "确认找平" not in page
+    assert "应找平金额(円)" in page
+    assert "自动" in page
+    # 自动找平：sync 后 payroll 找平金额 = 金额差（含奖金）
     db = appdb.SessionLocal()
-    res = v3_recon.confirm_adjust(db, tk.id, "111", admin.id)
-    assert res["ok"] is True and res["amount"] == 2
-    rec = res["record"]
-    assert rec.applied_to_month == "2026-09" and rec.amount == 2
-    res2 = v3_recon.confirm_adjust(db, tk.id, "111", admin.id)
-    assert res2["record"].id == rec.id
-    assert db.query(AdjustRecord).count() == 1
-    assert v3_perf.adjust_map(db, "2026-09") == {"111": [2, 500]}
-    # 找平记录锁存当时单价（250），金额=点×单价
-    rec2 = db.query(AdjustRecord).first()
-    assert rec2.per_point == 250 and rec2.amount == 2
-    db.close()
-    # 页面：已确认状态可见；取消后删除记录
-    page = client.get(f"/recon?task_id={tk.id}").text
-    assert "已确认 · +2点 记入 2026-09" in page
-    csrf = _csrf_of(client, f"/recon?task_id={tk.id}")
-    r = client.post(f"/recon/{tk.id}/adjust/111",
-                    data={"csrf_token": csrf, "action": "remove"},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    assert db.query(AdjustRecord).count() == 0
+    v3_period.sync_period_table(db, "2026-08")
+    rows = {r["code"]: r for r in v3_period.period_rows(db, "2026-08")}
+    assert rows["111"]["adj_amt"] == rows["111"]["diff_amt"]
     db.close()
 
 

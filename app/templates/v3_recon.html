@@ -127,7 +127,7 @@
   {% if diffs %}
   <table class="grid-tbl">
     <tr><th>人员</th><th>编号</th><th class="num">系统点数</th><th class="num">对账点数</th>
-        <th class="num">差异(点)</th><th class="num">应找平(点)</th><th>操作</th></tr>
+        <th class="num">差异(点)</th><th class="num">应找平金额(円)</th><th>找平</th></tr>
     {% for d in diffs %}
     <tr>
       <td>{{ d.name }}</td>
@@ -139,27 +139,12 @@
         {% elif d.diff > 0 %}<span style="color:#b02a37">+{{ d.diff }}</span>
         {% else %}<span style="color:#b02a37">{{ d.diff }}</span>{% endif %}
       </td>
-      <td class="num">{{ '%+d' % d.amount }}</td>
-      <td>
-        {% if d.adjusted %}
-        <span class="pill ok">已确认 · {{ '%+d' % d.adjusted.amount }}点 记入 {{ d.adjusted.applied_to_month }}</span>
-        <form method="post" action="/recon/{{ cur.id }}/adjust/{{ d.code }}" style="display:inline">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-          <input type="hidden" name="action" value="remove">
-          <button class="btn ghost" style="padding:.15rem .5rem" type="submit">取消</button>
-        </form>
-        {% else %}
-        <form method="post" action="/recon/{{ cur.id }}/adjust/{{ d.code }}" style="display:inline">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-          <input type="hidden" name="action" value="add">
-          <button class="btn" style="padding:.15rem .6rem" type="submit">确认找平 → {{ next_month }}</button>
-        </form>
-        {% endif %}
-      </td>
+      <td class="num" style="font-weight:700">¥{{ '{:,}'.format(d.amount) }}</td>
+      <td><span class="pill ok">自动 · {{ next_month }} 月工资扣/补</span></td>
     </tr>
     {% endfor %}
   </table>
-  <p class="hint">找平金额 = 按工资规则折算「对账点数工资 − 系统点数工资」（正=下月补发，负=下月扣回），记入 {{ next_month }} 月工资表的「上月找平」列。</p>
+  <p class="hint">找平金额(円，含奖金) = 系统已发金额 − 对账金额，<b>自动</b>写入薪资找平表并在 {{ next_month }} 月工资中扣/补（上半月不够扣 → 下半月 → 下月递延），无需人工确认。</p>
   {% endif %}
 
   {% if sys_rows %}

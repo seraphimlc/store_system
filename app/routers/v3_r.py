@@ -501,6 +501,12 @@ def v3_recon_page(request: Request,
     next_month = ""
     if cur:
         from app.services import v3_recon as vr
+        from app.services import v3_perf as _vp
+
+        def _pay_diff(_db, sys_p, rep_p, mth):
+            pp = _vp.month_per_point(_db, mth)
+            return _vp.salary_for(sys_p, pp) - _vp.salary_for(rep_p, pp)
+
         amap = vr.task_adjust_map(db, task_id)
         next_month = vr._next_month((cur.params or {}).get("month", ""))
         for d in diffs:
@@ -510,8 +516,10 @@ def v3_recon_page(request: Request,
                         d.submitter_code,
                 "sys": d.system_value or 0, "rep": d.report_value or 0,
                 "diff": d.diff or 0,
-                "amount": vr._diff_amount(d.system_value or 0,
-                                          d.report_value or 0),
+                # 应找平金额(円,含奖金) = 系统已发金额 − 对账金额(工资规则)
+                "amount": _pay_diff(db, d.system_value or 0,
+                                    d.report_value or 0,
+                                    (cur.params or {}).get("month", "")),
                 "adjusted": amap.get(d.submitter_code)})
         if (cur.summary or {}).get("sys_only"):
             from app.models import Person

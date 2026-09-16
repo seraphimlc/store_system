@@ -113,16 +113,23 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             (half1 if r.ref_date.day <= 15 else half2).get(
                 r.person_code, 0) + r.points
     settle = _current_recon(db, month)
-    # 上月修正 = 上月「未找平余量」：点数列保留参考，金额列=上月金额差−上月已找平金额
-    # （找平按金额修正：余量金额 = 上月 diff_amount − 上月 adjust_amount，不按点数×单价）
+    # 上月修正 = 上月「未扣完余额」：链式递延（金额）。
+    # 上月余额在上月工资两期扣减后仍未扣完的部分才递延：
+    #   本月 carry = 上月(carry + half1_amt + half2_amt)，若为负(两期扣不完)则递延，正/零=已结清。
+    # 找平金额自动=金额差(无点击操作)：adjust_amount 由 sync 自动写，页面只读。
     prev = {}
     prev_amt = {}
     pm = _prev_month(month)
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == pm).all():
+        carry_pm = (r.prev_adjust_amount or 0) + (r.half1_amount or 0) \
+            + (r.half2_amount or 0)
+        if carry_pm < 0:            # 上月两期工资扣不完 → 负余额递延本月
+            prev_amt[r.person_code] = carry_pm
+        else:                       # 上月已扣清 → 无递延
+            prev_amt[r.person_code] = 0
         remain = (r.diff_points or 0) - (r.adjust_points or 0)
         prev[r.person_code] = remain
-        prev_amt[r.person_code] = (r.diff_amount or 0) - (r.adjust_amount or 0)
     names = {p.code: p.display_name for p in db.query(Person).all()}
     existing = {r.person_code: r for r in db.query(PayrollPeriodRow).filter(
         PayrollPeriodRow.month == month).all()}
@@ -159,12 +166,13 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
                 half1_bonus=b1, half2_bonus=b2,
                 half1_amount=h1_amt, half2_amount=h2_amt,
                 settle_amount=settle_amt,
-                prev_adjust_amount=prev_amt.get(code, 0),  # 上月金额余量
+                prev_adjust_amount=prev_amt.get(code, 0),  # 上月金额余量(链式递延)
                 diff_amount=diff_amt,   # 金额差(含奖金)=系统已发−对账金额
+                adjust_amount=diff_amt,  # 找平自动=金额差(无点击操作,页面只读)
                 updated_at=__import__("datetime").datetime.utcnow()))
         else:
             # 偏差两列=系统参考值：每次生成/更新自动按公式刷新；
-            # 找平两列(adjust_*)=人工执行值：默认0，保存过则保留不动。
+            # 找平(金额)=金额差：自动写表（无人工调整，页面只读）。
             row.half1_points = h1
             row.half2_points = h2
             row.half1_records = sh1[0]
@@ -176,13 +184,14 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             row.settle_points = sp
             row.prev_adjust_points = pa
             row.settle_amount = settle_amt
-            row.prev_adjust_amount = prev_amt.get(code, 0)  # 上月金额余量
+            row.prev_adjust_amount = prev_amt.get(code, 0)  # 上月金额余量(链式)
             row.half1_bonus = b1
             row.half2_bonus = b2
             row.half1_amount = h1_amt
             row.half2_amount = h2_amt
             row.diff_points = calc
             row.diff_amount = diff_amt   # 金额差(含奖金)=系统已发−对账金额
+            row.adjust_amount = diff_amt  # 找平自动=金额差(无点击,只读)
             row.updated_at = __import__("datetime").datetime.utcnow()
     db.commit()
     # 对账/偏差写回月绩效表（月绩效页直接可见"对账"与"偏差金额"）
@@ -258,10 +267,11 @@ def set_period_values(db: Session, month: str, person_code: str,
 
 
 def carry_map(db: Session, month: str) -> dict:
-    """该月应结转的「上月未找平余量」→ {code: [余量点(参考), 余量金额]}。
+    """该月应结转的「上月未扣完余额」→ {code: [余量点(参考), 余额金额]}。
 
-    余量金额 = 上月金额差(含奖金) − 上月已找平金额（找平按金额修正，不按点数）。
-    绩效工资页"上月找平"列与应付金额均取自本函数（与薪资找平页同一张表）。
+    余额金额(链式) = 上月(carry + half1_amt + half2_amt)，两期工资扣不完的负余额
+    才递延到本月（发薪表"找平金额"列与两期扣减取自本函数）。
+    找平金额(金额差)自动写表、页面只读；本函数返回上月结转余额(正补/负扣)。
     """
     pm = _prev_month(month)
     if not month:
@@ -270,7 +280,7 @@ def carry_map(db: Session, month: str) -> dict:
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == pm).all():
         remain_pt = (r.diff_points or 0) - (r.adjust_points or 0)
-        remain_amt = (r.diff_amount or 0) - (r.adjust_amount or 0)
-        if remain_amt:
-            out[r.person_code] = [remain_pt, remain_amt]
+        carry_amt = r.prev_adjust_amount or 0
+        if carry_amt:
+            out[r.person_code] = [remain_pt, carry_amt]
     return out

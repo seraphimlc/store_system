@@ -9,15 +9,16 @@ from app.services import v3_period
 
 
 def test_sync_formula_and_prev_adjust(client):
-    """偏差 = 对账 − (上半月+下半月) + 上月修正；上月修正取上月偏差。"""
+    """偏差 = 对账 − (上半月+下半月) + 上月修正；找平自动=金额差；上月修正=链式余额。"""
     db = appdb.SessionLocal()
     db.add(Person(code="111", display_name="甲"))
-    # 上月（7月）偏差2、找平0 → 未找平余量=2（递延源）；金额差=2×250=500
+    # 上月（7月）结转余额 -500（要扣，上月工资没扣完）；金额差=500
     db.add(PayrollPeriodRow(month="2026-07", person_code="111",
                             half1_points=0, half2_points=0,
                             settle_points=0, prev_adjust_points=0,
-                            diff_points=2, adjust_points=0,
-                            diff_amount=500, adjust_amount=0,
+                            diff_points=2, adjust_points=2,
+                            diff_amount=500, adjust_amount=500,
+                            prev_adjust_amount=-500,
                             updated_at=datetime.utcnow()))
     # 8月统计表：8/1=1点(上半月)，8/16=2点+8/20=1点(下半月3点)
     for d, pts in ((date(2026, 8, 1), 1), (date(2026, 8, 16), 2),
@@ -37,26 +38,32 @@ def test_sync_formula_and_prev_adjust(client):
     r = rows[0]
     assert r["half1"] == 1 and r["half2"] == 3      # 上半月1 / 下半月3
     assert r["settle"] == 10                          # 对账点数（全量）
-    assert r["prev"] == 2                       # 上月修正=上月余量(偏差2-找平0)
-    assert r["prev_amt"] == 500                 # 上月金额余量=上月金额差−已找平金额
-    assert r["diff"] == 10 - (1 + 3) + 2 == 8   # 偏差点数(参考)
+    assert r["prev"] == 0                       # 上月余量点数(参考；已自动找平→0)
+    assert r["prev_amt"] == -500                 # 上月结转余额-500(要扣)经链式递延
+    assert r["diff"] == 10 - (1 + 3) + 0 == 6   # 偏差点数(参考；上月余量0)
     assert r["diff_amt"] == (250 + 750) - 2500 == -1500  # 金额差(含奖金)=系统已发−对账金额
+    assert r["adj_amt"] == r["diff_amt"] == -1500        # 找平自动=金额差(无点击)
     db.close()
 
 
-def test_prev_adjust_is_remainder(client):
-    """递延=未找平余量：上月偏差100、找平100→余量0；找平50→余量50。"""
+def test_prev_adjust_chain_carry(client):
+    """链式递延：上月结转余额经两期工资吸收，<0 才递延下月；找平自动=金额差。"""
     db = appdb.SessionLocal()
     db.add(Person(code="A", display_name="甲"))
     db.add(Person(code="B", display_name="乙"))
-    # 上月：A 偏差100 找平100（余量0）；B 偏差100 找平50（余量50）
+    # 上月：A 结转 -25,000(要扣)、上半月工资 10,000 → 吸收后 -15,000 递延
+    #       B 结转 -25,000、两期工资 10,000+20,000 → 扣完(5,000>0) 结清
     db.add(PayrollPeriodRow(month="2026-07", person_code="A",
                             diff_points=100, adjust_points=100,
                             diff_amount=100 * 250, adjust_amount=100 * 250,
+                            half1_amount=10000, half2_amount=0,
+                            prev_adjust_amount=-25000,
                             updated_at=datetime.utcnow()))
     db.add(PayrollPeriodRow(month="2026-07", person_code="B",
-                            diff_points=100, adjust_points=50,
-                            diff_amount=100 * 250, adjust_amount=50 * 250,
+                            diff_points=100, adjust_points=100,
+                            diff_amount=100 * 250, adjust_amount=100 * 250,
+                            half1_amount=10000, half2_amount=20000,
+                            prev_adjust_amount=-25000,
                             updated_at=datetime.utcnow()))
     for code in ("A", "B"):
         db.add(PersonDailyStat(person_code=code,
@@ -64,41 +71,34 @@ def test_prev_adjust_is_remainder(client):
     db.commit()
     v3_period.sync_period_table(db, "2026-08")
     rows = {r["code"]: r for r in v3_period.period_rows(db, "2026-08")}
-    assert rows["A"]["prev"] == 0 and rows["A"]["prev_amt"] == 0      # 全找平→0
-    assert rows["B"]["prev"] == 50 and rows["B"]["prev_amt"] == 12500  # 余50→递延50×250
-    # carry_map（/perf 上月找平列来源）同源
+    assert rows["A"]["prev_amt"] == -15000          # 扣不完 → 递延
+    assert rows["B"]["prev_amt"] == 0               # 两期扣完 → 结清
+    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"]  # 找平自动=金额差
+    # carry_map（发薪表上月找平列）：上月结转余额（正补/负扣）
     cm = v3_period.carry_map(db, "2026-08")
-    assert cm.get("A") is None and cm["B"] == [50, 12500]
+    assert cm["A"] == [0, -25000] and cm["B"] == [0, -25000]
     db.close()
 
 
-def test_manual_adjust_preserved_and_diff_auto(client):
-    """找平=人工执行值（重新生成保留）；偏差=系统参考值（重新生成自动刷）。"""
+def test_adjust_auto_equals_diff_amount(client):
+    """找平自动=金额差（无点击操作）：生成后 adj_amt==diff_amt，重新生成保持。"""
     db = appdb.SessionLocal()
     db.add(Person(code="111", display_name="甲"))
     db.add(PersonDailyStat(person_code="111", ref_date=date(2026, 8, 1),
                            points=5))
     db.commit()
     v3_period.sync_period_table(db, "2026-08")
-    # 未编辑时：找平默认 0
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj"] == 0 and rows[0]["adj_amt"] == 0
-    # 保存找平 -99（金额）→ 找平金额=-99（按金额修正，不按点数）
-    v3_period.set_period_diff(db, "2026-08", "111", -99, 1)
-    v3_period.sync_period_table(db, "2026-08")        # 重新生成
+    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == 5 * 250
+    assert rows[0]["diff"] == -5                       # 偏差点数=参考值
+    v3_period.sync_period_table(db, "2026-08")         # 重新生成
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == -99                   # 找平金额保留（增量累计）
-    assert rows[0]["diff"] == -5                       # 偏差点数=参考值自动算回公式
-    assert rows[0]["diff_amt"] == 5 * 250             # 金额差(含奖金)=系统已发5×250−对账0
-    # delta 累计语义：再存 +99 → 总找平归零（输入框剩余=金额差-已找平金额）
-    v3_period.set_period_diff(db, "2026-08", "111", 99, 1)   # 撤销
-    rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == 0
+    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == 5 * 250  # 自动保持
     db.close()
 
 
-def test_payroll_settle_page_and_edit(client):
-    """薪资找平页面可看、可编辑「找平」。"""
+def test_payroll_settle_page_readonly(client):
+    """薪资找平页面只读：找平自动=金额差，无输入框/保存（去掉点击操作）。"""
     from tests_web.test_v3_flow import _seed_admin
     _seed_admin(client)
     db = appdb.SessionLocal()
@@ -113,23 +113,10 @@ def test_payroll_settle_page_and_edit(client):
     p = client.get("/payroll-settle?month=2026-08").text
     assert "薪资找平" in p and "找平(执行)" in p and "生成/更新" in p
     assert "本月对账偏差(参考)" in p
-    assert 'name="adjust_delta"' in p                 # 输入框=剩余未找平(偏差−已找平)
+    assert 'name="adjust_delta"' not in p               # 无找平输入框（自动）
+    assert "自动" in p                                   # 自动找平提示
     pp = client.get("/perf?month=2026-08").text
-    # 主页无薪资找平区块（区块特有元素不出现；导航菜单不算）
     assert "奖金合计(円)" not in pp and "导出薪资找平 Excel" not in pp
-    from tests_web.test_v3_flow import _csrf_of  # noqa
-    csrf = _csrf_of(client, "/payroll-settle?month=2026-08")
-    r = client.post("/payroll-settle/2026-08/111/update",
-                    data={"half1_amount": "0", "half2_amount": "0", "adjust_delta": "-5", "csrf_token": csrf},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == -5                    # 找平执行金额（累计，按金额）
-    assert rows[0]["diff"] == -5                       # 偏差点数参考值不随保存变
-    # 输入框=剩余未找平金额（=金额差−已找平金额 → 1250 − (-5) = 1255）
-    z = client.get("/payroll-settle?month=2026-08").text
-    assert 'name="adjust_delta"' in z and 'value="1255"' in z
     db.close()
 
 
