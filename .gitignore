@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Data: 真实巡店数据绝不允许进仓库（隐私 + 体积）
+data/uploads/
+data/real/
+*.xlsx
+!tests/fixtures/**/*.xlsx
+
+# Scratch（学习阶段的临时脚本）
+_learn_tmp/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+*.db
+
+# 8月对账验证缓存（真实数据，不入库）
+data/verify/recon_cache.json
+data/*.txt
+
+# 代理工具链/个人配置（不上传）
+.agents/
+
+# 运维脚本（敏感数据操作，仅本地）
+# (reset/restore 脚本保留在 scripts/，但备份库文件不入库)
+
+# 日志
+*.log
+
+# 旧仓库历史备份/本地残留
+.git.orig/
