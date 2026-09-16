@@ -113,20 +113,16 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             (half1 if r.ref_date.day <= 15 else half2).get(
                 r.person_code, 0) + r.points
     settle = _current_recon(db, month)
-    # 上月修正 = 上月「未找平余量」= 上月偏差(参考) − 上月找平(执行)
-    # （例：上月偏差100、找平100 → 余量0；偏差100、找平50 → 余量50）
-    # 余量金额 = 余量点 × 上月单价（余量是上月发生的，锁存上月单价）
+    # 上月修正 = 上月「未找平余量」：点数列保留参考，金额列=上月金额差−上月已找平金额
+    # （找平按金额修正：余量金额 = 上月 diff_amount − 上月 adjust_amount，不按点数×单价）
     prev = {}
     prev_amt = {}
     pm = _prev_month(month)
-    pp_pm = None
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == pm).all():
         remain = (r.diff_points or 0) - (r.adjust_points or 0)
         prev[r.person_code] = remain
-    if prev:
-        pp_pm = v3_perf.month_per_point(db, pm)
-        prev_amt = {k: v * pp_pm for k, v in prev.items()}
+        prev_amt[r.person_code] = (r.diff_amount or 0) - (r.adjust_amount or 0)
     names = {p.code: p.display_name for p in db.query(Person).all()}
     existing = {r.person_code: r for r in db.query(PayrollPeriodRow).filter(
         PayrollPeriodRow.month == month).all()}
@@ -148,6 +144,8 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         b2 = ((h1_rem + h2) // g) * amt
         h1_amt = h1 * per_point + b1
         h2_amt = h2 * per_point + b2
+        # 金额差（含奖金）= 系统已发金额 − 对账金额（正=系统多发，找平时扣回）
+        diff_amt = (h1_amt + h2_amt) - settle_amt
         sh1 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h1"]
         sh2 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h2"]
         row = existing.get(code)
@@ -161,8 +159,8 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
                 half1_bonus=b1, half2_bonus=b2,
                 half1_amount=h1_amt, half2_amount=h2_amt,
                 settle_amount=settle_amt,
-                prev_adjust_amount=prev_amt.get(code, 0),  # 余量×上月单价
-                diff_amount=calc * per_point,   # 金额差=点差×单价
+                prev_adjust_amount=prev_amt.get(code, 0),  # 上月金额余量
+                diff_amount=diff_amt,   # 金额差(含奖金)=系统已发−对账金额
                 updated_at=__import__("datetime").datetime.utcnow()))
         else:
             # 偏差两列=系统参考值：每次生成/更新自动按公式刷新；
@@ -178,13 +176,13 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             row.settle_points = sp
             row.prev_adjust_points = pa
             row.settle_amount = settle_amt
-            row.prev_adjust_amount = prev_amt.get(code, 0)  # 余量×上月单价
+            row.prev_adjust_amount = prev_amt.get(code, 0)  # 上月金额余量
             row.half1_bonus = b1
             row.half2_bonus = b2
             row.half1_amount = h1_amt
             row.half2_amount = h2_amt
             row.diff_points = calc
-            row.diff_amount = calc * per_point   # 金额差=点差×单价（系统参考）
+            row.diff_amount = diff_amt   # 金额差(含奖金)=系统已发−对账金额
             row.updated_at = __import__("datetime").datetime.utcnow()
     db.commit()
     # 对账/偏差写回月绩效表（月绩效页直接可见"对账"与"偏差金额"）
@@ -239,13 +237,12 @@ def set_period_values(db: Session, month: str, person_code: str,
                       half1_amount: int = 0, half2_amount: int = 0,
                       diff_points=None, user_id: int = 0,
                       adjust_delta: int = 0) -> dict:
-    """保存「找平」增量（人工执行）：
+    """保存「找平」增量（人工执行，单位为金額）：
 
-    - 输入框语义 = 剩余未找平(偏差−已找平)，保存的是本次增量 → 累计制：
-      偏差-190、第一次存-190后 输入框自动归 0；再填 5 → 总执行 -195。
-    - 找平金额 = 找平点数 × 该月单价；偏差两列是系统参考值不接受人工写。
+    - 输入框语义 = 剩余未找平金额(金额差−已找平金额)，保存的是本次增量 → 累计制：
+      金额差+58,250、第一次存+58,250后 输入框自动归 0；再填 5,000 → 总执行 +63,250。
+    - 找平按金额修正（含奖金差异），不按点数；点数列是参考值。
     """
-    from app.services import v3_perf
     row = db.query(PayrollPeriodRow).filter(
         PayrollPeriodRow.month == month,
         PayrollPeriodRow.person_code == person_code).first()
@@ -253,9 +250,7 @@ def set_period_values(db: Session, month: str, person_code: str,
         return {"ok": False, "msg": "该月此员工无对账行"}
     row.half1_amount = int(half1_amount or 0)
     row.half2_amount = int(half2_amount or 0)
-    row.adjust_points = (row.adjust_points or 0) + int(adjust_delta or 0)
-    row.adjust_amount = (row.adjust_points * v3_perf.month_per_point(db, month)
-                         if row.adjust_points else 0)
+    row.adjust_amount = (row.adjust_amount or 0) + int(adjust_delta or 0)
     row.updated_by = user_id
     row.updated_at = __import__("datetime").datetime.utcnow()
     db.commit()
@@ -263,20 +258,19 @@ def set_period_values(db: Session, month: str, person_code: str,
 
 
 def carry_map(db: Session, month: str) -> dict:
-    """该月应结转的「上月未找平余量」→ {code: [余量点, 余量金额]}。
+    """该月应结转的「上月未找平余量」→ {code: [余量点(参考), 余量金额]}。
 
-    余量点 = 上月偏差(参考) − 上月找平(执行)；金额 = 余量点 × 上月单价。
+    余量金额 = 上月金额差(含奖金) − 上月已找平金额（找平按金额修正，不按点数）。
     绩效工资页"上月找平"列与应付金额均取自本函数（与薪资找平页同一张表）。
     """
     pm = _prev_month(month)
     if not month:
         return {}
-    from app.services import v3_perf
-    pp = v3_perf.month_per_point(db, pm)
     out = {}
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == pm).all():
-        remain = (r.diff_points or 0) - (r.adjust_points or 0)
-        if remain:
-            out[r.person_code] = [remain, remain * pp]
+        remain_pt = (r.diff_points or 0) - (r.adjust_points or 0)
+        remain_amt = (r.diff_amount or 0) - (r.adjust_amount or 0)
+        if remain_amt:
+            out[r.person_code] = [remain_pt, remain_amt]
     return out

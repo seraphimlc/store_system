@@ -12,12 +12,12 @@ def test_sync_formula_and_prev_adjust(client):
     """偏差 = 对账 − (上半月+下半月) + 上月修正；上月修正取上月偏差。"""
     db = appdb.SessionLocal()
     db.add(Person(code="111", display_name="甲"))
-    # 上月（7月）偏差2、找平0 → 未找平余量=2（递延源）
+    # 上月（7月）偏差2、找平0 → 未找平余量=2（递延源）；金额差=2×250=500
     db.add(PayrollPeriodRow(month="2026-07", person_code="111",
                             half1_points=0, half2_points=0,
                             settle_points=0, prev_adjust_points=0,
                             diff_points=2, adjust_points=0,
-                            adjust_amount=0,
+                            diff_amount=500, adjust_amount=0,
                             updated_at=datetime.utcnow()))
     # 8月统计表：8/1=1点(上半月)，8/16=2点+8/20=1点(下半月3点)
     for d, pts in ((date(2026, 8, 1), 1), (date(2026, 8, 16), 2),
@@ -38,8 +38,9 @@ def test_sync_formula_and_prev_adjust(client):
     assert r["half1"] == 1 and r["half2"] == 3      # 上半月1 / 下半月3
     assert r["settle"] == 10                          # 对账点数（全量）
     assert r["prev"] == 2                       # 上月修正=上月余量(偏差2-找平0)
-    assert r["prev_amt"] == 2 * 250             # 余量金额×上月单价(250)
-    assert r["diff"] == 10 - (1 + 3) + 2 == 8   # 偏差公式
+    assert r["prev_amt"] == 500                 # 上月金额余量=上月金额差−已找平金额
+    assert r["diff"] == 10 - (1 + 3) + 2 == 8   # 偏差点数(参考)
+    assert r["diff_amt"] == (250 + 750) - 2500 == -1500  # 金额差(含奖金)=系统已发−对账金额
     db.close()
 
 
@@ -51,11 +52,11 @@ def test_prev_adjust_is_remainder(client):
     # 上月：A 偏差100 找平100（余量0）；B 偏差100 找平50（余量50）
     db.add(PayrollPeriodRow(month="2026-07", person_code="A",
                             diff_points=100, adjust_points=100,
-                            adjust_amount=100 * 250,
+                            diff_amount=100 * 250, adjust_amount=100 * 250,
                             updated_at=datetime.utcnow()))
     db.add(PayrollPeriodRow(month="2026-07", person_code="B",
                             diff_points=100, adjust_points=50,
-                            adjust_amount=50 * 250,
+                            diff_amount=100 * 250, adjust_amount=50 * 250,
                             updated_at=datetime.utcnow()))
     for code in ("A", "B"):
         db.add(PersonDailyStat(person_code=code,
@@ -82,18 +83,17 @@ def test_manual_adjust_preserved_and_diff_auto(client):
     # 未编辑时：找平默认 0
     rows = v3_period.period_rows(db, "2026-08")
     assert rows[0]["adj"] == 0 and rows[0]["adj_amt"] == 0
-    # 保存找平 -99 → 金额自动=-99×250
+    # 保存找平 -99（金额）→ 找平金额=-99（按金额修正，不按点数）
     v3_period.set_period_diff(db, "2026-08", "111", -99, 1)
     v3_period.sync_period_table(db, "2026-08")        # 重新生成
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj"] == -99                      # 找平保留
-    assert rows[0]["adj_amt"] == -99 * 250
-    assert rows[0]["diff"] == -5                      # 偏差=参考值自动算回公式
-    assert rows[0]["diff_amt"] == -5 * 250
-    # delta 累计语义：再存 +99 → 总找平归零（输入框剩余=偏差-已找平）
+    assert rows[0]["adj_amt"] == -99                   # 找平金额保留（增量累计）
+    assert rows[0]["diff"] == -5                       # 偏差点数=参考值自动算回公式
+    assert rows[0]["diff_amt"] == 5 * 250             # 金额差(含奖金)=系统已发5×250−对账0
+    # delta 累计语义：再存 +99 → 总找平归零（输入框剩余=金额差-已找平金额）
     v3_period.set_period_diff(db, "2026-08", "111", 99, 1)   # 撤销
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj"] == 0 and rows[0]["adj_amt"] == 0
+    assert rows[0]["adj_amt"] == 0
     db.close()
 
 
@@ -125,12 +125,11 @@ def test_payroll_settle_page_and_edit(client):
     assert r.status_code == 303
     db = appdb.SessionLocal()
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj"] == -5                      # 找平执行值（累计）
-    assert rows[0]["adj_amt"] == -5 * 250            # 金额自动
-    assert rows[0]["diff"] == -5                     # 偏差参考值不随保存变
-    # 输入框=剩余未找平（=偏差−已找平 → -5 − (-5) = 0）
+    assert rows[0]["adj_amt"] == -5                    # 找平执行金额（累计，按金额）
+    assert rows[0]["diff"] == -5                       # 偏差点数参考值不随保存变
+    # 输入框=剩余未找平金额（=金额差−已找平金额 → 1250 − (-5) = 1255）
     z = client.get("/payroll-settle?month=2026-08").text
-    assert 'name="adjust_delta"' in z
+    assert 'name="adjust_delta"' in z and 'value="1255"' in z
     db.close()
 
 

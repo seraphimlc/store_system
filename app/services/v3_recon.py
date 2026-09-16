@@ -984,22 +984,25 @@ def confirm_adjust(db, task_id: int, person_code: str,
         created_by=actor_id)
     db.add(rec)
     # 同步写入薪资找平执行值（同一张表 payroll_period_rows）：
-    # 对账页确认 = 一键把该员工当月的差异全部找平（增量=偏差−已找平）
+    # 对账页确认 = 一键把该员工当月的金额差全部找平（增量=金额差−已找平金额；金额含奖金）
     from app.models import PayrollPeriodRow
     prow = (db.query(PayrollPeriodRow)
             .filter(PayrollPeriodRow.month == month,
                     PayrollPeriodRow.person_code == person_code).first())
     if prow is not None:
-        delta = (prow.diff_points or 0) - (prow.adjust_points or 0)
-        prow.adjust_points = (prow.adjust_points or 0) + delta
-        prow.adjust_amount = (prow.adjust_points * pp
-                              if prow.adjust_points else 0)
+        delta = (prow.diff_amount or 0) - (prow.adjust_amount or 0)
+        prow.adjust_amount = (prow.adjust_amount or 0) + delta
+    else:
+        delta = 0
     db.commit()
+    if prow is not None:            # 记录金额增量（供取消时精确回滚）
+        rec.amount_adj = delta
+        db.commit()
     return {"ok": True, "amount": amount, "per_point": pp, "record": rec}
 
 
 def cancel_adjust(db, task_id: int, person_code: str) -> bool:
-    """取消已确认的找平记录（同时撤销写入薪资找平表的执行值）。"""
+    """取消已确认的找平记录（同时撤销写入薪资找平表的执行值，按金额）。"""
     from app.models import AdjustRecord, PayrollPeriodRow, ReconTask
     old = (db.query(AdjustRecord)
            .filter(AdjustRecord.source_task_id == task_id,
@@ -1010,9 +1013,10 @@ def cancel_adjust(db, task_id: int, person_code: str) -> bool:
                         PayrollPeriodRow.person_code == person_code)
                 .first())
         if prow is not None:
-            prow.adjust_points = (prow.adjust_points or 0) - old.amount
-            prow.adjust_amount = (prow.adjust_points * (old.per_point or 250)
-                                  if prow.adjust_points else 0)
+            # 回滚当时写入的金额增量（确认时按金额差写入）
+            adj_amt = getattr(old, "amount_adj", 0) or 0
+            if adj_amt:
+                prow.adjust_amount = (prow.adjust_amount or 0) - adj_amt
     n = (db.query(AdjustRecord)
          .filter(AdjustRecord.source_task_id == task_id,
                  AdjustRecord.person_code == person_code).delete())

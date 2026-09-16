@@ -263,6 +263,17 @@ def v3_perf(request: Request,
                                r["half2"], r["half2_amt"], r["half2_bonus"])
     # 按期的 有效店/1点/2点（期视图这三列只看该期，避免全月数据误导）
     half_stats = v3_period.half_stats_map(db, month) if month else {}
+    # 两期应付（金额找平）：上半月应付=上半月金额+上月金额余量(正补负扣)；
+    # 若上半月不够扣(为负)→上半月发0、剩余负数转到下半月继续扣。
+    pay_map = {}
+    for r in rows:
+        hf = half_map.get(r["code"], (0, 0, 0, 0, 0, 0))
+        carry = adj_amt_map.get(r["code"], 0)
+        p1 = hf[1] + carry
+        if p1 < 0:
+            pay_map[r["code"]] = (0, hf[4] + p1)
+        else:
+            pay_map[r["code"]] = (p1, hf[4])
     if period not in ("half1", "half2"):
         period = "half1"
     bonus_g, bonus_a = v3_perf.bonus_params()
@@ -285,6 +296,7 @@ def v3_perf(request: Request,
         "per_point": per_point, "half_stats": half_stats,
         "cur_adj": cur_adj, "half_map": half_map,
         "bonus_g": bonus_g, "bonus_a": bonus_a,
+        "pay_map": pay_map,
         "payroll_rows": payroll_rows, "payroll_total": payroll_total,
         "page_state": page_state})
 

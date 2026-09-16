@@ -81,7 +81,9 @@
       <td class="num" style="font-weight:700;color:{% if hbonus %}#1a7f37{% else %}#999{% endif %}">{% if hbonus %}¥{{ '{:,}'.format(hbonus) }}{% else %}0{% endif %}</td>
       <td class="num" style="font-weight:700">¥{{ '{:,}'.format(hamt) }}</td>
       <td class="num" style="font-weight:700;color:{% if carry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{% if carry %}¥{{ '{:+,}'.format(carry).replace('+','+') }}{% else %}¥0{% endif %}</td>
-      <td class="num" style="font-weight:700;color:#333">¥{{ '{:,}'.format(hamt + carry) }}</td>
+      {% set pm = pay_map.get(r.code, (0, 0)) %}
+      {% if h1 %}{% set pay_cur = pm[0] %}{% else %}{% set pay_cur = pm[1] %}{% endif %}
+      <td class="num" style="font-weight:700;color:#333">¥{{ '{:,}'.format(pay_cur) }}{% if pay_cur < 0 %}<small style="color:#b02a37">（下期继续扣 ¥{{ '{:,}'.format(-pay_cur) }}）</small>{% endif %}</td>
       <td style="display:flex;gap:.3rem">
         <a class="btn ghost" style="padding:.12rem .45rem;font-size:.8rem"
            href="/perf/daily?month={{ month }}&staff={{ r.code }}">明细</a>
@@ -93,8 +95,8 @@
   </table></div>
   <p class="hint" style="margin-top:.4rem">
     「奖金」=该期点数的奖金（每满{{ bonus_g }}点奖{{ bonus_a }}，整月滚动、不跨月）；「总金额」=该期点数×单价＋奖金；
-    「找平金额」=上月未找平余量×上月单价（正=补发/负=扣回，仅上半月结清，下半月为0）；
-    「应该付金额」=总金额＋找平金额——照此列发薪即可。
+    「找平金额」=上月未找平余量<b>金额</b>（正=补发/负=扣回，按金额找平、含奖金差异）；
+    「应该付金额」=总金额＋找平金额；<b>上半月不够扣的部分转到下半月继续扣</b>（该行显示"下期继续扣"）——照此列发薪即可。
   </p>
 </div>
 {% endif %}

@@ -258,8 +258,9 @@ class AdjustRecord(Base):
     month = Column(String(7), nullable=False)            # 差异所属月（被对账月）
     applied_to_month = Column(String(7), nullable=False)  # 生效月 = 下一月
     person_code = Column(String(32), nullable=False)
-    amount = Column(Integer, nullable=False, default=0)   # 点数（正补/负扣）
+    amount = Column(Integer, nullable=False, default=0)   # 点数（正补/负扣，参考）
     per_point = Column(Integer, nullable=False, default=250)  # 发生时单价(円/点)，纠偏按此价
+    amount_adj = Column(Integer, nullable=False, default=0)  # 金额增量(円，含奖金)：确认时写入薪资找平的金额
     reason = Column(Text, nullable=False, default="")
     source_task_id = Column(Integer, nullable=False)      # 来源对账任务
     source_points_diff = Column(Integer, nullable=False, default=0)
