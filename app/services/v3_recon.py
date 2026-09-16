@@ -459,14 +459,13 @@ def run_task(db, task_id: int):
         saved = 0
         sys_only = []
         if report:
-            # 人月汇总对账：写全量人月行（_current_recon 依据），再写差异
-            from app.services import v3_period as _vp
-            _st, _en = __import__("datetime").date.fromisoformat(month + "-01"), None
-            for c, pts in report.items():
-                db.add(ReconDataRow(
-                    task_id=task_id,
-                    ref_date=__import__("datetime").date.fromisoformat(month + "-01"),
-                    person_code=c, person_name=str(c), points=int(pts), cnt=1))
+            # 人月汇总对账：写全量人月行（_current_recon 依据），仅 person_points；再写差异
+            if kind == "person_points" and month:
+                from datetime import date as _d9
+                for c, pts in report.items():
+                    db.add(ReconDataRow(
+                        task_id=task_id, ref_date=_d9.fromisoformat(month + "-01"),
+                        person_code=c, person_name=str(c), points=int(pts), cnt=1))
             for d_ in compare_person_points(db, report, month):
                 if d_["diff"] == 0:
                     continue

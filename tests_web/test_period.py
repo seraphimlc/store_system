@@ -41,8 +41,8 @@ def test_sync_formula_and_prev_adjust(client):
     assert r["prev"] == 0                       # 上月余量点数(参考；已自动找平→0)
     assert r["prev_amt"] == -500                 # 上月结转余额-500(要扣)经链式递延
     assert r["diff"] == 10 - (1 + 3) + 0 == 6   # 偏差点数(参考；上月余量0)
-    assert r["diff_amt"] == (250 + 750) - 2500 == -1500  # 金额差(含奖金)=系统已发−对账金额
-    assert r["adj_amt"] == r["diff_amt"] == -1500        # 找平自动=金额差(无点击)
+    assert r["diff_amt"] == 2500 - (250 + 750) == 1500  # 金额差(含奖金)=对账−系统
+    assert r["adj_amt"] == r["diff_amt"] == 1500  # 找平自动=金额差(无点击)
     db.close()
 
 
@@ -74,7 +74,7 @@ def test_prev_adjust_chain_carry(client):
     #   → 结转9月 = −2,500 + (−22,500) = −25,000；B 无结转 → 结转9月 = −2,500
     assert rows["A"]["prev_amt"] == -25000        # 上月修正列=上月结转
     assert rows["B"]["prev_amt"] == 0             # B 无结转
-    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"] == 2500  # 找平自动=金额差
+    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"] == -2500  # 负=扣款
     # carry_map（发薪表上月找平列）：上月结转余额（正补/负扣）
     cm = v3_period.carry_map(db, "2026-08")
     assert cm["A"] == [0, -25000] and cm.get("B") is None
@@ -90,11 +90,11 @@ def test_adjust_auto_equals_diff_amount(client):
     db.commit()
     v3_period.sync_period_table(db, "2026-08")
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == 5 * 250
+    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -5 * 250  # 负=扣款
     assert rows[0]["diff"] == -5                       # 偏差点数=参考值
     v3_period.sync_period_table(db, "2026-08")         # 重新生成
     rows = v3_period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == 5 * 250  # 自动保持
+    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -5 * 250  # 负=扣款  # 自动保持
     db.close()
 
 

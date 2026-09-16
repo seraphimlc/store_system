@@ -147,12 +147,12 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         b2 = ((h1_rem + h2) // g) * amt
         h1_amt = h1 * per_point + b1
         h2_amt = h2 * per_point + b2
-        # 金额差（含奖金）= 系统已发金额 − 对账金额（正=系统多发，找平时扣回）
-        diff_amt = (h1_amt + h2_amt) - settle_amt
-        # 下月结转 = −本月金额差 + 本月扣剩余额
+        # 金额差（含奖金）= 对账金额 − 系统已发金额（负=系统多发→扣款；正=系统少发→补款）
+        diff_amt = settle_amt - (h1_amt + h2_amt)
+        # 下月结转 = 本月金额差 + 本月扣剩余额（负=下月继续扣；正=下月补发）
         #   （上月结转先在本月两期工资里扣：本月两期+上月结转<0 的部分才递延）
         left_this = carry_in.get(code, 0) + h1_amt + h2_amt
-        prev_amt = -diff_amt + (left_this if left_this < 0 else 0)
+        prev_amt = diff_amt + (left_this if left_this < 0 else 0)
         sh1 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h1"]
         sh2 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h2"]
         row = existing.get(code)

@@ -505,7 +505,7 @@ def v3_recon_page(request: Request,
 
         def _pay_diff(_db, sys_p, rep_p, mth):
             pp = _vp.month_per_point(_db, mth)
-            return _vp.salary_for(sys_p, pp) - _vp.salary_for(rep_p, pp)
+            return _vp.salary_for(rep_p, pp) - _vp.salary_for(sys_p, pp)  # 负=扣款/正=补款
 
         amap = vr.task_adjust_map(db, task_id)
         next_month = vr._next_month((cur.params or {}).get("month", ""))
