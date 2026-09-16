@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}我的绩效{% endblock %}
+{% block content %}
+<div class="page-title"><h1>我的绩效</h1>
+  <span class="sub">只统计已确认并计入正式表的有效店。工资按规则：每点 250円，满 68 点奖 3,000円。</span></div>
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/my/perf" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <label>月份
+      <select name="month" onchange="location='/my/perf?month='+this.value">
+        {% for m in months %}
+        <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+</div>
+
+{% if not summary %}
+<div class="card"><p class="empty">该月暂无计入绩效的记录</p></div>
+{% else %}
+<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem;margin-bottom:.8rem">
+  <div class="card" style="text-align:center"><div class="hint">有效店数</div><div style="font-size:1.6rem;font-weight:700">{{ summary.records }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">1点店</div><div style="font-size:1.6rem;font-weight:700">{{ summary.p1 }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">2点店</div><div style="font-size:1.6rem;font-weight:700">{{ summary.p2 }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">总点数</div><div style="font-size:1.6rem;font-weight:700">{{ summary.points }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">本月工资(点数)</div><div style="font-size:1.6rem;font-weight:700">{{ summary.amount }}</div></div>
+  {% if summary.adjust != 0 %}
+  <div class="card" style="text-align:center"><div class="hint">上月差异找平</div>
+    <div style="font-size:1.6rem;font-weight:700;color:{% if summary.adjust >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{{ '%+d' % summary.adjust }}</div></div>
+  {% endif %}
+  <div class="card" style="text-align:center"><div class="hint">应付合计(円)</div><div style="font-size:1.6rem;font-weight:700">{{ summary.payable }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">2点店占比</div><div style="font-size:1.6rem;font-weight:700">{{ '%.0f' % (summary.rate37 * 100) }}%</div></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem">
+    <h2 style="font-size:1rem;margin:0">{{ month }} 每日明细</h2>
+    <form method="get" action="/my/perf" style="display:flex;gap:.5rem;align-items:center">
+      <input type="hidden" name="month" value="{{ month }}">
+      <label>日期
+        <select name="date" onchange="this.form.submit()">
+          <option value="">全部日期</option>
+          {% for d in dates %}
+          <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <noscript><button class="btn" style="padding:.2rem .6rem" type="submit">查看</button></noscript>
+    </form>
+  </div>
+  {% if not daily %}<p class="empty">本月暂无逐日数据</p>
+  {% else %}
+  <table class="grid-tbl">
+    <tr><th>日期</th><th class="num">有效店</th><th class="num">1点</th><th class="num">2点</th><th class="num">点数</th></tr>
+    {% for d in daily %}
+    <tr>
+      <td>{{ d.date }}</td>
+      <td class="num">{{ d.records }}</td>
+      <td class="num">{{ d.p1 }}</td>
+      <td class="num">{{ d.p2 }}</td>
+      <td class="num"><b>{{ d.points }}</b></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

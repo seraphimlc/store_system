@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: store_settle
+      POSTGRES_USER: store_settle
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"   # 仅本机；容器网络内仍走 5432
+    volumes:
+      - store_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U store_settle -d store_settle"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    # 上传卷需可写：以 root 运行（内部工具，Nginx 反代+登录在前）
+    user: "0:0"
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://store_settle:${DB_PASSWORD}@db:5432/store_settle
+    ports:
+      - "127.0.0.1:3660:8000"   # 仅本机，由系统 Nginx 反代
+    volumes:
+      - store_uploads:/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  store_pgdata:
+  store_uploads:

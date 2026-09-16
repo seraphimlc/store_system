@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}员工管理{% endblock %}
+{% block content %}
+<div class="page-title"><h1>员工管理</h1>
+  <span class="sub">员工账号随数据导入自动开通：文件里出现新的人员编号即自动开户（登录名按姓名自动生成）。这里只做改状态与重置口令；员工永不删除——离职也只改状态，历史与核算数据完整保留。</span></div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">
+  <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin">全部 {{ counts.values()|sum }}</a>
+  {% for s, label in labels.items() %}
+  <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin?status={{ s }}">{{ label }} {{ counts[s] }}</a>
+  {% endfor %}
+</div>
+<div class="card" style="margin-bottom:.8rem;padding:.5rem .8rem">
+  <form method="post" action="/staff-admin/reset-all"
+        onsubmit="return confirm('将重置全部员工口令为系统默认并要求各自首登修改，确认？')"
+        style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <b style="font-size:.9rem">批量重置：</b>
+    <span class="hint">正式发号前一次性使用——全部员工口令重置为系统默认，每人首次登录必须改成自己的密码。</span>
+    <button class="btn" style="padding:.2rem .7rem" type="submit">重置全部员工口令并要求首登修改</button>
+  </form>
+</div>
+<div class="tbl-wrap"><table class="grid-tbl">
+  <tr><th>登录名</th><th>员工姓名</th><th>人员编号</th><th>状态</th><th>操作</th></tr>
+  {% for u in staff %}
+  <tr>
+    <td>{{ u.username }}</td>
+    <td>{{ u.display_name }}</td>
+    <td>{{ u.person_code or '—' }}</td>
+    <td><span class="{{ pill(u.status) }}">{{ labels.get(u.status, u.status) }}</span></td>
+    <td>
+      <form method="post" action="/staff-admin/{{ u.id }}/status"
+            style="display:inline-flex;gap:.4rem;align-items:center">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <select name="new_status" style="padding:.2rem .4rem">
+          {% for s, label in labels.items() %}
+          <option value="{{ s }}" {% if s == u.status %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn ghost" style="padding:.2rem .6rem" type="submit">改状态</button>
+      </form>
+      <form method="post" action="/staff-admin/{{ u.id }}/reset"
+            style="display:inline-flex;gap:.3rem;margin-left:.4rem">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input name="password" placeholder="新口令（不填用系统默认）"
+               style="width:150px;padding:.2rem .4rem">
+        <button class="btn ghost" style="padding:.2rem .6rem" type="submit">重置口令</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="empty">没有符合条件的员工</td></tr>{% endfor %}
+</table></div>
+<div class="card" style="margin-top:.8rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">状态说明</h2>
+  <ul style="margin:0;padding-left:1.2rem;line-height:1.9">
+    <li><b>在岗</b>：正常登录、每日确认、报问题。</li>
+    <li><b>请假</b>：可登录、可照常确认与报问题（账号保留，回来不用重建）。</li>
+    <li><b>停用</b>：暂时不能登录（如账号风险/长期未用），随时可改回。</li>
+    <li><b>离职</b>：不能登录，但账号与历史数据、结算记录永久保留，供查账。</li>
+    <li>员工账号不用手动建：导入数据文件时发现<b>新的人员编号</b>，系统自动开户——登录名按姓名自动生成（拼音），初始口令为系统默认，员工<b>首次登录必须先改成自己的密码</b>。</li>
+    <li>员工忘口令时，管理员在此「重置口令」（框留空即系统默认初始口令），重置后员工同样须首登改密。</li>
+    <li>系统<b>不提供删除员工</b>——删人会让历史核算对不上。</li>
+  </ul>
+</div>
+{% endblock %}

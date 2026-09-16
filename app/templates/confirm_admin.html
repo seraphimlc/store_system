@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}绩效确认{% endblock %}
+{% block content %}
+<div class="page-title"><h1>绩效确认</h1>
+  <span class="sub">有效记录自动入绩效、不打扰员工；被滤记录（疑似重复/并入主店）默认已认可滤除。这里查看申诉并按文件入正式表：认可申诉→改判有效计入绩效；驳回→维持滤除。</span></div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.8rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">按员工查看被滤记录与申诉</h2>
+  <form method="get" action="/confirm-admin" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <label>员工
+      <select name="staff" onchange="this.form.submit()">
+        <option value="">— 选择员工 —</option>
+        {% for code, name in staff_list %}
+        <option value="{{ code }}" {% if code == staff %}selected{% endif %}>{{ name }}（{{ code }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <noscript><button class="btn" style="padding:.2rem .6rem" type="submit">查看</button></noscript>
+  </form>
+</div>
+
+{% if staff %}
+<div class="card" style="margin-bottom:.8rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工「{{ staff_name }}」的被滤记录（{{ staff_rows|length }} 条）</h2>
+  {% if not staff_rows %}<p class="empty">该员工没有被滤记录</p>
+  {% else %}
+  <table class="grid-tbl">
+    <tr><th>日期</th><th>店</th><th>原因</th><th>状态</th></tr>
+    {% for rr in staff_rows %}
+    {% set ap = appeal_map.get(rr.id) %}
+    <tr>
+      <td>{{ (rr.modified_raw or '')[:10] }}</td>
+      <td>{{ rr.store_name_local_raw }}<br><span class="hint">{{ rr.store_id_raw }}</span></td>
+      <td>{{ '疑似重复（同月已有更早记录，保留最早）' if rr.clean_status == 'master_late' else '并入同名主店编号' }}</td>
+      <td>{% if not ap %}<span class="pill ok">默认认可滤除</span>
+          {% elif ap.status == 'pending' %}<span class="pill run">员工申诉·待处理</span>
+          {% elif ap.status == 'approved' %}<span class="pill ok">申诉成立·已算有效</span>
+          {% else %}<span class="pill">申诉驳回·维持滤除</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="tbl-wrap"><table class="grid-tbl">
+  <tr><th>文件</th><th>有效</th><th>被滤(默认认可)</th><th>重复导入</th><th>申诉</th><th>正式表</th><th>操作</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/files/{{ r.file.id }}/report">{{ r.file.file_name }}</a></td>
+    <td><span class="pill ok">{{ r.valid }}</span></td>
+    <td><span class="pill">{{ r.filtered }}</span></td>
+    <td><span class="pill">{{ r.dup }}</span></td>
+    <td>{% if r.pend %}<span class="pill err">待处理 {{ r.pend }}</span>
+        {% elif r.appeals %}<span class="pill ok">已处理 {{ r.appeals }}</span>
+        {% else %}<span class="pill">无</span>{% endif %}</td>
+    <td>{% if r.formal and r.valid == r.formal %}<span class="pill ok">已入 {{ r.formal }} 条</span>
+        {% elif r.formal %}<span class="pill err">已入 {{ r.formal }} 条·待重入</span>
+        {% else %}—{% endif %}</td>
+    <td style="display:flex;gap:.3rem">
+      <a class="btn ghost" style="padding:.2rem .6rem"
+         href="/confirm-admin?imp_id={{ r.file.id }}">处理申诉</a>
+      {% if r.pend == 0 and not r.formal %}
+      <form method="post" action="/files/{{ r.file.id }}/finalize">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <button class="btn" style="padding:.2rem .6rem" type="submit">入正式表</button>
+      </form>
+      {% elif r.pend == 0 and r.formal and r.valid != r.formal %}
+      <form method="post" action="/files/{{ r.file.id }}/finalize"
+            onsubmit="return confirm('将重建该文件正式表，{{ r.valid - r.formal }} 条新有效记录会补入，确认？')">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <button class="btn" style="padding:.2rem .6rem" type="submit">重新入表({{ r.valid - r.formal }})</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table></div>
+
+{% if imp_id %}
+<div class="card" style="margin-top:1rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">文件 #{{ imp_id }} 的申诉</h2>
+  {% if not appeal_rows %}<p class="empty">无申诉（被滤记录已默认认可，无需处理）</p>
+  {% else %}
+  <table class="grid-tbl">
+    <tr><th>员工</th><th>店</th><th>申诉理由</th><th>状态</th><th>处理</th></tr>
+    {% for ap, rr in appeal_rows %}
+    <tr>
+      <td>{{ ap.submitter_code }}</td>
+      <td>{{ rr.store_name_local_raw }}<br><span class="hint">{{ rr.store_id_raw }} · {{ (rr.modified_raw or '')[:10] }}</span></td>
+      <td>{{ ap.reason or '—' }}</td>
+      <td>{% if ap.status == 'pending' %}<span class="pill run">待处理</span>
+          {% elif ap.status == 'approved' %}<span class="pill ok">已认可(改有效)</span>
+          {% else %}<span class="pill">已驳回(维持滤除)</span>{% endif %}</td>
+      <td>
+        {% if ap.status == 'pending' %}
+        <div style="display:flex;gap:.3rem">
+        <form method="post" action="/files/{{ imp_id }}/appeals/{{ ap.id }}/resolve">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="decision" value="accept">
+          <button class="btn ghost" style="padding:.2rem .5rem">认可(算有效)</button>
+        </form>
+        <form method="post" action="/files/{{ imp_id }}/appeals/{{ ap.id }}/resolve">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="decision" value="reject">
+          <button class="btn ghost danger-ghost" style="padding:.2rem .5rem">驳回</button>
+        </form>
+        </div>
+        {% else %}<span class="hint">—</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}店铺实体检索{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>店铺实体</h1>
+  <span class="actions"><a class="btn ghost" href="/stores">← 主档工作台</a></span>
+</div>
+<form method="get" class="card" style="margin-bottom:.8rem">
+  <label class="f">搜索 <input type="text" name="q" value="{{ q }}" placeholder="Store ID / 店名" style="width:280px"></label>
+  <button class="btn" type="submit">查</button>
+</form>
+<div class="tbl-wrap"><table class="grid-tbl">
+  <tr><th>id</th><th>Store ID</th><th>店名(最早写法)</th><th>城市</th><th>主档指向</th><th>操作</th></tr>
+  {% for e in ents %}
+  {% set m = by_id[e.master_id] %}
+  <tr>
+    <td>{{ e.id }}</td>
+    <td>{{ e.store_id_raw }}</td>
+    <td>{{ e.name_local or e.name_norm or '(无名)' }}</td>
+    <td>{{ e.city or '' }}</td>
+    <td>
+      {% if e.master_id == e.id %}<span class="pill ok">主档</span>
+      {% else %}→ <a href="/stores/entities?q={{ m.store_id_raw }}">{{ m.name_local or m.name_norm or '(无名)' }}</a> <span class="hint">#{{ e.master_id }}</span>
+      <form method="post" action="/stores/entities/{{ e.id }}/split" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <button class="btn ghost" style="padding:.2rem .5rem" type="submit">拆回</button>
+      </form>{% endif %}
+    </td>
+    <td></td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endblock %}

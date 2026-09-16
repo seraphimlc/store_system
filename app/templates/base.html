@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}巡店结算系统{% endblock %}</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% if current_user %}
+<header class="topbar">
+  <span class="brand">巡店结算系统</span>
+  {% if current_user.role == 'staff' %}
+  <a class="nav" href="/my/perf"><b>我的绩效</b></a>
+  <a class="nav" href="/my/appeal"><b>我的申诉</b></a>
+  {% else %}
+  <a class="nav" href="/files"><b>文件上传</b></a>
+  <a class="nav" href="/confirm-admin"><b>绩效确认</b></a>
+  <a class="nav" href="/perf"><b>绩效工资</b></a>
+  <a class="nav" href="/recon"><b>月度对账</b></a>
+  <a class="nav" href="/payroll-settle"><b>薪资找平</b></a>
+  <a class="nav" href="/month"><b>月度重算</b></a>
+  <span class="nav disabled">｜</span>
+  <a class="nav" href="/stores">店铺主档</a>
+  <a class="nav" href="/staff-admin">员工管理</a>
+  <a class="nav" href="/product" target="_blank">产品说明↗</a>
+  {% endif %}
+  <span class="spacer"></span>
+  <span class="user">{{ current_user.display_name }}</span>
+  <a class="nav" href="/my/password">修改密码</a>
+  <form method="post" action="/logout" class="logout-form">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <button class="logout" type="submit">退出</button>
+  </form>
+</header>
+{% endif %}
+<main class="wrap">{% block content %}{% endblock %}</main>
+{# agent 友好：结构化页面状态注入，浏览器自动化直接读取（替代截图 OCR） #}
+<script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>
+</body>
+</html>

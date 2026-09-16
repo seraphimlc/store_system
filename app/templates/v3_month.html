@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}月度重算{% endblock %}
+{% block content %}
+<div class="page-title"><h1>月度重算</h1>
+  <span class="sub">判重按「店名×结算月」只认当月最早一条；正式表按文件入。同月又补传文件时可能双算 —— 此页按结算月统一重判并重建当月正式表（申诉已认可的记录会保留，不推翻）。</span></div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/month" style="display:flex;gap:.5rem;align-items:center">
+    <label>月份
+      <select name="month" onchange="this.form.submit()">
+        {% for m in months %}
+        <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <noscript><button class="btn" style="padding:.2rem .6rem" type="submit">查看</button></noscript>
+  </form>
+</div>
+
+{% if not month %}
+<div class="card"><p class="empty">暂无数据</p></div>
+{% else %}
+<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-bottom:.8rem">
+  <div class="card" style="text-align:center"><div class="hint">当月 raw</div><div style="font-size:1.4rem;font-weight:700">{{ info.raw }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">有效(判定)</div><div style="font-size:1.4rem;font-weight:700">{{ info.valid }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">被滤(默认认可)</div><div style="font-size:1.4rem;font-weight:700">{{ info.filtered }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">重复导入</div><div style="font-size:1.4rem;font-weight:700">{{ info.dup }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">未决申诉</div><div style="font-size:1.4rem;font-weight:700">{% if info.pend %}<span class="pill err">{{ info.pend }}</span>{% else %}0{% endif %}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">正式表条数</div><div style="font-size:1.4rem;font-weight:700">{{ info.formal }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">当月点数</div><div style="font-size:1.4rem;font-weight:700">{{ info.points }}</div></div>
+  <div class="card" style="text-align:center"><div class="hint">当月工资(円)</div><div style="font-size:1.4rem;font-weight:700">{{ info.wage }}</div></div>
+</div>
+
+<div class="card" style="margin-bottom:.8rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ month }} 涉及文件（当月有效 vs 已入表）</h2>
+  {% if not info.files %}<p class="empty">该月无文件</p>
+  {% else %}
+  <table class="grid-tbl">
+    <tr><th>文件</th><th class="num">当月有效</th><th class="num">已入正式表</th><th>状态</th></tr>
+    {% for f in info.files %}
+    <tr>
+      <td><a href="/files/{{ f.id }}/report">#{{ f.id }} {{ f.name }}</a></td>
+      <td class="num">{{ f.valid }}</td>
+      <td class="num">{{ f.formal }}</td>
+      <td>{% if f.formalized and f.synced %}<span class="pill ok">已同步</span>
+          {% elif f.formalized and not f.synced %}<span class="pill err">不一致（新判定/申诉认可后未重入）</span>
+          {% else %}<span class="pill run">含当月数据但未入表</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% if info.need_rebuild %}
+  <div class="msg run" style="margin:.6rem 0">⚠️ 有文件「当月有效数 ≠ 已入表数」（补传或申诉改判后未同步），当前绩效/工资可能不准，请重算。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">操作</h2>
+  <form method="post" action="/month/rebuild" style="display:flex;gap:.5rem;align-items:center">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <button class="btn" type="submit" {% if info.pend %}disabled{% endif %}>重算并重建 {{ month }} 正式表</button>
+    {% if info.pend %}<span class="hint">先处理当月 {{ info.pend }} 条未决申诉才能重算</span>
+    {% else %}<span class="hint">幂等操作：重判当月全部文件 → 重建当月正式表（申诉成果保留）</span>{% endif %}
+  </form>
+</div>
+{% endif %}
+{% endblock %}

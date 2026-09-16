@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}绩效与工资 · {{ month or '全部' }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>绩效与工资</h1>
+  <span class="sub">发薪工具：按上半月(1-15)/下半月(16-月末)两期发放；工资=该期点数×单价＋该期奖金(每满{{ bonus_g }}点奖{{ bonus_a }}，整月滚动、不跨月)。</span>
+  <span class="actions">
+    <form method="get" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+      <label class="f">月份
+        <select name="month" onchange="this.form.submit()">
+          {% for m in months %}<option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>{% endfor %}
+        </select></label>
+      <label class="f">期
+        <select name="period" onchange="this.form.submit()" data-testid="perf-period">
+          <option value="half1" {% if period == 'half1' %}selected{% endif %}>上半月(1-15) · 20日发</option>
+          <option value="half2" {% if period == 'half2' %}selected{% endif %}>下半月(16-月末) · 次月5日发</option>
+        </select></label>
+    </form>
+    {% if rows and current_user.role == 'admin' %}
+    <a class="btn" style="padding:.25rem .6rem"
+       href="/perf/export?month={{ month }}&period={{ period }}">导出工资表 Excel</a>
+    {% endif %}
+  </span>
+</div>
+{% if not rows %}<p class="empty">该月暂无月绩效工资记录（需「入正式表」或「月度重算」后生成）</p>
+{% else %}
+{% set h1 = (period == 'half1') %}
+{% set pt = {} %}{# 该期点数/金额映射 #}
+<div class="stat-grid grid" style="grid-template-columns:repeat(4,1fr)">
+  {% set tcarry = 0 if not h1 else adj_amt_total %}
+  <div class="stat-card"><div class="k">员工数</div><div class="v">{{ summary.employees }}</div></div>
+  <div class="stat-card"><div class="k">{% if h1 %}上半月点数{% else %}下半月点数{% endif %}</div>
+    <div class="v">{% if h1 %}{{ '{:,}'.format(payroll_total.half1) }}{% else %}{{ '{:,}'.format(payroll_total.half2) }}{% endif %}</div></div>
+  <div class="stat-card"><div class="k">该期工资合计(円)</div>
+    <div class="v">¥{% if h1 %}{{ '{:,}'.format(payroll_total.half1_amt) }}{% else %}{{ '{:,}'.format(payroll_total.half2_amt) }}{% endif %}</div></div>
+  {% if h1 %}
+  <div class="stat-card"><div class="k">找平金额(上月余量×上月单价)</div>
+    <div class="v" style="color:{% if tcarry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">¥{{ '{:,}'.format(tcarry) }}</div></div>
+  {% else %}
+  <div class="stat-card"><div class="k">总点数(全月)</div><div class="v">{{ '{:,}'.format(summary.total_points) }}</div></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{% if h1 %}上半月(1-15) 发薪表{% else %}下半月(16-月末) 发薪表{% endif %} · {{ month }}
+    <form method="post" action="/perf/per-point" style="display:inline-flex;gap:.4rem;align-items:center;margin-left:.8rem">
+      <input type="hidden" name="month" value="{{ month }}">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <span class="hint">单价(円/点)</span>
+      <input type="number" name="per_point" value="{{ per_point }}" min="1" step="1" style="width:4.5rem" data-testid="perf-per-point">
+      <button class="btn ghost" style="padding:.15rem .45rem;font-size:.8rem" type="submit">设置</button>
+    </form>
+    <span class="hint" style="margin-left:.6rem">改单价重算本月工资；上月余量按上月单价，不受影响。</span>
+  </h2>
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
+    <tr><th>员工</th><th class="num">有效店</th><th class="num">点数(1/2)</th>
+        <th class="num">2点成功率</th><th class="num">奖金(円)</th><th class="num">总金额(円)</th>
+        <th class="num">找平金额(円)</th><th class="num">应该付金额(円)</th><th></th></tr>
+    {% for r in rows %}
+    {% set hf = half_map.get(r.code, (0, 0, 0, 0, 0, 0)) %}
+    {% set hs = half_stats.get(r.code, {'h1': (0,0,0), 'h2': (0,0,0)}) %}
+    {% if h1 %}
+      {% set hpts = hf[0] %}{% set hamt = hf[1] %}{% set hbonus = hf[2] %}
+      {% set carry = adj_amt_map.get(r.code, 0) %}
+      {% set st = hs['h1'] %}
+    {% else %}
+      {% set hpts = hf[3] %}{% set hamt = hf[4] %}{% set hbonus = hf[5] %}
+      {% set carry = 0 %}
+      {% set st = hs['h2'] %}
+    {% endif %}
+    {% set hp1 = st[1] %}{% set hp2 = st[2] %}
+    {% set hden = hp1 + hp2 %}
+    {% set hrate = (hp2 / hden) if hden else 0.0 %}
+    <tr>
+      <td>{{ r.name }}<br><span class="hint">{{ r.code }}</span></td>
+      <td class="num">{{ st[0] }}</td>
+      <td class="num">{{ hp1 }} / {{ hp2 }}</td>
+      <td class="num">{{ '%.1f'|format(hrate * 100) }}%{% if hden %}
+        {% if hrate >= 0.37 %}<span class="pill ok">达标</span>{% else %}<span class="pill err">未达标</span>{% endif %}
+      {% else %}<span class="pill">-</span>{% endif %}
+      </td>
+      <td class="num" style="font-weight:700;color:{% if hbonus %}#1a7f37{% else %}#999{% endif %}">{% if hbonus %}¥{{ '{:,}'.format(hbonus) }}{% else %}0{% endif %}</td>
+      <td class="num" style="font-weight:700">¥{{ '{:,}'.format(hamt) }}</td>
+      <td class="num" style="font-weight:700;color:{% if carry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{% if carry %}¥{{ '{:+,}'.format(carry).replace('+','+') }}{% else %}¥0{% endif %}</td>
+      <td class="num" style="font-weight:700;color:#333">¥{{ '{:,}'.format(hamt + carry) }}</td>
+      <td style="display:flex;gap:.3rem">
+        <a class="btn ghost" style="padding:.12rem .45rem;font-size:.8rem"
+           href="/perf/daily?month={{ month }}&staff={{ r.code }}">明细</a>
+        <a class="btn ghost" style="padding:.12rem .45rem;font-size:.8rem"
+           href="/payroll-settle?month={{ month }}&staff={{ r.code }}">找平</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint" style="margin-top:.4rem">
+    「奖金」=该期点数的奖金（每满{{ bonus_g }}点奖{{ bonus_a }}，整月滚动、不跨月）；「总金额」=该期点数×单价＋奖金；
+    「找平金额」=上月未找平余量×上月单价（正=补发/负=扣回，仅上半月结清，下半月为0）；
+    「应该付金额」=总金额＋找平金额——照此列发薪即可。
+  </p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}月度对账{% endblock %}
+{% block content %}
+<div class="page-title"><h1>月度对账</h1>
+  <span class="sub">导入外部对账 Excel（人员点数汇总 或 逐条巡店明细），与正式数据对比；日级明细定位"哪天谁对不上"，差异确认后记入下月找平。</span></div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.9rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">导入对账文件</h2>
+  <form method="post" action="/recon/upload2" enctype="multipart/form-data"
+        style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"
+        data-testid="recon-upload-form">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <label class="f">月份<input type="month" name="month" value="2026-08"
+        data-testid="recon-month"></label>
+    <input type="file" name="file" accept=".xlsx" required data-testid="recon-file">
+    <button class="btn" type="submit" data-testid="recon-upload-btn">导入并对比</button>
+  </form>
+  <p class="hint">支持两类格式：①「姓名/编号 + 总点数」人员汇总（人月比对）；
+    ②逐条巡店明细（含 Store ID / Modified Time / Submitter / Deploy 或 标准点数，如
+    「8月全月巡回最终结算」的最终有效/有效明细表）→ 自动按 <b>员工×日</b> 比对。</p>
+</div>
+
+{% if tasks %}
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">对账记录</h2>
+  <table class="grid-tbl">
+    <tr><th>ID</th><th>月份</th><th>文件</th><th>格式</th><th>比对人数</th><th>差异数</th><th>状态</th><th>时间</th><th>结果</th></tr>
+    {% for t in tasks %}
+    <tr>
+      <td><a href="/recon?task_id={{ t.id }}">#{{ t.id }}</a>
+        {% if (t.params or {}).get('replaced_by') %}<span class="pill">上一版</span>
+        {% else %}<span class="pill ok">当前</span>{% endif %}</td>
+      <td>{{ (t.params or {}).get('month','') }}</td>
+      <td>{{ (t.params or {}).get('file','') }}</td>
+      <td>{{ (t.params or {}).get('kind','') }}</td>
+      <td class="num">{{ (t.summary or {}).get('compared', 0) }}</td>
+      <td class="num">{{ (t.summary or {}).get('diff_count', 0) }}</td>
+      <td>{% if t.status == 'done' or t.status == 'parsed' %}<span class="pill ok">已完成</span>
+          {% elif t.status == 'running' %}<span class="pill run">处理中</span>
+          {% elif t.status == 'pending' %}<span class="pill run">排队中</span>
+          {% elif t.status == 'failed' %}<span class="pill err">失败</span>
+          {% else %}<span class="pill">{{ t.status }}</span>{% endif %}</td>
+      <td>{{ t.created_at.strftime('%m-%d %H:%M') }}</td>
+      <td>
+        {% if t.status in ('done', 'parsed') %}
+        <a class="btn ghost" style="padding:.12rem .45rem;font-size:.82rem"
+           href="/recon/result?task_id={{ t.id }}">结果</a>
+        <a class="btn ghost" style="padding:.12rem .45rem;font-size:.82rem"
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% if cur %}
+<div class="card" style="margin-top:.9rem">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h2 style="font-size:1rem;margin:.2rem 0 .6rem">对账结果 · 任务#{{ cur.id }}
+      （{{ (cur.params or {}).get('file','') }} · 格式 {{ kind }} ·
+      比对 {{ (cur.summary or {}).get('compared',0) }} 人）</h2>
+    <span style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+    <a class="btn ghost" style="padding:.25rem .7rem"
+       href="/recon/export?task_id={{ cur.id }}">导出差异 Excel</a>
+    {% if cur.status == 'done' or cur.status == 'parsed' %}
+    <a class="btn" style="padding:.25rem .7rem"
+       href="/recon/result?task_id={{ cur.id }}">下载对账结果</a>
+    {% else %}
+    <span class="pill run">{{ '失败' if cur.status == 'failed' else '处理中/排队中' }}</span>
+    {% endif %}
+    </span>
+  </div>
+
+  {% if kind == 'daily_records' %}
+  {# ---------- 员工 × 日 明细（问题行） ---------- #}
+  {% if (cur.params or {}).get('single_date') %}
+  <div class="msg run" style="margin:.4rem 0">
+    ⚠️ 对账文件为<b>月度账单</b>（日期列固定为 {{ (cur.params or {}).get('single_date_val','') }}，无逐日记录）；
+    日级明细仅作参考，请以<b>人月点数差异</b>为准。
+  </div>
+  {% endif %}
+  {% set um = (cur.params or {}).get('unmatched') %}
+  {% if um %}
+  <div class="msg warn" style="margin:.4rem 0">
+    ⚠️ 对账文件有 <b>{{ um|length }}</b> 行员工姓名未匹配到系统员工（已跳过）：
+    {% for x in um[:10] %}{{ x[0] }}{% if not loop.last %}、{% endif %}{% endfor %}{% if um|length > 10 %}…{% endif %}
+    —— 请核对姓名写法（如空格/繁体），或到「员工管理」确认账号。
+  </div>
+  {% endif %}
+  <h3 style="font-size:.98rem;margin:.6rem 0 .3rem">员工×日 对账明细（只列问题行：{{ day_rows|length }} 行）</h3>
+  {% if not day_rows %}
+  <p class="empty">无问题行：逐日逐人点数一致（{{ (cur.summary or {}).get('compared',0) }} 人全对）</p>
+  {% else %}
+  <div class="tbl-wrap" style="box-shadow:none;border:0"><table class="grid-tbl">
+    <tr><th>日期</th><th>员工编号</th><th>员工姓名</th><th class="num">本地(系统)点数</th>
+        <th class="num">对账点数</th><th class="num">差异(本地-对账)</th><th>说明</th></tr>
+    {% for d in day_rows %}
+    <tr>
+      <td>{{ d.ref_date }}</td>
+      <td>{{ d.person_code }}</td>
+      <td>{{ d.name or d.person_code }}</td>
+      <td class="num">{{ d.sys_points }}</td>
+      <td class="num">{{ d.rep_points }}</td>
+      <td class="num" style="font-weight:700;color:{% if d.diff >= 0 %}#b02a37{% else %}#1a7f37{% endif %}">
+        {% if d.diff > 0 %}+{{ d.diff }}{% else %}{{ d.diff }}{% endif %}</td>
+      <td>{% if d.side == 'local_only' %}<span class="pill warn">仅本地有</span>
+          {% elif d.side == 'report_only' %}<span class="pill warn">仅对账有</span>
+          {% else %}<span class="hint">点数不一致</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+
+  {# ---------- 人月差异（找平入口） ---------- #}
+  <h3 style="font-size:.98rem;margin:.8rem 0 .3rem">人月差异 · 找平（按整月总点数）</h3>
+  {% if not diffs %}<p class="empty">月度总点数一致（无需找平）</p>
+  {% else %}
+  {% endif %}
+  {% endif %}
+
+  {% if not diffs and kind != 'daily_records' %}
+  <p class="empty">无差异（两侧点数一致，共比对 {{ (cur.summary or {}).get('compared',0) }} 人）</p>
+  {% endif %}
+
+  {% if diffs %}
+  <table class="grid-tbl">
+    <tr><th>人员</th><th>编号</th><th class="num">系统点数</th><th class="num">对账点数</th>
+        <th class="num">差异(点)</th><th class="num">应找平(点)</th><th>操作</th></tr>
+    {% for d in diffs %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td>{{ d.code }}</td>
+      <td class="num">{{ d.sys }}</td>
+      <td class="num">{{ d.rep }}</td>
+      <td class="num" style="font-weight:700">
+        {% if d.diff == 0 %}<span style="color:#1a7f37">0</span>
+        {% elif d.diff > 0 %}<span style="color:#b02a37">+{{ d.diff }}</span>
+        {% else %}<span style="color:#b02a37">{{ d.diff }}</span>{% endif %}
+      </td>
+      <td class="num">{{ '%+d' % d.amount }}</td>
+      <td>
+        {% if d.adjusted %}
+        <span class="pill ok">已确认 · {{ '%+d' % d.adjusted.amount }}点 记入 {{ d.adjusted.applied_to_month }}</span>
+        <form method="post" action="/recon/{{ cur.id }}/adjust/{{ d.code }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="action" value="remove">
+          <button class="btn ghost" style="padding:.15rem .5rem" type="submit">取消</button>
+        </form>
+        {% else %}
+        <form method="post" action="/recon/{{ cur.id }}/adjust/{{ d.code }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="action" value="add">
+          <button class="btn" style="padding:.15rem .6rem" type="submit">确认找平 → {{ next_month }}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="hint">找平金额 = 按工资规则折算「对账点数工资 − 系统点数工资」（正=下月补发，负=下月扣回），记入 {{ next_month }} 月工资表的「上月找平」列。</p>
+  {% endif %}
+
+  {% if sys_rows %}
+  <div class="msg run" style="margin-top:.8rem">
+    ⚠️ <b>系统当月有正式记录、但对账文件未列出（{{ sys_rows|length }} 人）</b>：
+    {% for s in sys_rows %}{{ s.name }}（{{ s.code }}）{% if not loop.last %}、{% endif %}{% endfor %}
+    —— 可能是对账文件漏列/离职/0 点人员未上表，请人工核对。
+  </div>
+  {% endif %}
+
+  {% set attr = (cur.summary or {}).get('attribution') %}
+  {% if attr %}
+  <div class="card" style="margin-top:.8rem">
+    <h3 style="font-size:.98rem;margin:.2rem 0 .4rem">差异归因（系统自动）</h3>
+    <p style="margin:.2rem 0">两侧一致的店行：<b>{{ attr.consistent }}</b>；
+      仅系统有（对账表没有）：<b>{{ attr.only_system }}</b>；
+      仅对账有：<b>{{ attr.only_report }}</b>（
+      {% for k,v in attr.only_report_reason.items() %}{{ k }}={{ v }}{% if not loop.last %}，{% endif %}{% endfor %}）；
+      净差：<b>{{ attr.net }}</b></p>
+    <p class="hint">行级按「店+时间戳」判定；"仅对账有"多为系统按规则滤除（从档归并/重复导入/跨日），如存疑需人工核对。</p>
+  </div>
+  {% endif %}
+
+  <div class="card" style="margin-top:.8rem">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="font-size:.98rem;margin:.2rem 0 .4rem">AI 对账分析</h3>
+      <form method="post" action="/recon/{{ cur.id }}/interpret">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <button class="btn ghost" style="padding:.2rem .6rem" type="submit">生成/更新 AI 分析</button>
+      </form>
+    </div>
+    {% set ai = (cur.summary or {}).get('ai_interpret') %}
+    {% if ai %}
+    <div style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:.6rem">{{ ai.text }}</div>
+    <p class="hint">模型 {{ ai.model }} · {{ ai.at }}（AI 分析仅作参考，结论以规则归因与人工核为准）</p>
+    {% else %}
+    <p class="hint">点击生成：由大模型基于比对/归因/反向名单/特殊标记给出 总体结论·差异构成·风险核对·建议动作；需配置 AI_API_KEY/AI_BASE_URL，未配置会提示。</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

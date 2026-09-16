@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 巡店结算系统</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+<form class="login-card" method="post" action="/login">
+  <h1>巡店结算系统</h1>
+  <div class="sub">巡店数据导入 · 去重清洗 · 点数结算</div>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <label for="username">用户名</label>
+  <input id="username" name="username" autocomplete="username" required>
+  <label for="password">密码</label>
+  <input id="password" type="password" name="password" autocomplete="current-password" required>
+  <button class="btn" type="submit">登 录</button>
+</form>
+</body>
+</html>

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}判定明细 · {{ file.file_name }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>文件判定明细</h1>
+  <span class="sub">该文件每行 raw 的 V3 判定结果：有效（自动计入绩效）/ 同店跨日 / 从档 / 重复导入 / Visible 空白，以及申诉状态</span>
+  <span class="actions">
+    <a class="btn ghost" href="/files">← 文件上传</a>
+  </span>
+</div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+<div class="card" style="margin-bottom:.9rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem;word-break:break-all">{{ file.file_name }}</h2>
+  <div class="stat-grid grid">
+    <div class="stat-card"><div class="k">导入行数(raw)</div><div class="v">{{ raw_total }}</div></div>
+    <div class="stat-card okk"><div class="k">有效</div><div class="v">{{ valid }}</div></div>
+    <div class="stat-card warnk"><div class="k">同店跨日</div><div class="v">{{ master_late }}</div></div>
+    <div class="stat-card warnk"><div class="k">从档</div><div class="v">{{ from_sub }}</div></div>
+    <div class="stat-card errk"><div class="k">重复导入</div><div class="v">{{ cross_file_dup }}</div></div>
+    <div class="stat-card"><div class="k">Visible 空白</div><div class="v">{{ blank }}</div></div>
+    {% if appealing %}<div class="stat-card"><div class="k">申诉处理中</div><div class="v" style="color:var(--warn)">{{ appealing }}</div></div>{% endif %}
+  </div>
+  <p class="hint" style="margin:.5rem 0 0">
+    涉及自然月：{{ months|join('、') if months else '—' }}｜ 已入正式表 <b>{{ valid }}</b> 条
+    （申诉认可后点「重新入表」/「月度重算」生效）
+  </p>
+</div>
+<form method="get" class="card" style="margin-bottom:.9rem">
+  <label class="f">判定
+    <select name="bucket">
+      {% for v, t in bucket_opts %}<option value="{{ v }}" {% if bucket == v %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="f">关键字 <input type="text" name="q" value="{{ q }}" placeholder="姓名 / 编号 / Store ID / 店名"></label>
+  <button class="btn" type="submit">查询</button>
+  <a class="btn ghost" href="?">重置</a>
+</form>
+<p class="hint">当前显示 {{ total }} 行（第 {{ page }}/{{ pages }} 页，每页 {{ rows|length }}）</p>
+<div class="tbl-wrap"><table class="grid-tbl">
+  <tr><th>判定</th><th>原因</th><th>人员</th><th>Store ID</th><th>店名</th>
+      <th>日期</th><th>Visible</th><th>Deploy</th><th>申诉</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>
+      {% if r.status == 'valid' %}<span class="pill ok">有效</span>
+      {% elif r.status == 'master_late' %}<span class="pill warn">同店跨日</span>
+      {% elif r.status == 'from_sub' %}<span class="pill warn">从档</span>
+      {% elif r.status == 'cross_file_dup' %}<span class="pill err">重复导入</span>
+      {% elif r.status == 'blank' %}<span class="pill">Visible空白</span>
+      {% else %}<span class="pill">{{ r.status or '—' }}</span>{% endif %}
+    </td>
+    <td>{{ r.label }}{% if r.in_formal %}<div class="hint">已入正式表</div>{% endif %}</td>
+    <td>{{ r.name }}<br><span class="hint">{{ r.code or '—' }}</span></td>
+    <td>{{ r.store_id }}</td><td>{{ r.store_name }}</td>
+    <td>{{ r.date }}</td><td>{{ r.visible or '—' }}</td><td>{{ r.deploy or '—' }}</td>
+    <td>
+      {% if r.appeal %}
+        {% if r.appeal.status == 'pending' %}<span class="pill warn">申诉处理中</span>
+        {% elif r.appeal.status == 'approved' %}<span class="pill ok">申诉成立</span>
+        {% else %}<span class="pill err">申诉驳回</span>{% endif %}
+        {% if r.appeal.reason %}<div class="hint">{{ r.appeal.reason[:40] }}</div>{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9" class="empty">无匹配行</td></tr>
+  {% endfor %}
+</table></div>
+{% if pages > 1 %}
+<p class="hint">
+  {% if page > 1 %}<a href="?page={{ page-1 }}&bucket={{ bucket }}&q={{ q }}">上一页</a>{% endif %}
+  {% if page < pages %}<a href="?page={{ page+1 }}&bucket={{ bucket }}&q={{ q }}">下一页</a>{% endif %}
+</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,443 @@
+# -*- coding: utf-8 -*-
+"""店铺主档服务：从 raw 同步实体、构建候选对、合并/拆分与审计。"""
+import difflib
+import re
+import unicodedata
+
+from app.db import get_engine, Base
+from app.models import RawRecord, ImportFile, StoreEntity, StorePair, StoreMergeLog
+
+
+def earliest_nonempty_name(names) -> str:
+    """建档代表名规则：取按时间顺序里第一个非空店名（用户确认）。"""
+    for n in names:
+        n = (n or "").strip()
+        if n:
+            return n
+    return ""
+
+
+def norm_name(s) -> str:
+    s = unicodedata.normalize("NFKC", s or "")
+    return re.sub(r"[\s\u3000]+", "", s.casefold())
+
+
+def sync_entities(db) -> dict:
+    """从 raw_records 同步实体：每个 store_id_raw 保留最早记录的信息；不删已有。"""
+    fmts = {f.id: f.format for f in db.query(ImportFile).all()}
+    rows = db.query(RawRecord.import_id, RawRecord.excel_row,
+                    RawRecord.store_id_raw, RawRecord.store_name_local_raw,
+                    RawRecord.modified_raw, RawRecord.original_row).order_by(
+        RawRecord.import_id, RawRecord.excel_row).all()
+    created = updated = 0
+    order = 0
+    cache = {}
+    for ent in db.query(StoreEntity).all():
+        cache[ent.store_id_raw] = ent
+    for imp_id, ex_row, sid, name, mt, orig in rows:
+        sid = sid.strip()
+        if not sid:
+            continue
+        order += 1
+        ent = cache.get(sid)
+        city = ""
+        if fmts.get(imp_id) == "wide50" and orig and len(orig) > 4 and orig[4]:
+            city = str(orig[4]).strip()
+        nm = name.strip()
+        addr = ""
+        if fmts.get(imp_id) == "wide50" and orig and len(orig) > 21 and orig[21]:
+            addr = str(orig[21]).strip()
+        if ent is None:
+            ent = StoreEntity(store_id_raw=sid, name_local=nm,
+                              name_norm=norm_name(name), city=city,
+                              address_local=addr,
+                              first_seen_import_id=imp_id, master_id=0)
+            db.add(ent)
+            db.flush()
+            ent.master_id = ent.id  # 先自指
+            cache[sid] = ent
+            created += 1
+        else:
+            # 店名取"最早的非空写法"；保证 norm/city 兜底
+            if not ent.name_local and nm:
+                ent.name_local = nm
+                ent.name_norm = norm_name(name)
+            if not ent.name_norm:
+                ent.name_norm = norm_name(name)
+            if not ent.city and city:
+                ent.city = city
+            if not ent.address_local and addr:
+                ent.address_local = addr
+            updated += 1
+    db.commit()
+    return {"entities": len(cache), "created": created}
+
+
+def _pending_pairs(db, kind):
+    from sqlalchemy import select
+    ents = {e.id: e for e in db.query(StoreEntity).all()}
+    rows = db.query(StorePair).filter(StorePair.kind == kind,
+                                StorePair.status == 'pending').all()
+    out = []
+    for p in rows:
+        a, b = ents.get(p.entity_a), ents.get(p.entity_b)
+        if a is None or b is None:
+            continue
+        if a.master_id != a.id or b.master_id != b.id:
+            continue  # 有一方已并入他档则不再提示
+        if a.master_id == b.master_id:
+            continue
+        out.append({"pair": p, "a": a, "b": b})
+    return out
+
+
+def build_pairs(db, fuzzy_threshold: float = 0.90):
+    """程序建候选：同 norm 且同 city 组 → exact 对；近似桶 → fuzzy 对（保留原有状态）。"""
+    from collections import defaultdict
+    ents = db.query(StoreEntity).all()
+    by_norm_city = defaultdict(list)
+    for e in ents:
+        if not e.name_norm or e.master_id != e.id:
+            continue
+        by_norm_city[(e.name_norm, e.city or "")].append(e)
+    existing = set()
+    for p in db.query(StorePair.entity_a, StorePair.entity_b).all():
+        existing.add(tuple(sorted((p[0], p[1]))))
+    added = 0
+    # exact：同 norm（同 city 约束放宽到同 city 或都空）——按用户"差不多即可"：仅按 norm 分组，city 作展示
+    exact_groups = defaultdict(list)
+    for e in ents:
+        if e.master_id == e.id and e.name_norm:
+            exact_groups[e.name_norm].append(e)
+    for g in exact_groups.values():
+        gs = sorted(g, key=lambda x: x.id)
+        if len(gs) < 2:
+            continue
+        for i in range(len(gs)):
+            for j in range(i + 1, len(gs)):
+                key = (gs[i].id, gs[j].id)
+                if key in existing:
+                    continue
+                db.add(StorePair(entity_a=gs[i].id, entity_b=gs[j].id,
+                                 kind="exact"))
+                existing.add(key)
+                added += 1
+    # fuzzy：同 city（含都空）、首字符同、长度近的桶内比
+    buckets = defaultdict(list)
+    for e in ents:
+        if e.master_id != e.id or not e.name_norm:
+            continue
+        buckets[(e.city or "", e.name_norm[:1], len(e.name_norm) // 2)].append(e)
+    for lst in buckets.values():
+        if len(lst) < 2 or len(lst) > 500:
+            continue
+        lst.sort(key=lambda x: x.id)
+        for i in range(len(lst)):
+            na = lst[i].name_norm
+            for j in range(i + 1, len(lst)):
+                nb = lst[j].name_norm
+                if abs(len(na) - len(nb)) > 2 or len(na) < 3:
+                    continue
+                r = difflib.SequenceMatcher(None, na, nb).ratio()
+                if r >= fuzzy_threshold:
+                    key = (lst[i].id, lst[j].id)
+                    if key in existing:
+                        continue
+                    db.add(StorePair(entity_a=lst[i].id, entity_b=lst[j].id,
+                                     kind="fuzzy", sim=int(r * 100)))
+                    existing.add(key)
+                    added += 1
+    db.commit()
+    return {"added": added}
+
+
+def merge_pair(db, pair_id: int, keep_entity_id: int, user_id, basis="manual",
+               note=""):
+    """把对子里另一实体并入 keep 主档。"""
+    p = db.get(StorePair, pair_id)
+    if p is None:
+        raise ValueError("pair not found")
+    a = db.get(StoreEntity, p.entity_a)
+    b = db.get(StoreEntity, p.entity_b)
+    keeper = a if a.id == keep_entity_id else b
+    other = b if keeper is a else a
+    keeper_master = db.get(StoreEntity, keeper.master_id) if keeper.master_id != keeper.id else keeper
+    if keeper_master is None:
+        keeper_master = keeper
+    old_master = other.master_id
+    other.master_id = keeper_master.id
+    db.add(StoreMergeLog(entity_id=other.id, from_master=old_master,
+                         to_master=keeper_master.id, basis=basis,
+                         note=note or p.note, decided_by=user_id))
+    p.status = "merged"
+    p.note = note or None
+    p.decided_by = user_id
+    db.commit()
+
+
+def skip_pair(db, pair_id: int, user_id):
+    p = db.get(StorePair, pair_id)
+    if p is None:
+        raise ValueError("pair not found")
+    p.status = "skip"
+    p.decided_by = user_id
+    db.commit()
+
+
+def split_entity(db, entity_id: int, user_id):
+    """拆回自己为主档（撤销并入）。"""
+    e = db.get(StoreEntity, entity_id)
+    if e is None:
+        raise ValueError("entity not found")
+    old = e.master_id
+    e.master_id = e.id
+    db.add(StoreMergeLog(entity_id=e.id, from_master=old, to_master=e.id,
+                         basis="manual", note="拆分回主档", decided_by=user_id))
+    db.commit()
+
+
+def exact_groups(db):
+    """A组待处理：按 name_norm 聚类（成员均为当前主档且存在待处理 exact 对）。"""
+    from sqlalchemy import func
+    pair_ids = set()
+    for p in db.query(StorePair.entity_a, StorePair.entity_b).filter(
+            StorePair.kind == "exact", StorePair.status == "pending").all():
+        pair_ids.update(p)
+    ents = {e.id: e for e in db.query(StoreEntity).all()}
+    groups = {}
+    for eid in pair_ids:
+        e = ents.get(eid)
+        if e is None or e.master_id != e.id:
+            continue
+        groups.setdefault(e.name_norm, []).append(e)
+    out = []
+    for norm, members in groups.items():
+        members = sorted(set(members), key=lambda x: x.id)
+        if len(members) < 2:
+            continue
+        out.append({"name_norm": norm, "members": members,
+                    "cities": sorted({m.city or "" for m in members})})
+    out.sort(key=lambda g: len(g["members"]), reverse=True)
+    return out
+
+
+def merge_name_group(db, name_norm: str, keep_entity_id: int, user_id,
+                     note: str = "") -> int:
+    """把同 norm 组内其它实体并入 keep 主档；相关 exact 候选标记 merged。"""
+    group = db.query(StoreEntity).filter(
+        StoreEntity.name_norm == name_norm,
+        StoreEntity.master_id == StoreEntity.id).all()
+    keep = next((e for e in group if e.id == keep_entity_id), None)
+    if keep is None:
+        raise ValueError("keep entity not in group")
+    ids = [e.id for e in group]
+    merged = 0
+    for e in group:
+        if e.id == keep.id:
+            continue
+        old = e.master_id
+        e.master_id = keep.id
+        db.add(StoreMergeLog(entity_id=e.id, from_master=old, to_master=keep.id,
+                             basis="program_exact", note=note or None,
+                             decided_by=user_id))
+        merged += 1
+    if ids:
+        for p in db.query(StorePair).filter(
+                StorePair.kind == "exact", StorePair.status == "pending",
+                StorePair.entity_a.in_(ids), StorePair.entity_b.in_(ids)).all():
+            p.status = "merged"
+            p.decided_by = user_id
+    db.commit()
+    return merged
+
+
+def skip_name_group(db, name_norm: str, user_id) -> int:
+    group = db.query(StoreEntity).filter(
+        StoreEntity.name_norm == name_norm,
+        StoreEntity.master_id == StoreEntity.id).all()
+    ids = [e.id for e in group]
+    skipped = 0
+    if ids:
+        for p in db.query(StorePair).filter(
+                StorePair.kind == "exact", StorePair.status == "pending",
+                StorePair.entity_a.in_(ids), StorePair.entity_b.in_(ids)).all():
+            p.status = "skip"
+            p.decided_by = user_id
+            skipped += 1
+    db.commit()
+    return skipped
+
+
+def apply_all_recommended(db, user_id) -> dict:
+    """整批：A组每组并入最早建档实体；跨城市分组自动留出（防连锁同名误并）。
+    返回处理统计；误并可凭日志在实体检索里拆回。"""
+    merged_entities = 0
+    processed_groups = 0
+    skipped_groups = 0
+    for g in exact_groups(db):
+        members = sorted(g["members"], key=lambda x: x.id)
+        known = {m.city for m in members if m.city}
+        if len(known) > 1:  # 仅“都填了且不同城市”才算跨城市
+            skipped_groups += 1
+            continue
+        merged_entities += merge_name_group(db, g["name_norm"], members[0].id,
+                                            user_id, note="整批推荐(最早主档)")
+        processed_groups += 1
+    return {"groups": processed_groups, "merged_entities": merged_entities,
+            "left_groups": skipped_groups}
+
+
+def backfill_addresses(db) -> int:
+    """给缺地址/缺城市的实体补最早含地址的 wide 行信息。"""
+    from app.models import ImportFile, RawRecord
+    fmts = {f.id: f.format for f in db.query(ImportFile).all()}
+    need = {e.store_id_raw: e for e in db.query(StoreEntity).filter(
+        (StoreEntity.address_local.is_(None)) | (StoreEntity.city.is_(None))).all()}
+    if not need:
+        return 0
+    got = {}
+    rows = db.query(RawRecord.import_id, RawRecord.store_id_raw,
+                    RawRecord.original_row).order_by(
+        RawRecord.import_id, RawRecord.excel_row).all()
+    for imp_id, sid, orig in rows:
+        sid = sid.strip()
+        e = need.get(sid)
+        if e is None or sid in got or fmts.get(imp_id) != "wide50" or not orig:
+            continue
+        city = str(orig[4]).strip() if len(orig) > 4 and orig[4] else ""
+        addr = str(orig[21]).strip() if len(orig) > 21 and orig[21] else ""
+        if city or addr:
+            got[sid] = (city or None, addr or None)
+    fixed = 0
+    for sid, e in need.items():
+        c, a = got.get(sid, (None, None))
+        if c and not e.city:
+            e.city = c
+            fixed += 1
+        if a and not e.address_local:
+            e.address_local = a
+            fixed += 1
+    db.commit()
+    return fixed
+
+
+def auto_skip_cross_city(db) -> dict:
+    """城市规则（用户确认）：同名记录若已知城市≥2 个 → 不同店，整组跳过（不合并）。
+    纯同名同城 或 城市未知的组继续留人工。fuzzy 对同理（双方都有城市且不同 → 跳过）。"""
+    groups = 0
+    pairs_skipped = 0
+    # A exact：按组处理
+    for g in exact_groups(db):
+        cities = {m.city for m in g["members"] if m.city}
+        if len(cities) < 2:
+            continue
+        ids = [m.id for m in g["members"]]
+        for pr in db.query(StorePair).filter(
+                StorePair.kind == "exact", StorePair.status == "pending",
+                StorePair.entity_a.in_(ids), StorePair.entity_b.in_(ids)).all():
+            pr.status = "skip"
+            pr.note = "跨城市/城市不一致 → 判定不同店"
+            pairs_skipped += 1
+        groups += 1
+    # B fuzzy：双方城市都有且不同 → 跳过
+    fz = 0
+    for pr in db.query(StorePair).filter(StorePair.kind == "fuzzy",
+                                         StorePair.status == "pending").all():
+        a = db.get(StoreEntity, pr.entity_a)
+        b = db.get(StoreEntity, pr.entity_b)
+        if a and b and a.city and b.city and a.city != b.city:
+            pr.status = "skip"
+            pr.note = "跨城市 → 判定不同店"
+            pairs_skipped += 1
+            fz += 1
+    db.commit()
+    return {"exact_groups": groups, "fuzzy_pairs": fz,
+            "pairs_skipped": pairs_skipped}
+
+
+def unmerge_cross_city(db) -> int:
+    """修复：非主档实体若与根主档城市均已知且不同 → 拆回自己（撤销跨城市误并）。"""
+    from app.models import StoreMergeLog
+    ents = {e.id: e for e in db.query(StoreEntity).all()}
+    fixed = 0
+    for e in db.query(StoreEntity).filter(
+            StoreEntity.master_id != StoreEntity.id).all():
+        if not e.city:
+            continue
+        root = e
+        seen = set()
+        while root.master_id != root.id and root.id not in seen:
+            seen.add(root.id)
+            root = ents.get(root.master_id) or root
+        if root is e:
+            continue
+        if root.city and root.city != e.city:
+            e.master_id = e.id
+            db.add(StoreMergeLog(entity_id=e.id, from_master=root.id,
+                                 to_master=e.id, basis="manual",
+                                 note="跨城市修复：撤销误并"))
+            fixed += 1
+    db.commit()
+    return fixed
+
+
+def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
+    """全部店铺目录：主档行 + 其下已并入的分身（可展开/解绑）。"""
+    ents = db.query(StoreEntity).order_by(StoreEntity.id).all()
+    by_id = {e.id: e for e in ents}
+    root = {}
+    for e in ents:
+        r = e
+        seen = set()
+        while r.master_id != r.id and r.id not in seen:
+            seen.add(r.id)
+            r = by_id.get(r.master_id) or r
+        root[e.id] = r.id
+    masters = {}
+    for e in ents:
+        if root[e.id] == e.id:
+            masters.setdefault(e.id, []).append(e)
+        else:
+            masters.setdefault(root[e.id], []).append(e)
+    rows = []
+    for mid, members in masters.items():
+        members.sort(key=lambda x: x.id)
+        m = by_id[mid]
+        rows.append({"master": m, "children": members[1:]})
+    if q:
+        ql = q.lower()
+        rows = [r for r in rows
+                if ql in r["master"].name_local.lower()
+                or ql in r["master"].name_norm.lower()
+                or ql in (r["master"].city or "").lower()
+                or ql in r["master"].store_id_raw.lower()
+                or any(ql in c.store_id_raw.lower() or ql in (c.name_local or "").lower()
+                       for c in r["children"])]
+    total = len(rows)
+    start = (page - 1) * per
+    return {"rows": rows[start:start + per], "total": total,
+            "page": page, "pages": (total + per - 1) // per}
+
+
+def auto_handle_exact(db) -> dict:
+    """同类名直接定案（用户确认）：同城/未填城市 → 自动并入最早；已填且不同城市 → 自动跳过。
+    返回统计。"""
+    merged_groups = merged_entities = skipped_groups = 0
+    for g in exact_groups(db):
+        known = {m.city for m in g["members"] if m.city}
+        ids = [m.id for m in g["members"]]
+        if len(known) > 1:
+            for pr in db.query(StorePair).filter(
+                    StorePair.kind == "exact", StorePair.status == "pending",
+                    StorePair.entity_a.in_(ids), StorePair.entity_b.in_(ids)).all():
+                pr.status = "skip"
+                pr.note = "同名但已知城市不同 → 自动判不同店"
+            skipped_groups += 1
+            db.commit()
+            continue
+        members = sorted(g["members"], key=lambda x: x.id)
+        merged_entities += merge_name_group(db, g["name_norm"], members[0].id, None,
+                                            note="导入自动：同类名并入最早")
+        merged_groups += 1
+    return {"merged_groups": merged_groups, "merged_entities": merged_entities,
+            "skipped_groups": skipped_groups}

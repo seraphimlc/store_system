@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}我的申诉{% endblock %}
+{% block content %}
+<div class="page-title"><h1>我的申诉</h1>
+  <span class="sub">系统已默认认可全部判定：有效记录自动计入绩效；被滤记录（疑似重复/从档归并）已按滤除处理，无需你逐条操作。若你认为某条店其实应该算有效，在这里申诉即可。</span></div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+
+{% if total_appealable == 0 %}
+<div class="card"><p class="empty">🎉 没有需要申诉的记录</p></div>
+{% else %}
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">被滤记录（默认已认可滤除，可申诉）</h2>
+  {% for day, raws in days %}
+  <h3 style="font-size:.95rem;margin:.9rem 0 .3rem">{{ day }}</h3>
+  <table class="grid-tbl">
+    <tr><th>店铺</th><th>原因</th><th>申诉</th></tr>
+    {% for rr in raws %}
+    {% set ap = appeal_map.get(rr.id) %}
+    <tr>
+      <td style="font-weight:600">{{ rr.store_name_local_raw }}</td>
+      <td><span class="pill">已滤除</span>
+        <span class="hint">{{ '疑似重复（该店同月已有更早记录）' if rr.clean_status == 'master_late' else '并入同名主店编号' }}</span>
+      </td>
+      <td>
+        {% if not ap %}
+        <details style="position:relative">
+          <summary class="btn ghost danger-ghost" style="padding:.25rem .6rem;cursor:pointer">这条应该算？申诉</summary>
+          <div style="position:absolute;right:0;top:1.8rem;background:#fff;border:1px solid #ddd;
+                      border-radius:6px;padding:.5rem;z-index:5;width:230px;box-shadow:0 2px 8px #0002">
+            <form method="post" action="/my/appeal/{{ rr.id }}" style="display:flex;flex-direction:column;gap:.3rem">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+              <input name="reason" placeholder="说明为什么应算有效" required style="padding:.25rem .4rem">
+              <button class="btn danger-ghost" style="padding:.25rem .5rem" type="submit">提交申诉</button>
+            </form>
+          </div>
+        </details>
+        {% elif ap.status == 'pending' %}<span class="pill run">已申诉 · 待处理</span>
+        {% elif ap.status == 'approved' %}<span class="pill ok">申诉成立 · 已算有效</span>
+        {% else %}<span class="pill">申诉未过 · 维持滤除</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

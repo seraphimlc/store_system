@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>巡店数据结算系统 · 产品说明</title>
+<style>
+  :root { --brand:#2f5bea; --text:#1c2333; --muted:#5b6478; --line:#e4e7ef;
+          --bg:#f6f7fb; --card:#fff; --ok:#1a7f37; --warn:#9a6700; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+         "Hiragino Sans GB","Microsoft YaHei",sans-serif; line-height:1.75; }
+  .banner { background:linear-gradient(120deg,#2f5bea,#4b7af0); color:#fff;
+            padding:2.2rem 1.2rem 1.6rem; }
+  .banner .inner { max-width:900px; margin:0 auto; }
+  .banner h1 { margin:.2rem 0 .3rem; font-size:1.6rem; }
+  .banner p { margin:0; opacity:.92; font-size:.95rem; }
+  .doc { max-width:900px; margin:1.4rem auto 3rem; padding:0 1rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:1.6rem 2rem; box-shadow:0 1px 3px rgba(30,40,80,.06); }
+  .doc h1 { font-size:1.5rem; border-bottom:2px solid var(--brand);
+            padding-bottom:.4rem; margin-top:2rem; }
+  .doc h1:first-child { margin-top:.2rem; }
+  .doc h2 { font-size:1.2rem; margin-top:1.8rem; }
+  .doc h3 { font-size:1.05rem; margin-top:1.4rem; }
+  .doc p, .doc li { font-size:.97rem; }
+  .doc table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.92rem;
+               background:#fff; }
+  .doc th, .doc td { border:1px solid var(--line); padding:.5rem .7rem; text-align:left;
+                     vertical-align:top; }
+  .doc th { background:#eef1fb; font-weight:600; }
+  .doc tr:nth-child(even) td { background:#fafbfe; }
+  .doc code { background:#eef0f7; padding:.1rem .35rem; border-radius:4px;
+              font-size:.9em; }
+  .doc pre { background:#f2f4fa; padding:.8rem 1rem; border-radius:8px;
+             overflow-x:auto; }
+  .doc pre code { background:none; padding:0; }
+  .doc blockquote { border-left:4px solid var(--brand); margin:1rem 0;
+                    padding:.2rem 1rem; background:#f2f5ff; color:var(--muted); }
+  .foot { text-align:center; color:var(--muted); font-size:.85rem;
+          padding:1rem 0 2.4rem; }
+  .pill { display:inline-block; padding:.05rem .5rem; border-radius:999px;
+          font-size:.85em; background:#eef1fb; color:var(--brand); }
+  .doc a { color:var(--brand); }
+</style>
+</head>
+<body>
+<div class="banner">
+  <div class="inner">
+    <h1>巡店数据结算系统 · 产品说明</h1>
+    <p>从原始巡店 Excel 到员工结算 —— 每一步都看得见、查得到、改有据</p>
+  </div>
+</div>
+<main class="doc"><div class="card">
+{{ body | safe }}
+</div></main>
+<div class="foot">巡店数据结算系统 v2.0 · 2026-09</div>
+</body>
+</html>

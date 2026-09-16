@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}店铺管理{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>店铺管理</h1>
+  <span class="sub">列表管"事实"（主档/关联/解绑）；待确认管"疑似同名的疑问"</span>
+</div>
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+<div class="tabs">
+  <a class="{% if tab=='list' %}on{% endif %}" href="/stores?tab=list">店铺列表（{{ counts.masters }} 主档）</a>
+  <a class="{% if tab=='fuzzy' %}on{% endif %}" href="/stores?tab=fuzzy">待确认{% if counts.fuzzy %}（{{ counts.fuzzy }}）{% endif %}</a>
+</div>
+
+{% if tab == 'list' %}
+<div class="stat-grid grid" style="margin-bottom:.8rem">
+  <div class="stat-card"><div class="k">店铺主档</div><div class="v">{{ counts.masters }}</div></div>
+  <div class="stat-card"><div class="k">已并入的分身</div><div class="v">{{ counts.entities - counts.masters }}</div></div>
+</div>
+<form method="get" class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
+  <input type="hidden" name="tab" value="list">
+  <label class="f">搜索店名 / Store ID / 城市
+    <input type="text" name="q" value="{{ q }}" style="width:300px" placeholder="如 春田屋 或 01010470...">
+  </label>
+  <button class="btn" type="submit">查</button>
+</form>
+<p class="hint">共 {{ cat.total }} 家（本页 {{ cat.rows|length }}）｜点"关联店铺"展开并入的分身，可单独解绑</p>
+{% for r in cat.rows %}
+<div class="card" style="margin-bottom:.7rem">
+  <div style="display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap">
+    <b style="font-size:1.05rem">{{ r.master.name_local or r.master.name_norm or '(无名)' }}</b>
+    <span class="hint">{{ r.master.city or '城市未填' }}</span>
+    {% if r.master.address_local %}<span class="hint">{{ r.master.address_local }}</span>{% endif %}
+    <span class="pill ok">主档</span>
+    {% if r.children %}<span class="pill warn">+{{ r.children|length }} 关联</span>{% endif %}
+  </div>
+  <div class="hint">Store ID: {{ r.master.store_id_raw }}</div>
+  {% if r.children %}
+  <details style="margin-top:.4rem">
+    <summary>关联店铺（{{ r.children|length }} 条，展开可单独解绑某一条）</summary>
+    <table class="grid-tbl">
+      <tr><th>Store ID</th><th>店名(当时写法)</th><th>城市 / 地址</th><th></th></tr>
+      {% for c in r.children %}
+      <tr>
+        <td>{{ c.store_id_raw }}</td>
+        <td>{{ c.name_local or c.name_norm or '(无名)' }}</td>
+        <td class="hint">{{ c.city or '' }} {{ c.address_local or '' }}</td>
+        <td>
+          <form method="post" action="/stores/entities/{{ c.id }}/split"
+                onsubmit="return confirm('只把这一条解绑成独立店铺？其它关联不受影响')">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <button class="btn ghost" style="padding:.2rem .5rem" type="submit">解绑这一条</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% endif %}
+</div>
+{% else %}<div class="card empty">没有匹配的店铺</div>{% endfor %}
+{% if cat.pages > 1 %}
+<p class="hint">第 {{ cat.page }}/{{ cat.pages }} 页
+  {% if cat.page > 1 %}<a href="?tab=list&page={{ cat.page-1 }}&q={{ q }}">上一页</a>{% endif %}
+  {% if cat.page < cat.pages %}<a href="?tab=list&page={{ cat.page+1 }}&q={{ q }}">下一页</a>{% endif %}
+</p>
+{% endif %}
+
+{% else %}
+<h2 style="font-size:1.02rem">待确认（疑似同名）</h2>
+<p class="hint">店名很像但不完全一样的对——可能是同一家，也可能不同分店；看城市/地址/AI 提示后定。</p>
+<div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.8rem">
+  <form method="post" action="/stores/ai-run">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <button class="btn" type="submit">让 AI 再自动处理一轮</button>
+  </form>
+  <span class="hint">AI 高置信的自动处理，其余留给你（附 AI 建议）</span>
+</div>
+{% for p in pairs %}
+<div class="card" style="margin-bottom:.8rem">
+  <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:.8rem;align-items:center">
+    <div>
+      <b style="font-size:1rem">{{ p.a.name_local or p.a.name_norm or '(无名)' }}</b><br>
+      <span class="hint">{{ p.a.city or '城市未填' }} {{ p.a.address_local or '' }}</span><br>
+      <span class="hint">{{ p.a.store_id_raw }}</span>
+    </div>
+    <div style="text-align:center"><span class="pill run">相似 {{ p.pair.sim }}%</span></div>
+    <div style="text-align:right">
+      <b style="font-size:1rem">{{ p.b.name_local or p.b.name_norm or '(无名)' }}</b><br>
+      <span class="hint">{{ p.b.city or '城市未填' }} {{ p.b.address_local or '' }}</span><br>
+      <span class="hint">{{ p.b.store_id_raw }}</span>
+    </div>
+  </div>
+  {% if p.pair.ai_decision %}
+  <div style="margin:.5rem 0">
+    <span class="pill warn">AI：{{ {'same':'像是同一家','diff':'像是不同店','unknown':'拿不准'}[p.pair.ai_decision] }}</span>
+    <span class="hint">{{ p.pair.ai_reason }}</span>
+  </div>
+  {% endif %}
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.5rem">
+    <form method="post" action="/stores/pairs/{{ p.pair.id }}/merge?kind=fuzzy" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="keep" value="{{ p.a.id }}">
+      <button class="btn" type="submit">是 → 保留左，合并右</button>
+    </form>
+    <form method="post" action="/stores/pairs/{{ p.pair.id }}/merge?kind=fuzzy" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="keep" value="{{ p.b.id }}">
+      <button class="btn" type="submit">是 → 保留右，合并左</button>
+    </form>
+    <form method="post" action="/stores/pairs/{{ p.pair.id }}/skip?kind=fuzzy" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <button class="btn ghost" type="submit">不是同一家</button>
+    </form>
+  </div>
+</div>
+{% else %}<div class="card empty">没有待确认项 🎉</div>{% endfor %}
+{% endif %}
+{% endblock %}
