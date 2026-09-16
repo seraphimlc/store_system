@@ -113,23 +113,19 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             (half1 if r.ref_date.day <= 15 else half2).get(
                 r.person_code, 0) + r.points
     settle = _current_recon(db, month)
-    # 上月修正 = 上月「未扣完余额」：链式递延（金额）。
-    # 上月余额在上月工资两期扣减后仍未扣完的部分才递延：
-    #   本月 carry = 上月(carry + half1_amt + half2_amt)，若为负(两期扣不完)则递延，正/零=已结清。
+    # 结转链（金额，正=补/负=扣）：
+    #   本月行存「下月要扣/补的余额」= −本月金额差 + 本月扣剩余额
+    #   - 上月结转(上月 prev_adjust_amount)在本月两期工资里扣/补，
+    #     本月两期吸收后仍为负的余额才继续递延；
+    #   - 本月新产生的金额差(系统多发为正)下月开始扣 → 结转取负号。
     # 找平金额自动=金额差(无点击操作)：adjust_amount 由 sync 自动写，页面只读。
     prev = {}
-    prev_amt = {}
+    carry_in = {}
     pm = _prev_month(month)
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == pm).all():
-        carry_pm = (r.prev_adjust_amount or 0) + (r.half1_amount or 0) \
-            + (r.half2_amount or 0)
-        if carry_pm < 0:            # 上月两期工资扣不完 → 负余额递延本月
-            prev_amt[r.person_code] = carry_pm
-        else:                       # 上月已扣清 → 无递延
-            prev_amt[r.person_code] = 0
-        remain = (r.diff_points or 0) - (r.adjust_points or 0)
-        prev[r.person_code] = remain
+        carry_in[r.person_code] = r.prev_adjust_amount or 0   # 上月结转
+        prev[r.person_code] = (r.diff_points or 0) - (r.adjust_points or 0)
     names = {p.code: p.display_name for p in db.query(Person).all()}
     existing = {r.person_code: r for r in db.query(PayrollPeriodRow).filter(
         PayrollPeriodRow.month == month).all()}
@@ -153,6 +149,10 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         h2_amt = h2 * per_point + b2
         # 金额差（含奖金）= 系统已发金额 − 对账金额（正=系统多发，找平时扣回）
         diff_amt = (h1_amt + h2_amt) - settle_amt
+        # 下月结转 = −本月金额差 + 本月扣剩余额
+        #   （上月结转先在本月两期工资里扣：本月两期+上月结转<0 的部分才递延）
+        left_this = carry_in.get(code, 0) + h1_amt + h2_amt
+        prev_amt = -diff_amt + (left_this if left_this < 0 else 0)
         sh1 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h1"]
         sh2 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h2"]
         row = existing.get(code)
@@ -166,7 +166,7 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
                 half1_bonus=b1, half2_bonus=b2,
                 half1_amount=h1_amt, half2_amount=h2_amt,
                 settle_amount=settle_amt,
-                prev_adjust_amount=prev_amt.get(code, 0),  # 上月金额余量(链式递延)
+                prev_adjust_amount=prev_amt,  # 下月结转余额(链式:负扣/正补)
                 diff_amount=diff_amt,   # 金额差(含奖金)=系统已发−对账金额
                 adjust_amount=diff_amt,  # 找平自动=金额差(无点击操作,页面只读)
                 updated_at=__import__("datetime").datetime.utcnow()))
@@ -184,7 +184,7 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             row.settle_points = sp
             row.prev_adjust_points = pa
             row.settle_amount = settle_amt
-            row.prev_adjust_amount = prev_amt.get(code, 0)  # 上月金额余量(链式)
+            row.prev_adjust_amount = prev_amt  # 下月结转余额(链式:负扣/正补)
             row.half1_bonus = b1
             row.half2_bonus = b2
             row.half1_amount = h1_amt
@@ -215,6 +215,14 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
 def period_rows(db: Session, month: str):
     """该月偏差表行（含姓名），按人排序。"""
     names = {p.code: p.display_name for p in db.query(Person).all()}
+    # 「上月修正」= 本月要扣/补的上月结转（上月行 prev_adjust_amount）
+    pm = _prev_month(month)
+    carry = {r.person_code: r.prev_adjust_amount for r in
+             db.query(PayrollPeriodRow).filter(
+                 PayrollPeriodRow.month == pm).all()}
+    carry_pt = {r.person_code: r.prev_adjust_points for r in
+                db.query(PayrollPeriodRow).filter(
+                    PayrollPeriodRow.month == pm).all()}
     out = []
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == month).order_by(
@@ -223,11 +231,12 @@ def period_rows(db: Session, month: str):
             "code": r.person_code, "name": names.get(r.person_code,
                                                      r.person_code),
             "half1": r.half1_points, "half2": r.half2_points,
-            "settle": r.settle_points, "prev": r.prev_adjust_points,
+            "settle": r.settle_points, "prev": carry_pt.get(r.person_code, 0),
             "diff": r.diff_points,
             "half1_bonus": r.half1_bonus, "half2_bonus": r.half2_bonus,
             "half1_amt": r.half1_amount, "half2_amt": r.half2_amount,
-            "settle_amt": r.settle_amount, "prev_amt": r.prev_adjust_amount,
+            "settle_amt": r.settle_amount,
+            "prev_amt": carry.get(r.person_code, 0),   # 上月结转(本月要扣/补)
             "diff_amt": r.diff_amount,
             "adj": r.adjust_points, "adj_amt": r.adjust_amount,
             "updated_by": r.updated_by, "updated_at": r.updated_at,

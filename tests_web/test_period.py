@@ -47,12 +47,11 @@ def test_sync_formula_and_prev_adjust(client):
 
 
 def test_prev_adjust_chain_carry(client):
-    """链式递延：上月结转余额经两期工资吸收，<0 才递延下月；找平自动=金额差。"""
+    """链式递延：本月结转 = −本月金额差 + 本月两期工资吸收上月结转后的剩余(<0才递延)。"""
     db = appdb.SessionLocal()
     db.add(Person(code="A", display_name="甲"))
     db.add(Person(code="B", display_name="乙"))
-    # 上月：A 结转 -25,000(要扣)、上半月工资 10,000 → 吸收后 -15,000 递延
-    #       B 结转 -25,000、两期工资 10,000+20,000 → 扣完(5,000>0) 结清
+    # 上月结转：A=-25,000(要扣,本月工资吸收不完)、B=0(无结转)
     db.add(PayrollPeriodRow(month="2026-07", person_code="A",
                             diff_points=100, adjust_points=100,
                             diff_amount=100 * 250, adjust_amount=100 * 250,
@@ -63,7 +62,7 @@ def test_prev_adjust_chain_carry(client):
                             diff_points=100, adjust_points=100,
                             diff_amount=100 * 250, adjust_amount=100 * 250,
                             half1_amount=10000, half2_amount=20000,
-                            prev_adjust_amount=-25000,
+                            prev_adjust_amount=0,
                             updated_at=datetime.utcnow()))
     for code in ("A", "B"):
         db.add(PersonDailyStat(person_code=code,
@@ -71,12 +70,14 @@ def test_prev_adjust_chain_carry(client):
     db.commit()
     v3_period.sync_period_table(db, "2026-08")
     rows = {r["code"]: r for r in v3_period.period_rows(db, "2026-08")}
-    assert rows["A"]["prev_amt"] == -15000          # 扣不完 → 递延
-    assert rows["B"]["prev_amt"] == 0               # 两期扣完 → 结清
-    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"]  # 找平自动=金额差
+    # 8月：两期=2,500、diff=+2,500；A 上月结转-25,000 吸收2,500后剩-22,500
+    #   → 结转9月 = −2,500 + (−22,500) = −25,000；B 无结转 → 结转9月 = −2,500
+    assert rows["A"]["prev_amt"] == -25000        # 上月修正列=上月结转
+    assert rows["B"]["prev_amt"] == 0             # B 无结转
+    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"] == 2500  # 找平自动=金额差
     # carry_map（发薪表上月找平列）：上月结转余额（正补/负扣）
     cm = v3_period.carry_map(db, "2026-08")
-    assert cm["A"] == [0, -25000] and cm["B"] == [0, -25000]
+    assert cm["A"] == [0, -25000] and cm.get("B") is None
     db.close()
 
 
