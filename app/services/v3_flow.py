@@ -456,9 +456,24 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         FormalRecord.japan_date < hi).delete()
     db.commit()
     added = 0
+    # 从档排除（精确名单）：同店异写法的店已归并从档，重建时不入正式表，
+    # 保证"同一家店不同写法只算一次"（数据修复定的"最合理识别逻辑"）。
+    # 仅排除明确归并的 4 组，不动历史从档（历史从档店正常有效）。
+    import os
+    sub_ids = set(os.environ.get(
+        "DEDUP_SUB_STORES",
+        "0101047092026031200555097|0202047092026032480084411|"
+        "0101047092026081903348200|0101047092026060970019734").split("|"))
+    if sub_ids == {""}:
+        sub_ids = set()
     for rr in db.query(RawRecord).filter(
             RawRecord.clean_status == "valid",
             RawRecord.modified_raw.like(ym + "%")).all():
+        if rr.store_id_raw in sub_ids:
+            rr.clean_status = "from_sub"
+            rr.filter_reason = "from_sub"
+            rr.confirm_state = "auto_ok"
+            continue
         db.add(_formal_for_raw(rr))
         added += 1
     db.commit()
