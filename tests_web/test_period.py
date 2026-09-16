@@ -111,10 +111,10 @@ def test_payroll_settle_page_readonly(client):
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
     p = client.get("/payroll-settle?month=2026-08").text
-    assert "薪资找平" in p and "找平(执行)" in p and "生成/更新" in p
+    assert "薪资找平" in p and "本月对账偏差(参考)=找平" in p and "生成/更新" in p
     assert "本月对账偏差(参考)" in p
     assert 'name="adjust_delta"' not in p               # 无找平输入框（自动）
-    assert "自动" in p                                   # 自动找平提示
+    assert "即自动找平金额" in p                        # 自动找平说明
     pp = client.get("/perf?month=2026-08").text
     assert "奖金合计(円)" not in pp and "导出薪资找平 Excel" not in pp
     db.close()

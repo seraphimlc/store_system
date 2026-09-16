@@ -44,11 +44,9 @@
         <th class="num">分期已发(円)</th>
         <th class="num" colspan="2">对账</th>
         <th class="num" colspan="2">上月修正</th>
-        <th class="num" colspan="2">本月对账偏差(参考)</th>
-        <th class="num" colspan="2">找平(执行)</th><th></th></tr>
+        <th class="num" colspan="2">本月对账偏差(参考)=找平</th><th></th></tr>
     <tr><th></th><th class="num">点</th><th class="num">円</th><th class="num">点</th><th class="num">円</th>
         <th></th><th></th><th class="num">点</th><th class="num">円</th><th class="num">点</th><th class="num">円</th>
-        <th class="num">点</th><th class="num">円</th>
         <th class="num">点</th><th class="num">円</th><th></th></tr>
     {% for r in rows %}
     <tr {% if r.code == staff %}style="outline:2px solid #888;outline-offset:-2px"{% endif %}>
@@ -65,14 +63,12 @@
       <td class="num">{{ '{:,}'.format(r.prev_amt) }}</td>
       <td class="num" style="font-weight:700;color:{% if r.diff >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{{ '%+d' % r.diff }}</td>
       <td class="num" style="font-weight:700;color:{% if r.diff_amt >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">¥{{ '{:,}'.format(r.diff_amt) }}</td>
-      <td class="num" style="font-weight:700;color:{% if r.adj_amt >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{% if r.adj_amt %}¥{{ '{:,}'.format(r.adj_amt) }}{% else %}¥0{% endif %}</td>
-      <td class="hint">自动</td>
     </tr>
     {% endfor %}
   </table></div>
   <p class="hint" style="margin-top:.5rem">
-    「本月对账偏差(金额)」= 系统已发金额 − 对账金额（含奖金），自动算的<b>参考值</b>；
-    「找平(执行)」= <b>自动 = 金额差</b>（无人工调整，页面只读）：发薪时在上半月工资里扣/补，上半月不够扣 → 下半月继续扣，两期都不够 → 余额递延下月。
+    「本月对账偏差(金额)」= 系统已发金额 − 对账金额（含奖金），<b>即自动找平金额</b>（无需人工操作）：
+    发薪时在上半月工资里扣/补，上半月不够扣 → 下半月继续扣，两期都不够 → 余额递延下月。
     「上月修正(金额)」= 上月两期工资扣不完的余额（递延到本月继续扣）。
   </p>
 </div>
