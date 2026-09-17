@@ -9,7 +9,8 @@ from typing import Optional
 import json
 import re
 
-from app.services.ai_chat import configured as _ai_configured, chat as _chat
+from app.services.ai_chat import (configured as _ai_configured, chat as _chat,
+                                  extract_json as _extract_json)
 from app.services.recon import _sheet_preview
 
 # 巡店文件必需语义字段（可信校验：店/店名/时间/提交人/有效性/投放 六项缺一不可）
@@ -58,7 +59,7 @@ def ai_parse_visit_layout(path: str) -> dict:
         + preview)
     try:
         text = _chat(prompt)
-        data = json.loads(text)
+        data = _extract_json(text)
         if not isinstance(data, dict):
             return {}
         m = re.findall(r"\[(\d+)\]", preview)

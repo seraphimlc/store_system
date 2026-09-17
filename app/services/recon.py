@@ -770,8 +770,8 @@ def ai_parse_daily_cols(path: str) -> dict:
         + preview)
     try:
         text = _chat(prompt)
-        import json as _json
-        data = _json.loads(text)
+        from app.services.ai_chat import extract_json as _extract_json
+        data = _extract_json(text)
         if not isinstance(data, dict):
             return {}
         ncols = None
@@ -957,9 +957,9 @@ def ai_employee_notes(db, task_id: int) -> dict:
         "为准/行级归因』等术语。不得臆测数据外的原因。"
         "只返回 JSON：{\"员工编号\": \"解读\"}。\n\n" + "\n".join(lines))
     try:
-        import json as _json
+        from app.services.ai_chat import extract_json as _extract_json
         text = _chat(prompt)
-        data = _json.loads(text)
+        data = _extract_json(text)
         if not isinstance(data, dict):
             return {}
         notes = {str(k): str(v)[:140] for k, v in data.items() if v}

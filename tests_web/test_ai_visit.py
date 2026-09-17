@@ -221,3 +221,40 @@ def test_zero_point_rows_not_counted(client):
         PersonDailyStat.person_code == "911").all()
     assert sum(s.points for s in st) == 3
     db.close()
+
+
+def test_extract_json_tolerant():
+    """模型输出容错解析：代码块/前后杂文/推理模型思考文本里的 JSON。"""
+    from app.services.ai_chat import extract_json
+    assert extract_json('{"a": 1}') == {"a": 1}
+    assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert extract_json('好的，结果如下：\n{"a": 1}\n以上') == {"a": 1}
+    # 推理模型：思考里带 JSON（前后有自然语言）
+    assert extract_json('我们根据要求返回JSON。 header_row=0 ... {"header_row": 1, "store_id": 0} 完成') \
+        == {"header_row": 1, "store_id": 0}
+    assert extract_json("") is None
+    assert extract_json("没有 JSON") is None
+
+
+def test_ai_visit_reasoning_model_output(monkeypatch, tmp_path):
+    """推理模型（content 空 / 思考里带 JSON）也能解析出布局。"""
+    from openpyxl import Workbook
+    import app.services.ai_visit as av
+    p = str(tmp_path / "t.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Store ID", "Store Name-Local", "Modified Time", "Submitter",
+               "Review status", "Deploy New A+POSM"])
+    ws.append(["S1", "店A", "2026-09-01 10:00:00", "甲(111)",
+               "AUDIT_SUCCESS", "YES"])
+    wb.save(p)
+    monkeypatch.setattr(av, "_ai_configured", lambda: True)
+    monkeypatch.setattr(av, "_chat", lambda prompt: (
+        '先分析各列含义…… {"header_row": 0, "store_id": 0, "store_name": 1, '
+        '"modified_time": 2, "submitter": 3, "visible": 4, "deploy": 5, '
+        '"value_map": {"visible": {"AUDIT_SUCCESS": "candidate"}, '
+        '"deploy": {"YES": 2}}} 完成'))
+    out = av.ai_parse_visit_layout(p)
+    assert out["cols"]["store_id"] == 1
+    assert out["cols"]["visible"] == 5
+    assert out["value_map"]["deploy"] == {"YES": 2}
