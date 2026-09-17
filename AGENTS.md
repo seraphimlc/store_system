@@ -25,15 +25,21 @@ DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.p
 | 工资 | 随奖金规则（每满68点奖3000） | — |
 | 员工 | 34 | 22 |
 
-- **工资规则**：每点 250円（按月可配 per_point），奖金**每满 68 点奖 3000**（整月滚动、不跨月；上半月余数带向下半月）；2点成功率 37% 仅展示。
+- **工资规则**：每点 250円（按月可配 per_point），奖金**每满门槛点奖 3000**（整月滚动、不跨月；门槛按月可配：默认 68，`BONUS_GROUP_SCHEDULE` 如 `2026-09=75`）；2点成功率 37% 仅展示。
 - **判重**：窗口=结算月；键=(店名trim,月)；组内最早全时间戳行 valid；跨月不互压。
 - **申诉**：master_late/from_sub 可申诉，其余滤除不可申诉；默认全部认可；存在 pending 申诉的文件不能入正式表。
-- **对账**：person_daily_stats 为本地侧；recon_day_rows 只存问题行；同月重传→旧任务标「上一版」、新任务当前。
-- **找平**：偏差=系统参考值(自动刷)；找平=人工执行值(默认0，输入框=剩余偏差−已找平，保存为增量累计)；上月修正=上月未找平余量(diff−adjust)×上月单价递延；对账页「确认找平」=一键全找平并同步 payroll 表。
+- **对账**：person_daily_stats 为本地侧；recon_day_rows 只存问题行；同月重传→旧任务标「上一版」、新任务当前；person_points(人月汇总)对账写全量 ReconDataRow。
+- **找平（金额制·自动）**：偏差金额 = 对账金额 − 系统已发（**负=扣款/正=补款**，含奖金），**自动写表**（`adjust_amount=diff_amount`，无需点击、页面只读）；发薪时**上半月扣/补 → 不够转下半月 → 两期都不够递延下月**（链式 `prev_adjust_amount`：本月结转 = diff + 本月两期吸收上月结转后的剩余）。8 月封账数据不随规则变更。
 
-## 发布流程
-1. 本地测试过 → commit；2. `ssh mkdir releases/<TS>` + rsync（排除 .git/.venv/__pycache__/*.pyc/*.db/data/uploads/data/aug_input/.pytest_cache/.DS_Store）；
-3. 服务器 `cp 旧release/deploy/.env 新`、`rm current && ln -s 新`；4. `cd deploy && docker compose build web && up -d --no-deps web`（entrypoint 自动 alembic upgrade）；5. 公网走查（docs/索引.md 清单）；6. 改数据前先 pg_dump 备份。
+## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
+1. 本地测试过 → commit → `git push origin main`；
+2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
+   `rsync -a --delete -e ssh --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.db' --exclude 'data/' --exclude '.pytest_cache' --exclude '.DS_Store' --exclude 'scripts/2026-09_*' ./ store-prod:/opt/store-settle/releases/$TS/`；
+3. `ssh store-prod "cp /opt/store-settle/current/deploy/.env /opt/store-settle/releases/$TS/deploy/.env; rm -f /opt/store-settle/current; ln -s /opt/store-settle/releases/$TS /opt/store-settle/current"`；
+4. `ssh store-prod "cd /opt/store-settle/current/deploy && docker compose build web && docker compose up -d --no-deps web"`（entrypoint 自动 alembic upgrade）；
+5. 公网走查 https://store.visitworld.me（健康/绩效/找平/对账/产品页）；
+6. 改数据前先备份：`ssh store-prod "docker exec deploy-db-1 pg_dump -U store_settle -d store_settle > /opt/store-settle/backups/pre_xxx_$(date +%Y%m%d_%H%M%S).sql"`。
+7. 旧机（8.216.43.224 / `ssh store-old`）仅保留数据供回滚（改回 DNS A 记录 + compose up 即恢复），不参与发布。
 
 ## 已知坑
 - MySQL TEXT 默认值需 `sa.text("('')")`；唯一键含 TEXT 列用 VARCHAR(255)。
