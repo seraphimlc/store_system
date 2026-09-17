@@ -80,9 +80,22 @@ def upload_and_store(filename: str, content: bytes, user_id: int, db) -> ImportF
 
 
 def parse_file(imp: ImportFile, db) -> None:
-    """loader 解析并把行落库；失败 → status=failed + errors（单文件事务）。"""
+    """loader 解析并把行落库；失败 → status=failed + errors（单文件事务）。
+
+    表头识别：优先系统内调用模型（AI 解析列语义），失败/未配置回退规则匹配。
+    """
+    col_override = None
+    ai_note = ""
     try:
-        res = engine_loader.load_workbook(imp.stored_path, filename=imp.file_name)
+        from app.services.ai_visit import ai_parse_visit_cols
+        col_override = ai_parse_visit_cols(imp.stored_path)
+        if col_override:
+            ai_note = f"AI 表头解析: {col_override}"
+    except Exception:  # noqa: BLE001
+        col_override = None
+    try:
+        res = engine_loader.load_workbook(
+            imp.stored_path, filename=imp.file_name, col_override=col_override)
     except Exception as e:  # 损坏/非 zip 等：绝不猜测，标 failed
         imp.status = "failed"
         imp.errors = [f"文件无法解析: {type(e).__name__}: {e}"]
@@ -94,6 +107,8 @@ def parse_file(imp: ImportFile, db) -> None:
         imp.warnings = res.warnings
         db.commit()
         return
+    if ai_note:
+        imp.warnings = (imp.warnings or []) + [ai_note]
 
     persons_cache = {}  # code -> name seen this file（首见写入）
     for row in res.rows:

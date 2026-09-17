@@ -18,12 +18,27 @@ from store_settle.rules import YES_NO_BLANK, parse_modified_jst, parse_submitter
 
 _TEMPLATE = "STORE_TASK_EXCEL_SHEET"
 _DEPLOY_ALIASES = ("Deploy New A+POSM", "NEW A+ POSM")
-_REQUIRED = ("Store ID", "Store Name-Local", "Modified Time",
-             "Submitter", "A+ POSM Visible")
+# Visible 语义列：8 月用 "A+ POSM Visible"(YES/NO/空)；9 月起部分文件用 "Review status"
+# （AUDIT_SUCCESS→YES、AUDIT_FAILED→NO，均参与判重，与 8 月 YES/NO 同构）
+_VISIBLE_ALIASES = ("A+ POSM Visible", "Review status")
+_REQUIRED = ("Store ID", "Store Name-Local", "Modified Time", "Submitter")
 _OPTIONAL_MAP = {
     "Store Name-English": "store_name_en_raw",
     "Record ID": "record_id_raw",
 }
+
+
+def _norm_visible(v: str):
+    """Visible 值规范化：YES/NO/空原样；AUDIT_SUCCESS→YES、AUDIT_FAILED→NO；
+    其它非空（OTHER/NOT_REQUEST 等审核状态）→ YES（视为巡店有效候选，与 8 月
+    「非空白即候选」同构；如需对 OTHER 单独口径再调整）。"""
+    if v in ("YES", "NO", ""):
+        return v
+    if v == "AUDIT_SUCCESS":
+        return "YES"
+    if v == "AUDIT_FAILED":
+        return "NO"
+    return "YES"
 
 
 @dataclass
@@ -82,7 +97,11 @@ def _find_header(ws) -> Optional[tuple]:
     return None
 
 
-def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0) -> LoadResult:
+def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0,
+                  col_override: Optional[dict] = None) -> LoadResult:
+    """解析 Excel。col_override：AI 表头识别给出的列映射
+    {semantic: 1基列号}（如 {"store_id":1,"visible":6,"deploy":7}），
+    提供时优先于按表头名匹配；缺项回退规则匹配。"""
     name = filename or os.path.basename(path)
     res = LoadResult()
     wb = _xlsx_load(path, read_only=False, data_only=True)
@@ -94,7 +113,7 @@ def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0)
         if templates:
             for ws in wb.worksheets:
                 if ws.title.strip().upper() == _TEMPLATE:
-                    if _parse_sheet(ws, name, import_id, res):
+                    if _parse_sheet(ws, name, import_id, res, col_override):
                         return res
                 else:
                     res.ignored_sheets.append({"name": ws.title,
@@ -113,7 +132,7 @@ def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0)
                 found = _find_header(ws)
                 if not parsed_any and has_required(found):
                     parsed_any = True
-                    if _parse_sheet(ws, name, import_id, res):
+                    if _parse_sheet(ws, name, import_id, res, col_override):
                         return res
                 else:
                     res.ignored_sheets.append({"name": ws.title,
@@ -130,7 +149,8 @@ def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0)
         wb.close()
 
 
-def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult) -> bool:
+def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
+                   col_override: Optional[dict] = None) -> bool:
     """解析一个模板 sheet；出错返回 True（文件失败，终止后续）。"""
     found = _find_header(ws)
     if found is None:
@@ -142,16 +162,26 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult) -> bool:
     res.header_row = header_row
     res.data_start_row = header_row + 1
 
-    deploy_col = next((colmap[a] for a in _DEPLOY_ALIASES if a in colmap), None)
-    missing = [req for req in _REQUIRED if req not in colmap]
+    deploy_col = (col_override or {}).get("deploy") or \
+        next((colmap[a] for a in _DEPLOY_ALIASES if a in colmap), None)
+    visible_col = (col_override or {}).get("visible") or \
+        next((colmap[a] for a in _VISIBLE_ALIASES if a in colmap), None)
+    # AI 列映射优先；缺项回退表头名匹配
+    _SEM = {"store_id": "Store ID", "store_name": "Store Name-Local",
+            "modified_time": "Modified Time", "submitter": "Submitter"}
+    col_ids = {}
+    for sem, req in _SEM.items():
+        col_ids[req] = (col_override or {}).get(sem) or colmap.get(req)
+    missing = [req for req in _REQUIRED if col_ids.get(req) is None]
     if deploy_col is None:
         missing.append(_DEPLOY_ALIASES[0])
+    if visible_col is None:
+        missing.append("Visible 列（" + " / ".join(_VISIBLE_ALIASES) + "）")
     if missing:
         res.errors.append(f"{filename}（sheet {ws.title!r}）缺必需列: {', '.join(missing)}")
         res.failed = True
         return True
 
-    col_ids = {req: colmap[req] for req in _REQUIRED}
     opt_cols = {k: colmap.get(k) for k in _OPTIONAL_MAP}
     ncols = ws.max_column
 
@@ -175,13 +205,14 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult) -> bool:
         sid_raw = cell_raw(row, col_ids["Store ID"])          # 保留原文
         name_raw = cell_raw(row, col_ids["Store Name-Local"])  # 保留原文（raw 判重模式依赖）
         mt_raw = cell_raw(row, col_ids["Modified Time"])
-        vis_raw = cell(row, col_ids["A+ POSM Visible"])        # 规范化：trim
+        vis_raw = _norm_visible(cell(row, visible_col))      # 规范化：trim + AUDIT 映射
         dep_raw = cell(row, deploy_col)                        # 规范化：trim
         sub_raw = cell_raw(row, col_ids["Submitter"])          # 保留原文（parse_submitter 自理）
 
-        if vis_raw not in YES_NO_BLANK:
-            res.errors.append(f"{filename} 行{r_i}: A+ POSM Visible 值域异常 {vis_raw!r}"
-                              "（仅接受精确 YES/NO/空白）")
+        if vis_raw is None:
+            res.errors.append(f"{filename} 行{r_i}: Visible 值域异常 "
+                              f"{cell(row, visible_col)!r}"
+                              "（仅接受 YES/NO/空白，或 AUDIT_SUCCESS/AUDIT_FAILED）")
             res.failed = True
             return True
         if dep_raw not in YES_NO_BLANK:
