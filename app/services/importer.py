@@ -169,16 +169,48 @@ def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
 
 
 def delete_file(imp: ImportFile, db) -> None:
-    """删除文件：先删其正式表行（PG 外键 formal_records.raw_record_id），再删 raw/import。
+    """删除文件及其派生数据（PG 外键全量清理，顺序：子表→raw→引用置空→import）。
 
-    删后该月绩效/工资数据建议用「月度重算」刷新。
+    1) 该文件的正式表行（raw_record_id/import_id）；2) 确认任务/人工判定；
+    3) raw_records；4) persons/store_entities/recon_tasks 对它的外键引用置空；
+    5) import 本身。删后该月绩效/工资建议用「月度重算」刷新。
     """
     _ = imp.id  # 旧 run 引用检查已下线
-    from app.models import FormalRecord
-    db.query(FormalRecord).filter(
-        FormalRecord.import_id == imp.id).delete(synchronize_session=False)
+    from app.models import AppealRecord, FormalRecord, Person, StoreEntity
+    from sqlalchemy import or_
+    # 该文件 raw 的 id 集合（子表引用 raw 的外键）
+    raw_ids = [x[0] for x in db.query(RawRecord.id).filter(
+        RawRecord.import_id == imp.id).all()]
+    if raw_ids:
+        db.query(AppealRecord).filter(
+            AppealRecord.raw_record_id.in_(raw_ids)).delete(
+                synchronize_session=False)
+        db.query(FormalRecord).filter(
+            or_(FormalRecord.import_id == imp.id,
+                FormalRecord.raw_record_id.in_(raw_ids))).delete(
+                    synchronize_session=False)
+    # 历史遗留表（模型已下线，但线上仍有 FK）：存在则清理；缺表只回滚该步(savepoint)
+    from sqlalchemy import text as _text
+    for _t in ("confirm_tasks", "manual_decisions"):
+        try:
+            with db.begin_nested():
+                db.execute(_text(f"DELETE FROM {_t} WHERE import_id = :i"),
+                           {"i": imp.id})
+        except Exception:  # noqa: BLE001
+            pass
     db.query(RawRecord).filter(
         RawRecord.import_id == imp.id).delete(synchronize_session=False)
+    # 外键引用置空（保留实体/人员/对账任务本身）
+    db.query(Person).filter(
+        Person.first_seen_import_id == imp.id).update(
+            {"first_seen_import_id": None}, synchronize_session=False)
+    db.query(StoreEntity).filter(
+        StoreEntity.first_seen_import_id == imp.id).update(
+            {"first_seen_import_id": None}, synchronize_session=False)
+    from app.models import ReconTask
+    db.query(ReconTask).filter(
+        ReconTask.source_import_id == imp.id).update(
+            {"source_import_id": None}, synchronize_session=False)
     db.delete(imp)
     db.commit()
     # 物理 blob：有同名 sha 其它 import 时保留；简化：删除失败不阻断
