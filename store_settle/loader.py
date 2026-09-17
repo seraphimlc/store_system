@@ -99,11 +99,24 @@ def _find_header(ws) -> Optional[tuple]:
 
 def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0,
                   col_override: Optional[dict] = None) -> LoadResult:
-    """解析 Excel。col_override：AI 表头识别给出的列映射
-    {semantic: 1基列号}（如 {"store_id":1,"visible":6,"deploy":7}），
-    提供时优先于按表头名匹配；缺项回退规则匹配。"""
+    """解析 Excel。
+
+    col_override（AI 布局）：两种形式——
+    A. {"header_row": 1基表头行号, "cols": {字段: 1基列号}}  —— 完全按 AI 坐标解析，
+       不要求表头含 'Store ID' 字面（通用表头）；
+    B. 旧平铺 {字段: 1基列号}  —— 优先于表头名匹配，表头行仍由规则找。
+    无 col_override：规则解析（兼容既有 wide50/flat9 等已知格式）。
+    """
     name = filename or os.path.basename(path)
     res = LoadResult()
+    # 统一为 (header_row 覆盖, 列覆盖)
+    if isinstance(col_override, dict) and "cols" in col_override:
+        override_layout = (col_override.get("header_row"),
+                           dict(col_override["cols"]))
+    elif isinstance(col_override, dict):
+        override_layout = (None, dict(col_override))
+    else:
+        override_layout = (None, {})
     wb = _xlsx_load(path, read_only=False, data_only=True)
     try:
         templates = [ws for ws in wb.worksheets
@@ -113,35 +126,45 @@ def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0,
         if templates:
             for ws in wb.worksheets:
                 if ws.title.strip().upper() == _TEMPLATE:
-                    if _parse_sheet(ws, name, import_id, res, col_override):
+                    if _parse_sheet(ws, name, import_id, res, override_layout):
                         return res
                 else:
                     res.ignored_sheets.append({"name": ws.title,
                                                "rows": _count_nonempty(ws),
                                                "reason": "非模板 sheet，忽略"})
         else:
-            # 无模板 sheet：回退到"首个含全部必需列的 sheet"，其余全部忽略
-            def has_required(found):
-                if found is None:
-                    return False
-                _, colmap = found
-                return all(req in colmap for req in _REQUIRED) and any(
-                    a in colmap for a in _DEPLOY_ALIASES)
+            # 无模板 sheet：有 AI 布局 → 用第一个非空 sheet；否则回退规则找必需列
             parsed_any = False
-            for ws in wb.worksheets:
-                found = _find_header(ws)
-                if not parsed_any and has_required(found):
-                    parsed_any = True
-                    if _parse_sheet(ws, name, import_id, res, col_override):
-                        return res
-                else:
-                    res.ignored_sheets.append({"name": ws.title,
-                                               "rows": _count_nonempty(ws),
-                                               "reason": "非模板/缺必需列，忽略"})
+            if override_layout[0] is not None:
+                for ws in wb.worksheets:
+                    if _count_nonempty(ws):
+                        if _parse_sheet(ws, name, import_id, res,
+                                        override_layout):
+                            return res
+                        parsed_any = True
+                        break
+            if not parsed_any:
+                def has_required(found):
+                    if found is None:
+                        return False
+                    _, colmap = found
+                    return all(req in colmap for req in _REQUIRED) and any(
+                        a in colmap for a in _DEPLOY_ALIASES)
+                for ws in wb.worksheets:
+                    found = _find_header(ws)
+                    if not parsed_any and has_required(found):
+                        parsed_any = True
+                        if _parse_sheet(ws, name, import_id, res,
+                                        override_layout):
+                            return res
+                    else:
+                        res.ignored_sheets.append({"name": ws.title,
+                                                   "rows": _count_nonempty(ws),
+                                                   "reason": "非模板/缺必需列，忽略"})
             if not parsed_any and not res.errors:
                 res.failed = True
                 res.errors.append("未找到模板 sheet STORE_TASK_EXCEL_SHEET，"
-                                  "且无含必需列的可用 sheet")
+                                  "且无 AI 布局或含必需列的可用 sheet")
             elif parsed_any:
                 res.warnings.append("未找到模板 sheet，已回退使用含必需列的 sheet")
         return res
@@ -150,28 +173,39 @@ def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0,
 
 
 def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
-                   col_override: Optional[dict] = None) -> bool:
-    """解析一个模板 sheet；出错返回 True（文件失败，终止后续）。"""
-    found = _find_header(ws)
-    if found is None:
-        res.errors.append(f"{filename}（sheet {ws.title!r}）: 前 3 行未找到 'Store ID' 表头")
-        res.failed = True
-        return True
-    header_row, colmap = found
+                 override_layout: Optional[tuple] = None) -> bool:
+    """解析一个模板 sheet；出错返回 True（文件失败，终止后续）。
+
+    override_layout = (header_row覆盖(1基)或None, 列覆盖dict)
+    AI 布局模式（header_row 非 None）：完全按 AI 坐标解析，不要求表头含 'Store ID'。
+    """
+    hr_override, col_override = override_layout or (None, {})
+    # 找表头行：AI 给了就用 AI 的；否则规则前 3 行找 'Store ID'
+    if hr_override is not None:
+        header_row = hr_override
+        colmap = {}
+    else:
+        found = _find_header(ws)
+        if found is None:
+            res.errors.append(
+                f"{filename}（sheet {ws.title!r}）: 前 3 行未找到 'Store ID' 表头")
+            res.failed = True
+            return True
+        header_row, colmap = found
     res.parsed_sheets.append(ws.title)
     res.header_row = header_row
     res.data_start_row = header_row + 1
 
-    deploy_col = (col_override or {}).get("deploy") or \
+    deploy_col = col_override.get("deploy") or \
         next((colmap[a] for a in _DEPLOY_ALIASES if a in colmap), None)
-    visible_col = (col_override or {}).get("visible") or \
+    visible_col = col_override.get("visible") or \
         next((colmap[a] for a in _VISIBLE_ALIASES if a in colmap), None)
-    # AI 列映射优先；缺项回退表头名匹配
+    # 列映射：AI 优先；缺项回退表头名匹配
     _SEM = {"store_id": "Store ID", "store_name": "Store Name-Local",
             "modified_time": "Modified Time", "submitter": "Submitter"}
     col_ids = {}
     for sem, req in _SEM.items():
-        col_ids[req] = (col_override or {}).get(sem) or colmap.get(req)
+        col_ids[req] = col_override.get(sem) or colmap.get(req)
     missing = [req for req in _REQUIRED if col_ids.get(req) is None]
     if deploy_col is None:
         missing.append(_DEPLOY_ALIASES[0])

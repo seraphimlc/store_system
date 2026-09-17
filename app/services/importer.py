@@ -87,12 +87,23 @@ def parse_file(imp: ImportFile, db) -> None:
     col_override = None
     ai_note = ""
     try:
-        from app.services.ai_visit import ai_parse_visit_cols
-        col_override = ai_parse_visit_cols(imp.stored_path)
-        if col_override:
-            ai_note = f"AI 表头解析: {col_override}"
-    except Exception:  # noqa: BLE001
+        from app.services.ai_visit import ai_parse_visit_layout
+        layout = ai_parse_visit_layout(imp.stored_path)
+        import sys as _sys
+        print(f"[importer] AI 布局解析 {imp.file_name}: {layout!r}",
+              file=_sys.stderr)
+        if layout:
+            col_override = layout
+            ai_note = (f"AI 布局解析: 表头行{layout['header_row']} "
+                       f"列{layout['cols']}")
+        else:
+            ai_note = "AI 布局解析: 无结果（未配置/失败/不可信），回退规则解析"
+    except Exception as e:  # noqa: BLE001
         col_override = None
+        ai_note = f"AI 布局解析异常: {type(e).__name__}: {e}，回退规则解析"
+        import sys as _sys
+        print(f"[importer] AI 布局解析异常: {type(e).__name__}: {e}",
+              file=_sys.stderr)
     try:
         res = engine_loader.load_workbook(
             imp.stored_path, filename=imp.file_name, col_override=col_override)
@@ -137,7 +148,7 @@ def parse_file(imp: ImportFile, db) -> None:
     imp.total_rows = res.total_rows
     imp.parsed_rows = res.parsed_rows
     imp.status = "parsed"
-    imp.warnings = res.warnings
+    imp.warnings = (res.warnings or []) + ([ai_note] if ai_note else [])
     imp.errors = []
     db.commit()
 
