@@ -131,10 +131,12 @@ def sync_month_perf(db, month: str) -> int:
             continue
         d = agg[r.person_code]
         d["records"] += 1
-        if r.points == 2:
+        _p = r.points or 0
+        if _p == 2:
             d["p2"] += 1
-        else:
+        elif _p == 1:
             d["p1"] += 1
+        # 0 点（规则判定"不计成绩"，如 AUDIT_FAILED 且非 YES）→ 只计店数、不计点
     existing = {r.person_code: r for r in db.query(MonthPerfRecord).filter(
         MonthPerfRecord.month == month).all()}
     # 该月单价：已有行锁存的优先（设置过单价后重物化不冲掉），否则全局默认
@@ -233,10 +235,12 @@ def sync_month_stats(db, month: str) -> int:
         key = (f.person_code, f.japan_date)
         a = agg.setdefault(key, [0, 0, 0])   # records, p1, p2
         a[0] += 1
-        if (f.points or 0) == 2:
+        _p = f.points or 0
+        if _p == 2:
             a[2] += 1
-        else:
+        elif _p == 1:
             a[1] += 1
+        # 0 点行只计店数、不计点（点数规则由文件布局 point_rules 决定）
     for (code, d), (records, p1, p2) in agg.items():
         db.add(PersonDailyStat(person_code=code, ref_date=d, records=records,
                                p1=p1, p2=p2, points=p1 + p2 * 2))

@@ -181,3 +181,43 @@ def test_delete_import_removes_formal_rows(client):
         FormalRecord.import_id == imp.id).count() == 0
     assert db.get(ImportFile, imp.id) is None
     db.close()
+
+
+def test_zero_point_rows_not_counted(client):
+    """0 点行（规则"不计成绩"）：只计店数、不计点，月绩效/日统计一致。"""
+    import app.db as appdb
+    from datetime import date as _d
+    from app.models import (FormalRecord, ImportFile, MonthPerfRecord,
+                            Person, PersonDailyStat, RawRecord)
+    from app.services import perf
+    db = appdb.SessionLocal()
+    db.add(Person(code="911", display_name="零点儿"))
+    imp = ImportFile(file_name="z.xlsx", file_sha256="sha-zero-pt",
+                     file_size=1, stored_path="/tmp/none.xlsx", uploaded_by=1,
+                     status="parsed", parsed_sheets=[], ignored_sheets=[],
+                     warnings=[], errors=[])
+    db.add(imp)
+    db.commit()
+    for i, pts in enumerate((2, 1, 0, 0), start=1):
+        rr = RawRecord(import_id=imp.id, sheet_name="s", excel_row=i,
+                       store_id_raw=f"S{i}", store_name_local_raw=f"店{i}",
+                       modified_raw=f"2026-09-0{i} 10:00:00",
+                       submitter_raw="甲(911)", submitter_code="911",
+                       clean_status="valid")
+        db.add(rr)
+        db.commit()
+        db.add(FormalRecord(import_id=imp.id, raw_record_id=rr.id,
+                            person_code="911", store_id_raw=f"S{i}",
+                            japan_date=_d(2026, 9, i), points=pts))
+    db.commit()
+    perf.sync_month_stats(db, "2026-09")
+    mp = db.query(MonthPerfRecord).filter(
+        MonthPerfRecord.month == "2026-09",
+        MonthPerfRecord.person_code == "911").first()
+    assert mp is not None
+    assert mp.records == 4          # 店数含 0 点行
+    assert mp.points == 2 + 1       # 点数不含 0 点行
+    st = db.query(PersonDailyStat).filter(
+        PersonDailyStat.person_code == "911").all()
+    assert sum(s.points for s in st) == 3
+    db.close()
