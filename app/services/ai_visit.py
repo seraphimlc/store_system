@@ -5,6 +5,7 @@
 loader 完全按此坐标解析（不再要求表头含 'Store ID' 字面）；
 AI 未配置 / 解析失败 / 不可信 → {}（调用方回退规则解析，仅兼容既有已知格式）。
 """
+from typing import Optional
 import json
 import re
 
@@ -139,3 +140,92 @@ def ai_parse_visit_cols(path: str) -> dict:
     """旧接口：只返回列映射 {字段: 1基列号}（表头行取 AI 识别值）。"""
     r = ai_parse_visit_layout(path)
     return r.get("cols", {}) if r else {}
+
+# ---------- 默认口径（来自 .env 配置，非代码硬编码） ----------
+
+def parse_vm_text(text: str) -> Optional[dict]:
+    """"KEY=值, ~=空串" → {KEY: 值}；空输入 → None。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    out = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k, v = k.strip(), v.strip()
+        out["" if k == "~" else k] = v
+    return out or None
+
+
+def parse_pr_text(text: str) -> Optional[list]:
+    """行式文本 → point_rules（每行：可见值|列表 & 投放值|列表 = 点数；~=空、*=任意）。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    out = []
+    for line in __import__("re").split(r"[\n,]+", text.replace("\r", "")):
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        left, pts = line.rsplit("=", 1)
+        pts = pts.strip()
+        if not pts.isdigit():
+            continue
+        left = left.strip()
+        vis_part = left.split("&")[0] if "&" in left else left
+        dep_part = left.split("&")[1] if "&" in left else None
+
+        def _vals(part):
+            if part is None:
+                return None
+            vs = [x.strip() for x in part.split("|") if x.strip() != ""]
+            vs = ["" if x == "~" else x for x in vs]
+            if "*" in vs:
+                return None
+            return vs or None
+
+        out.append({"visible": _vals(vis_part), "deploy": _vals(dep_part),
+                    "points": int(pts)})
+    return out or None
+
+
+def default_layout() -> dict:
+    """从配置（.env）取默认口径布局（供无规则说明时兜底）；未配置 → {}。"""
+    from app.config import get_settings as _st
+    c = _st()
+    vmv = parse_vm_text(c.default_visible_map)
+    vmd = parse_vm_text(c.default_deploy_map)
+    pr = parse_pr_text(c.default_point_rules)
+    if not (vmv or vmd or pr):
+        return {}
+    out = {"source": "default"}
+    vm = {}
+    if vmv:
+        vm["visible"] = vmv
+    if vmd:
+        try:
+            vm["deploy"] = {k: int(v) for k, v in vmd.items()}
+        except (TypeError, ValueError):
+            vm.pop("deploy", None)
+    if vm:
+        out["value_map"] = vm
+    if pr:
+        out["point_rules"] = pr
+    return out
+
+
+def merge_defaults(layout: Optional[dict]) -> Optional[dict]:
+    """AI/规则布局缺 value_map 或 point_rules 时，用配置默认口径补齐。"""
+    if not layout:
+        return None
+    d = default_layout()
+    if not d:
+        return layout
+    out = dict(layout)
+    if not out.get("value_map") and d.get("value_map"):
+        out["value_map"] = d["value_map"]
+    if not out.get("point_rules") and d.get("point_rules"):
+        out["point_rules"] = d["point_rules"]
+    return out

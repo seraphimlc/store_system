@@ -716,8 +716,13 @@ def _sheet_preview(path: str, max_rows: int = 14, max_cols: int = 12):
     """把对账文件前几行文本化，供模型理解表头与样例。"""
     wb = load_workbook(path, read_only=True, data_only=True)
     lines = []
+    _KEY = ("规则", "说明", "rule", "note", "指引", "定义")
     try:
-        for sn in wb.sheetnames[:3]:
+        names = wb.sheetnames
+        # 规则/说明 sheet（任意位置，最多 3 个）→ 全文（限 60 行），供模型提取规则
+        rule_sheets = [n for n in names
+                       if any(k in n.lower() for k in _KEY)][:3]
+        for sn in names[:3]:
             ws = wb[sn]
             rows = list(ws.iter_rows(min_row=1, max_row=max_rows,
                                      values_only=True))
@@ -729,6 +734,17 @@ def _sheet_preview(path: str, max_rows: int = 14, max_cols: int = 12):
                          for c in r[:max_cols]]
                 lines.append(f"R{ri}: " + " | ".join(
                     f"[{ci}]{v}" for ci, v in enumerate(cells)))
+        for sn in rule_sheets:
+            if sn in names[:3]:
+                lines.append(f"# （规则 sheet「{sn}」已在上方预览中）")
+                continue
+            ws = wb[sn]
+            lines.append(f"# 规则/说明 sheet: {sn}")
+            for ri, r in enumerate(ws.iter_rows(min_row=1, max_row=60,
+                                                values_only=True)):
+                cells = [str(c)[:120] if c is not None else "" for c in r[:8]]
+                if any(x.strip() for x in cells):
+                    lines.append("R%d: %s" % (ri, " | ".join(cells)))
     finally:
         wb.close()
     return "\n".join(lines)

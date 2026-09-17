@@ -94,17 +94,28 @@ def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
         used = layout
         ai_note = f"布局(人工纠正): 表头行{layout.get('header_row')} 列{layout.get('cols')}"
     else:
+        from app.services.ai_visit import (ai_parse_visit_layout,
+                                           default_layout, merge_defaults)
         try:
-            from app.services.ai_visit import ai_parse_visit_layout
             used = ai_parse_visit_layout(imp.stored_path) or None
-            if used:
-                ai_note = (f"AI 布局解析: 表头行{used['header_row']} "
-                           f"列{used['cols']} 值语义{used.get('value_map') or {}}")
-            else:
-                ai_note = "AI 布局解析: 无结果（未配置/失败/不可信），回退规则解析"
         except Exception as e:  # noqa: BLE001
             used = None
-            ai_note = f"AI 布局解析异常: {type(e).__name__}: {e}，回退规则解析"
+            ai_note = (f"AI 布局解析异常: {type(e).__name__}: {e}，"
+                       f"回退规则解析")
+        if used:
+            ai_note = (f"AI 布局解析: 表头行{used['header_row']} "
+                       f"列{used['cols']} 值语义{used.get('value_map') or {}} "
+                       f"规则{len(used.get('point_rules') or [])}条")
+        else:
+            # AI 不可用 → 规则解析；用配置默认口径兜底值语义/点数规则
+            used = default_layout() or None
+            if used:
+                ai_note = ("AI 布局解析: 无结果，回退规则解析 + 配置默认口径"
+                           f"（{used.get('point_rules') and len(used['point_rules'])}条规则）")
+            else:
+                ai_note = "AI 布局解析: 无结果，回退规则解析"
+    if used:
+        used = merge_defaults(used)
     try:
         res = engine_loader.load_workbook(
             imp.stored_path, filename=imp.file_name, col_override=used)
