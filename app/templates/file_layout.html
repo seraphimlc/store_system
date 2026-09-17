@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}解析布局 · {{ imp.file_name }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>解析布局（可纠正）</h1>
+  <span class="sub">
+    系统识别/人工纠正的列位置与取值语义；改完点「保存并重新解析」，
+    会清空该文件的原始行并按新布局重新解析、重新判定（不需要重传文件）。
+  </span>
+  <span class="actions">
+    <a class="btn ghost" href="/files">← 文件上传</a>
+    <a class="btn ghost" href="/files/{{ imp.id }}/report">判定明细</a>
+  </span>
+</div>
+
+{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
+{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
+
+<div class="card">
+  <div style="font-weight:600;margin-bottom:.4rem">{{ imp.file_name }}
+    <span class="hint">（{{ imp.parsed_rows }} 行 · {{ imp.status }}）</span></div>
+  {% if imp.warnings %}
+  <div class="hint" style="margin-bottom:.5rem">
+    {% for w in imp.warnings %}· {{ w }}<br>{% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/files/{{ imp.id }}/reparse">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <table style="width:auto">
+      <tr>
+        <th style="text-align:left">表头行号（1=第一行）</th>
+        <td><input type="number" name="header_row" min="1" max="10"
+                   value="{{ layout.header_row or 1 }}" style="width:5rem"></td>
+      </tr>
+      {% for f, label in fields %}
+      <tr>
+        <th style="text-align:left">{{ label }}</th>
+        <td><input type="number" name="{{ f }}" min="0" max="60"
+                   value="{{ (layout.cols or {}).get(f) or '' }}" style="width:5rem">
+          {% if f in required %}<span class="hint">必需</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <th style="text-align:left">有效性取值语义</th>
+        <td><input name="visible_map" style="width:32rem"
+                   value="{{ visible_map_text }}"
+                   placeholder="AUDIT_SUCCESS=candidate, AUDIT_FAILED=blank">
+          <div class="hint">candidate=算巡店有效（参与计点、判重）；blank=不算（空白）</div></td>
+      </tr>
+      <tr>
+        <th style="text-align:left">投放取值点数</th>
+        <td><input name="deploy_map" style="width:32rem"
+                   value="{{ deploy_map_text }}"
+                   placeholder="YES=2, NO=1, =1">
+          <div class="hint">该列每个值对应的点数（2点/1点）</div></td>
+      </tr>
+    </table>
+    <p><button class="btn" type="submit">保存并重新解析</button>
+      <span class="hint">重新解析会按新布局覆盖该文件的行与判定结果</span></p>
+  </form>
+</div>
+{% endblock %}

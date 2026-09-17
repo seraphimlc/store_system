@@ -28,17 +28,28 @@ _OPTIONAL_MAP = {
 }
 
 
-def _norm_visible(v: str):
-    """Visible 值规范化：YES/NO/空原样；AUDIT_SUCCESS→YES、AUDIT_FAILED→NO；
-    其它非空（OTHER/NOT_REQUEST 等审核状态）→ YES（视为巡店有效候选，与 8 月
-    「非空白即候选」同构；如需对 OTHER 单独口径再调整）。"""
-    if v in ("YES", "NO", ""):
-        return v
-    if v == "AUDIT_SUCCESS":
-        return "YES"
-    if v == "AUDIT_FAILED":
-        return "NO"
-    return "YES"
+def _norm_visible(v: str, vm: Optional[dict] = None):
+    """Visible 值规范化（布局 value_map 驱动，不写死业务口径）：
+    - 有 vm：candidate→保留 YES/NO 原样（其它候选值归 YES），blank→""；
+      不在 vm 的值→""（空白，不猜测）并可在页面纠正；
+    - 无 vm（规则兜底）：非空→YES、空→""（最小假设：非空白即候选）。
+    """
+    if vm is None:
+        return "YES" if v else ""
+    tag = vm.get(v)
+    if tag == "candidate":
+        return v if v in ("YES", "NO") else "YES"
+    return ""          # blank / 未知值 → 空白
+
+
+def _norm_deploy(v: str, vm: Optional[dict] = None):
+    """Deploy 值规范化（value_map 驱动）：点>=2→YES(2点)、==1→NO(1点)、0/未知→""(1点)。"""
+    if vm is None:
+        return v if v in ("YES", "NO", "") else ""
+    pt = vm.get(v)
+    if isinstance(pt, int):
+        return "YES" if pt >= 2 else ("NO" if pt == 1 else "")
+    return ""
 
 
 @dataclass
@@ -112,11 +123,12 @@ def load_workbook(path: str, filename: Optional[str] = None, import_id: int = 0,
     # 统一为 (header_row 覆盖, 列覆盖)
     if isinstance(col_override, dict) and "cols" in col_override:
         override_layout = (col_override.get("header_row"),
-                           dict(col_override["cols"]))
+                           dict(col_override["cols"]),
+                           dict(col_override.get("value_map") or {}))
     elif isinstance(col_override, dict):
-        override_layout = (None, dict(col_override))
+        override_layout = (None, dict(col_override), {})
     else:
-        override_layout = (None, {})
+        override_layout = (None, {}, {})
     wb = _xlsx_load(path, read_only=False, data_only=True)
     try:
         templates = [ws for ws in wb.worksheets
@@ -179,7 +191,11 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
     override_layout = (header_row覆盖(1基)或None, 列覆盖dict)
     AI 布局模式（header_row 非 None）：完全按 AI 坐标解析，不要求表头含 'Store ID'。
     """
-    hr_override, col_override = override_layout or (None, {})
+    _ol = override_layout or (None, {}, {})
+    hr_override, col_override = _ol[0], _ol[1]
+    _vm = _ol[2] if len(_ol) > 2 else {}
+    vm_visible = _vm.get("visible") if isinstance(_vm, dict) else None
+    vm_deploy = _vm.get("deploy") if isinstance(_vm, dict) else None
     # 找表头行：AI 给了就用 AI 的；否则规则前 3 行找 'Store ID'
     if hr_override is not None:
         header_row = hr_override
@@ -239,19 +255,14 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
         sid_raw = cell_raw(row, col_ids["Store ID"])          # 保留原文
         name_raw = cell_raw(row, col_ids["Store Name-Local"])  # 保留原文（raw 判重模式依赖）
         mt_raw = cell_raw(row, col_ids["Modified Time"])
-        vis_raw = _norm_visible(cell(row, visible_col))      # 规范化：trim + AUDIT 映射
-        dep_raw = cell(row, deploy_col)                        # 规范化：trim
+        vis_raw = _norm_visible(cell(row, visible_col), vm_visible)   # 布局 value_map 驱动
+        dep_raw = _norm_deploy(cell(row, deploy_col), vm_deploy)
         sub_raw = cell_raw(row, col_ids["Submitter"])          # 保留原文（parse_submitter 自理）
 
         if vis_raw is None:
             res.errors.append(f"{filename} 行{r_i}: Visible 值域异常 "
                               f"{cell(row, visible_col)!r}"
                               "（仅接受 YES/NO/空白，或 AUDIT_SUCCESS/AUDIT_FAILED）")
-            res.failed = True
-            return True
-        if dep_raw not in YES_NO_BLANK:
-            res.errors.append(f"{filename} 行{r_i}: Deploy 值域异常 {dep_raw!r}"
-                              "（仅接受精确 YES/NO/空白）")
             res.failed = True
             return True
         if parse_modified_jst(mt_raw) is None:

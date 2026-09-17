@@ -35,17 +35,22 @@ def ai_parse_visit_layout(path: str) -> dict:
         '{"header_row": 表头行号或null, "store_id": 列号或null, '
         '"store_name": 列号或null, "modified_time": 列号或null, '
         '"submitter": 列号或null, "visible": 列号或null, '
-        '"deploy": 列号或null, "record_id": 列号或null}\n'
+        '"deploy": 列号或null, "record_id": 列号或null, '
+        '"value_map": {"visible": {值: "candidate"或"blank"}, '
+        '"deploy": {值: 点数整数}}}\n'
         "字段含义：store_id=店铺标识列（列名常含 Store ID / Store Basic ID / 店舗ID）；"
         "store_name=店铺名称列（常含 Store Name-Local / 店名）；"
         "modified_time=巡店时间列（常含 Modified Time，值为 YYYY-MM-DD HH:MM:SS）；"
         "submitter=巡店人列（常含 Submitter / Agent，值为 '姓名(编号)'）；"
-        "visible=有效性标记列：列名可能是 A+ POSM Visible(值 YES/NO)，"
-        "或 Review status(值 AUDIT_SUCCESS/AUDIT_FAILED/OTHER/NOT_REQUEST)，"
-        "或包含 Visible/Status 的其它名字——**按列的值形态判断**，不要只看列名；"
-        "deploy=投放标记列（常含 Deploy New A+POSM / NEW A+ POSM，值为 YES/NO/空）；"
-        "record_id=记录编号列（常含 Record ID，可选）。"
-        "列号从0开始（第一列是0）。无法确定给 null。除 JSON 外不要输出任何文字。\n\n"
+        "visible=有效性标记列：列名可能是 A+ POSM Visible(值 YES/NO)、"
+        "Review status(值 AUDIT_SUCCESS/AUDIT_FAILED/OTHER 等)，或含 Visible/Status 的"
+        "其它名字——**按列里的值形态判断**，不要只看列名；"
+        "deploy=投放标记列（常含 Deploy New A+POSM，值为 YES/NO/空）。\n"
+        "value_map 说明：按预览里的**实际值**给出——visible 的每个值标 candidate"
+        "（算巡店有效、参与计点）或 blank（空白、不算巡店）；deploy 的每个值给点数"
+        "（通常投放成功=2、未投放/空白=1）。空字符串值也要列出。"
+        "record_id=记录编号列（可选）。列号从0开始（第一列是0）。无法确定给 null。"
+        "除 JSON 外不要输出任何文字。\n\n"
         + preview)
     try:
         text = _chat(prompt)
@@ -73,7 +78,34 @@ def ai_parse_visit_layout(path: str) -> dict:
         # 可信校验：六项必需字段全部定位到
         if any(cols.get(f) is None for f in _VISIT_REQUIRED):
             return {}
-        return {"header_row": hr + 1, "cols": cols}
+        # 值语义建议（模型给，人工可改）：visible→candidate/blank；deploy→点数
+        vm_in = data.get("value_map") if isinstance(data.get("value_map"), dict) else {}
+        value_map = {}
+        vis = vm_in.get("visible")
+        if isinstance(vis, dict):
+            vv = {}
+            for k, v in vis.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    continue
+                v = v.strip().lower()
+                if v in ("candidate", "blank"):
+                    vv[k.strip()] = v
+            if vv:
+                value_map["visible"] = vv
+        dep = vm_in.get("deploy")
+        if isinstance(dep, dict):
+            dv = {}
+            for k, v in dep.items():
+                if not isinstance(k, str):
+                    continue
+                if isinstance(v, bool) or not isinstance(v, int):
+                    continue
+                if 0 <= v <= 9:
+                    dv[k.strip()] = v
+            if dv:
+                value_map["deploy"] = dv
+        return {"header_row": hr + 1, "cols": cols, "value_map": value_map,
+                "source": "ai"}
     except Exception:  # noqa: BLE001
         return {}
 

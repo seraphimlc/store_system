@@ -140,3 +140,141 @@ def delete_file(fid: int, request: Request, csrf_token: str = Form(...),
     except importer.UploadError as e:
         raise HTTPException(409, str(e))
     return RedirectResponse("/files", status_code=303)
+
+
+# ---------- 解析布局：查看/纠正/重新解析 ----------
+
+def _vm_text(vm: Optional[dict]) -> str:
+    """value_map dict → "KEY=值,KEY2=值2" 文本（KEY 空字符串显示为 ~）。"""
+    if not vm:
+        return ""
+    return ", ".join(f"{('~' if k == '' else k)}={v}" for k, v in vm.items())
+
+
+def _parse_vm(text: str) -> Optional[dict]:
+    """"KEY=值, ~=值" → {KEY: 值/值 str}；空输入 → None（使用默认）。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    out = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k, v = k.strip(), v.strip()
+        if k == "~":
+            k = ""
+        out[k] = v
+    return out or None
+
+
+@router.get("/files/{fid}/layout", response_class=HTMLResponse)
+def file_layout(fid: int, request: Request,
+                user: Optional[User] = Depends(require_login),
+                db: Session = Depends(get_db)):
+    """解析布局查看/纠正页（人工可改列号与取值语义后重新解析）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    imp = db.get(ImportFile, fid)
+    if imp is None:
+        return RedirectResponse("/files?msg=文件不存在", status_code=303)
+    layout = imp.layout or {}
+    fields = [
+        ("store_id", "店铺 ID 列"), ("store_name", "店铺名列"),
+        ("modified_time", "巡店时间列"), ("submitter", "提交人列"),
+        ("visible", "有效性列"), ("deploy", "投放列"),
+        ("record_id", "记录编号列(可选)"),
+    ]
+    vm = layout.get("value_map") or {}
+    return templates.TemplateResponse("file_layout.html", {
+        "request": request, "current_user": user, "imp": imp,
+        "layout": layout, "fields": fields,
+        "required": ("store_id", "store_name", "modified_time", "submitter",
+                     "visible", "deploy"),
+        "visible_map_text": _vm_text(vm.get("visible")),
+        "deploy_map_text": _vm_text(vm.get("deploy")),
+        "msg": "", "err": "",
+    })
+
+
+@router.post("/files/{fid}/reparse", response_class=HTMLResponse)
+def file_reparse(fid: int, request: Request,
+                 csrf_token: str = Form(...),
+                 header_row: int = Form(1),
+                 store_id: int = Form(0), store_name: int = Form(0),
+                 modified_time: int = Form(0), submitter: int = Form(0),
+                 visible: int = Form(0), deploy: int = Form(0),
+                 record_id: int = Form(0),
+                 visible_map: str = Form(""), deploy_map: str = Form(""),
+                 user: Optional[User] = Depends(require_login),
+                 db: Session = Depends(get_db)):
+    """按人工纠正的布局重新解析：删旧 raw → parse_file(layout) → 判定。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    imp = db.get(ImportFile, fid)
+    if imp is None:
+        return RedirectResponse("/files?msg=文件不存在", status_code=303)
+    cols = {"store_id": store_id, "store_name": store_name,
+            "modified_time": modified_time, "submitter": submitter,
+            "visible": visible, "deploy": deploy, "record_id": record_id}
+    cols = {k: v for k, v in cols.items() if v and v > 0}
+    if not all(cols.get(k) for k in
+               ("store_id", "store_name", "modified_time", "submitter",
+                "visible", "deploy")):
+        return templates.TemplateResponse("file_layout.html", {
+            "request": request, "current_user": user, "imp": imp,
+            "layout": imp.layout or {}, "fields": [
+                ("store_id", "店铺 ID 列"), ("store_name", "店铺名列"),
+                ("modified_time", "巡店时间列"), ("submitter", "提交人列"),
+                ("visible", "有效性列"), ("deploy", "投放列"),
+                ("record_id", "记录编号列(可选)")],
+            "required": ("store_id", "store_name", "modified_time",
+                         "submitter", "visible", "deploy"),
+            "visible_map_text": visible_map, "deploy_map_text": deploy_map,
+            "msg": "", "err": "必需列（店ID/店名/时间/提交人/有效性/投放）都要填列号",
+        }, status_code=400)
+    value_map = {}
+    vmv = _parse_vm(visible_map)
+    if vmv:
+        value_map["visible"] = vmv
+    vmd = _parse_vm(deploy_map)
+    if vmd:
+        try:
+            value_map["deploy"] = {k: int(v) for k, v in vmd.items()}
+        except (TypeError, ValueError):
+            return HTMLResponse("投放取值点数需是整数（如 YES=2, NO=1, ~=1）",
+                                status_code=400)
+    layout = {"header_row": max(1, header_row), "cols": cols,
+              "value_map": value_map, "source": "manual"}
+    try:
+        # 清旧 raw（判定明细/申诉随之重建）
+        db.query(RawRecord).filter(RawRecord.import_id == imp.id).delete()
+        imp.parsed_sheets = []
+        imp.total_rows = 0
+        imp.parsed_rows = 0
+        imp.status = "uploaded"
+        imp.errors = []
+        db.commit()
+        from app.services import importer
+        importer.parse_file(imp, db, layout=layout)
+        if imp.status == "failed":
+            return RedirectResponse(
+                f"/files/{fid}/layout?msg=重新解析失败：{'；'.join(imp.errors[:3])}",
+                status_code=303)
+        from app.services import flow as _v3
+        r = _v3.process_import(db, imp.id)
+        j = r["judge"]
+        from urllib.parse import quote
+        return RedirectResponse(
+            f"/files/{fid}/layout?msg=" + quote(
+                f"已按新布局重新解析 {imp.parsed_rows} 行；判定：有效 "
+                f"{j['valid']} / 可申诉 {j['master_late']} / 从档 "
+                f"{j['from_sub']} / 跨文件同日 {j['cross_file_dup']}"),
+            status_code=303)
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        return RedirectResponse(f"/files/{fid}/layout?msg=重新解析异常：{e}",
+                                status_code=303)

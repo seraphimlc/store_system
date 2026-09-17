@@ -4,6 +4,7 @@
 upload_and_store: 校验 + sha256 防重 + 落盘
 parse_file: loader 解析 → 单事务写 imports 诊断 + raw_records + persons 补全
 """
+from typing import Optional
 import hashlib
 import os
 import re
@@ -79,34 +80,34 @@ def upload_and_store(filename: str, content: bytes, user_id: int, db) -> ImportF
     return imp
 
 
-def parse_file(imp: ImportFile, db) -> None:
+def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
     """loader 解析并把行落库；失败 → status=failed + errors（单文件事务）。
 
-    表头识别：优先系统内调用模型（AI 解析列语义），失败/未配置回退规则匹配。
+    布局（表头行+列坐标+值语义）：
+    - layout 显式传入（人工纠正 reparse）→ 用之；
+    - 否则系统内调用模型识别（通用能力），失败/未配置回退规则。
+    解析成功后把所用布局写入 imp.layout（页面可见/可纠正）。
     """
-    col_override = None
     ai_note = ""
-    try:
-        from app.services.ai_visit import ai_parse_visit_layout
-        layout = ai_parse_visit_layout(imp.stored_path)
-        import sys as _sys
-        print(f"[importer] AI 布局解析 {imp.file_name}: {layout!r}",
-              file=_sys.stderr)
-        if layout:
-            col_override = layout
-            ai_note = (f"AI 布局解析: 表头行{layout['header_row']} "
-                       f"列{layout['cols']}")
-        else:
-            ai_note = "AI 布局解析: 无结果（未配置/失败/不可信），回退规则解析"
-    except Exception as e:  # noqa: BLE001
-        col_override = None
-        ai_note = f"AI 布局解析异常: {type(e).__name__}: {e}，回退规则解析"
-        import sys as _sys
-        print(f"[importer] AI 布局解析异常: {type(e).__name__}: {e}",
-              file=_sys.stderr)
+    used = None
+    if layout:
+        used = layout
+        ai_note = f"布局(人工纠正): 表头行{layout.get('header_row')} 列{layout.get('cols')}"
+    else:
+        try:
+            from app.services.ai_visit import ai_parse_visit_layout
+            used = ai_parse_visit_layout(imp.stored_path) or None
+            if used:
+                ai_note = (f"AI 布局解析: 表头行{used['header_row']} "
+                           f"列{used['cols']} 值语义{used.get('value_map') or {}}")
+            else:
+                ai_note = "AI 布局解析: 无结果（未配置/失败/不可信），回退规则解析"
+        except Exception as e:  # noqa: BLE001
+            used = None
+            ai_note = f"AI 布局解析异常: {type(e).__name__}: {e}，回退规则解析"
     try:
         res = engine_loader.load_workbook(
-            imp.stored_path, filename=imp.file_name, col_override=col_override)
+            imp.stored_path, filename=imp.file_name, col_override=used)
     except Exception as e:  # 损坏/非 zip 等：绝不猜测，标 failed
         imp.status = "failed"
         imp.errors = [f"文件无法解析: {type(e).__name__}: {e}"]
@@ -150,6 +151,8 @@ def parse_file(imp: ImportFile, db) -> None:
     imp.status = "parsed"
     imp.warnings = (res.warnings or []) + ([ai_note] if ai_note else [])
     imp.errors = []
+    if used:
+        imp.layout = dict(used)
     db.commit()
 
 

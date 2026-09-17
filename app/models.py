@@ -53,6 +53,10 @@ class ImportFile(Base):
     format = Column(String(16), nullable=True)
     header_row = Column(Integer, nullable=True)
     data_start_row = Column(Integer, nullable=True)
+    # 解析布局（AI 识别 + 人工可纠正）：
+    # {"header_row": 2, "cols": {...}, "value_map": {"visible": {...}, "deploy": {...}},
+    #  "source": "ai"|"manual"|"rule"}
+    layout = Column(JSON, nullable=True)
     parsed_sheets = Column(JSON, nullable=False, default=list)
     ignored_sheets = Column(JSON, nullable=False, default=list)
     total_rows = Column(Integer, nullable=False, default=0)

@@ -50,6 +50,8 @@
         {% if f.status == 'parsed' %}
           <a class="btn ghost" style="padding:.2rem .6rem"
              href="/files/{{ f.id }}/report">判定明细</a>
+          <a class="btn ghost" style="padding:.2rem .6rem"
+             href="/files/{{ f.id }}/layout">解析布局</a>
           {% if current_user.role == 'admin' %}
           {% if st and not st.formal and not st.pend_appeal %}
           <form method="post" action="/files/{{ f.id }}/finalize">
