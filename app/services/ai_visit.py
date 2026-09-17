@@ -58,7 +58,9 @@ def ai_parse_visit_layout(path: str) -> dict:
         "除 JSON 外不要输出任何文字。\n\n"
         + preview)
     try:
-        text = _chat(prompt)
+        # 布局解析只需一个短 JSON：用小 token（渠道上 8000 约 1 分钟稳定返回；
+        # 380K 会因思考过长而极慢/挂起，故此处显式限定）
+        text = _chat(prompt, max_tokens=8000, timeout=300)
         data = _extract_json(text)
         if not isinstance(data, dict):
             return {}

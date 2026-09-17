@@ -86,7 +86,7 @@ def test_ai_parse_visit_layout_monkeypatched(variant_file, monkeypatch):
     from app.services.ai_visit import ai_parse_visit_layout
 
     monkeypatch.setattr(av, "_ai_configured", lambda: True)
-    monkeypatch.setattr(av, "_chat", lambda prompt: (
+    monkeypatch.setattr(av, "_chat", lambda prompt, **kw: (
         '{"header_row": 1, "store_id": 2, "store_name": 1, '
         '"modified_time": 4, "submitter": 3, "visible": 5, "deploy": 0, '
         '"record_id": null}'))
@@ -97,14 +97,14 @@ def test_ai_parse_visit_layout_monkeypatched(variant_file, monkeypatch):
     assert out["source"] == "ai"
 
     # 模型漏报必需字段 → 不可信 → {}
-    monkeypatch.setattr(av, "_chat", lambda prompt: (
+    monkeypatch.setattr(av, "_chat", lambda prompt, **kw: (
         '{"header_row": 1, "store_id": 2, "store_name": 1, '
         '"modified_time": null, "submitter": null, "visible": 5, '
         '"deploy": 0}'))
     assert ai_parse_visit_layout(variant_file) == {}
 
     # 模型返回乱码 → {}
-    monkeypatch.setattr(av, "_chat", lambda prompt: "not json")
+    monkeypatch.setattr(av, "_chat", lambda prompt, **kw: "not json")
     assert ai_parse_visit_layout(variant_file) == {}
 
     # 未配置 AI → {}
@@ -249,7 +249,7 @@ def test_ai_visit_reasoning_model_output(monkeypatch, tmp_path):
                "AUDIT_SUCCESS", "YES"])
     wb.save(p)
     monkeypatch.setattr(av, "_ai_configured", lambda: True)
-    monkeypatch.setattr(av, "_chat", lambda prompt: (
+    monkeypatch.setattr(av, "_chat", lambda prompt, **kw: (
         '先分析各列含义…… {"header_row": 0, "store_id": 0, "store_name": 1, '
         '"modified_time": 2, "submitter": 3, "visible": 4, "deploy": 5, '
         '"value_map": {"visible": {"AUDIT_SUCCESS": "candidate"}, '
