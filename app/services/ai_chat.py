@@ -11,7 +11,9 @@ import httpx
 def _cfg():
     return {"key": os.environ.get("AI_API_KEY", ""),
             "base": os.environ.get("AI_BASE_URL", "").rstrip("/"),
-            "model": os.environ.get("AI_MODEL", "gpt-4o-mini")}
+            "model": os.environ.get("AI_MODEL", "gpt-4o-mini"),
+            # 输出上限：重推理模型思考很长，需大 token 才轮到正式答案
+            "max_tokens": int(os.environ.get("AI_MAX_TOKENS", "380000") or 380000)}
 
 
 def configured() -> bool:
@@ -19,14 +21,17 @@ def configured() -> bool:
     return bool(c["key"] and c["base"])
 
 
-def chat(prompt: str, timeout: int = 180, retries: int = 2,
-         max_tokens: int = 2500) -> str:
+def chat(prompt: str, timeout: int = 600, retries: int = 1,
+         max_tokens: int = None) -> str:
     """调用模型，返回文本；失败自动重试（共 retries+1 次），仍失败抛异常。
 
-    兼容推理型模型：思考在 reasoning_content、content 可能为空 → 返回
-    reasoning_content 让调用方用 extract_json 提取。
+    兼容推理型模型：思考很长 → max_tokens 取配置（默认 380000）；
+    思考在 reasoning_content、content 可能为空 → 返回 reasoning_content
+    让调用方用 extract_json 提取。
     """
     c = _cfg()
+    if max_tokens is None:
+        max_tokens = c.get("max_tokens") or 380000
     last = None
     for i in range(retries + 1):
         try:
