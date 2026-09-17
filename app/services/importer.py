@@ -169,8 +169,16 @@ def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
 
 
 def delete_file(imp: ImportFile, db) -> None:
+    """删除文件：先删其正式表行（PG 外键 formal_records.raw_record_id），再删 raw/import。
+
+    删后该月绩效/工资数据建议用「月度重算」刷新。
+    """
     _ = imp.id  # 旧 run 引用检查已下线
-    db.query(RawRecord).filter(RawRecord.import_id == imp.id).delete()
+    from app.models import FormalRecord
+    db.query(FormalRecord).filter(
+        FormalRecord.import_id == imp.id).delete(synchronize_session=False)
+    db.query(RawRecord).filter(
+        RawRecord.import_id == imp.id).delete(synchronize_session=False)
     db.delete(imp)
     db.commit()
     # 物理 blob：有同名 sha 其它 import 时保留；简化：删除失败不阻断

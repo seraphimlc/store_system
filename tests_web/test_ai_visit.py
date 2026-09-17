@@ -149,3 +149,35 @@ def test_point_for_combination_rules():
     # 无规则 → 默认口径（boundary 后 deploy=YES→2）
     assert point_for(date(2026, 9, 1), "YES", b) == 2
     assert point_for(date(2026, 9, 1), "NO", b) == 1
+
+
+def test_delete_import_removes_formal_rows(client):
+    """删除已入表的文件：正式表行一并删除（PG 外键约束下的正确行为）。"""
+    import app.db as appdb
+    from app.models import FormalRecord, ImportFile, RawRecord
+    from app.services import importer
+    db = appdb.SessionLocal()
+    imp = ImportFile(file_name="t.xlsx", file_sha256="sha-del-test",
+                     file_size=1, stored_path="/tmp/none.xlsx", uploaded_by=1,
+                     status="parsed", parsed_sheets=[], ignored_sheets=[],
+                     warnings=[], errors=[])
+    db.add(imp)
+    db.commit()
+    rr = RawRecord(import_id=imp.id, sheet_name="s", excel_row=2,
+                   store_id_raw="S1", store_name_local_raw="店A",
+                   modified_raw="2026-09-01 10:00:00",
+                   submitter_raw="甲(111)", submitter_code="111",
+                   clean_status="valid")
+    db.add(rr)
+    db.commit()
+    from datetime import date as _date
+    db.add(FormalRecord(import_id=imp.id, raw_record_id=rr.id,
+                        person_code="111", store_id_raw="S1",
+                        japan_date=_date(2026, 9, 1), points=1))
+    db.commit()
+    importer.delete_file(imp, db)
+    assert db.query(RawRecord).filter(RawRecord.import_id == imp.id).count() == 0
+    assert db.query(FormalRecord).filter(
+        FormalRecord.import_id == imp.id).count() == 0
+    assert db.get(ImportFile, imp.id) is None
+    db.close()
