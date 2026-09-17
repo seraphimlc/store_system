@@ -249,12 +249,19 @@ def test_ai_visit_reasoning_model_output(monkeypatch, tmp_path):
                "AUDIT_SUCCESS", "YES"])
     wb.save(p)
     monkeypatch.setattr(av, "_ai_configured", lambda: True)
-    monkeypatch.setattr(av, "_chat", lambda prompt, **kw: (
-        '先分析各列含义…… {"header_row": 0, "store_id": 0, "store_name": 1, '
-        '"modified_time": 2, "submitter": 3, "visible": 4, "deploy": 5, '
-        '"value_map": {"visible": {"AUDIT_SUCCESS": "candidate"}, '
-        '"deploy": {"YES": 2}}} 完成'))
+    calls = {"n": 0}
+
+    def fake_chat(prompt, **kw):
+        calls["n"] += 1
+        if "header_row" in prompt:      # 第一步：列识别
+            return ('先分析…… {"header_row": 0, "store_id": 0, "store_name": 1, '
+                    '"modified_time": 2, "submitter": 3, "visible": 4, "deploy": 5}')
+        return ('{"point_rules": [{"visible": ["AUDIT_SUCCESS"], '
+                '"deploy": ["YES"], "points": 2}]}')
+
+    monkeypatch.setattr(av, "_chat", fake_chat)
     out = av.ai_parse_visit_layout(p)
+    assert calls["n"] >= 1                  # 列识别至少一次（该文件无规则页）
     assert out["cols"]["store_id"] == 1
     assert out["cols"]["visible"] == 5
-    assert out["value_map"]["deploy"] == {"YES": 2}
+    assert out["source"] == "ai"
