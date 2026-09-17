@@ -37,7 +37,9 @@ def ai_parse_visit_layout(path: str) -> dict:
         '"submitter": 列号或null, "visible": 列号或null, '
         '"deploy": 列号或null, "record_id": 列号或null, '
         '"value_map": {"visible": {值: "candidate"或"blank"}, '
-        '"deploy": {值: 点数整数}}}\n'
+        '"deploy": {值: 点数整数}}, '
+        '"point_rules": [{"visible": [值...], "deploy": [值...], '
+        '"points": 整数}, ...]}\n'
         "字段含义：store_id=店铺标识列（列名常含 Store ID / Store Basic ID / 店舗ID）；"
         "store_name=店铺名称列（常含 Store Name-Local / 店名）；"
         "modified_time=巡店时间列（常含 Modified Time，值为 YYYY-MM-DD HH:MM:SS）；"
@@ -46,6 +48,7 @@ def ai_parse_visit_layout(path: str) -> dict:
         "Review status(值 AUDIT_SUCCESS/AUDIT_FAILED/OTHER 等)，或含 Visible/Status 的"
         "其它名字——**按列里的值形态判断**，不要只看列名；"
         "deploy=投放标记列（常含 Deploy New A+POSM，值为 YES/NO/空）。\n"
+        "若预览里出现**规则/说明 sheet**（如名为「规则」「说明」「rules」），按其文字说明提取点数组合规则 point_rules（形如 [{\"visible\": [\"OTHER\",\"AUDIT_SUCCESS\"], \"deploy\": [\"YES\"], \"points\": 2}, ...]；visible/deploy 是该组合下的取值列表（含空字符串），points 是点数整数；规则未覆盖的组合即不计成绩）；没有规则 sheet 给 []。\n"
         "value_map 说明：按预览里的**实际值**给出——visible 的每个值标 candidate"
         "（算巡店有效、参与计点）或 blank（空白、不算巡店）；deploy 的每个值给点数"
         "（通常投放成功=2、未投放/空白=1）。空字符串值也要列出。"
@@ -104,8 +107,29 @@ def ai_parse_visit_layout(path: str) -> dict:
                     dv[k.strip()] = v
             if dv:
                 value_map["deploy"] = dv
+        # 点数组合规则（规则 sheet 提取；未覆盖组合=不计成绩）
+        pr_out = []
+        pr_in = data.get("point_rules")
+        if isinstance(pr_in, list):
+            for it in pr_in:
+                if not isinstance(it, dict):
+                    continue
+                pt = it.get("points")
+                if isinstance(pt, bool) or not isinstance(pt, int):
+                    continue
+                if not (0 <= pt <= 9):
+                    continue
+                rule = {"points": pt}
+                for k in ("visible", "deploy"):
+                    v = it.get(k)
+                    if isinstance(v, list):
+                        rule[k] = [str(x).strip() for x in v
+                                   if isinstance(x, str)]
+                    elif v is None:
+                        rule[k] = None
+                pr_out.append(rule)
         return {"header_row": hr + 1, "cols": cols, "value_map": value_map,
-                "source": "ai"}
+                "point_rules": pr_out, "source": "ai"}
     except Exception:  # noqa: BLE001
         return {}
 

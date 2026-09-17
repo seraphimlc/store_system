@@ -51,10 +51,10 @@ def test_loader_ai_layout_mode(variant_file):
     assert r0.store_name_local_raw == "A店"
     assert r0.modified_raw == "2026-09-03 09:15:00"
     assert r0.submitter_code == "111"
-    assert r0.visible_raw == "YES"      # AUDIT_SUCCESS → candidate
+    assert r0.visible_raw == "AUDIT_SUCCESS"  # raw 保留原值
     assert r0.deploy_raw == "YES"
-    assert res.rows[1].visible_raw == "YES"    # OTHER → candidate
-    assert res.rows[2].visible_raw == ""       # AUDIT_FAILED → blank（不计）
+    assert res.rows[1].visible_raw == "OTHER"
+    assert res.rows[2].visible_raw == "AUDIT_FAILED"
 
 
 def test_loader_value_map_controls_visibility(variant_file):
@@ -68,7 +68,16 @@ def test_loader_value_map_controls_visibility(variant_file):
                                         "AUDIT_FAILED": "candidate"},
                             "deploy": {"YES": 2, "": 1}}}
     res = load_workbook(variant_file, col_override=layout)
-    assert res.rows[2].visible_raw == "YES"   # 口径由配置控制（页面可纠正）
+    assert res.rows[2].visible_raw == "AUDIT_FAILED"  # 原值保留
+    # 候选判定由 value_map 决定（judge 阶段）
+    from store_settle.rules import visible_is_candidate
+    vm_blank = {"AUDIT_SUCCESS": "candidate", "OTHER": "candidate",
+                "AUDIT_FAILED": "blank"}
+    assert visible_is_candidate("AUDIT_SUCCESS", vm_blank) is True
+    assert visible_is_candidate("AUDIT_FAILED", vm_blank) is False
+    vm_all = {"AUDIT_SUCCESS": "candidate", "OTHER": "candidate",
+              "AUDIT_FAILED": "candidate"}
+    assert visible_is_candidate("AUDIT_FAILED", vm_all) is True   # 口径可配置
 
 
 def test_ai_parse_visit_layout_monkeypatched(variant_file, monkeypatch):
@@ -115,4 +124,28 @@ def test_rule_fallback_still_works(tmp_path):
     ])
     res = load_workbook(p)
     assert not res.failed and res.parsed_rows == 1
-    assert res.rows[0].visible_raw == "YES"
+    assert res.rows[0].visible_raw == "AUDIT_SUCCESS"  # 原值保留（候选在 judge 判定）
+
+
+def test_point_for_combination_rules():
+    """点数组合规则：AUDIT_FAILED+非YES 不计成绩；FAILED+YES 仍 2 点。"""
+    from datetime import date
+    from store_settle.rules import point_for
+    b = date(2026, 7, 9)
+    rules = [
+        {"visible": ["OTHER", "AUDIT_SUCCESS"], "deploy": ["YES"], "points": 2},
+        {"visible": ["OTHER", "AUDIT_SUCCESS"], "deploy": ["NO", ""], "points": 1},
+        {"visible": ["AUDIT_FAILED"], "deploy": ["YES"], "points": 2},
+        {"visible": ["AUDIT_FAILED"], "deploy": ["NO", ""], "points": 0},
+    ]
+    assert point_for(date(2026, 9, 1), "YES", b, "AUDIT_SUCCESS", rules) == 2
+    assert point_for(date(2026, 9, 1), "", b, "AUDIT_SUCCESS", rules) == 1
+    assert point_for(date(2026, 9, 1), "YES", b, "OTHER", rules) == 2
+    assert point_for(date(2026, 9, 1), "YES", b, "AUDIT_FAILED", rules) == 2
+    assert point_for(date(2026, 9, 1), "NO", b, "AUDIT_FAILED", rules) == 0
+    assert point_for(date(2026, 9, 1), "", b, "AUDIT_FAILED", rules) == 0
+    # 未覆盖组合 → 0
+    assert point_for(date(2026, 9, 1), "?", b, "OTHER", rules) == 0
+    # 无规则 → 默认口径（boundary 后 deploy=YES→2）
+    assert point_for(date(2026, 9, 1), "YES", b) == 2
+    assert point_for(date(2026, 9, 1), "NO", b) == 1

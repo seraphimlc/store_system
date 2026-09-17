@@ -55,6 +55,16 @@
                    placeholder="YES=2, NO=1, =1">
           <div class="hint">该列每个值对应的点数（2点/1点）</div></td>
       </tr>
+      <tr>
+        <th style="text-align:left">点数组合规则</th>
+        <td><textarea name="point_rules_text" rows="6"
+                   style="width:32rem;font-family:monospace;font-size:.8rem"
+                   placeholder="OTHER|AUDIT_SUCCESS&amp;YES=2&#10;OTHER|AUDIT_SUCCESS&amp;NO|~=1&#10;AUDIT_FAILED&amp;YES=2&#10;AUDIT_FAILED&amp;NO|~=0">{{ point_rules_text }}</textarea>
+          <div class="hint">每行：<b>可见值|列表 &amp; 投放值|列表 = 点数</b>；~ 表示空字符串、* 表示任意。
+            文件自带「规则」说明时由模型自动提取，这里可改；未被规则覆盖的组合=不计成绩（0 点）。
+            <br>例（9 月口径）：OTHER|AUDIT_SUCCESS&amp;YES=2 /
+            OTHER|AUDIT_SUCCESS&amp;NO|~=1 / AUDIT_FAILED&amp;YES=2 / AUDIT_FAILED&amp;NO|~=0</div></td>
+      </tr>
     </table>
     <p><button class="btn" type="submit">保存并重新解析</button>
       <span class="hint">重新解析会按新布局覆盖该文件的行与判定结果</span></p>

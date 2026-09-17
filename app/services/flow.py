@@ -17,6 +17,7 @@ import unicodedata
 from datetime import datetime
 
 from app.db import get_db  # noqa: F401
+from store_settle.rules import visible_is_candidate  # noqa: E402
 from app.models import (FormalRecord, ImportFile, Person, RawRecord,
                         StoreEntity, User)
 
@@ -100,13 +101,17 @@ def promote_or_link_entities(db, cache: dict, imp: ImportFile) -> dict:
     """
     # 每个实体最早可见行 id（全库，仅 YES/NO）
     if cache:
-        rows = db.query(RawRecord.store_id_raw, RawRecord.id, RawRecord.modified_raw) \
-            .filter(RawRecord.store_id_raw.in_([e.store_id_raw for e in cache.values()]),
-                    RawRecord.visible_raw.in_(("YES", "NO"))).all()
+        rows = db.query(RawRecord.store_id_raw, RawRecord.id,
+                        RawRecord.modified_raw, RawRecord.visible_raw) \
+            .filter(RawRecord.store_id_raw.in_(
+                [e.store_id_raw for e in cache.values()])).all()
     else:
         rows = []
     best = {}
-    for sid, rid, m in rows:
+    for _row in rows:
+        sid, rid, m = _row[0], _row[1], _row[2]
+        if not visible_is_candidate(_row[3] if len(_row) > 3 else None):
+            continue
         if m is None:
             continue
         cur = best.get(sid.strip())
@@ -163,7 +168,7 @@ def update_earliest_anchor(db, imp: ImportFile):
     rows = db.query(RawRecord).filter(RawRecord.store_id_raw.in_(sids)).all()
     earliest = {}
     for rr in rows:
-        if (rr.visible_raw or "").strip() not in ("YES", "NO"):
+        if not visible_is_candidate(rr.visible_raw):
             continue
         sid = rr.store_id_raw.strip()
         cur = earliest.get(sid)
@@ -192,10 +197,14 @@ def _name_month_min(db):
     """
     rows = db.query(RawRecord.id, RawRecord.store_id_raw,
                     RawRecord.store_name_local_raw, RawRecord.modified_raw,
-                    RawRecord.visible_raw).all()
+                    RawRecord.visible_raw, RawRecord.import_id).all()
+    _vmx = {}
+    for _i in db.query(ImportFile).all():
+        _vmx[_i.id] = (((_i.layout or {}).get("value_map") or {})
+                       .get("visible"))
     mm = {}
-    for rid, sid, nm, m, vis in rows:
-        if (vis or "").strip() not in ("YES", "NO"):
+    for rid, sid, nm, m, vis, impid in rows:
+        if not visible_is_candidate(vis, _vmx.get(impid)):
             continue
         nm = (nm or "").strip()
         if not nm or not m:
@@ -218,6 +227,12 @@ def judge_import(db, imp: ImportFile) -> dict:
       异日   → master_late（员工确认，可申诉）
     跨月 / 同 store 跨月改名：各月独立成组，互不压制。
     """
+    # 各文件布局的可见性口径（value_map.visible：值→candidate/blank）
+    _vm_by_imp = {}
+    for _i in db.query(ImportFile).all():
+        _vm_by_imp[_i.id] = (((_i.layout or {}).get("value_map") or {})
+                             .get("visible"))
+
     mm = _name_month_min(db)
     recs = (db.query(RawRecord)
             .filter(RawRecord.import_id == imp.id)
@@ -234,8 +249,8 @@ def judge_import(db, imp: ImportFile) -> dict:
             rr.confirm_state = "auto_ok"
             stats["no_ref"] += 1
             continue
-        # Visible 空 → blank
-        if (rr.visible_raw or "").strip() not in ("YES", "NO"):
+        # Visible 非候选 → blank（口径来自该文件布局的 value_map；无则非空即候选）
+        if not visible_is_candidate(rr.visible_raw, _vm_by_imp.get(rr.import_id)):
             rr.clean_status = "visible_blank"
             rr.filter_reason = None
             rr.confirm_state = "auto_ok"
@@ -328,8 +343,12 @@ def process_import(db, import_id: int) -> dict:
 
 
 # ---------------- 判定定稿 → 入正式表 ----------------
-def _formal_for_raw(rr):
-    """按判定规则把一条 raw 转成正式表行（1/2点：分界 2026-07-09，Deploy=YES→2点）。"""
+def _formal_for_raw(rr, point_rules=None):
+    """按判定规则把一条 raw 转成正式表行。
+
+    点数：有 point_rules（文件布局里的组合规则，AI 从"规则"说明提取/人工纠正）
+    按 (visible, deploy) 组合算；无则默认口径（分界 2026-07-09，Deploy=YES→2点）。
+    """
     from app.models import FormalRecord
     from store_settle.rules import point_for
     from datetime import date as _d
@@ -340,7 +359,8 @@ def _formal_for_raw(rr):
             jd = _d.fromisoformat(d)
         except ValueError:
             jd = None
-    pts = point_for(jd, rr.deploy_raw or "", _d(2026, 7, 9)) if jd else 1
+    pts = point_for(jd, rr.deploy_raw or "", _d(2026, 7, 9),
+                    visible=rr.visible_raw or "", point_rules=point_rules) if jd else 0
     return FormalRecord(import_id=rr.import_id, raw_record_id=rr.id,
                         person_code=rr.submitter_code,
                         store_id_raw=rr.store_id_raw,
@@ -366,10 +386,12 @@ def finalize_import(db, import_id: int, actor_id=None) -> dict:
                 "msg": f"仍有 {pend} 条申诉未处理，处理后再入正式表"}
     db.query(FormalRecord).filter(FormalRecord.import_id == import_id).delete()
     added = 0
+    _imp = db.get(ImportFile, import_id)
+    _rules = ((_imp.layout or {}).get("point_rules") if _imp else None)
     for rr in db.query(RawRecord).filter(
             RawRecord.import_id == import_id,
             RawRecord.clean_status == "valid").all():
-        db.add(_formal_for_raw(rr))
+        db.add(_formal_for_raw(rr, point_rules=_rules))
         added += 1
     db.commit()
     from app.services import perf as _perf
@@ -466,6 +488,9 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         "0101047092026081903348200|0101047092026060970019734").split("|"))
     if sub_ids == {""}:
         sub_ids = set()
+    # 各文件布局里的点数组合规则（AI 从"规则"说明提取/人工纠正）
+    _rules_by_imp = {i.id: ((i.layout or {}).get("point_rules"))
+                     for i in db.query(ImportFile).all()}
     for rr in db.query(RawRecord).filter(
             RawRecord.clean_status == "valid",
             RawRecord.modified_raw.like(ym + "%")).all():
@@ -474,7 +499,7 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
             rr.filter_reason = "from_sub"
             rr.confirm_state = "auto_ok"
             continue
-        db.add(_formal_for_raw(rr))
+        db.add(_formal_for_raw(rr, point_rules=_rules_by_imp.get(rr.import_id)))
         added += 1
     db.commit()
     after = db.query(FormalRecord).filter(

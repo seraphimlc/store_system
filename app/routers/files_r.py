@@ -151,6 +151,56 @@ def _vm_text(vm: Optional[dict]) -> str:
     return ", ".join(f"{('~' if k == '' else k)}={v}" for k, v in vm.items())
 
 
+def _pr_text(pr: Optional[list]) -> str:
+    """point_rules → 行式文本（每行：可见值|列表 & 投放值|列表 = 点数；~=空、*=任意）。"""
+    if not pr:
+        return ""
+    lines = []
+    for r in pr:
+        if not isinstance(r, dict):
+            continue
+        def _fmt(k):
+            v = r.get(k)
+            if v is None:
+                return "*"
+            if isinstance(v, list):
+                return "|".join(("~" if x == "" else str(x)) for x in v)
+            return str(v)
+        lines.append(f"{_fmt('visible')}&{_fmt('deploy')}={r.get('points', '')}")
+    return "\n".join(lines)
+
+
+def _parse_pr(text: str) -> Optional[list]:
+    """行式文本 → point_rules；空输入 → None（使用默认口径）。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        left, pts = line.rsplit("=", 1)
+        pts = pts.strip()
+        if not pts.isdigit():
+            continue
+        left = left.strip()
+        vis_part = left.split("&")[0] if "&" in left else left
+        dep_part = left.split("&")[1] if "&" in left else None
+
+        def _vals(part):
+            if part is None:
+                return None
+            vs = [x.strip() for x in part.split("|") if x.strip() != ""]
+            vs = ["" if x == "~" else x for x in vs]
+            if "*" in vs:
+                return None
+            return vs or None
+        out.append({"visible": _vals(vis_part), "deploy": _vals(dep_part),
+                    "points": int(pts)})
+    return out or None
+
+
 def _parse_vm(text: str) -> Optional[dict]:
     """"KEY=值, ~=值" → {KEY: 值/值 str}；空输入 → None（使用默认）。"""
     text = (text or "").strip()
@@ -194,6 +244,7 @@ def file_layout(fid: int, request: Request,
                      "visible", "deploy"),
         "visible_map_text": _vm_text(vm.get("visible")),
         "deploy_map_text": _vm_text(vm.get("deploy")),
+        "point_rules_text": _pr_text(layout.get("point_rules")),
         "msg": "", "err": "",
     })
 
@@ -207,6 +258,7 @@ def file_reparse(fid: int, request: Request,
                  visible: int = Form(0), deploy: int = Form(0),
                  record_id: int = Form(0),
                  visible_map: str = Form(""), deploy_map: str = Form(""),
+                 point_rules_text: str = Form(""),
                  user: Optional[User] = Depends(require_login),
                  db: Session = Depends(get_db)):
     """按人工纠正的布局重新解析：删旧 raw → parse_file(layout) → 判定。"""
@@ -234,6 +286,7 @@ def file_reparse(fid: int, request: Request,
             "required": ("store_id", "store_name", "modified_time",
                          "submitter", "visible", "deploy"),
             "visible_map_text": visible_map, "deploy_map_text": deploy_map,
+            "point_rules_text": point_rules_text,
             "msg": "", "err": "必需列（店ID/店名/时间/提交人/有效性/投放）都要填列号",
         }, status_code=400)
     value_map = {}
@@ -247,8 +300,11 @@ def file_reparse(fid: int, request: Request,
         except (TypeError, ValueError):
             return HTMLResponse("投放取值点数需是整数（如 YES=2, NO=1, ~=1）",
                                 status_code=400)
+    point_rules = _parse_pr(point_rules_text)
     layout = {"header_row": max(1, header_row), "cols": cols,
               "value_map": value_map, "source": "manual"}
+    if point_rules:
+        layout["point_rules"] = point_rules
     try:
         # 清旧 raw（判定明细/申诉随之重建）
         db.query(RawRecord).filter(RawRecord.import_id == imp.id).delete()

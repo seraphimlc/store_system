@@ -255,7 +255,7 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
         sid_raw = cell_raw(row, col_ids["Store ID"])          # 保留原文
         name_raw = cell_raw(row, col_ids["Store Name-Local"])  # 保留原文（raw 判重模式依赖）
         mt_raw = cell_raw(row, col_ids["Modified Time"])
-        vis_raw = _norm_visible(cell(row, visible_col), vm_visible)   # 布局 value_map 驱动
+        vis_raw = cell(row, visible_col)          # 保留原值（AUDIT_SUCCESS 等，候选判断在 judge）
         dep_raw = _norm_deploy(cell(row, deploy_col), vm_deploy)
         sub_raw = cell_raw(row, col_ids["Submitter"])          # 保留原文（parse_submitter 自理）
 
