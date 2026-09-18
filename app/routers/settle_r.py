@@ -256,9 +256,14 @@ def sys_config_save(request: Request, csrf_token: str = Form(...),
             and 0 <= bonus_amount <= 1000000):
         return RedirectResponse("/config?err=配置值超出合理范围", status_code=303)
     from app.models import SysConfig
-    db.add(SysConfig(config_month="", per_point=per_point,
-                     bonus_group=bonus_group, bonus_amount=bonus_amount,
-                     updated_by=user.id))
+    row = db.query(SysConfig).order_by(SysConfig.id.desc()).first()
+    if row is None:
+        db.add(SysConfig(config_month="", per_point=per_point,
+                         bonus_group=bonus_group, bonus_amount=bonus_amount,
+                         updated_by=user.id))
+    else:
+        row.per_point, row.bonus_group, row.bonus_amount =             per_point, bonus_group, bonus_amount
+        row.updated_by = user.id
     db.commit()
     from app.services import perf as _p
     _p.clear_config_cache()
