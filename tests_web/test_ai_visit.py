@@ -265,3 +265,27 @@ def test_ai_visit_reasoning_model_output(monkeypatch, tmp_path):
     assert out["cols"]["store_id"] == 1
     assert out["cols"]["visible"] == 5
     assert out["source"] == "ai"
+
+
+def test_default_rules_user_口径():
+    """用户口径固化：新物料YES=2点；S1∈{OTHER,AUDIT_SUCCESS}=1点；其它不计点。"""
+    from datetime import date
+    from store_settle.rules import point_for
+    from app.services.ai_visit import default_layout
+    rules = default_layout().get("point_rules")
+    assert rules, "默认口径应内建"
+    b = date(2026, 7, 9)
+    d = date(2026, 9, 1)
+    # ① 新物料=YES → 2 点（任意 S1）
+    assert point_for(d, "YES", b, "AUDIT_SUCCESS", rules) == 2
+    assert point_for(d, "YES", b, "OTHER", rules) == 2
+    assert point_for(d, "YES", b, "AUDIT_FAILED", rules) == 2
+    assert point_for(d, "YES", b, "NOT_REQUEST", rules) == 2
+    # ② S1 ∈ {OTHER, AUDIT_SUCCESS} 且非 YES → 1 点
+    assert point_for(d, "NO", b, "AUDIT_SUCCESS", rules) == 1
+    assert point_for(d, "", b, "OTHER", rules) == 1
+    # ③ 其它 S1（FAILED/NOT_REQUEST/未知）且非 YES → 不计点
+    assert point_for(d, "NO", b, "AUDIT_FAILED", rules) == 0
+    assert point_for(d, "", b, "AUDIT_FAILED", rules) == 0
+    assert point_for(d, "", b, "NOT_REQUEST", rules) == 0
+    assert point_for(d, "NO", b, "WHATEVER", rules) == 0

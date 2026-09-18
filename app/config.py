@@ -49,11 +49,17 @@ class Settings:
     #   形如 DEFAULT_VISIBLE_MAP="AUDIT_SUCCESS=candidate, AUDIT_FAILED=candidate, ~=blank"
     #        DEFAULT_POINT_RULES="OTHER|AUDIT_SUCCESS&YES=2, OTHER|AUDIT_SUCCESS&NO|~=1, ..."
     default_visible_map: str = field(
-        default_factory=lambda: os.environ.get("DEFAULT_VISIBLE_MAP", ""))
+        default_factory=lambda: os.environ.get(
+            "DEFAULT_VISIBLE_MAP",
+            "AUDIT_SUCCESS=candidate, AUDIT_FAILED=candidate, "
+            "OTHER=candidate, YES=candidate, NO=candidate, "
+            "NOT_REQUEST=blank"))
     default_deploy_map: str = field(
         default_factory=lambda: os.environ.get("DEFAULT_DEPLOY_MAP", ""))
     default_point_rules: str = field(
-        default_factory=lambda: os.environ.get("DEFAULT_POINT_RULES", ""))
+        default_factory=lambda: os.environ.get(
+            "DEFAULT_POINT_RULES",
+            "*&YES=2, OTHER|AUDIT_SUCCESS|YES|NO&*=1"))
     bonus_group_schedule: str = field(
         default_factory=lambda: os.environ.get(
             "BONUS_GROUP_SCHEDULE", "2026-09=75"))

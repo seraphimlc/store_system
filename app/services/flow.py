@@ -191,10 +191,10 @@ def update_earliest_anchor(db, imp: ImportFile):
 def _name_month_min(db):
     """全库可见行按 (店名trim, modified月) 归组 → {组key: (modified, raw_id, store_id)}。
 
-    判重窗口 = 结算月 + 行原始店名(trim)。**组内保留优先级**（9 月口径固化）：
-      ① deploy=YES 的行（该店当月有投放 → 记 2 点）——多条 YES 取最早；
-      ② 非 AUDIT_FAILED 的行（SUCCESS/OTHER → 记 1 点）；
-      ③ 其余（纯 AUDIT_FAILED 且无投放 → 0 点，不计成绩）。
+    判重窗口 = 结算月 + 行原始店名(trim)。**组内保留优先级**（用户口径固化）：
+      ① deploy=YES 的行（→ 2 点），多条 YES 取**第一条 YES**；
+      ② S1 ∈ {OTHER, AUDIT_SUCCESS} 的行（→ 1 点）；
+      ③ 其余（FAILED/NOT_REQUEST 等 → 0 点，不计成绩、不入表）。
     同级内取 modified 最早。跨月与跨月改名不互相压制。
     """
     rows = db.query(RawRecord.id, RawRecord.store_id_raw,
@@ -206,13 +206,19 @@ def _name_month_min(db):
         _vmx[_i.id] = (((_i.layout or {}).get("value_map") or {})
                        .get("visible"))
 
+    _ONE_PT = ("OTHER", "AUDIT_SUCCESS", "YES", "NO")  # YES/NO 为历史/8月风格兼容
+
     def _rank(dep, vis):
-        """越小越优先：YES→0；非 FAILED→1；FAILED→2。"""
+        """越小越优先（用户口径固化）：
+        ① 新物料 deploy=YES → 2 点（多条取第一条 YES）
+        ② S1(visible) ∈ {OTHER, AUDIT_SUCCESS} → 1 点
+        ③ 其它值（AUDIT_FAILED / NOT_REQUEST / 未知）→ 0 点 = 不计成绩、不入表
+        """
         if (dep or "").strip() == "YES":
             return 0
-        if (vis or "").strip() == "AUDIT_FAILED":
-            return 2
-        return 1
+        if (vis or "").strip() in _ONE_PT:
+            return 1
+        return 2
 
     mm = {}
     for rid, sid, nm, m, vis, impid, dep in rows:
