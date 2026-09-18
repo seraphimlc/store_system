@@ -43,6 +43,10 @@ class Settings:
     bonus_group: int = field(default_factory=lambda: _env_int("BONUS_GROUP", 68))
     bonus_amount: int = field(
         default_factory=lambda: _env_int("BONUS_AMOUNT", 3000))
+    # 奖额按月调整（形如 "2026-09=1250"；未列出的月份用 bonus_amount）
+    bonus_amount_schedule: str = field(
+        default_factory=lambda: os.environ.get(
+            "BONUS_AMOUNT_SCHEDULE", "2026-09=1250"))
     # 按月生效的门槛调整（形如 "2026-09=75,2027-01=80"；未列出的月份用 bonus_group）
     # 例：2026-09 起门槛由 68 改为 75，8 月及以前保持 68（历史月份封账不受影响）
     # 解析默认口径（无规则说明 sheet 时套用；配置在 .env，非代码硬编码）

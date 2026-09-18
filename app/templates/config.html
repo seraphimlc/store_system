@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}系统配置{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>系统配置</h1>
+  <span class="sub">每点金额 / 达标点数 / 达标奖金 —— 按月生效，之后所有工资与找平计算都读取这里的值。</span>
+  <span class="actions">
+    <a class="btn ghost" href="/perf?month=2026-09">← 绩效工资</a>
+  </span>
+</div>
+
+{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
+{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
+
+<div class="card">
+  <div style="font-weight:600;margin-bottom:.4rem">当前生效（2026-09 起）</div>
+  <table>
+    <tr><th>每点金额(円)</th><th>达标点数</th><th>达标奖金(円)</th></tr>
+    <tr>
+      <td class="num" style="font-weight:700">{{ per_point }}</td>
+      <td class="num" style="font-weight:700">{{ bonus_g }}</td>
+      <td class="num" style="font-weight:700">{{ bonus_a }}</td>
+    </tr>
+  </table>
+  <p class="hint">示例：9 月每人工资 = 点数 × {{ per_point }} +（点数 ÷ {{ bonus_g }} 取整）× {{ bonus_a }}。</p>
+</div>
+
+<div class="card">
+  <div style="font-weight:600;margin-bottom:.4rem">修改配置（从指定月份起生效）</div>
+  <form method="post" action="/config/save">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <table style="width:auto">
+      <tr><th style="text-align:left">生效月份（YYYY-MM）</th>
+        <td><input name="config_month" value="{{ cur.config_month if cur else '2026-09' }}" style="width:8rem"></td></tr>
+      <tr><th style="text-align:left">每点金额(円)</th>
+        <td><input type="number" name="per_point" value="{{ per_point }}" style="width:6rem"></td></tr>
+      <tr><th style="text-align:left">达标点数</th>
+        <td><input type="number" name="bonus_group" value="{{ bonus_g }}" style="width:6rem"></td></tr>
+      <tr><th style="text-align:left">达标奖金(円)</th>
+        <td><input type="number" name="bonus_amount" value="{{ bonus_a }}" style="width:6rem"></td></tr>
+    </table>
+    <p><button class="btn" type="submit">保存</button>
+      <span class="hint">保存后需对相关月份点「月度重算」+「薪资找平-生成/更新」生效</span></p>
+  </form>
+</div>
+
+{% if rows %}
+<div class="card">
+  <div style="font-weight:600;margin-bottom:.4rem">配置历史（生效月份 → 值）</div>
+  <table>
+    <tr><th>生效月份</th><th>每点金额</th><th>达标点数</th><th>达标奖金</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.config_month }}</td>
+      <td class="num">{{ r.per_point }}</td>
+      <td class="num">{{ r.bonus_group }}</td>
+      <td class="num">{{ r.bonus_amount }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endblock %}

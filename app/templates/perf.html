@@ -38,6 +38,10 @@
   {% else %}
   <div class="stat-card"><div class="k">总点数(全月)</div><div class="v">{{ '{:,}'.format(summary.total_points) }}</div></div>
   {% endif %}
+  <div class="stat-card"><div class="k">1点店铺数 / 点数</div>
+    <div class="v">{{ '{:,}'.format(summary.p1) }} / {{ '{:,}'.format(summary.p1) }}</div></div>
+  <div class="stat-card"><div class="k">2点店铺数 / 点数</div>
+    <div class="v">{{ '{:,}'.format(summary.p2) }} / {{ '{:,}'.format(summary.p2 * 2) }}</div></div>
 </div>
 
 <div class="card">

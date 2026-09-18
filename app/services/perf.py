@@ -16,6 +16,31 @@ def _bonus_cfg():
     return s.bonus_group, s.bonus_amount
 
 
+# 系统配置缓存（SysConfig 表按生效月；保存配置后需 clear）
+_CONFIG_CACHE = {}
+
+
+def _cfg_row(db, month):
+    if not month:
+        return None
+    from app.models import SysConfig
+    row = db.query(SysConfig).filter(
+        SysConfig.config_month <= month).order_by(
+        SysConfig.config_month.desc()).first()
+    return row
+
+
+def warm_config(db, month):
+    """把该月生效的系统配置(每点金额/达标点数/达标奖金)载入缓存。"""
+    row = _cfg_row(db, month)
+    _CONFIG_CACHE[month] = row
+    return row
+
+
+def clear_config_cache():
+    _CONFIG_CACHE.clear()
+
+
 FULL_GROUP = 68          # 兼容默认（旧引用）
 BONUS_AMOUNT = 3000     # 兼容默认（旧引用）
 PER_POINT = 250
@@ -36,15 +61,62 @@ def _schedule():
     return sorted(out)
 
 
+def _amount_schedule():
+    """解析按月奖额规则 "2026-09=1250,..." → [(month, amount)]（升序）。"""
+    raw = getattr(_get_settings(), "bonus_amount_schedule", "") or ""
+    out = []
+    for part in raw.split(","):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        m, v = part.split("=", 1)
+        m, v = m.strip(), v.strip()
+        if len(m) == 7 and v.isdigit():
+            out.append((m, int(v)))
+    return sorted(out)
+
+
 def _bonus_cfg(month: str = None):
-    """返回 (门槛, 奖额)：门槛按月份取按月规则（未命中用默认 bonus_group）。"""
+    """返回 (门槛, 奖额)：优先系统配置表(SysConfig，须先 warm_config)；
+    未配置/未载入 → env（BONUS_GROUP/BONUS_AMOUNT 及按月 schedule）。"""
+    if month and month in _CONFIG_CACHE and _CONFIG_CACHE[month] is not None:
+        r = _CONFIG_CACHE[month]
+        return r.bonus_group or 68, r.bonus_amount or 3000
     s = _get_settings()
     group, amount = s.bonus_group, s.bonus_amount
     if month:
         for m, g in _schedule():
             if month >= m:
                 group = g
+        for m, a in _amount_schedule():
+            if month >= m:
+                amount = a
     return group, amount
+
+
+# 系统配置缓存（SysConfig 表按生效月；保存配置后需 clear）
+_CONFIG_CACHE = {}
+
+
+def _cfg_row(db, month):
+    if not month:
+        return None
+    from app.models import SysConfig
+    row = db.query(SysConfig).filter(
+        SysConfig.config_month <= month).order_by(
+        SysConfig.config_month.desc()).first()
+    return row
+
+
+def warm_config(db, month):
+    """把该月生效的系统配置(每点金额/达标点数/达标奖金)载入缓存。"""
+    row = _cfg_row(db, month)
+    _CONFIG_CACHE[month] = row
+    return row
+
+
+def clear_config_cache():
+    _CONFIG_CACHE.clear()
 
 
 FULL_GROUP = 68          # 兼容默认（旧引用）
@@ -265,7 +337,10 @@ def ensure_month_stats(db, month: str) -> int:
 
 
 def month_per_point(db, month: str) -> int:
-    """该月锁存的点数单价（月绩效表），无记录则全局默认。"""
+    """该月点数单价：优先系统配置表（须先 warm_config），其次月绩效锁存，最后默认 250。"""
+    row = _cfg_row(db, month)
+    if row is not None and row.per_point:
+        return row.per_point
     from app.models import MonthPerfRecord
     if not month:
         return PER_POINT

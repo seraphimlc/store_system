@@ -219,6 +219,59 @@ def my_perf(request: Request,
 
 
 # ---------------- V3 绩效 / 工资 ----------------
+@router.get("/config", response_class=HTMLResponse)
+def sys_config_page(request: Request,
+                    user: Optional[User] = Depends(require_login),
+                    db: Session = Depends(get_db)):
+    """系统配置：每点金额 / 达标点数 / 达标奖金（按月生效，计算全程读取）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    from app.services import perf as _p
+    from app.models import SysConfig
+    rows = db.query(SysConfig).order_by(SysConfig.config_month.desc()).all()
+    _p.warm_config(db, "2026-09")
+    per_point = _p.month_per_point(db, "2026-09")
+    g, a = _p.bonus_params("2026-09")
+    return templates.TemplateResponse("config.html", {
+        "request": request, "current_user": user,
+        "rows": rows, "cur": rows[0] if rows else None,
+        "per_point": per_point, "bonus_g": g, "bonus_a": a,
+        "msg": "", "err": "",
+    })
+
+
+@router.post("/config/save")
+def sys_config_save(request: Request, csrf_token: str = Form(...),
+                    config_month: str = Form(""),
+                    per_point: int = Form(250),
+                    bonus_group: int = Form(68),
+                    bonus_amount: int = Form(3000),
+                    user: Optional[User] = Depends(require_login),
+                    db: Session = Depends(get_db)):
+    """保存系统配置（指定生效月份起用新值）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    import re as _re
+    if not _re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", config_month or ""):
+        return RedirectResponse("/config?err=生效月份格式需为 YYYY-MM", status_code=303)
+    if not (0 < per_point <= 10000 and 0 < bonus_group <= 1000
+            and 0 <= bonus_amount <= 1000000):
+        return RedirectResponse("/config?err=配置值超出合理范围", status_code=303)
+    from app.models import SysConfig
+    db.add(SysConfig(config_month=config_month, per_point=per_point,
+                     bonus_group=bonus_group, bonus_amount=bonus_amount,
+                     updated_by=user.id))
+    db.commit()
+    from app.services import perf as _p
+    _p.clear_config_cache()
+    from urllib.parse import quote
+    return RedirectResponse(
+        "/config?msg=" + quote(f"已保存 {config_month} 起配置：每点{per_point}円/满{bonus_group}点奖{bonus_amount}円"),
+        status_code=303)
+
+
 @router.get("/perf", response_class=HTMLResponse)
 @router.get("/v3/perf", response_class=HTMLResponse)
 def perf(request: Request,
@@ -276,6 +329,7 @@ def perf(request: Request,
             pay_map[r["code"]] = (p1, hf[4])
     if period not in ("half1", "half2"):
         period = "half1"
+    perf.warm_config(db, month)
     bonus_g, bonus_a = perf.bonus_params(month)
     page_state = {
         "page": "perf", "month": month, "period": period,
@@ -287,6 +341,10 @@ def perf(request: Request,
         "payroll_rows": len(payroll_rows),
         "per_point": per_point,
         "bonus_group": bonus_g, "bonus_amount": bonus_a,
+        "point1_stores": summary.get("p1", 0),
+        "point1_points": summary.get("p1", 0),
+        "point2_stores": summary.get("p2", 0),
+        "point2_points": summary.get("p2", 0) * 2,
     }
     return templates.TemplateResponse("perf.html", {
         "request": request, "current_user": user, "month": month,
@@ -892,6 +950,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
                   "rows": len(rows), "total": total,
                   "adjusted": sum(1 for r in rows if r["adj"])}
     from app.services import perf as _vp
+    _vp.warm_config(db, month)
     bonus_g, bonus_a = _vp.bonus_params(month)
     return templates.TemplateResponse("payroll_settle.html", {
         "request": request, "current_user": user, "month": month,
