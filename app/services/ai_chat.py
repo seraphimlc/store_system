@@ -12,8 +12,8 @@ def _cfg():
     return {"key": os.environ.get("AI_API_KEY", ""),
             "base": os.environ.get("AI_BASE_URL", "").rstrip("/"),
             "model": os.environ.get("AI_MODEL", "gpt-4o-mini"),
-            # 输出上限：重推理模型思考很长，需大 token 才轮到正式答案
-            "max_tokens": int(os.environ.get("AI_MAX_TOKENS", "380000") or 380000)}
+            # 输出上限（可配 AI_MAX_TOKENS；DeepSeek 官网 deepseek-chat 8K 足够）
+            "max_tokens": int(os.environ.get("AI_MAX_TOKENS", "8000") or 8000)}
 
 
 def configured() -> bool:
@@ -31,7 +31,7 @@ def chat(prompt: str, timeout: int = 600, retries: int = 1,
     """
     c = _cfg()
     if max_tokens is None:
-        max_tokens = c.get("max_tokens") or 380000
+        max_tokens = c.get("max_tokens") or 8000
     last = None
     for i in range(retries + 1):
         try:
