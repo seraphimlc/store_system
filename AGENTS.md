@@ -26,7 +26,10 @@ DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.p
 | 员工 | 34 | 22 |
 
 - **工资规则**：每点 250円（按月可配 per_point），奖金**每满门槛点奖 3000**（整月滚动、不跨月；门槛按月可配：默认 68，`BONUS_GROUP_SCHEDULE` 如 `2026-09=75`）；2点成功率 37% 仅展示。
-- **判重**：窗口=结算月；键=(店名trim,月)；组内最早全时间戳行 valid；跨月不互压。
+- **判重与点数（9月起固化口径，与手工结算一致）**：窗口=结算月；键=(店名trim,月)；
+  组内**锚点优先级**：① deploy=YES 的行（该店当月有投放→**2点**，多条 YES 取最早）
+  ② 非 AUDIT_FAILED 行（SUCCESS/OTHER→**1点**）③ 纯 AUDIT_FAILED 无投放→**0点=不计成绩，不入正式表**；
+  同级内取 modified 最早；跨月不互压。实测 2026-09 与手工《巡回最终结算》逐人一致（1点10728/2点4422/总19572/店15150）。
 - **申诉**：master_late/from_sub 可申诉，其余滤除不可申诉；默认全部认可；存在 pending 申诉的文件不能入正式表。
 - **对账**：person_daily_stats 为本地侧；recon_day_rows 只存问题行；同月重传→旧任务标「上一版」、新任务当前；person_points(人月汇总)对账写全量 ReconDataRow。
 - **找平（金额制·自动）**：偏差金额 = 对账金额 − 系统已发（**负=扣款/正=补款**，含奖金），**自动写表**（`adjust_amount=diff_amount`，无需点击、页面只读）；发薪时**上半月扣/补 → 不够转下半月 → 两期都不够递延下月**（链式 `prev_adjust_amount`：本月结转 = diff + 本月两期吸收上月结转后的剩余）。8 月封账数据不随规则变更。
