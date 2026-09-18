@@ -191,19 +191,31 @@ def update_earliest_anchor(db, imp: ImportFile):
 def _name_month_min(db):
     """全库可见行按 (店名trim, modified月) 归组 → {组key: (modified, raw_id, store_id)}。
 
-    判重窗口 = 结算月 + 行原始店名(trim)（基准月度结算口径：
-    同名店内当月只保留最早一次巡店；跨月与跨月改名不互相压制——同一真实店
-    7 月巡过、8 月再巡/改名，是新的结算记录）。
+    判重窗口 = 结算月 + 行原始店名(trim)。**组内保留优先级**（9 月口径固化）：
+      ① deploy=YES 的行（该店当月有投放 → 记 2 点）——多条 YES 取最早；
+      ② 非 AUDIT_FAILED 的行（SUCCESS/OTHER → 记 1 点）；
+      ③ 其余（纯 AUDIT_FAILED 且无投放 → 0 点，不计成绩）。
+    同级内取 modified 最早。跨月与跨月改名不互相压制。
     """
     rows = db.query(RawRecord.id, RawRecord.store_id_raw,
                     RawRecord.store_name_local_raw, RawRecord.modified_raw,
-                    RawRecord.visible_raw, RawRecord.import_id).all()
+                    RawRecord.visible_raw, RawRecord.import_id,
+                    RawRecord.deploy_raw).all()
     _vmx = {}
     for _i in db.query(ImportFile).all():
         _vmx[_i.id] = (((_i.layout or {}).get("value_map") or {})
                        .get("visible"))
+
+    def _rank(dep, vis):
+        """越小越优先：YES→0；非 FAILED→1；FAILED→2。"""
+        if (dep or "").strip() == "YES":
+            return 0
+        if (vis or "").strip() == "AUDIT_FAILED":
+            return 2
+        return 1
+
     mm = {}
-    for rid, sid, nm, m, vis, impid in rows:
+    for rid, sid, nm, m, vis, impid, dep in rows:
         if not visible_is_candidate(vis, _vmx.get(impid)):
             continue
         nm = (nm or "").strip()
@@ -211,8 +223,9 @@ def _name_month_min(db):
             continue
         key = (nm, m[:7])
         cur = mm.get(key)
-        if cur is None or m < cur[0]:
-            mm[key] = (m, rid, (sid or "").strip())
+        rk = _rank(dep, vis)
+        if cur is None or rk < cur[3] or (rk == cur[3] and m < cur[0]):
+            mm[key] = (m, rid, (sid or "").strip(), rk)
     return mm
 
 
@@ -266,7 +279,7 @@ def judge_import(db, imp: ImportFile) -> dict:
             rr.confirm_state = "auto_approved"   # 有效自动生效，无需员工确认
             stats["valid"] += 1
             continue
-        best_mod, best_raw_id, best_store = best
+        best_mod, best_raw_id, best_store = best[0], best[1], best[2]
         if best_raw_id == rr.id:
             rr.clean_status = "valid"
             rr.filter_reason = None
@@ -391,8 +404,10 @@ def finalize_import(db, import_id: int, actor_id=None) -> dict:
     for rr in db.query(RawRecord).filter(
             RawRecord.import_id == import_id,
             RawRecord.clean_status == "valid").all():
-        db.add(_formal_for_raw(rr, point_rules=_rules))
-        added += 1
+        _fr = _formal_for_raw(rr, point_rules=_rules)
+        if _fr.points is None or _fr.points > 0:   # 0 点=不计成绩，不入表
+            db.add(_fr)
+            added += 1
     db.commit()
     from app.services import perf as _perf
     months = sorted({(r[0] or "")[:7] for r in db.query(
@@ -499,8 +514,10 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
             rr.filter_reason = "from_sub"
             rr.confirm_state = "auto_ok"
             continue
-        db.add(_formal_for_raw(rr, point_rules=_rules_by_imp.get(rr.import_id)))
-        added += 1
+        _fr = _formal_for_raw(rr, point_rules=_rules_by_imp.get(rr.import_id))
+        if _fr.points is None or _fr.points > 0:   # 0 点=不计成绩，不入表
+            db.add(_fr)
+            added += 1
     db.commit()
     after = db.query(FormalRecord).filter(
         FormalRecord.japan_date >= lo, FormalRecord.japan_date < hi).all()
