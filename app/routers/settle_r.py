@@ -492,20 +492,37 @@ def perf_export(request: Request, user: Optional[User] =
                 (adj_amt_total if is_h1 else 0), t_pay])
     for c in range(1, 11):
         ws1.cell(ws1.max_row, c).font = bold
-    ws1.append([])
-    ws1.append(["说明：总金额=该期点数×单价＋该期奖金(满68奖3000当月一次)；"
-                "找平金额=上月余量×上月单价(仅上半月，正补负扣)；"
-                "应该付金额=总金额＋找平金额，照此发薪。"])
-
-    ws2 = wb.create_sheet("日绩效明细")
-    ws2.append(["日期", "员工编号", "姓名", "有效店数", "1点店", "2点店",
-                "当日点"])
-    for c in range(1, 8):
-        ws2.cell(1, c).font = bold
-    for d in daily:
-        ws2.append([str(d["date"]), d["code"], d["name"], d["records"],
-                    d["p1"], d["p2"], d["points"]])
-    for ws in (ws1, ws2):
+    # 每人一个 sheet：该员工本期内所有有效巡店记录（逐条，便于对账）
+    from datetime import date as _d
+    y, m0 = int(month[:4]), int(month[5:7])
+    if is_h1:
+        lo, hi = _d(y, m0, 1), _d(y, m0, 15)
+    else:
+        lo, hi = _d(y, m0, 16), _d(y + 1, 1, 1) if m0 == 12 else _d(y, m0 + 1, 1)
+    _PERS = {p.code: p.display_name for p in db.query(Person).all()}
+    by_person = {}
+    for f, rr in (db.query(FormalRecord, RawRecord)
+                  .join(RawRecord, FormalRecord.raw_record_id == RawRecord.id)
+                  .filter(FormalRecord.japan_date >= lo,
+                          FormalRecord.japan_date < hi).all()):
+        by_person.setdefault(f.person_code, []).append(
+            (f.japan_date, rr.store_name_local_raw or "",
+             rr.modified_raw or "", rr.visible_raw or "",
+             rr.deploy_raw or "", f.points or 0))
+    _names = {}
+    for code in sorted(by_person):
+        nm = _PERS.get(code, code) or code
+        sname = f"{nm}({code})"[:31]
+        _names[code] = nm
+        ws = wb.create_sheet(sname)
+        ws.append(["日期", "店铺名", "巡店时间", "S1(审核状态)", "投放",
+                   "点数", "员工编号"])
+        for c in range(1, 8):
+            ws.cell(1, c).font = bold
+        for rec in sorted(by_person[code], key=lambda x: (x[0], x[2])):
+            ws.append([str(rec[0]), rec[1], rec[2], rec[3], rec[4],
+                       rec[5], code])
+    for ws in wb.worksheets:
         for col in ws.columns:
             width = max(len(str(c.value or "")) for c in col) + 2
             ws.column_dimensions[col[0].column_letter].width = width
