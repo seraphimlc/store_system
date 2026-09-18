@@ -188,6 +188,13 @@ def update_earliest_anchor(db, imp: ImportFile):
 
 
 # ---------------- 去重判定 ----------------
+def _norm_name(x: str) -> str:
+    """店名判重归一化（2026-09 起）：NFKC(全角→半角) + 去空格(半角/全角) + 小写。
+    同一店不同写法（如 WineShop Sommelier / Wine shop sommelier）合并为一家。"""
+    import unicodedata as _u
+    return _u.normalize("NFKC", x or "").replace(" ", "").replace("\u3000", "").lower()
+
+
 def _name_month_min(db):
     """全库可见行按 (店名trim, modified月) 归组 → {组key: (modified, raw_id, store_id)}。
 
@@ -229,7 +236,8 @@ def _name_month_min(db):
         nm = (nm or "").strip()
         if not nm or not m:
             continue
-        key = (nm, m[:7])
+        mth = m[:7]
+        key = ((_norm_name(nm) if mth >= "2026-09" else nm), mth)
         cur = mm.get(key)
         rk = _rank(dep, vis, key[1])
         if cur is None or rk < cur[3] or (rk == cur[3] and m < cur[0]):
@@ -278,7 +286,7 @@ def judge_import(db, imp: ImportFile) -> dict:
             stats["blank"] += 1
             continue
         month = (rr.modified_raw or "")[:7]
-        best = mm.get((nm, month))
+        best = mm.get((_norm_name(nm) if month >= "2026-09" else nm, month))
         if best is None:
             # 理论不可达：本条自身可见且同名同月，必入 mm
             rr.clean_status = "valid"

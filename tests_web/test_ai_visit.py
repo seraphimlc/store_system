@@ -289,3 +289,35 @@ def test_default_rules_user_口径():
     assert point_for(d, "", b, "AUDIT_FAILED", rules) == 0
     assert point_for(d, "", b, "NOT_REQUEST", rules) == 0
     assert point_for(d, "NO", b, "WHATEVER", rules) == 0
+
+
+def test_norm_name_dedup(client):
+    """9月起按归一化店名判重：同店不同写法合并为一家（只留 YES 那条）。"""
+    import app.db as appdb
+    from app.models import ImportFile, Person, RawRecord
+    from app.services import flow
+    db = appdb.SessionLocal()
+    db.add(Person(code="771", display_name="甲"))
+    imp = ImportFile(file_name="n.xlsx", file_sha256="sha-norm-dedup",
+                     file_size=1, stored_path="/tmp/none.xlsx", uploaded_by=1,
+                     status="parsed", parsed_sheets=[], ignored_sheets=[],
+                     warnings=[], errors=[])
+    db.add(imp)
+    db.commit()
+    # 同店两种写法：较早无投放、较晚 YES
+    for i, (nm, dep, mt) in enumerate([
+            ("WineShop Sommelier", "", "2026-09-02 10:00:00"),
+            ("Wine shop sommelier", "YES", "2026-09-05 10:00:00")], start=1):
+        db.add(RawRecord(import_id=imp.id, sheet_name="s", excel_row=i,
+                         store_id_raw=f"S{i}", store_name_local_raw=nm,
+                         modified_raw=mt, submitter_raw="甲(771)",
+                         submitter_code="771", visible_raw="AUDIT_SUCCESS",
+                         deploy_raw=dep, clean_status="pending"))
+    db.commit()
+    flow.judge_import(db, imp)
+    db.commit()
+    rows = db.query(RawRecord).filter(RawRecord.import_id == imp.id).all()
+    valid = [r for r in rows if r.clean_status == "valid"]
+    assert len(valid) == 1                      # 归一化后同一家店只留一条
+    assert (valid[0].deploy_raw or "") == "YES"  # 且留的是 YES 那条（2 点）
+    db.close()
