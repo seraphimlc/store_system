@@ -208,12 +208,14 @@ def _name_month_min(db):
 
     _ONE_PT = ("OTHER", "AUDIT_SUCCESS", "YES", "NO")  # YES/NO 为历史/8月风格兼容
 
-    def _rank(dep, vis):
-        """越小越优先（用户口径固化）：
-        ① 新物料 deploy=YES → 2 点（多条取第一条 YES）
-        ② S1(visible) ∈ {OTHER, AUDIT_SUCCESS} → 1 点
-        ③ 其它值（AUDIT_FAILED / NOT_REQUEST / 未知）→ 0 点 = 不计成绩、不入表
+    def _rank(dep, vis, mth):
+        """越小越优先：
+        - 2026-09 起（用户口径固化）：① deploy=YES→2 点（多条取第一条 YES）
+          ② S1 ∈ {OTHER, AUDIT_SUCCESS}→1 点 ③ 其它→0 点不计、不入表；
+        - 2026-09 之前（历史/封账月）：保持原口径（最早即最优，不改历史）。
         """
+        if mth < "2026-09":
+            return 0
         if (dep or "").strip() == "YES":
             return 0
         if (vis or "").strip() in _ONE_PT:
@@ -229,7 +231,7 @@ def _name_month_min(db):
             continue
         key = (nm, m[:7])
         cur = mm.get(key)
-        rk = _rank(dep, vis)
+        rk = _rank(dep, vis, key[1])
         if cur is None or rk < cur[3] or (rk == cur[3] and m < cur[0]):
             mm[key] = (m, rid, (sid or "").strip(), rk)
     return mm
