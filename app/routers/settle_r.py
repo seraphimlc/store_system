@@ -242,25 +242,21 @@ def sys_config_page(request: Request,
 
 @router.post("/config/save")
 def sys_config_save(request: Request, csrf_token: str = Form(...),
-                    config_month: str = Form(""),
                     per_point: int = Form(250),
                     bonus_group: int = Form(68),
                     bonus_amount: int = Form(3000),
                     user: Optional[User] = Depends(require_login),
                     db: Session = Depends(get_db)):
-    """保存系统配置（指定生效月份起用新值）。"""
+    """保存系统配置（全局单值，最新一条生效）。"""
     if user is None or user.role != "admin":
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    import re as _re
-    if not _re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", config_month or ""):
-        return RedirectResponse("/config?err=生效月份格式需为 YYYY-MM", status_code=303)
     if not (0 < per_point <= 10000 and 0 < bonus_group <= 1000
             and 0 <= bonus_amount <= 1000000):
         return RedirectResponse("/config?err=配置值超出合理范围", status_code=303)
     from app.models import SysConfig
-    db.add(SysConfig(config_month=config_month, per_point=per_point,
+    db.add(SysConfig(config_month="", per_point=per_point,
                      bonus_group=bonus_group, bonus_amount=bonus_amount,
                      updated_by=user.id))
     db.commit()
@@ -268,7 +264,7 @@ def sys_config_save(request: Request, csrf_token: str = Form(...),
     _p.clear_config_cache()
     from urllib.parse import quote
     return RedirectResponse(
-        "/config?msg=" + quote(f"已保存 {config_month} 起配置：每点{per_point}円/满{bonus_group}点奖{bonus_amount}円"),
+        "/config?msg=" + quote(f"已保存：每点{per_point}円 / 满{bonus_group}点奖{bonus_amount}円"),
         status_code=303)
 
 

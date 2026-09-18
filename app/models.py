@@ -110,10 +110,11 @@ class Person(Base):
 
 # ---------- §4.5 ----------
 class SysConfig(Base):
-    """系统配置（每点金额/达标点数/达标奖金），按生效月份记录历史。"""
+    """系统配置（每点金额/达标点数/达标奖金）：全局单值，最新一条生效（id 最大）。"""
     __tablename__ = "sys_configs"
     id = Column(Integer, primary_key=True)
-    config_month = Column(String(7), nullable=False, unique=True)  # 生效月 YYYY-MM
+    config_month = Column(String(7), nullable=False, default="",
+                            server_default="")  # 空=无月份语义（仅记录，不参与匹配）
     per_point = Column(Integer, nullable=False, default=250)
     bonus_group = Column(Integer, nullable=False, default=68)
     bonus_amount = Column(Integer, nullable=False, default=3000)

@@ -13,7 +13,7 @@
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
 
 <div class="card">
-  <div style="font-weight:600;margin-bottom:.4rem">当前生效（2026-09 起）</div>
+  <div style="font-weight:600;margin-bottom:.4rem">当前配置（全局生效，最新保存值）</div>
   <table>
     <tr><th>每点金额(円)</th><th>达标点数</th><th>达标奖金(円)</th></tr>
     <tr>
@@ -26,12 +26,10 @@
 </div>
 
 <div class="card">
-  <div style="font-weight:600;margin-bottom:.4rem">修改配置（从指定月份起生效）</div>
+  <div style="font-weight:600;margin-bottom:.4rem">修改配置（保存后全局生效；需对相关月份点「月度重算」+「薪资找平-生成/更新」）</div>
   <form method="post" action="/config/save">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <table style="width:auto">
-      <tr><th style="text-align:left">生效月份（YYYY-MM）</th>
-        <td><input name="config_month" value="{{ cur.config_month if cur else '2026-09' }}" style="width:8rem"></td></tr>
       <tr><th style="text-align:left">每点金额(円)</th>
         <td><input type="number" name="per_point" value="{{ per_point }}" style="width:6rem"></td></tr>
       <tr><th style="text-align:left">达标点数</th>
@@ -46,12 +44,12 @@
 
 {% if rows %}
 <div class="card">
-  <div style="font-weight:600;margin-bottom:.4rem">配置历史（生效月份 → 值）</div>
+  <div style="font-weight:600;margin-bottom:.4rem">修改记录（最近一次在顶部）</div>
   <table>
-    <tr><th>生效月份</th><th>每点金额</th><th>达标点数</th><th>达标奖金</th></tr>
+    <tr><th>#</th><th>每点金额</th><th>达标点数</th><th>达标奖金</th></tr>
     {% for r in rows %}
     <tr>
-      <td>{{ r.config_month }}</td>
+      <td>{{ r.id }}</td>
       <td class="num">{{ r.per_point }}</td>
       <td class="num">{{ r.bonus_group }}</td>
       <td class="num">{{ r.bonus_amount }}</td>

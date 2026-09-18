@@ -186,14 +186,12 @@ def test_bonus_configurable(client, monkeypatch):
 
 
 def test_sys_config_chain(client):
-    """系统配置表驱动计算：warm_config 后 bonus_params/month_per_point 用配置值。"""
+    """系统配置全局单值：最新一条(id最大)生效，warm 后计算读取。"""
     import app.db as appdb
     from app.models import SysConfig
     from app.services import perf
     db = appdb.SessionLocal()
-    db.add(SysConfig(config_month="2026-08", per_point=250, bonus_group=68,
-                     bonus_amount=3000, updated_by=1))
-    db.add(SysConfig(config_month="2026-09", per_point=250, bonus_group=75,
+    db.add(SysConfig(config_month=None, per_point=250, bonus_group=75,
                      bonus_amount=1250, updated_by=1))
     db.commit()
     perf.clear_config_cache()
@@ -201,9 +199,15 @@ def test_sys_config_chain(client):
     assert perf.bonus_params("2026-09") == (75, 1250)
     assert perf.month_per_point(db, "2026-09") == 250
     assert perf.salary_for(160, 250, "2026-09") == 160 * 250 + 2 * 1250
-    perf.warm_config(db, "2026-08")
-    assert perf.bonus_params("2026-08") == (68, 3000)
-    # 未配置月份 → env 默认
-    assert perf.salary_for(160, 250, "2026-07") == 160 * 250 + 2 * 3000
+    # 全局：任何月份都读最新一条
+    assert perf.bonus_params("2026-08") == (75, 1250)
+    # 更新（新行 id 更大）→ 最新值
+    db.add(SysConfig(config_month=None, per_point=300, bonus_group=80,
+                     bonus_amount=2000, updated_by=1))
+    db.commit()
+    perf.clear_config_cache()
+    perf.warm_config(db, "2026-09")
+    assert perf.bonus_params("2026-09") == (80, 2000)
+    assert perf.month_per_point(db, "2026-09") == 300
     perf.clear_config_cache()
     db.close()
