@@ -496,7 +496,7 @@ def perf_export(request: Request, user: Optional[User] =
     from datetime import date as _d
     y, m0 = int(month[:4]), int(month[5:7])
     if is_h1:
-        lo, hi = _d(y, m0, 1), _d(y, m0, 15)
+        lo, hi = _d(y, m0, 1), _d(y, m0, 16)      # 上半月 1~15（含15号）
     else:
         lo, hi = _d(y, m0, 16), _d(y + 1, 1, 1) if m0 == 12 else _d(y, m0 + 1, 1)
     _PERS = {p.code: p.display_name for p in db.query(Person).all()}
