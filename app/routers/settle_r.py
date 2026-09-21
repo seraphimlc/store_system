@@ -89,91 +89,100 @@ def my_perf(request: Request,
 
 
 # ---------------- V3 绩效 / 工资 ----------------
-def _dashboard_data(db):
-    """逐月经营数据（点数/工资/店数/1点2点/人数）+ 环比。"""
-    from app.models import MonthPerfRecord
-    months = sorted({r.month for r in db.query(MonthPerfRecord).all()})
-    out = []
-    for mo in months:
-        rows = db.query(MonthPerfRecord).filter(
-            MonthPerfRecord.month == mo).all()
-        if not rows:
-            continue
-        p1 = sum(r.p1 or 0 for r in rows)
-        p2 = sum(r.p2 or 0 for r in rows)
-        out.append({
-            "month": mo, "employees": len(rows),
-            "records": sum(r.records or 0 for r in rows),
-            "p1": p1, "p2": p2, "points": sum(r.points or 0 for r in rows),
-            "amount": sum(r.salary or 0 for r in rows),
-            "p2rate": (p2 / (p1 + p2)) if (p1 + p2) else 0.0,
-        })
-    if len(out) >= 2:
-        cur, prev = out[-1], out[-2]
-        for k in ("points", "amount", "records", "employees"):
-            base = prev[k] or 0
-            cur[f"d_{k}"] = ((cur[k] - base) / base) if base else None
-    return out
+_AI_CACHE = {}
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: Optional[User] = Depends(require_login),
-              db: Session = Depends(get_db), analysis: str = "",
+              db: Session = Depends(get_db), staff: str = "",
               msg: str = "", err: str = ""):
-    """管理端数据看板：逐月点数/工资/店铺趋势 + 模型分析。"""
+    """管理端数据看板：逐月趋势图表 + 人员/质量指标 + 员工维度 + 模型分析。"""
     if user is None or user.role != "admin":
         return _denied()
-    monthly = _dashboard_data(db)
-    cur = monthly[-1] if monthly else None
+    from app.services import dashboard as D
     from app.services import perf as _p
+    monthly = D.monthly_series(db)
+    labels = [m["month"][5:] + "月" for m in monthly]
+    charts = {
+        "points": D.svg_line([m["points"] for m in monthly], labels,
+                             color="#2f6fed"),
+        "amount": D.svg_line([m["amount"] for m in monthly], labels,
+                             color="#1a7f37"),
+        "records": D.svg_line([m["records"] for m in monthly], labels,
+                              color="#b45309"),
+        "p2rate": D.svg_line([round(m["p2rate"] * 100, 1) for m in monthly],
+                             labels, color="#7c3aed", fmt="{:,.1f}"),
+    }
+    cur = monthly[-1] if monthly else None
+    opts = D.staff_options(db)
+    staff_series = D.staff_series(db, staff) if staff else []
+    staff_chart = D.svg_line([s["points"] for s in staff_series],
+                             [s["month"][5:] + "月" for s in staff_series],
+                             color="#2f6fed") if staff_series else ""
+    staff_name = dict(opts).get(staff, staff)
     _p.warm_config(db, cur["month"] if cur else None)
-    per_point = _p.month_per_point(db, cur["month"] if cur else "")
-    g, a = _p.bonus_params(cur["month"] if cur else None)
     page_state = {"page": "dashboard", "months": [m["month"] for m in monthly],
-                  "current": cur, "per_point": per_point,
-                  "bonus_group": g, "bonus_amount": a}
+                  "current": cur, "staff": staff,
+                  "per_point": _p.month_per_point(db, cur["month"] if cur else ""),
+                  "bonus_group": _p.bonus_params(cur["month"] if cur else None)[0],
+                  "bonus_amount": _p.bonus_params(cur["month"] if cur else None)[1]}
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
-        "cur": cur, "per_point": per_point, "bonus_g": g, "bonus_a": a,
-        "analysis": analysis, "msg": msg, "err": err,
-        "page_state": page_state,
+        "cur": cur, "charts": charts, "opts": opts, "staff": staff,
+        "staff_name": staff_name, "staff_series": staff_series,
+        "staff_chart": staff_chart,
+        "top": D.top_staff(db, cur["month"], 8) if cur else [],
+        "new_staff": D.staff_changes(db, cur["month"])[0] if cur else [],
+        "gone_staff": D.staff_changes(db, cur["month"])[1] if cur else [],
+        "quality": D.quality_stats(db, cur["month"]) if cur else {},
+        "msg": msg, "err": err, "page_state": page_state,
     })
 
 
-@router.post("/dashboard/analyze", response_class=HTMLResponse)
-def dashboard_analyze(request: Request, csrf_token: str = Form(...),
-                      user: Optional[User] = Depends(require_login),
-                      db: Session = Depends(get_db)):
-    """用模型对本系统经营数据做分析（趋势/变化/异常/建议）。"""
+@router.get("/dashboard/analysis", response_class=HTMLResponse)
+def dashboard_analysis(request: Request,
+                       user: Optional[User] = Depends(require_login),
+                       db: Session = Depends(get_db), staff: str = "",
+                       refresh: int = 0):
+    """返回模型分析 HTML 片段（页面加载自动调用；结果按数据指纹缓存）。"""
     if user is None or user.role != "admin":
         return _denied()
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import dashboard as D
     from app.services.ai_chat import configured, chat
-    monthly = _dashboard_data(db)
+    facts = D.fact_text(db, staff or None)
+    key = str(abs(hash(facts))) + ("_" + staff if staff else "")
+    if not refresh and key in _AI_CACHE:
+        return HTMLResponse(_render_analysis(_AI_CACHE[key], cached=True))
     if not configured():
-        return dashboard(request, user, db,
-                         analysis="（未配置 AI：请在 .env 配置 AI_API_KEY）")
-    lines = []
-    for m in monthly:
-        lines.append(
-            f"{m['month']}: 员工{m['employees']}人 有效店{m['records']} "
-            f"1点店{m['p1']} 2点店{m['p2']} 2点率{m['p2rate']:.1%} "
-            f"总点数{m['points']} 工资{m['amount']}円")
+        return HTMLResponse("<p class='hint'>未配置 AI（.env 的 AI_API_KEY）</p>")
+    focus = ("请重点分析该员工：与他自己的历史相比、与全公司平均相比，"
+             "指出变化、异常与建议。" if staff else
+             "请从整体经营视角分析。")
     prompt = (
-        "你是巡店结算系统的数据分析助手。下面是各月经营数据（日企巡店结算）：\n"
-        + "\n".join(lines) +
-        "\n请用中文输出四节（每节 2-4 句，不要用表格）：\n"
-        "1) 整体趋势（点数/工资/店铺数的变化与幅度）；\n"
-        "2) 结构分析（1点/2点占比与 2点率变化说明什么）；\n"
-        "3) 异常点（环比突变、2点率异常、人数或店铺数异常）；\n"
-        "4) 建议动作（针对异常给出可执行建议）。\n"
+        "你是巡店结算系统的经营分析师。下面是各月经营事实数据：\n\n"
+        + facts + "\n\n" + focus +
+        "\n请用中文输出四节（每节 3-5 句，具体到数字，不要用表格）：\n"
+        "1) 整体趋势与幅度（点数/工资/店铺/人均，明确百分比）；\n"
+        "2) 结构与效率（1点2点结构、2点率、店均点数、人均产出，说明含义）；\n"
+        "3) 异常与风险（环比突变、2点率变化、人员进出与人均负荷、数据质量：重复/迟交/空白占比）；\n"
+        "4) 建议动作（3-5 条可执行建议，指名到具体指标或人群）。\n"
         "只依据上面数据，不得臆测数据外原因。")
     try:
-        text = chat(prompt, max_tokens=1500, timeout=180)
+        text = chat(prompt, max_tokens=2500, timeout=240)
     except Exception as e:  # noqa: BLE001
-        text = f"（AI 分析失败：{type(e).__name__}）"
-    return dashboard(request, user, db, analysis=text)
+        return HTMLResponse(f"<p class='hint'>AI 分析失败：{type(e).__name__}</p>")
+    _AI_CACHE[key] = text
+    return HTMLResponse(_render_analysis(text, cached=False))
+
+
+def _render_analysis(text: str, cached: bool = True) -> str:
+    import html as _h
+    tag = ("<span class='hint'>（缓存）</span>" if cached else
+           "<span class='hint'>（刚刚生成）</span>")
+    return (f"<div style='white-space:pre-wrap;line-height:1.75'>{_h.escape(text)}</div>"
+            f"<p class='hint' style='margin-top:.4rem'>{tag}"
+            f"<a class='btn ghost' style='margin-left:.6rem;padding:.1rem .5rem' "
+            f"href='/dashboard/analysis?refresh=1'>重新生成</a></p>")
 
 
 @router.get("/config", response_class=HTMLResponse)
