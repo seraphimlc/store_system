@@ -21,7 +21,7 @@ def test_base_template_renders_logged_in():
         current_user=SimpleNamespace(display_name="管理员", role="admin"),
         request=_req())
     assert "巡店结算系统" in html
-    assert "绩效确认" in html and "绩效工资" in html and "月度对账" in html
+    assert "数据看板" in html and "绩效工资" in html and "月度对账" in html
     assert "管理员" in html
 
 
@@ -29,7 +29,7 @@ def test_base_staff_nav():
     html = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"),
         request=_req())
-    assert "我的绩效" in html and "我的申诉" in html
+    assert "我的绩效" in html
 
 
 def test_base_template_anonymous():

@@ -33,120 +33,6 @@ def _reason_cn(rr) -> str:
     return _REASON_CN.get(rr.filter_reason or "", rr.filter_reason or "")
 
 
-# ---------------- 员工端：我的申诉 ----------------
-@router.get("/my/confirm", response_class=HTMLResponse)
-def my_confirm_legacy(request: Request,
-                      user: Optional[User] = Depends(require_login)):
-    """旧路径兼容 → 我的申诉。"""
-    if user is None or user.role != "staff" or not user.person_code:
-        return _denied()
-    return RedirectResponse("/my/appeal", status_code=302)
-
-
-@router.get("/my/appeal", response_class=HTMLResponse)
-def my_appeal_page(request: Request,
-                   user: Optional[User] = Depends(require_login),
-                   db: Session = Depends(get_db), msg: str = ""):
-    """我的申诉：被滤记录(master_late/from_sub)默认已认可滤除、不打扰；
-    仅当员工认为某条被滤错时在此申诉。"""
-    if user is None or user.role != "staff" or not user.person_code:
-        return _denied()
-    code = user.person_code
-    days = flow.appeal_list(db, code)
-    appeal_map = flow.appeal_map(db, code)
-    total_appealable = sum(len(v) for _, v in days)
-    return templates.TemplateResponse("my_appeal.html", {
-        "request": request, "current_user": user, "msg": msg,
-        "days": days, "appeal_map": appeal_map,
-        "total_appealable": total_appealable,
-        "reason_cn": _reason_cn})
-
-
-@router.post("/my/appeal/{raw_id}")
-def my_appeal(raw_id: int, request: Request, reason: str = Form(""),
-              csrf_token: str = Form(...),
-              user: Optional[User] = Depends(require_login),
-              db: Session = Depends(get_db)):
-    if user is None or user.role != "staff":
-        return _denied()
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
-    try:
-        flow.create_appeal(db, raw_id, user.person_code, reason)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    return RedirectResponse(f"/my/appeal?msg=已申诉，等待管理员处理",
-                            status_code=303)
-
-
-# ---------------- 管理员端：绩效确认（申诉处理） ----------------
-@router.get("/confirm-admin", response_class=HTMLResponse)
-def confirm_admin(request: Request,
-                  user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db), msg: str = "",
-                  imp_id: int = 0, only: str = "", staff: str = ""):
-    """绩效确认（管理端）。
-
-    文件总览（有效/重复导入/申诉/正式表）+ 处理申诉（认可→改判有效计入
-    绩效 / 驳回→维持滤除）+ 按员工查看其被滤/申诉情况。有效记录自动入
-    绩效；被滤默认已认可，仅员工申诉需处理。
-    """
-    from app.models import AppealRecord
-    if user is None or user.role != "admin":
-        return _denied()
-    files = db.query(ImportFile).order_by(ImportFile.id.desc()).all()
-    rows = []
-    for f in files:
-        pend = db.query(AppealRecord).filter(
-            AppealRecord.import_id == f.id,
-            AppealRecord.status == "pending").count()
-        n_appeal = db.query(AppealRecord).filter(
-            AppealRecord.import_id == f.id).count()
-        formal = db.query(FormalRecord).filter(
-            FormalRecord.import_id == f.id).count()
-        n_valid = db.query(RawRecord).filter(
-            RawRecord.import_id == f.id,
-            RawRecord.clean_status == "valid").count()
-        n_filtered = db.query(RawRecord).filter(
-            RawRecord.import_id == f.id,
-            RawRecord.clean_status.in_(("master_late", "from_sub"))).count()
-        n_dup = db.query(RawRecord).filter(
-            RawRecord.import_id == f.id,
-            RawRecord.clean_status == "cross_file_dup").count()
-        rows.append({"file": f, "pend": pend, "appeals": n_appeal,
-                     "formal": formal, "valid": n_valid,
-                     "filtered": n_filtered, "dup": n_dup})
-    # 申诉列表（选中文件后展示，含处理按钮）
-    appeal_rows = []
-    if imp_id:
-        appeal_rows = (db.query(AppealRecord, RawRecord)
-                       .join(RawRecord, RawRecord.id == AppealRecord.raw_record_id)
-                       .filter(AppealRecord.import_id == imp_id)
-                       .order_by(AppealRecord.created_at).all())
-    # 按员工查看：该员工被滤(master_late/from_sub)与申诉状态
-    staff_list = (db.query(Person.code, Person.display_name)
-                  .join(RawRecord, RawRecord.submitter_code == Person.code)
-                  .distinct().order_by(Person.display_name).all())
-    staff_name = ""
-    staff_rows = []
-    if staff:
-        pn = db.query(Person.display_name).filter(
-            Person.code == staff).first()
-        staff_name = pn[0] if pn else staff
-        staff_rows = (db.query(RawRecord)
-                      .filter(RawRecord.submitter_code == staff,
-                              RawRecord.clean_status.in_(
-                                  ("master_late", "from_sub")))
-                      .order_by(RawRecord.modified_raw.desc()).all())
-    appeal_map = flow.appeal_map(db, staff or "")
-    return templates.TemplateResponse("confirm_admin.html", {
-        "request": request, "current_user": user, "msg": msg,
-        "rows": rows, "appeal_rows": appeal_rows, "imp_id": imp_id,
-        "reason_cn": _reason_cn, "staff": staff, "staff_name": staff_name,
-        "staff_list": staff_list, "staff_rows": staff_rows,
-        "appeal_map": appeal_map})
-
-
 @router.post("/files/{fid}/finalize")
 def finalize_file(fid: int, request: Request,
                   csrf_token: str = Form(...),
@@ -159,28 +45,12 @@ def finalize_file(fid: int, request: Request,
     res = flow.finalize_import(db, fid, user.id)
     if not res["ok"]:
         raise HTTPException(400, res.get("msg", "无法入正式表"))
-    return RedirectResponse(f"/confirm-admin?imp_id={fid}"
-                            f"&msg=已入正式表 {res['added']} 条", status_code=303)
+    from urllib.parse import quote as _q2
+    return RedirectResponse(
+        f"/files?msg={_q2('已入正式表 ' + str(res['added']) + ' 条')}",
+        status_code=303)
 
 
-@router.post("/files/{fid}/appeals/{appeal_id}/resolve")
-def resolve_appeal(fid: int, appeal_id: int, request: Request,
-                   decision: str = Form("accept"),
-                   csrf_token: str = Form(...),
-                   user: Optional[User] = Depends(require_login),
-                   db: Session = Depends(get_db)):
-    if user is None or user.role != "admin":
-        return _denied()
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
-    res = flow.resolve_appeal(db, appeal_id, decision, user.id, file_id=fid)
-    if not res["ok"]:
-        raise HTTPException(404, res.get("msg", "申诉不存在或已处理"))
-    return RedirectResponse(f"/confirm-admin?imp_id={fid}"
-                            f"&msg=已处理申诉", status_code=303)
-
-
-# ---------------- 员工端：我的绩效（日/月报表） ----------------
 @router.get("/my/perf", response_class=HTMLResponse)
 def my_perf(request: Request,
             user: Optional[User] = Depends(require_login),
@@ -248,7 +118,8 @@ def _dashboard_data(db):
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: Optional[User] = Depends(require_login),
-              db: Session = Depends(get_db), analysis: str = ""):
+              db: Session = Depends(get_db), analysis: str = "",
+              msg: str = "", err: str = ""):
     """管理端数据看板：逐月点数/工资/店铺趋势 + 模型分析。"""
     if user is None or user.role != "admin":
         return _denied()
@@ -264,7 +135,8 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
         "cur": cur, "per_point": per_point, "bonus_g": g, "bonus_a": a,
-        "analysis": analysis, "page_state": page_state,
+        "analysis": analysis, "msg": msg, "err": err,
+        "page_state": page_state,
     })
 
 
@@ -468,41 +340,6 @@ def v3_set_per_point(request: Request, month: str = Form(""),
         f"/perf?month={month}&msg="
         f"{_q(f'{month} 点数单价已设为 {per_point}円/点（工资/找平金额已重算；已确认找平按当时单价不变）')}",
         status_code=303)
-
-
-@router.get("/perf/daily", response_class=HTMLResponse)
-@router.get("/v3/perf/daily", response_class=HTMLResponse)
-def perf_daily(request: Request,
-                  user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db), month: str = "",
-                  date: str = "", staff: str = ""):
-    """日绩效明细（独立页面，从绩效工资点「详细」进入）。"""
-    if user is None or user.role != "admin":
-        return _denied()
-    from app.services import perf
-    months = sorted({(str(r.japan_date or ""))[:7]
-                     for r in db.query(FormalRecord).all()
-                     if r.japan_date})
-    if month not in months:
-        month = months[-1] if months else ""
-    daily = perf.daily_perf(db, month)
-    dates = sorted({str(d["date"]) for d in daily})
-    staff_opts = sorted({(d["code"], d["name"]) for d in daily})
-    if date and date not in dates:
-        date = ""
-    if not date:
-        if staff:
-            date = ""
-        else:
-            date = dates[-1] if dates else ""
-    if date:
-        daily = [d for d in daily if str(d["date"]) == date]
-    if staff:
-        daily = [d for d in daily if d["code"] == staff]
-    return templates.TemplateResponse("daily_detail.html", {
-        "request": request, "current_user": user, "month": month,
-        "months": months, "daily": daily, "date": date, "staff": staff,
-        "dates": dates, "staff_opts": staff_opts})
 
 
 @router.get("/perf/export")
@@ -924,71 +761,6 @@ def _month_of_modified(rr):
     return (rr.modified_raw or "")[:7]
 
 
-@router.get("/month", response_class=HTMLResponse)
-@router.get("/v3/month", response_class=HTMLResponse)
-def month_page(request: Request,
-                  user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db), month: str = "",
-                  msg: str = "", err: str = ""):
-    """月度数据健康度：该月 raw/有效/入表情况 + 补传警示 + 重建入口。"""
-    if user is None or user.role != "admin":
-        return _denied()
-    from sqlalchemy import func
-    from app.models import AppealRecord
-    from app.services import perf
-    months = sorted({r[0] for r in db.query(
-        func.substr(RawRecord.modified_raw, 1, 7)).all() if r[0]})
-    if month not in months:
-        month = months[-1] if months else ""
-    info = {"raw": 0, "valid": 0, "filtered": 0, "dup": 0,
-            "pend": 0, "formal": 0, "points": 0, "wage": 0, "files": []}
-    if month:
-        q = db.query(RawRecord).filter(
-            RawRecord.modified_raw.like(month + "%"))
-        info["raw"] = q.count()
-        info["valid"] = q.filter(RawRecord.clean_status == "valid").count()
-        info["filtered"] = q.filter(RawRecord.clean_status.in_(
-            ("master_late", "from_sub"))).count()
-        info["dup"] = q.filter(
-            RawRecord.clean_status == "cross_file_dup").count()
-        info["pend"] = (db.query(AppealRecord)
-                        .join(RawRecord,
-                              RawRecord.id == AppealRecord.raw_record_id)
-                        .filter(AppealRecord.status == "pending",
-                                RawRecord.modified_raw.like(month + "%"))
-                        .count())
-        frs = [f for f in db.query(FormalRecord).all()
-               if (str(f.japan_date or ""))[:7] == month]
-        info["formal"] = len(frs)
-        info["points"] = sum(f.points or 0 for f in frs)
-        mp = perf.month_perf(db, month)
-        info["wage"] = sum(perf.salary_for(m["points"], month=month) for m in mp)
-        # 涉及文件
-        fids = [r[0] for r in db.query(RawRecord.import_id).filter(
-            RawRecord.modified_raw.like(month + "%")).distinct().all()]
-        for fid in fids:
-            f = db.get(ImportFile, fid)
-            if f is None:
-                continue
-            vm = db.query(RawRecord).filter(
-                RawRecord.import_id == fid,
-                RawRecord.clean_status == "valid",
-                RawRecord.modified_raw.like(month + "%")).count()
-            fm = sum(1 for x in frs if x.import_id == fid)
-            info["files"].append({"id": f.id, "name": f.file_name,
-                                  "valid": vm, "formal": fm,
-                                  "synced": vm == fm,
-                                  "formalized": fm > 0})
-        info["need_rebuild"] = any(
-            not x["synced"] for x in info["files"])
-    page_state = {"page": "month", "month": month, "info": info,
-                  "need_rebuild": info.get("need_rebuild", False)}
-    return templates.TemplateResponse("month.html", {
-        "request": request, "current_user": user, "month": month,
-        "months": months, "info": info, "msg": msg, "err": err,
-        "page_state": page_state})
-
-
 @router.post("/month/rebuild")
 @router.post("/v3/month/rebuild")
 def month_rebuild(request: Request, month: str = Form(""),
@@ -1004,12 +776,10 @@ def month_rebuild(request: Request, month: str = Form(""),
     # 月份格式（含年份范围）校验的唯一关口在 flow.rebuild_month，此处只消费结果
     res = flow.rebuild_month(db, month, user.id)
     if not res["ok"]:
-        return RedirectResponse(f"/v3/month?month={_q(month)}"
-                                f"&err={_q(res.get('msg', '无法重算'))}",
+        return RedirectResponse(f"/dashboard?err={_q(res.get('msg', '无法重算'))}",
                                 status_code=303)
     return RedirectResponse(
-        f"/v3/month?month={month}"
-        f"&msg=已重算 {len(res['files'])} 个文件并重建正式表："
+        f"/dashboard?msg=已重算 {len(res['files'])} 个文件并重建正式表："
         f"条数 {res['formal_before']} → {res['formal_after']}，"
         f"点数 {res['points_before']} → {res['points_after']}",
         status_code=303)

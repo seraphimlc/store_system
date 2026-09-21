@@ -127,41 +127,6 @@ def db_fresh():
     return appdb.SessionLocal()
 
 
-def test_my_appeal_empty_when_all_valid(client, tmp_path):
-    """员工端：有效记录自动入绩效、无被滤 → 「我的申诉」为空，无需操作。"""
-    _seed_admin(client)
-    db = appdb.SessionLocal()
-    admin = db.query(User).first()
-    imp = _up(db, admin, "c1.xlsx", [
-        ["S-A", "甲店", "", "2026-07-01 09:00:00", "甲(111)", "R1",
-         "YES", "YES", "NO"],
-        ["S-B", "乙店", "", "2026-07-01 10:00:00", "甲(111)", "R2",
-         "YES", "YES", "NO"],
-    ], tmp_path)
-    db.close()
-    flow.process_import(db_fresh(), imp.id)
-    _seed_staff(client)
-    client.post("/login", data={"username": "emp1", "password": "pw123456"},
-                follow_redirects=False)
-    page = client.get("/my/appeal").text
-    assert "没有需要申诉的记录" in page
-    db = appdb.SessionLocal()
-    assert all(r.clean_status == "valid"
-               for r in db.query(RawRecord).filter(
-                   RawRecord.import_id == imp.id).all())
-    db.close()
-    # 管理员直接入正式表（无需员工确认）
-    client.post("/login", data={"username": "admin", "password": "pw123456"},
-                follow_redirects=False)
-    csrf = _csrf_of(client, "/confirm-admin")
-    r = client.post(f"/files/{imp.id}/finalize", data={"csrf_token": csrf},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    assert db.query(FormalRecord).filter(
-        FormalRecord.import_id == imp.id).count() == 2
-    db.close()
-
 
 def _csrf_of(client, path):
     import re
@@ -169,68 +134,6 @@ def _csrf_of(client, path):
     m = re.search(r'name="csrf_token" value="([^"]+)"', page)
     return m.group(1) if m else ""
 
-
-def test_my_appeal_flow(client, tmp_path):
-    """绩效申诉：员工对 master_late 逐条申诉 → 管理员认可改判有效。"""
-    _seed_admin(client)
-    db = appdb.SessionLocal()
-    admin = db.query(User).first()
-    # 甲一条有效一条疑似重复：同店不同日 → 第二天 master_late（可申诉）
-    imp = _up(db, admin, "c2.xlsx", [
-        ["S-A", "甲店", "", "2026-07-01 09:00:00", "甲(111)", "R1",
-         "YES", "YES", "NO"],
-        ["S-A", "甲店", "", "2026-07-02 09:30:00", "甲(111)", "R2",
-         "YES", "YES", "NO"],
-    ], tmp_path)
-    db.close()
-    flow.process_import(db_fresh(), imp.id)
-    db = appdb.SessionLocal()
-    late = db.query(RawRecord).filter(RawRecord.import_id == imp.id,
-                                      RawRecord.clean_status == "master_late").one()
-    late_id = late.id
-    # master_late 默认不入正式表：此刻入表仅最早那条(1)，不阻塞
-    res = flow.finalize_import(db, imp.id)
-    assert res["ok"] is True and res["added"] == 1
-    db.query(FormalRecord).filter(FormalRecord.import_id == imp.id).delete()
-    db.commit()
-    db.close()
-    _seed_staff(client)
-    client.post("/login", data={"username": "emp1", "password": "pw123456"},
-                follow_redirects=False)
-    # 员工申诉该条
-    r = client.post(f"/my/appeal/{late_id}",
-                    data={"csrf_token": _csrf_of(client, "/my/appeal"),
-                          "reason": "那天确实又去了"},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    ap = db.query(AppealRecord).filter(
-        AppealRecord.raw_record_id == late_id).one()
-    assert ap.status == "pending"
-    # 重复申诉应被拒
-    client.post("/login", data={"username": "emp1", "password": "pw123456"},
-                follow_redirects=False)
-    r2 = client.post(f"/my/appeal/{late_id}",
-                     data={"csrf_token": _csrf_of(client, "/my/appeal"),
-                           "reason": "重复"},
-                     follow_redirects=False)
-    assert r2.status_code == 400
-    db.close()
-    # 管理员认可 → 改判有效
-    client.post("/login", data={"username": "admin", "password": "pw123456"},
-                follow_redirects=False)
-    csrf = _csrf_of(client, "/confirm-admin")
-    r = client.post(f"/files/{imp.id}/appeals/{ap.id}/resolve",
-                    data={"csrf_token": csrf, "decision": "accept"},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    rr = db.get(RawRecord, late_id)
-    assert rr.clean_status == "valid" and rr.confirm_state == "approved"
-    # 无未决申诉 → 入正式表（有效 2 条：最早 + 申诉认可）
-    res = flow.finalize_import(db, imp.id)
-    assert res["ok"] is True and res["added"] == 2
-    db.close()
 
 
 def test_perf_salary(client, tmp_path):
@@ -427,121 +330,6 @@ def test_recon_all_match_zero_diff_rows(client, tmp_path):
     db.close()
 
 
-def test_admin_staff_picker_and_staff_self_lock(client, tmp_path):
-    """权限视角：管理端 /confirm-admin 可选员工看其被滤/申诉明细；
-    员工端 /my/appeal 无员工选择器，只能申诉自己的记录。"""
-    _seed_admin(client)
-    db = appdb.SessionLocal()
-    admin = db.query(User).first()
-    # 两个员工、两个文件：文件A 甲提交；文件B 乙提交
-    imp_a = _up(db, admin, "pa.xlsx", [
-        ["S-A", "甲店A", "", "2026-08-01 09:00:00", "甲(111)", "R1",
-         "YES", "YES", "NO"],
-        ["S-A", "甲店A", "", "2026-08-01 10:00:00", "甲(111)", "R2",
-         "YES", "YES", "NO"],   # 同日 → cross_file_dup 自动滤
-    ], tmp_path)
-    imp_b = _up(db, admin, "pb.xlsx", [
-        ["S-B", "乙店B", "", "2026-08-02 09:00:00", "乙(222)", "R3",
-         "YES", "YES", "NO"],
-    ], tmp_path)
-    db.close()
-    flow.process_import(db_fresh(), imp_a.id)
-    flow.process_import(db_fresh(), imp_b.id)
-    # 员工账号
-    db = appdb.SessionLocal()
-    if not db.query(User).filter(User.username == "emp1").first():
-        db.add(User(username="emp1", password_hash=hash_password("pw123456"),
-                    display_name="甲", role="staff", person_code="111",
-                    is_active=True, status="active"))
-    if not db.query(User).filter(User.username == "emp2").first():
-        db.add(User(username="emp2", password_hash=hash_password("pw123456"),
-                    display_name="乙", role="staff", person_code="222",
-                    is_active=True, status="active"))
-    db.commit()
-    db.close()
-    # 管理端：员工下拉应含 111 与 222
-    client.post("/login", data={"username": "admin", "password": "pw123456"},
-                follow_redirects=False)
-    page = client.get("/confirm-admin").text
-    assert "按员工查看被滤记录与申诉" in page and "（111）" in page and "（222）" in page
-    # 管理端选甲(111)：无被滤（有效自动、同日重复自动滤）
-    page = client.get("/confirm-admin?staff=111").text
-    assert "员工「甲」" in page and "没有被滤记录" in page
-    # 员工端 emp1：无员工选择器、页面为「我的申诉」空态（无被滤可申诉）
-    client.post("/login", data={"username": "emp1", "password": "pw123456"},
-                follow_redirects=False)
-    page = client.get("/my/appeal").text
-    assert "选择员工" not in page and "按员工查看被滤记录与申诉" not in page
-    assert "没有需要申诉的记录" in page
-
-
-def test_confirm_and_appeal_flow(client, tmp_path):
-    """被滤记录默认已认可滤除(auto_ok)、不打扰员工；仅当员工认为某条
-    被滤错时申诉 → 管理端认可改判有效（计入绩效）。"""
-    _seed_admin(client)
-    db = appdb.SessionLocal()
-    admin = db.query(User).first()
-    # 甲：一家有效 + 两条被滤（不同原因：跨日 master_late、同日重复、从档）
-    imp = _up(db, admin, "cf.xlsx", [
-        ["S-1", "店1", "", "2026-08-01 09:00:00", "甲(111)", "R1",
-         "YES", "YES", "NO"],                     # valid
-        ["S-1", "店1", "", "2026-08-02 09:00:00", "甲(111)", "R2",
-         "YES", "YES", "NO"],                     # master_late（默认已认可）
-        ["S-2", "店2", "", "2026-08-03 09:00:00", "甲(111)", "R3",
-         "YES", "YES", "YES"],                    # valid
-        ["S-2", "店2", "", "2026-08-03 10:00:00", "甲(111)", "R4",
-         "YES", "YES", "YES"],                    # cross_file_dup(自动滤)
-        ["S-3", "店3", "", "2026-08-01 09:00:00", "甲(111)", "R5",
-         "YES", "YES", "NO"],
-        ["S-3", "店3", "", "2026-08-04 09:00:00", "甲(111)", "R6",
-         "YES", "YES", "NO"],                     # master_late#2（用于申诉）
-    ], tmp_path)
-    db.close()
-    flow.process_import(db_fresh(), imp.id)
-    db = appdb.SessionLocal()
-    late = db.query(RawRecord).filter(RawRecord.import_id == imp.id,
-                                      RawRecord.clean_status == "master_late",
-                                      RawRecord.modified_raw.like("2026-08-02%")).one()
-    late2 = db.query(RawRecord).filter(RawRecord.import_id == imp.id,
-                                       RawRecord.clean_status == "master_late",
-                                       RawRecord.modified_raw.like("2026-08-04%")).one()
-    dup = db.query(RawRecord).filter(RawRecord.import_id == imp.id,
-                                     RawRecord.clean_status == "cross_file_dup").one()
-    # 默认全部认可：被滤(master_late/from_sub) 与 重复导入(cross_file_dup)
-    # 均 auto_ok；cross_file_dup 员工端不出现、master_late/from_sub 可申诉
-    assert late.confirm_state == "auto_ok" and dup.confirm_state == "auto_ok"
-    assert late2.confirm_state == "auto_ok"
-    db.close()
-    _seed_staff(client)
-    client.post("/login", data={"username": "emp1", "password": "pw123456"},
-                follow_redirects=False)
-    # 员工申诉一条 master_late（无需先“认可”其它被滤）
-    r = client.post(f"/my/appeal/{late2.id}",
-                    data={"csrf_token": _csrf_of(client, "/my/appeal"),
-                          "reason": "那天确实又去了"},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    ap = db.query(AppealRecord).filter(
-        AppealRecord.raw_record_id == late2.id).one()
-    assert ap.status == "pending"
-    assert db.get(RawRecord, late2.id).confirm_state == "disputed"
-    # 未申诉的 late 仍为默认认可(auto_ok)，不产生待办
-    assert db.get(RawRecord, late.id).confirm_state == "auto_ok"
-    db.close()
-    # 管理员认可申诉 → 改判有效
-    client.post("/login", data={"username": "admin", "password": "pw123456"},
-                follow_redirects=False)
-    csrf = _csrf_of(client, "/confirm-admin")
-    r = client.post(f"/files/{imp.id}/appeals/{ap.id}/resolve",
-                    data={"csrf_token": csrf, "decision": "accept"},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
-    assert db.get(RawRecord, late2.id).clean_status == "valid"
-    assert db.get(RawRecord, late2.id).confirm_state == "approved"
-    db.close()
-
 
 def test_appeal_grouped_by_day_and_dup_hidden(client, tmp_path):
     """员工「我的申诉」按天倒序组织：重复导入(cross_file_dup)自动滤、
@@ -702,32 +490,6 @@ def test_rebuild_month_keeps_approved_appeal(client, tmp_path):
     assert late.id in ids
     db.close()
 
-
-def test_month_page_and_rebuild_route(client, tmp_path):
-    """管理端 /month：页面统计可见；重建按钮提交成功。"""
-    _seed_admin(client)
-    db = appdb.SessionLocal()
-    admin = db.query(User).first()
-    imp = _up(db, admin, "m4.xlsx", [
-        ["S-B", "店B", "", "2026-08-06 09:00:00", "甲(111)", "R1",
-         "YES", "YES", "NO"],
-    ], tmp_path)
-    db.close()
-    flow.process_import(db_fresh(), imp.id)
-    db = appdb.SessionLocal()
-    flow.finalize_import(db, imp.id)
-    db.close()
-    client.post("/login", data={"username": "admin", "password": "pw123456"},
-                follow_redirects=False)
-    page = client.get("/month?month=2026-08").text
-    assert "月度重算" in page
-    assert "重算并重建" in page
-    assert "m4.xlsx" in page and "已同步" in page
-    csrf = _csrf_of(client, "/month")
-    r = client.post("/month/rebuild",
-                    data={"month": "2026-08", "csrf_token": csrf},
-                    follow_redirects=False)
-    assert r.status_code == 303
 
 
 def test_recon_sys_only_and_export(client, tmp_path):
@@ -1047,43 +809,3 @@ def test_recon_attribution_and_ai_placeholder(client, tmp_path):
     assert "未配置" in unquote(r.headers.get("location", ""))
 
 
-def test_daily_perf_filterable(client, tmp_path):
-    """日绩效明细：日期、员工可选筛选（不选=全部）。"""
-    _seed_admin(client)
-    db = appdb.SessionLocal()
-    admin = db.query(User).first()
-    imp = _up(db, admin, "df.xlsx", [
-        ["S1", "店1", "", "2026-08-01 09:00:00", "甲(111)", "R1",
-         "YES", "YES", "NO"],
-        ["S2", "店2", "", "2026-08-02 09:00:00", "乙(222)", "R2",
-         "YES", "YES", "YES"],
-    ], tmp_path)
-    db.close()
-    flow.process_import(db_fresh(), imp.id)
-    db = appdb.SessionLocal()
-    flow.finalize_import(db, imp.id)
-    db.close()
-    client.post("/login", data={"username": "admin", "password": "pw123456"},
-                follow_redirects=False)
-    # 日绩效明细已移出主页面（/perf 不再包含该区块）
-    p = client.get("/perf?month=2026-08").text
-    assert "日绩效明细" not in p
-    # 独立页 /perf/daily：默认只显示最新一天（08-02；08-01 不再全列）
-    p = client.get("/perf/daily?month=2026-08").text
-    assert "<td>2026-08-02</td>" in p and "<td>2026-08-01</td>" not in p
-    assert 'value="2026-08-02" selected' in p
-    assert 'name="date"' in p and 'name="staff"' in p
-    # 按日期筛选：表格只显示 08-01 行
-    p = client.get("/perf/daily?month=2026-08&date=2026-08-01").text
-    assert "<td>2026-08-01</td>" in p and "<td>2026-08-02</td>" not in p
-    # 按员工筛选：只显示甲(111)那天行
-    p = client.get("/perf/daily?month=2026-08&staff=111").text
-    assert "<td>2026-08-01</td>" in p and "<td>2026-08-02</td>" not in p
-    # 员工端：默认最新一天，日期可筛
-    _seed_staff(client)
-    client.post("/login", data={"username": "emp1", "password": "pw123456"},
-                follow_redirects=False)
-    p = client.get("/my/perf?month=2026-08").text
-    assert "<td>2026-08-01</td>" in p   # 默认该员工最新一天(08-01)
-    p = client.get("/my/perf?month=2026-08&date=2026-08-01").text
-    assert "<td>2026-08-01</td>" in p and "<td>2026-08-02</td>" not in p

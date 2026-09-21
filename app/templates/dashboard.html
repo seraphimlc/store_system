@@ -6,6 +6,8 @@
   <span class="sub">各月点数 / 工资 / 店铺数趋势与模型分析（管理端）。</span>
 </div>
 
+{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
+{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
 {% if cur %}
 <div class="stat-grid grid" style="grid-template-columns:repeat(4,1fr)">
   <div class="stat-card"><div class="k">最新月份</div><div class="v">{{ cur.month }}</div></div>
