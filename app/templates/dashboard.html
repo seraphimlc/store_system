@@ -3,9 +3,8 @@
 {% block content %}
 <div class="page-title">
   <h1>数据看板</h1>
-  <span class="sub">逐月趋势与结构分析 · 模型自动解读（管理端）</span>
+  <span class="sub">经营趋势与结构 · 模型自动解读（管理端）</span>
 </div>
-
 {% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
 
@@ -24,19 +23,23 @@
 {% if cur.d_points is defined %}
 <div class="hint" style="margin:.4rem 0">
   环比（{{ monthly[-2].month }} → {{ cur.month }}）：
-  点数 <b>{{ '%+.1f%%'|format((cur.d_points or 0) * 100) }}</b>、
-  工资 <b>{{ '%+.1f%%'|format((cur.d_amount or 0) * 100) }}</b>、
-  有效店 <b>{{ '%+.1f%%'|format((cur.d_records or 0) * 100) }}</b>、
-  人均点数 <b>{{ '%+.1f%%'|format((cur.d_per_emp_points or 0) * 100) }}</b>、
+  点数 <b>{{ '%+.1f%%'|format((cur.d_points or 0) * 100) }}</b> ·
+  工资 <b>{{ '%+.1f%%'|format((cur.d_amount or 0) * 100) }}</b> ·
+  有效店 <b>{{ '%+.1f%%'|format((cur.d_records or 0) * 100) }}</b> ·
+  人均点数 <b>{{ '%+.1f%%'|format((cur.d_per_emp_points or 0) * 100) }}</b> ·
   2点率 <b>{{ '%+.1f'|format((cur.p2rate - monthly[-2].p2rate) * 100) }}pt</b>
 </div>
 {% endif %}
 
 <div class="stat-grid grid" style="grid-template-columns:repeat(2,1fr)">
-  <div class="card"><div style="font-weight:600;font-size:.9rem">总点数趋势</div>{{ charts.points|safe }}</div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem">工资总额趋势(円)</div>{{ charts.amount|safe }}</div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem">有效店数趋势</div>{{ charts.records|safe }}</div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem">2点率趋势(%)</div>{{ charts.p2rate|safe }}</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">总点数（月度）</div>
+    <canvas id="cPoints" height="150"></canvas></div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">工资总额（円，月度）</div>
+    <canvas id="cAmount" height="150"></canvas></div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">有效店数（月度）</div>
+    <canvas id="cRecords" height="150"></canvas></div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">最新月店铺结构（1点/2点）</div>
+    <canvas id="cDonut" height="150"></canvas></div>
 </div>
 
 <div class="card">
@@ -62,43 +65,28 @@
 </div>
 
 <div class="stat-grid grid" style="grid-template-columns:repeat(3,1fr)">
-  <div class="card">
-    <div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期新增人员（{{ cur.month }}）</div>
-    {% if new_staff %}
-    {% for n, v in new_staff[:10] %}<div>{{ n }} <span class="hint">{{ v[0] }}点 / {{ '{:,}'.format(v[1]) }}円</span></div>{% endfor %}
-    {% else %}<p class="hint">无</p>{% endif %}
-  </div>
-  <div class="card">
-    <div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期未出现人员</div>
-    {% if gone_staff %}
-    {% for n, v in gone_staff[:10] %}<div>{{ n }} <span class="hint">上月 {{ v[0] }}点</span></div>{% endfor %}
-    {% else %}<p class="hint">无</p>{% endif %}
-  </div>
-  <div class="card">
-    <div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">点数排行 Top8</div>
-    {% for t in top %}<div>{{ t.name }} <span class="hint">{{ t.points }}点 / {{ t.records }}店 / 2点{{ t.p2 }}</span></div>{% endfor %}
-  </div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期新增人员（{{ cur.month }}）</div>
+    {% if new_staff %}{% for n, v in new_staff[:10] %}<div>{{ n }} <span class="hint">{{ v[0] }}点 / ¥{{ '{:,}'.format(v[1]) }}</span></div>{% endfor %}
+    {% else %}<p class="hint">无</p>{% endif %}</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期未出现人员</div>
+    {% if gone_staff %}{% for n, v in gone_staff[:10] %}<div>{{ n }} <span class="hint">上月 {{ v[0] }}点</span></div>{% endfor %}
+    {% else %}<p class="hint">无</p>{% endif %}</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">点数排行 Top8</div>
+    {% for t in top %}<div>{{ t.name }} <span class="hint">{{ t.points }}点 / {{ t.records }}店 / 2点{{ t.p2 }}</span></div>{% endfor %}</div>
 </div>
 
 {% if quality %}
-<div class="card">
-  <div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">数据质量（{{ cur.month }}）</div>
-  <div class="hint">
-    原始记录 {{ '{:,}'.format(quality.total) }} 条 ·
-    有效 {{ '{:,}'.format(quality.by_status.get('valid', 0)) }} ·
-    跨文件重复 {{ '{:,}'.format(quality.by_status.get('cross_file_dup', 0)) }} ·
-    疑似迟交 {{ '{:,}'.format(quality.by_status.get('master_late', 0)) }} ·
-    从档 {{ '{:,}'.format(quality.by_status.get('from_sub', 0)) }} ·
-    空白 {{ '{:,}'.format(quality.by_status.get('visible_blank', 0)) }} ·
-    有数据天数 {{ quality.valid_days }}
-  </div>
-</div>
+<div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">数据质量（{{ cur.month }}）</div>
+  <div class="hint">原始 {{ '{:,}'.format(quality.total) }} 条 · 有效 {{ '{:,}'.format(quality.by_status.get('valid', 0)) }} ·
+  跨文件重复 {{ '{:,}'.format(quality.by_status.get('cross_file_dup', 0)) }} · 迟交 {{ '{:,}'.format(quality.by_status.get('master_late', 0)) }} ·
+  从档 {{ '{:,}'.format(quality.by_status.get('from_sub', 0)) }} · 空白 {{ '{:,}'.format(quality.by_status.get('visible_blank', 0)) }} ·
+  有数据天数 {{ quality.valid_days }}</div></div>
 {% endif %}
 
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析</h2>
   <form method="get" action="/dashboard" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
-    <select name="staff" onchange="this.form.submit()">
+    <select name="staff" onchange="this.form.submit()" style="min-width:16rem">
       <option value="">— 选择员工 —</option>
       {% for code, name in opts %}
       <option value="{{ code }}" {% if code == staff %}selected{% endif %}>{{ name }}（{{ code }}）</option>
@@ -106,30 +94,44 @@
     </select>
   </form>
   {% if staff and staff_series %}
-  <div style="font-weight:600;margin-bottom:.3rem">{{ staff_name }}（{{ staff }}）趋势</div>
-  {{ staff_chart|safe }}
-  <table style="margin-top:.4rem">
+  <div style="font-weight:600;margin-bottom:.3rem">{{ staff_name }}（{{ staff }}）点数趋势</div>
+  <canvas id="cStaff" height="120"></canvas>
+  <table style="margin-top:.5rem">
     <tr><th>月份</th><th>有效店</th><th>1点店</th><th>2点店</th><th>点数</th><th>工资(円)</th></tr>
     {% for s in staff_series %}
-    <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td>
-        <td class="num">{{ s.p1 }}</td><td class="num">{{ s.p2 }}</td>
-        <td class="num">{{ s.points }}</td><td class="num">¥{{ '{:,}'.format(s.amount) }}</td></tr>
+    <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td><td class="num">{{ s.p1 }}</td>
+        <td class="num">{{ s.p2 }}</td><td class="num">{{ s.points }}</td><td class="num">¥{{ '{:,}'.format(s.amount) }}</td></tr>
     {% endfor %}
   </table>
-  {% elif staff %}
-  <p class="hint">该员工暂无月度数据</p>
-  {% else %}
-  <p class="hint">选择员工后显示其逐月趋势与明细。</p>
-  {% endif %}
+  {% elif staff %}<p class="hint">该员工暂无月度数据</p>
+  {% else %}<p class="hint">选择员工后显示其逐月趋势与明细。</p>{% endif %}
 </div>
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析{% if staff %}（{{ staff_name }}）{% endif %}
-    <span class="hint" style="font-weight:400">自动生成</span></h2>
-  <div hx-get="/dashboard/analysis{% if staff %}?staff={{ staff }}{% endif %}"
-       hx-trigger="load" hx-swap="innerHTML">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析{% if staff %}（{{ staff_name }}）{% endif %} <span class="hint" style="font-weight:400">自动生成</span></h2>
+  <div hx-get="/dashboard/analysis{% if staff %}?staff={{ staff }}{% endif %}" hx-trigger="load" hx-swap="innerHTML">
     <p class="hint">分析生成中…（首次约 10-30 秒，之后读缓存）</p>
   </div>
 </div>
 {% endif %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function(){
+  var C=(window.__PAGE_STATE__||{}).chart||{};
+  function axis(){return {responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}};}
+  function bar(id,label,data,color){var el=document.getElementById(id);if(!el||!(C.labels||[]).length)return;
+    new Chart(el,{type:'bar',data:{labels:C.labels,datasets:[{label:label,data:data,backgroundColor:color,borderRadius:4}]},options:axis()});}
+  bar('cPoints','总点数',C.points,'rgba(47,111,237,.78)');
+  bar('cAmount','工资',C.amount,'rgba(26,127,55,.78)');
+  bar('cRecords','有效店',C.records,'rgba(180,83,9,.78)');
+  var d=document.getElementById('cDonut');
+  if(d&&C.labels.length){new Chart(d,{type:'doughnut',data:{labels:['2点店','1点店'],
+    datasets:[{data:[C.cur_p2||0,C.cur_p1||0],backgroundColor:['#7c3aed','#e5e7eb'],borderWidth:0}]},
+    options:{responsive:true,cutout:'62%',plugins:{legend:{position:'bottom',labels:{boxWidth:12}}}}});}
+  var se=document.getElementById('cStaff');
+  if(se&&C.staff_labels&&C.staff_labels.length){new Chart(se,{type:'bar',
+    data:{labels:C.staff_labels,datasets:[{label:'点数',data:C.staff_points,backgroundColor:'rgba(47,111,237,.78)',borderRadius:4}]},
+    options:axis()});}
+})();
+</script>
 {% endblock %}

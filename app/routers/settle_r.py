@@ -125,7 +125,22 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
                   "current": cur, "staff": staff,
                   "per_point": _p.month_per_point(db, cur["month"] if cur else ""),
                   "bonus_group": _p.bonus_params(cur["month"] if cur else None)[0],
-                  "bonus_amount": _p.bonus_params(cur["month"] if cur else None)[1]}
+                  "bonus_amount": _p.bonus_params(cur["month"] if cur else None)[1],
+                  "chart": {
+                      "labels": [m["month"][5:] + "月" for m in monthly],
+                      "points": [m["points"] for m in monthly],
+                      "amount": [m["amount"] for m in monthly],
+                      "records": [m["records"] for m in monthly],
+                      "p2rate": [round(m["p2rate"] * 100, 1) for m in monthly],
+                      "p1": [m["p1"] for m in monthly],
+                      "p2": [m["p2"] for m in monthly],
+                      "cur_p1": (cur["p1"] if cur else 0),
+                      "cur_p2": (cur["p2"] if cur else 0),
+                      "staff_points": [s["points"] for s in staff_series],
+                      "staff_records": [s["records"] for s in staff_series],
+                      "staff_amount": [s["amount"] for s in staff_series],
+                      "staff_labels": [s["month"][5:] + "月" for s in staff_series],
+                  }}
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
         "cur": cur, "charts": charts, "opts": opts, "staff": staff,
