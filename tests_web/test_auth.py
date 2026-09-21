@@ -30,11 +30,11 @@ def login(client, username="admin", password="pw123456"):
 
 
 def test_anonymous_redirected(client):
-    # / → /perf（需登录）→ /login；任意环节均要求登录
+    # / → /dashboard（需登录）→ /login；任意环节均要求登录
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302
     loc = r.headers["location"]
-    assert loc in ("/perf", "/login")
+    assert loc in ("/dashboard", "/login")
     final = client.get("/perf", follow_redirects=True)
     assert str(final.url).endswith("/login")
 

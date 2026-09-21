@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}数据看板{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>数据看板</h1>
+  <span class="sub">各月点数 / 工资 / 店铺数趋势与模型分析（管理端）。</span>
+</div>
+
+{% if cur %}
+<div class="stat-grid grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card"><div class="k">最新月份</div><div class="v">{{ cur.month }}</div></div>
+  <div class="stat-card"><div class="k">总点数</div><div class="v">{{ '{:,}'.format(cur.points) }}</div></div>
+  <div class="stat-card"><div class="k">工资总额(円)</div><div class="v">¥{{ '{:,}'.format(cur.amount) }}</div></div>
+  <div class="stat-card"><div class="k">有效店数 / 员工</div><div class="v">{{ '{:,}'.format(cur.records) }} / {{ cur.employees }}</div></div>
+  <div class="stat-card"><div class="k">1点店 / 点数</div><div class="v">{{ '{:,}'.format(cur.p1) }} / {{ '{:,}'.format(cur.p1) }}</div></div>
+  <div class="stat-card"><div class="k">2点店 / 点数</div><div class="v">{{ '{:,}'.format(cur.p2) }} / {{ '{:,}'.format(cur.p2 * 2) }}</div></div>
+  <div class="stat-card"><div class="k">2点率</div><div class="v">{{ '{:.1%}'.format(cur.p2rate) }}</div></div>
+  <div class="stat-card"><div class="k">当前配置</div>
+    <div class="v" style="font-size:.85rem">{{ per_point }}円/点 · 满{{ bonus_g }}点奖{{ bonus_a }}</div></div>
+</div>
+
+{% if cur.d_points is defined %}
+<div class="hint" style="margin:.4rem 0">
+  环比（{{ monthly[-2].month }} → {{ cur.month }}）：
+  点数 {{ '%+.1f%%'|format((cur.d_points or 0) * 100) }}、
+  工资 {{ '%+.1f%%'|format((cur.d_amount or 0) * 100) }}、
+  店数 {{ '%+.1f%%'|format((cur.d_records or 0) * 100) }}、
+  员工 {{ '%+.1f%%'|format((cur.d_employees or 0) * 100) }}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">逐月数据</h2>
+  <table>
+    <tr><th>月份</th><th>员工</th><th>有效店</th><th>1点店</th><th>2点店</th><th>2点率</th><th>总点数</th><th>工资(円)</th></tr>
+    {% for m in monthly %}
+    <tr>
+      <td>{{ m.month }}</td><td class="num">{{ m.employees }}</td>
+      <td class="num">{{ '{:,}'.format(m.records) }}</td>
+      <td class="num">{{ '{:,}'.format(m.p1) }}</td>
+      <td class="num">{{ '{:,}'.format(m.p2) }}</td>
+      <td class="num">{{ '{:.1%}'.format(m.p2rate) }}</td>
+      <td class="num">{{ '{:,}'.format(m.points) }}</td>
+      <td class="num">¥{{ '{:,}'.format(m.amount) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析</h2>
+  <form method="post" action="/dashboard/analyze" style="margin-bottom:.5rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <button class="btn" type="submit">生成分析（调用模型）</button>
+  </form>
+  {% if analysis %}
+  <div style="white-space:pre-wrap;line-height:1.7;background:#f8f9fa;padding:.6rem .8rem;border-radius:.4rem">{{ analysis }}</div>
+  {% else %}
+  <p class="hint">点击按钮，模型将基于上面各月数据输出：整体趋势 / 结构分析 / 异常点 / 建议动作。</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

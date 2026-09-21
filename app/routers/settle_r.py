@@ -219,6 +219,91 @@ def my_perf(request: Request,
 
 
 # ---------------- V3 绩效 / 工资 ----------------
+def _dashboard_data(db):
+    """逐月经营数据（点数/工资/店数/1点2点/人数）+ 环比。"""
+    from app.models import MonthPerfRecord
+    months = sorted({r.month for r in db.query(MonthPerfRecord).all()})
+    out = []
+    for mo in months:
+        rows = db.query(MonthPerfRecord).filter(
+            MonthPerfRecord.month == mo).all()
+        if not rows:
+            continue
+        p1 = sum(r.p1 or 0 for r in rows)
+        p2 = sum(r.p2 or 0 for r in rows)
+        out.append({
+            "month": mo, "employees": len(rows),
+            "records": sum(r.records or 0 for r in rows),
+            "p1": p1, "p2": p2, "points": sum(r.points or 0 for r in rows),
+            "amount": sum(r.salary or 0 for r in rows),
+            "p2rate": (p2 / (p1 + p2)) if (p1 + p2) else 0.0,
+        })
+    if len(out) >= 2:
+        cur, prev = out[-1], out[-2]
+        for k in ("points", "amount", "records", "employees"):
+            base = prev[k] or 0
+            cur[f"d_{k}"] = ((cur[k] - base) / base) if base else None
+    return out
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request, user: Optional[User] = Depends(require_login),
+              db: Session = Depends(get_db), analysis: str = ""):
+    """管理端数据看板：逐月点数/工资/店铺趋势 + 模型分析。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    monthly = _dashboard_data(db)
+    cur = monthly[-1] if monthly else None
+    from app.services import perf as _p
+    _p.warm_config(db, cur["month"] if cur else None)
+    per_point = _p.month_per_point(db, cur["month"] if cur else "")
+    g, a = _p.bonus_params(cur["month"] if cur else None)
+    page_state = {"page": "dashboard", "months": [m["month"] for m in monthly],
+                  "current": cur, "per_point": per_point,
+                  "bonus_group": g, "bonus_amount": a}
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request, "current_user": user, "monthly": monthly,
+        "cur": cur, "per_point": per_point, "bonus_g": g, "bonus_a": a,
+        "analysis": analysis, "page_state": page_state,
+    })
+
+
+@router.post("/dashboard/analyze", response_class=HTMLResponse)
+def dashboard_analyze(request: Request, csrf_token: str = Form(...),
+                      user: Optional[User] = Depends(require_login),
+                      db: Session = Depends(get_db)):
+    """用模型对本系统经营数据做分析（趋势/变化/异常/建议）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services.ai_chat import configured, chat
+    monthly = _dashboard_data(db)
+    if not configured():
+        return dashboard(request, user, db,
+                         analysis="（未配置 AI：请在 .env 配置 AI_API_KEY）")
+    lines = []
+    for m in monthly:
+        lines.append(
+            f"{m['month']}: 员工{m['employees']}人 有效店{m['records']} "
+            f"1点店{m['p1']} 2点店{m['p2']} 2点率{m['p2rate']:.1%} "
+            f"总点数{m['points']} 工资{m['amount']}円")
+    prompt = (
+        "你是巡店结算系统的数据分析助手。下面是各月经营数据（日企巡店结算）：\n"
+        + "\n".join(lines) +
+        "\n请用中文输出四节（每节 2-4 句，不要用表格）：\n"
+        "1) 整体趋势（点数/工资/店铺数的变化与幅度）；\n"
+        "2) 结构分析（1点/2点占比与 2点率变化说明什么）；\n"
+        "3) 异常点（环比突变、2点率异常、人数或店铺数异常）；\n"
+        "4) 建议动作（针对异常给出可执行建议）。\n"
+        "只依据上面数据，不得臆测数据外原因。")
+    try:
+        text = chat(prompt, max_tokens=1500, timeout=180)
+    except Exception as e:  # noqa: BLE001
+        text = f"（AI 分析失败：{type(e).__name__}）"
+    return dashboard(request, user, db, analysis=text)
+
+
 @router.get("/config", response_class=HTMLResponse)
 def sys_config_page(request: Request,
                     user: Optional[User] = Depends(require_login),

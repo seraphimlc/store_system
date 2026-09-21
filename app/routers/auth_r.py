@@ -93,5 +93,5 @@ def root_redirect(request: Request):
                 return RedirectResponse("/my/perf", status_code=302)
         finally:
             s.close()
-    # 首页 = 业绩总览（/perf）
-    return RedirectResponse("/perf", status_code=302)
+    # 首页 = 数据看板（管理员）
+    return RedirectResponse("/dashboard", status_code=302)
