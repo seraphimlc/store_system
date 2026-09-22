@@ -78,10 +78,12 @@ def my_perf(request: Request,
     summary = None
     if me:
         adj = perf.adjust_map(db, month).get(code, 0)
+        from app.services import perf as _pf
         summary = {"records": me["records"], "p1": me["p1"], "p2": me["p2"],
                    "points": me["points"], "amount": me["amount"],
                    "adjust": adj, "payable": me["amount"] + adj,
-                   "rate37": me["rate37"]}
+                   "rate37": me["rate37"],
+                   "dups": _pf.month_dup_map(db, month).get(code, 0)}
     return templates.TemplateResponse("my_perf.html", {
         "request": request, "current_user": user, "month": month,
         "months": months, "daily": daily, "summary": summary,
@@ -270,6 +272,8 @@ def perf(request: Request,
         month = months[-1] if months else ""
     rows = perf.month_perf(db, month)
     summary = perf.company_summary(db, month)
+    dup_map = perf.month_dup_map(db, month) if month else {}
+    dup_total = sum(dup_map.values())
     # 上月找平 = 上月未找平余量（diff−adjust，同一张表 payroll_period_rows）
     from app.services import period as _payroll
     adj = _payroll.carry_map(db, month) if month else {}
@@ -323,6 +327,7 @@ def perf(request: Request,
         "payroll_rows": len(payroll_rows),
         "per_point": per_point,
         "bonus_group": bonus_g, "bonus_amount": bonus_a,
+        "dup_total": dup_total,
         "point1_stores": summary.get("p1", 0),
         "point1_points": summary.get("p1", 0),
         "point2_stores": summary.get("p2", 0),
@@ -336,7 +341,7 @@ def perf(request: Request,
         "per_point": per_point, "half_stats": half_stats,
         "cur_adj": cur_adj, "half_map": half_map,
         "bonus_g": bonus_g, "bonus_a": bonus_a,
-        "pay_map": pay_map,
+        "pay_map": pay_map, "dup_map": dup_map, "dup_total": dup_total,
         "payroll_rows": payroll_rows, "payroll_total": payroll_total,
         "page_state": page_state})
 
@@ -386,6 +391,8 @@ def perf_export(request: Request, user: Optional[User] =
     rows = perf.month_perf(db, month)
     daily = perf.daily_perf(db, month)
     summary = perf.company_summary(db, month)
+    dup_map = perf.month_dup_map(db, month) if month else {}
+    dup_total = sum(dup_map.values())
     from app.services import period as _payroll
     adj = _payroll.carry_map(db, month) if month else {}
     adj_map = {k: v[0] for k, v in adj.items()}

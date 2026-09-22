@@ -155,6 +155,22 @@ def adjust_map(db, month: str = ""):
     return dict(out)
 
 
+def month_dup_map(db, month: str = "") -> dict:
+    """该月每人「重复巡店」数量（clean_status=cross_file_dup，同店同月只保留一条、
+    其余判重复——重复多说明效率低）。返回 {person_code: n}。"""
+    from app.models import RawRecord
+    out = {}
+    q = db.query(RawRecord).filter(
+        RawRecord.clean_status == "cross_file_dup")
+    for r in q.all():
+        if month and (r.modified_raw or "")[:7] != month:
+            continue
+        c = r.submitter_code
+        if c:
+            out[c] = out.get(c, 0) + 1
+    return out
+
+
 def month_perf(db, month: str = ""):
     """月度绩效工资：查 month_perf_records（入表时物化，每员工每月一条）。
     返回 {code, name, records, p1, p2, points, amount, rate37, pass37}。"""

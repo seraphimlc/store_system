@@ -57,7 +57,7 @@
   </h2>
   <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>员工</th><th class="num">有效店</th><th class="num">点数(1/2)</th>
-        <th class="num">2点成功率</th><th class="num">奖金(円)</th><th class="num">总金额(円)</th>
+        <th class="num">2点成功率</th><th class="num">重复店</th><th class="num">奖金(円)</th><th class="num">总金额(円)</th>
         <th class="num">找平金额(円)</th><th class="num">应该付金额(円)</th><th></th></tr>
     {% for r in rows %}
     {% set hf = half_map.get(r.code, (0, 0, 0, 0, 0, 0)) %}
@@ -82,6 +82,7 @@
         {% if hrate >= 0.37 %}<span class="pill ok">达标</span>{% else %}<span class="pill err">未达标</span>{% endif %}
       {% else %}<span class="pill">-</span>{% endif %}
       </td>
+      <td class="num" style="color:{% if dup_map.get(r.code, 0) > 10 %}#b02a37{% else %}#666{% endif %}">{{ dup_map.get(r.code, 0) }}</td>
       <td class="num" style="font-weight:700;color:{% if hbonus %}#1a7f37{% else %}#999{% endif %}">{% if hbonus %}¥{{ '{:,}'.format(hbonus) }}{% else %}0{% endif %}</td>
       <td class="num" style="font-weight:700">¥{{ '{:,}'.format(hamt) }}</td>
       <td class="num" style="font-weight:700;color:{% if carry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{% if carry %}¥{{ '{:+,}'.format(carry).replace('+','+') }}{% else %}¥0{% endif %}</td>

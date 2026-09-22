@@ -46,8 +46,9 @@ def monthly_series(db):
 
 
 def staff_series(db, code):
-    """某员工逐月指标。"""
+    """某员工逐月指标（含重复巡店数）。"""
     from app.models import MonthPerfRecord
+    from app.services import perf as _p
     out = []
     for mo in _months(db):
         r = db.query(MonthPerfRecord).filter(
@@ -55,9 +56,11 @@ def staff_series(db, code):
             MonthPerfRecord.person_code == code).first()
         if r is None:
             continue
+        dups = _p.month_dup_map(db, mo).get(code, 0)
         out.append({"month": mo, "records": r.records or 0,
                     "p1": r.p1 or 0, "p2": r.p2 or 0,
-                    "points": r.points or 0, "amount": r.salary or 0})
+                    "points": r.points or 0, "amount": r.salary or 0,
+                    "dups": dups})
     return out
 
 
@@ -203,5 +206,5 @@ def fact_text(db, staff_code=None):
         nm = dict(staff_options(db)).get(staff_code, staff_code)
         lines.append(f"员工 {nm}({staff_code}) 逐月：" + "；".join(
             f"{s['month']} {s['points']}点/{s['records']}店/(1点{s['p1']},2点{s['p2']})/"
-            f"{s['amount']}円" for s in ss))
+            f"重复巡店{s.get('dups', 0)}/{s['amount']}円" for s in ss))
     return "\n".join(lines)

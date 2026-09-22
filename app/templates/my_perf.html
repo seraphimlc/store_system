@@ -53,7 +53,9 @@
   {% else %}
   <table class="grid-tbl">
     <tr><th>日期</th><th class="num">有效店</th><th class="num">1点</th><th class="num">2点</th><th class="num">点数</th></tr>
-    {% for d in daily %}
+</tr>
+        <tr><th style="text-align:left">重复巡店（同店重复,影响效率）</th>
+            <td class="num" style="font-weight:700;color:{% if summary.dups > 5 %}#b02a37{% else %}#1a7f37{% endif %}">{{ summary.dups }} 家</td>    {% for d in daily %}
     <tr>
       <td>{{ d.date }}</td>
       <td class="num">{{ d.records }}</td>
