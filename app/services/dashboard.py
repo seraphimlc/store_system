@@ -299,3 +299,18 @@ def staff_analysis(db, code, month="") -> str:
         q = q.filter(StaffAnalysis.month == month)
     row = q.order_by(StaffAnalysis.month.desc()).first()
     return row.content if row else ""
+
+
+def headcount_changes(db):
+    """逐月人员变化：每月新增/流失人数。"""
+    from app.models import MonthPerfRecord
+    ms = _months(db)
+    out = []
+    prev = set()
+    for mo in ms:
+        cur = {r.person_code for r in db.query(MonthPerfRecord).filter(
+            MonthPerfRecord.month == mo).all()}
+        out.append({"month": mo, "new": len(cur - prev),
+                    "gone": len(prev - cur), "employees": len(cur)})
+        prev = cur
+    return out

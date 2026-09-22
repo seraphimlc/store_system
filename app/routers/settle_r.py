@@ -139,6 +139,8 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
                       "staff_records": [s["records"] for s in staff_series],
                       "staff_amount": [s["amount"] for s in staff_series],
                       "staff_labels": [s["month"][5:] + "月" for s in staff_series],
+                      "employees": [m["employees"] for m in monthly],
+                      "hc": D.headcount_changes(db),
                   }}
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
