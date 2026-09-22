@@ -113,9 +113,10 @@
 
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析 · 总体分析（全公司）</h2>
-  <div hx-get="/dashboard/analysis" hx-trigger="load" hx-swap="innerHTML">
-    <p class="hint">分析生成中…（首次约 10-30 秒，之后读缓存）</p>
-  </div>
+  {% if company_analysis_html %}{{ company_analysis_html|safe }}
+  {% else %}<div hx-get="/dashboard/analysis" hx-trigger="load" hx-swap="innerHTML">
+    <p class="hint">分析生成中…（首次约 10-30 秒，之后直接显示）</p>
+  </div>{% endif %}
 </div>
 
 <div class="card">

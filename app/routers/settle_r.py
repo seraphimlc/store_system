@@ -173,6 +173,19 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
                       "staff_amount": [x["amount"] for x in staff_series],
                       "staff_labels": [x["month"][5:] + "月" for x in staff_series],
                   }}
+    company_analysis_html = ""
+    try:
+        import hashlib as _hb
+        from app.models import StaffAnalysis as _SA
+        _facts = D.fact_text(db, None)
+        _fp = _hb.md5(_facts.encode("utf-8")).hexdigest()
+        _row = db.query(_SA).filter(_SA.person_code == "COMPANY",
+                                    _SA.month == "ALL").first()
+        if _row and _row.fingerprint == _fp and _row.content:
+            from app.services.dashboard import render_analysis_html as _rh
+            company_analysis_html = _rh(_row.content)
+    except Exception:  # noqa: BLE001
+        pass
     _pl = D.month_payloads(db, sel) if sel else {}
     top = _pl.get("top_staff") or (D.top_staff(db, sel, 8) if sel else [])
     new_staff = [(x["name"], (x["points"], x["amount"]))
@@ -188,7 +201,7 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
         "opts": opts, "staff": staff, "months": [m["month"] for m in monthly],
         "sel": sel, "staff_name": staff_name, "staff_series": staff_series,
         "top": top, "new_staff": new_staff, "gone_staff": gone_staff,
-        "quality": quality,
+        "quality": quality, "company_analysis_html": company_analysis_html,
         "msg": msg, "err": err, "page_state": page_state,
     })
 
