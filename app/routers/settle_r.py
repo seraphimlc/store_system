@@ -196,27 +196,6 @@ def dashboard_staff_module(request: Request,
     })
 
 
-@router.post("/dashboard/analyze-all")
-def dashboard_analyze_all(request: Request, csrf_token: str = Form(...),
-                          user: Optional[User] = Depends(require_login),
-                          db: Session = Depends(get_db), month: str = ""):
-    """为当月全部员工批量生成分析（样本不足自动跳过；同步执行）。"""
-    if user is None or user.role != "admin":
-        return _denied()
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import dashboard as D
-    mo = month or (D.monthly_series(db)[-1]["month"]
-                   if D.monthly_series(db) else "")
-    r = D.analyze_all_staff(db, mo)
-    from urllib.parse import quote
-    return RedirectResponse(
-        "/dashboard?msg=" + quote(
-            f"{mo} 员工分析生成：完成 {r['done']} 人 / 样本不足跳过 {r['skipped']} 人"
-            + (f" / 失败 {r['failed']} 人" if r["failed"] else "")),
-        status_code=303)
-
-
 @router.get("/dashboard/analysis", response_class=HTMLResponse)
 def dashboard_analysis(request: Request,
                        user: Optional[User] = Depends(require_login),

@@ -277,23 +277,6 @@ def ensure_staff_analysis(db, code, month, force=False) -> str:
     return content
 
 
-def analyze_all_staff(db, month) -> dict:
-    """算完工资后批量生成：所有有月绩效记录的员工，样本不足的跳过。"""
-    from app.models import MonthPerfRecord
-    codes = [r.person_code for r in db.query(MonthPerfRecord).filter(
-        MonthPerfRecord.month == month).all()]
-    done, skipped, failed = 0, 0, 0
-    for code in codes:
-        if not staff_sample_ok(db, code, month):
-            skipped += 1
-            continue
-        if ensure_staff_analysis(db, code, month):
-            done += 1
-        else:
-            failed += 1
-    return {"done": done, "skipped": skipped, "failed": failed}
-
-
 def staff_analysis(db, code, month="") -> str:
     """读库返回该员工最新月度分析（无则空串）。"""
     from app.models import StaffAnalysis

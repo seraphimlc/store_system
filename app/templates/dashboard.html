@@ -124,10 +124,6 @@
       <option value="{{ code }}" {% if code == staff %}selected{% endif %}>{{ name }}（{{ code }}）</option>
       {% endfor %}
     </select>
-    <form method="post" action="/dashboard/analyze-all" style="display:inline-flex;margin:0">
-      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-      <button class="btn ghost" type="submit">为全部员工生成分析</button>
-    </form>
   </div>
   <div id="staffModule">{% if staff %}
     {% include "staff_module.html" %}
