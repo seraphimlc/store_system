@@ -218,9 +218,7 @@ def dashboard_analysis(request: Request,
 
 def _render_analysis(text: str, cached: bool = True) -> str:
     from app.services.dashboard import render_analysis_html
-    tag = ("<span class='hint'>（缓存）</span>" if cached else
-           "<span class='hint'>（刚刚生成）</span>")
-    return render_analysis_html(text) + f"<p class='hint' style='margin-top:.4rem'>{tag}</p>"
+    return render_analysis_html(text)
 
 
 @router.get("/config", response_class=HTMLResponse)

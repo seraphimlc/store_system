@@ -128,10 +128,7 @@
       {% endfor %}
     </select>
   </div>
-  <div id="staffModule">{% if staff %}
-    {% include "staff_module.html" %}
-  {% else %}<p class="hint">选择员工后，这里局部显示其逐月趋势、明细与自动分析（不刷新整页）。</p>{% endif %}
-  </div>
+  <div id="staffModule">{% if staff %}{% include "staff_module.html" %}{% endif %}</div>
 </div>
 
 
