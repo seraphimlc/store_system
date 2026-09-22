@@ -118,9 +118,6 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
     cur = monthly[-1] if monthly else None
     opts = D.staff_options(db)
     staff_series = D.staff_series(db, staff) if staff else []
-    staff_chart = D.svg_line([s["points"] for s in staff_series],
-                             [s["month"][5:] + "月" for s in staff_series],
-                             color="#2f6fed") if staff_series else ""
     staff_name = dict(opts).get(staff, staff)
     _p.warm_config(db, cur["month"] if cur else None)
     page_state = {"page": "dashboard", "months": [m["month"] for m in monthly],
@@ -147,13 +144,57 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
         "request": request, "current_user": user, "monthly": monthly,
         "cur": cur, "charts": charts, "opts": opts, "staff": staff,
         "staff_name": staff_name, "staff_series": staff_series,
-        "staff_chart": staff_chart,
         "top": D.top_staff(db, cur["month"], 8) if cur else [],
         "new_staff": D.staff_changes(db, cur["month"])[0] if cur else [],
         "gone_staff": D.staff_changes(db, cur["month"])[1] if cur else [],
         "quality": D.quality_stats(db, cur["month"]) if cur else {},
         "msg": msg, "err": err, "page_state": page_state,
     })
+
+
+@router.get("/dashboard/staff", response_class=HTMLResponse)
+def dashboard_staff_module(request: Request,
+                           user: Optional[User] = Depends(require_login),
+                           db: Session = Depends(get_db), staff: str = ""):
+    """员工维度模块（htmx 局部刷新，不整页跳转）：趋势图 + 明细 + 分析（存库懒生成）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    from app.services import dashboard as D
+    ss = D.staff_series(db, staff) if staff else []
+    chart = (D.svg_line([x["points"] for x in ss],
+                        [x["month"][5:] + "月" for x in ss],
+                        color="#2f6fed") if ss else "")
+    name = dict(D.staff_options(db)).get(staff, staff)
+    ok = D.staff_sample_ok(db, staff, ss[-1]["month"]) if (staff and ss) else False
+    analysis = ""
+    if staff and ss and ok:
+        analysis = D.ensure_staff_analysis(db, staff, ss[-1]["month"])
+    return templates.TemplateResponse("staff_module.html", {
+        "request": request, "current_user": user, "staff": staff,
+        "name": name, "series": ss, "chart": chart,
+        "analysis": analysis, "sample_ok": ok,
+    })
+
+
+@router.post("/dashboard/analyze-all")
+def dashboard_analyze_all(request: Request, csrf_token: str = Form(...),
+                          user: Optional[User] = Depends(require_login),
+                          db: Session = Depends(get_db), month: str = ""):
+    """为当月全部员工批量生成分析（样本不足自动跳过；同步执行）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import dashboard as D
+    mo = month or (D.monthly_series(db)[-1]["month"]
+                   if D.monthly_series(db) else "")
+    r = D.analyze_all_staff(db, mo)
+    from urllib.parse import quote
+    return RedirectResponse(
+        "/dashboard?msg=" + quote(
+            f"{mo} 员工分析生成：完成 {r['done']} 人 / 样本不足跳过 {r['skipped']} 人"
+            + (f" / 失败 {r['failed']} 人" if r["failed"] else "")),
+        status_code=303)
 
 
 @router.get("/dashboard/analysis", response_class=HTMLResponse)

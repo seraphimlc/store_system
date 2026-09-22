@@ -109,6 +109,20 @@ class Person(Base):
 
 
 # ---------- §4.5 ----------
+class StaffAnalysis(Base):
+    """员工月度分析（算完工资后自动生成，存表供看板读取）。"""
+    __tablename__ = "staff_analyses"
+    id = Column(Integer, primary_key=True)
+    person_code = Column(String(32), nullable=False, index=True)
+    month = Column(String(7), nullable=False, index=True)
+    content = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now,
+                        onupdate=_now)
+    __table_args__ = (UniqueConstraint("person_code", "month",
+                                       name="uq_staff_analysis_month"),)
+
+
 class SysConfig(Base):
     """系统配置（每点金额/达标点数/达标奖金）：全局单值，最新一条生效（id 最大）。"""
     __tablename__ = "sys_configs"

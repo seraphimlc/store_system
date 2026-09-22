@@ -208,3 +208,94 @@ def fact_text(db, staff_code=None):
             f"{s['month']} {s['points']}点/{s['records']}店/(1点{s['p1']},2点{s['p2']})/"
             f"重复巡店{s.get('dups', 0)}/{s['amount']}円" for s in ss))
     return "\n".join(lines)
+
+
+# ---------------- 员工月度分析（存库） ----------------
+
+def staff_sample_ok(db, code, month) -> bool:
+    """样本门槛：至少 2 个月有数据，且各月有效店合计 >= 5（8月无/9月仅一两条 → 不分析）。"""
+    ss = staff_series(db, code)
+    if len(ss) < 2:
+        return False
+    return sum(x["records"] for x in ss) >= 5
+
+
+def ensure_staff_analysis(db, code, month, force=False) -> str:
+    """为某员工生成/更新月度分析（写入 staff_analyses 表）；样本不足返回空串。"""
+    from app.models import StaffAnalysis
+    from app.services.ai_chat import configured, chat
+    if not configured():
+        return ""
+    if not staff_sample_ok(db, code, month):
+        return ""
+    row = db.query(StaffAnalysis).filter(
+        StaffAnalysis.person_code == code,
+        StaffAnalysis.month == month).first()
+    if row and not force:
+        return row.content
+    ss = staff_series(db, code)
+    ms = monthly_series(db)
+    avg = (ms[-1]["per_emp_points"] if ms else 0)
+    s_last = ss[-1]
+    prev = ss[-2] if len(ss) >= 2 else None
+    lines = [
+        f"员工 {dict(staff_options(db)).get(code, code)}({code}) 逐月：",
+        "；".join(
+            f"{x['month']} {x['points']}点/{x['records']}店"
+            f"(1点{x['p1']},2点{x['p2']})重复{x.get('dups', 0)}/{x['amount']}円"
+            for x in ss),
+        f"全公司最近月人均点数：{avg:.1f}",
+        f"本人最近月({s_last['month']})点数{s_last['points']}，"
+        f"店数{s_last['records']}，重复巡店{s_last.get('dups', 0)}",
+    ]
+    if prev:
+        lines.append(
+            f"较上一月({prev['month']})：点数{(s_last['points'] - prev['points']) / (prev['points'] or 1):+.1%}，"
+            f"店数{(s_last['records'] - prev['records']) / (prev['records'] or 1):+.1%}")
+    prompt = (
+        "你是巡店结算系统的员工绩效分析师。下面是该员工与全公司的数据：\n\n"
+        + "\n".join(lines) +
+        "\n请用中文输出四节（每节 2-4 句，具体到数字）：\n"
+        "1) 该员工表现（点数/店数/工资水平与变化幅度）；\n"
+        "2) 效率评估（有效店产出、重复巡店数量是否偏多——重复越多效率越低）；\n"
+        "3) 与全公司的对比（人均水平、相对位置）；\n"
+        "4) 建议（1-3 条可执行建议）。\n"
+        "只依据上面数据，不得臆测。")
+    try:
+        content = chat(prompt, max_tokens=1800, timeout=240)
+    except Exception as e:  # noqa: BLE001
+        return ""
+    if row is None:
+        db.add(StaffAnalysis(person_code=code, month=month,
+                             content=content))
+    else:
+        row.content = content
+    db.commit()
+    return content
+
+
+def analyze_all_staff(db, month) -> dict:
+    """算完工资后批量生成：所有有月绩效记录的员工，样本不足的跳过。"""
+    from app.models import MonthPerfRecord
+    codes = [r.person_code for r in db.query(MonthPerfRecord).filter(
+        MonthPerfRecord.month == month).all()]
+    done, skipped, failed = 0, 0, 0
+    for code in codes:
+        if not staff_sample_ok(db, code, month):
+            skipped += 1
+            continue
+        if ensure_staff_analysis(db, code, month):
+            done += 1
+        else:
+            failed += 1
+    return {"done": done, "skipped": skipped, "failed": failed}
+
+
+def staff_analysis(db, code, month="") -> str:
+    """读库返回该员工最新月度分析（无则空串）。"""
+    from app.models import StaffAnalysis
+    q = db.query(StaffAnalysis).filter(StaffAnalysis.person_code == code)
+    if month:
+        q = q.filter(StaffAnalysis.month == month)
+    row = q.order_by(StaffAnalysis.month.desc()).first()
+    return row.content if row else ""

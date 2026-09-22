@@ -84,29 +84,26 @@
 {% endif %}
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析</h2>
-  <form method="get" action="/dashboard" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
-    <select name="staff" onchange="this.form.submit()" style="min-width:16rem">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析
+    <span class="hint" style="font-weight:400">切换不刷新整页 · 分析自动生成并保存</span></h2>
+  <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
+    <select name="staff" hx-get="/dashboard/staff" hx-target="#staffModule"
+            hx-swap="innerHTML" hx-trigger="change"
+            style="min-width:16rem">
       <option value="">— 选择员工 —</option>
       {% for code, name in opts %}
       <option value="{{ code }}" {% if code == staff %}selected{% endif %}>{{ name }}（{{ code }}）</option>
       {% endfor %}
     </select>
-  </form>
-  {% if staff and staff_series %}
-  <div style="font-weight:600;margin-bottom:.3rem">{{ staff_name }}（{{ staff }}）点数趋势</div>
-  <canvas id="cStaff" height="120"></canvas>
-  <table style="margin-top:.5rem">
-    <tr><th>月份</th><th>有效店</th><th>重复</th><th>1点店</th><th>2点店</th><th>点数</th><th>工资(円)</th></tr>
-    {% for s in staff_series %}
-    <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td>
-        <td class="num" style="color:{% if s.dups > 10 %}#b02a37{% else %}#666{% endif %}">{{ s.dups }}</td>
-        <td class="num">{{ s.p1 }}</td><td class="num">{{ s.p2 }}</td>
-        <td class="num">{{ s.points }}</td><td class="num">¥{{ '{:,}'.format(s.amount) }}</td></tr>
-    {% endfor %}
-  </table>
-  {% elif staff %}<p class="hint">该员工暂无月度数据</p>
-  {% else %}<p class="hint">选择员工后显示其逐月趋势与明细。</p>{% endif %}
+    <form method="post" action="/dashboard/analyze-all" style="display:inline-flex;margin:0">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <button class="btn ghost" type="submit">为全部员工生成分析</button>
+    </form>
+  </div>
+  <div id="staffModule">{% if staff %}
+    {% include "staff_module.html" %}
+  {% else %}<p class="hint">选择员工后，这里局部显示其逐月趋势、明细与自动分析（不刷新整页）。</p>{% endif %}
+  </div>
 </div>
 
 <div class="card">
