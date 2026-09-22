@@ -624,3 +624,43 @@ def resolve_appeal(db, appeal_id, decision, actor_id, file_id=None) -> dict:
     ap.handled_at = datetime.utcnow()
     db.commit()
     return {"ok": True, "decision": decision}
+
+
+def auto_finalize_pipeline(db, fid: int, user_id: int = None) -> dict:
+    """入正式表 + 全自动后续：工资/找平 + 看板统计 + 员工分析预生成(后台)。
+    供「入正式表」按钮与「上传自动入表」共用。返回 finalize 结果。"""
+    res = finalize_import(db, fid, user_id)
+    if not res["ok"]:
+        return res
+    from app.models import RawRecord as _RR
+    _months = sorted({(r.modified_raw or "")[:7] for r in
+                      db.query(_RR).filter(_RR.import_id == fid).all()
+                      if r.modified_raw})
+    from app.services import period as _pay
+    from app.services import dashboard as _D
+    for _mo in _months:
+        try:
+            _pay.sync_period_table(db, _mo)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            _D.sync_dash_metrics(db, _mo)
+        except Exception:  # noqa: BLE001
+            pass
+    db.commit()
+    import threading as _th
+    from app.db import SessionLocal as _SL
+
+    def _bg():
+        _db = _SL()
+        try:
+            for _mo in _months:
+                _D.analyze_all_staff(_db, _mo)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            _db.close()
+
+    _th.Thread(target=_bg, daemon=True).start()
+    res["months"] = _months
+    return res

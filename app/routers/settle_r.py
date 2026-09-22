@@ -42,42 +42,13 @@ def finalize_file(fid: int, request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    res = flow.finalize_import(db, fid, user.id)
+    res = flow.auto_finalize_pipeline(db, fid, user.id)
     if not res["ok"]:
         raise HTTPException(400, res.get("msg", "无法入正式表"))
-    # 入表后全自动：工资/找平 + 看板统计 + 员工分析预生成
-    from app.models import RawRecord as _RR
-    _months = sorted({(r.modified_raw or "")[:7] for r in
-                      db.query(_RR).filter(_RR.import_id == fid).all()
-                      if r.modified_raw})
-    from app.services import period as _pay2
-    from app.services import dashboard as _D2
-    for _mo in _months:
-        try:
-            _pay2.sync_period_table(db, _mo)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            _D2.sync_dash_metrics(db, _mo)
-        except Exception:  # noqa: BLE001
-            pass
-    db.commit()
-    import threading as _th
-    from app.db import SessionLocal as _SL
-
-    def _bg():
-        _db = _SL()
-        try:
-            for _mo in _months:
-                _D2.analyze_all_staff(_db, _mo)
-        except Exception:  # noqa: BLE001
-            pass
-        finally:
-            _db.close()
-
-    _th.Thread(target=_bg, daemon=True).start()
     from urllib.parse import quote as _q2
-    _msg = "已入正式表 " + str(res["added"]) + " 条，工资/找平/看板统计/员工分析已自动刷新 " + ",".join(_months)
+    _msg = ("已入正式表 " + str(res["added"]) + " 条，"
+            "工资/找平/看板统计/员工分析已自动刷新 "
+            + ",".join(res.get("months") or []))
     return RedirectResponse(f"/files?msg={_q2(_msg)}", status_code=303)
 
 

@@ -93,10 +93,13 @@ async def upload_files(request: Request,
         for imp_id in parsed_ids:
             r = _v3.process_import(db, imp_id)
             j = r["judge"]
+            # 上传即自动入正式表 + 工资/找平/看板统计/员工分析
+            fr = _v3.auto_finalize_pipeline(db, imp_id, user.id)
             msgs.append(
-                f"文件#{imp_id} 判定：有效 {j['valid']} 条（自动入绩效）；过滤 "
+                f"文件#{imp_id} 判定：有效 {j['valid']} 条（已自动入正式表 "
+                f"{fr.get('added', 0)} 条，工资/找平/看板/员工分析已自动刷新）；过滤 "
                 f"{j['master_late']+j['from_sub']+j['cross_file_dup']} 条"
-                f"（可申诉 {j['master_late']}/从档 {j['from_sub']}/"
+                f"（迟交 {j['master_late']}/从档 {j['from_sub']}/"
                 f"跨文件同日 {j['cross_file_dup']}/空编号 {j['no_ref']}）")
     except Exception as e:  # noqa: BLE001
         msgs.append(f"V3 流程失败：{type(e).__name__}: {e}")

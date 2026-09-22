@@ -46,9 +46,8 @@ def monthly_series(db):
 
 
 def staff_series(db, code):
-    """某员工逐月指标（含重复巡店数）。"""
+    """某员工逐月指标（含重复巡店数；dups 读物化表，避免全表扫描）。"""
     from app.models import MonthPerfRecord
-    from app.services import perf as _p
     out = []
     for mo in _months(db):
         r = db.query(MonthPerfRecord).filter(
@@ -56,7 +55,7 @@ def staff_series(db, code):
             MonthPerfRecord.person_code == code).first()
         if r is None:
             continue
-        dups = _p.month_dup_map(db, mo).get(code, 0)
+        dups = month_payloads(db, mo).get("dup_map", {}).get(code, 0)
         out.append({"month": mo, "records": r.records or 0,
                     "p1": r.p1 or 0, "p2": r.p2 or 0,
                     "points": r.points or 0, "amount": r.salary or 0,
