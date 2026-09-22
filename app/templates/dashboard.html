@@ -3,7 +3,6 @@
 {% block content %}
 <div class="page-title">
   <h1>数据看板</h1>
-  <span class="sub">经营趋势与结构 · 模型自动解读（管理端）</span>
 </div>
 {% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
@@ -106,15 +105,14 @@
 {% endif %}
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析 · 总体分析（全公司） <span class="hint" style="font-weight:400">自动生成</span></h2>
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析 · 总体分析（全公司）</h2>
   <div hx-get="/dashboard/analysis" hx-trigger="load" hx-swap="innerHTML">
     <p class="hint">分析生成中…（首次约 10-30 秒，之后读缓存）</p>
   </div>
 </div>
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析
-    <span class="hint" style="font-weight:400">切换不刷新整页 · 分析自动生成并保存</span></h2>
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析</h2>
   <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
     <select name="staff" hx-get="/dashboard/staff" hx-target="#staffModule"
             hx-swap="innerHTML" hx-trigger="change"

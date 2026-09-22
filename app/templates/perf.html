@@ -2,7 +2,7 @@
 {% block title %}绩效与工资 · {{ month or '全部' }}{% endblock %}
 {% block content %}
 <div class="page-title"><h1>绩效与工资</h1>
-  <span class="sub">发薪工具：按上半月(1-15)/下半月(16-月末)两期发放；工资=该期点数×单价＋该期奖金(每满{{ bonus_g }}点奖{{ bonus_a }}，整月滚动、不跨月)。</span>
+
   <span class="actions">
     <form method="get" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
       <label class="f">月份
@@ -48,14 +48,6 @@
 
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{% if h1 %}上半月(1-15) 发薪表{% else %}下半月(16-月末) 发薪表{% endif %} · {{ month }}
-    <form method="post" action="/perf/per-point" style="display:inline-flex;gap:.4rem;align-items:center;margin-left:.8rem">
-      <input type="hidden" name="month" value="{{ month }}">
-      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-      <span class="hint">单价(円/点)</span>
-      <input type="number" name="per_point" value="{{ per_point }}" min="1" step="1" style="width:4.5rem" data-testid="perf-per-point">
-      <button class="btn ghost" style="padding:.15rem .45rem;font-size:.8rem" type="submit">设置</button>
-    </form>
-    <span class="hint" style="margin-left:.6rem">改单价重算本月工资；上月余量按上月单价，不受影响。</span>
   </h2>
   <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>员工</th><th class="num">有效店</th><th class="num">点数(1/2)</th>
