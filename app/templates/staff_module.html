@@ -15,7 +15,7 @@
 <div style="margin-top:.7rem">
   {% if analysis %}
   <div style="font-weight:600;margin-bottom:.3rem">员工分析</div>
-  <div style="white-space:pre-wrap;line-height:1.7;background:#f8f9fa;padding:.6rem .8rem;border-radius:.4rem">{{ analysis }}</div>
+  {{ analysis|safe }}
   {% elif not sample_ok %}
   <p class="hint">该员工数据样本不足（至少需 2 个月且有足够有效店），不生成分析。</p>
   {% else %}

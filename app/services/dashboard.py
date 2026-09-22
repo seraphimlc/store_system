@@ -257,14 +257,13 @@ def ensure_staff_analysis(db, code, month, force=False) -> str:
     prompt = (
         "你是巡店结算系统的员工绩效分析师。下面是该员工与全公司的数据：\n\n"
         + "\n".join(lines) +
-        "\n请用中文输出，结论导向（每点先说结论、再用数据佐证）：\n"
-        "1) 一句话结论（该员工本期表现评价：好/一般/需关注）；\n"
-        "2) 对比结论（vs 上月与全公司：哪里变好、哪里变差，先说结论后数据）；\n"
-        "3) 归因判断（结合数据判断主要原因，明确支持哪个：是任务量/市场原因（店数与点数的同向变化）、"
-        "还是重复巡店太多（重复数与重复率偏高）、还是投放质量（2点率偏低）、或奖金口径等变化；"
-        "说明'数据显示…'推断依据）；\n"
-        "4) 建议（1-3 条可执行建议）。\n"
-        "只依据上面数据做判断，不得臆测数据外原因。")
+        "\n请用中文输出，精炼要点式（不要段落废话，每条一句话，关键数字用**加粗**）：\n"
+        "1) **一句话结论**：该员工本期表现（好/一般/需关注）；\n"
+        "2) **对比结论**（最多2条）：vs 上月与全公司，哪里好/差；\n"
+        "3) **归因判断**：结合数据明确判断主因——是市场/任务量、还是**重复巡店太多**（重复率）、"
+        "还是投放质量（2点率）等，一句定论；\n"
+        "4) **建议**（最多2条）。\n"
+        "只依据数据判断，不得臆测。")
     try:
         content = chat(prompt, max_tokens=1800, timeout=240)
     except Exception as e:  # noqa: BLE001
@@ -318,3 +317,45 @@ def headcount_changes(db):
                     "gone": len(prev - cur), "employees": len(cur)})
         prev = cur
     return out
+
+
+# ---------------- 分析文本 → 结构化 HTML 渲染 ----------------
+
+def render_analysis_html(text: str) -> str:
+    """把模型输出的分析文本渲染成清爽的结构化 HTML：
+    `##`/`#` 小节标题 → 彩色小节条；`-`/`1)` 列表；`**加粗**` 高亮关键数字/结论。"""
+    import html as _h
+    import re as _re
+
+    def _fmt(s: str) -> str:
+        s = _h.escape(s or "")
+        s = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        s = _re.sub(r"`(.+?)`", r"<code>\1</code>", s)
+        return s
+
+    out = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = _re.match(r"^#{1,6}\s*(.+)$", line)
+        if m:
+            out.append(f"<h5 class='a-sec'>{_fmt(m.group(1))}</h5>")
+            continue
+        m = _re.match(r"^([0-9]+)[)\.、]\s*(.+)$", line)
+        if m:
+            body = _fmt(m.group(2))
+            if out and out[-1].startswith("<ol>"):
+                out[-1] = out[-1][:-5] + f"<li>{body}</li></ol>"
+            else:
+                out.append(f"<ol><li>{body}</li></ol>")
+            continue
+        if line.startswith(("- ", "• ")):
+            body = _fmt(line[2:])
+            if out and out[-1].startswith("<ul>"):
+                out[-1] = out[-1][:-5] + f"<li>{body}</li></ul>"
+            else:
+                out.append(f"<ul><li>{body}</li></ul>")
+            continue
+        out.append(f"<p>{_fmt(line)}</p>")
+    return '<div class="analysis">' + "".join(out) + "</div>"

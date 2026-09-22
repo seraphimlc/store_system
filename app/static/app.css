@@ -146,3 +146,13 @@ details { font-size: .85rem; color: var(--muted); }
 /* v2 业绩页面补充 */
 .num .small { font-weight: 400; color: var(--muted); font-size: .78rem; }
 .stat-card.errk { border-left: 3px solid var(--err); }
+
+/* 分析文本（结论导向排版） */
+.analysis { font-size: .95rem; line-height: 1.9; }
+.analysis p { margin: .35rem 0; }
+.analysis strong { color: #1f3a93; font-weight: 700; }
+.analysis ol, .analysis ul { margin: .3rem 0 .5rem; padding-left: 1.35rem; }
+.analysis li { margin: .28rem 0; }
+.analysis .a-sec { display: inline-block; font-size: .92rem; font-weight: 700;
+  color: #fff; background: #2f6fed; padding: .14rem .7rem; border-radius: 5px;
+  margin: .7rem 0 .35rem; letter-spacing: .02em; }

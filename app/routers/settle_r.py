@@ -187,10 +187,12 @@ def dashboard_staff_module(request: Request,
     analysis = ""
     if staff and ss and ok:
         analysis = D.ensure_staff_analysis(db, staff, ss[-1]["month"])
+    from app.services.dashboard import render_analysis_html
     return templates.TemplateResponse("staff_module.html", {
         "request": request, "current_user": user, "staff": staff,
         "name": name, "series": ss, "chart": chart,
-        "analysis": analysis, "sample_ok": ok,
+        "analysis": render_analysis_html(analysis) if analysis else "",
+        "sample_ok": ok,
     })
 
 
@@ -237,13 +239,12 @@ def dashboard_analysis(request: Request,
     prompt = (
         "你是巡店结算系统的经营分析师。下面是各月经营事实数据：\n\n"
         + facts + "\n\n" + focus +
-        "\n请用中文输出，结论导向（每点先说结论、再用数据佐证，不要罗列数据）：\n"
-        "1) 一句话核心结论（本期经营总体如何）；\n"
-        "2) 变好的方面（与上月对比：哪些指标、幅度多少、可能原因）；\n"
-        "3) 变差的方面（与上月对比：哪些指标、幅度多少、可能原因——如新增店多为1点店、"
-        "重复巡店过多、2点率下滑、奖金口径变化等，明确指出数据支持哪个判断）；\n"
-        "4) 改进建议（3-5 条可执行建议，指名到具体指标、人群或门店，说明预期效果）。\n"
-        "只依据上面数据做判断，原因类表述须标注'数据显示'与推断区分开。")
+        "\n请用中文输出，精炼要点式（不要段落废话，不要'总体来看/综上所述'等套话，每条一句话，关键数字用**加粗**）：\n"
+        "1) **一句话结论**：本期经营总体如何；\n"
+        "2) **变好**（最多3条）：指标、幅度、可能原因；\n"
+        "3) **变差**（最多3条）：指标、幅度、可能原因（如新增店多为1点店/重复巡店过多/2点率下滑/奖金口径等，明确数据支持哪个判断）；\n"
+        "4) **建议**（最多3条）：指名到具体指标或人群，说清做什么。\n"
+        "只依据数据判断，原因类表述区分'数据显示'与推断。")
     try:
         text = chat(prompt, max_tokens=2500, timeout=240)
     except Exception as e:  # noqa: BLE001
@@ -253,11 +254,10 @@ def dashboard_analysis(request: Request,
 
 
 def _render_analysis(text: str, cached: bool = True) -> str:
-    import html as _h
+    from app.services.dashboard import render_analysis_html
     tag = ("<span class='hint'>（缓存）</span>" if cached else
            "<span class='hint'>（刚刚生成）</span>")
-    return (f"<div style='white-space:pre-wrap;line-height:1.75'>{_h.escape(text)}</div>"
-            f"<p class='hint' style='margin-top:.4rem'>{tag}</p>")
+    return render_analysis_html(text) + f"<p class='hint' style='margin-top:.4rem'>{tag}</p>"
 
 
 @router.get("/config", response_class=HTMLResponse)
