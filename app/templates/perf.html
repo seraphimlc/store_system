@@ -38,6 +38,8 @@
   {% else %}
   <div class="stat-card"><div class="k">总点数(全月)</div><div class="v">{{ '{:,}'.format(summary.total_points) }}</div></div>
   {% endif %}
+  <div class="stat-card"><div class="k">重复巡店合计</div>
+    <div class="v" style="color:#b02a37">{{ '{:,}'.format(dup_total) }}</div></div>
   <div class="stat-card"><div class="k">1点店铺数 / 点数</div>
     <div class="v">{{ '{:,}'.format(summary.p1) }} / {{ '{:,}'.format(summary.p1) }}</div></div>
   <div class="stat-card"><div class="k">2点店铺数 / 点数</div>

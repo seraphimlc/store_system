@@ -97,10 +97,12 @@
   <div style="font-weight:600;margin-bottom:.3rem">{{ staff_name }}（{{ staff }}）点数趋势</div>
   <canvas id="cStaff" height="120"></canvas>
   <table style="margin-top:.5rem">
-    <tr><th>月份</th><th>有效店</th><th>1点店</th><th>2点店</th><th>点数</th><th>工资(円)</th></tr>
+    <tr><th>月份</th><th>有效店</th><th>重复</th><th>1点店</th><th>2点店</th><th>点数</th><th>工资(円)</th></tr>
     {% for s in staff_series %}
-    <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td><td class="num">{{ s.p1 }}</td>
-        <td class="num">{{ s.p2 }}</td><td class="num">{{ s.points }}</td><td class="num">¥{{ '{:,}'.format(s.amount) }}</td></tr>
+    <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td>
+        <td class="num" style="color:{% if s.dups > 10 %}#b02a37{% else %}#666{% endif %}">{{ s.dups }}</td>
+        <td class="num">{{ s.p1 }}</td><td class="num">{{ s.p2 }}</td>
+        <td class="num">{{ s.points }}</td><td class="num">¥{{ '{:,}'.format(s.amount) }}</td></tr>
     {% endfor %}
   </table>
   {% elif staff %}<p class="hint">该员工暂无月度数据</p>
