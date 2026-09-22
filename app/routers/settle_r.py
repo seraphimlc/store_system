@@ -969,6 +969,22 @@ def payroll_settle_generate(request: Request, month: str = Form(""),
             _D.sync_dash_metrics(db, month)   # 算完工资 → 物化看板统计
         except Exception:  # noqa: BLE001
             pass
+        try:
+            # 算完工资 → 后台自动为全部员工预生成分析（落盘，样本不足跳过）
+            import threading as _th
+            from app.db import SessionLocal as _SL
+
+            def _bg():
+                _db = _SL()
+                try:
+                    _D.analyze_all_staff(_db, month)
+                except Exception:  # noqa: BLE001
+                    pass
+                finally:
+                    _db.close()
+            _th.Thread(target=_bg, daemon=True).start()
+        except Exception:  # noqa: BLE001
+            pass
         return RedirectResponse(
             f"/payroll-settle?month={month}&msg={_q('已生成/更新 ' + str(res.get('rows', 0)) + ' 人，看板统计已刷新')}",
             status_code=303)

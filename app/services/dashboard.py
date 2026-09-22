@@ -468,3 +468,21 @@ def month_payloads(db, month: str) -> dict:
         except Exception:  # noqa: BLE001
             out[r.metric] = {}
     return out
+
+
+def analyze_all_staff(db, month: str) -> dict:
+    """为当月全部员工预生成分析并落盘（幂等：已生成的行跳过）。
+    样本不足的员工自动跳过；在算完工资后自动执行（后台线程）。"""
+    from app.models import MonthPerfRecord
+    codes = [r.person_code for r in db.query(MonthPerfRecord).filter(
+        MonthPerfRecord.month == month).all()]
+    done = skipped = failed = 0
+    for code in codes:
+        if not staff_sample_ok(db, code, month):
+            skipped += 1
+            continue
+        if ensure_staff_analysis(db, code, month):
+            done += 1
+        else:
+            failed += 1
+    return {"done": done, "skipped": skipped, "failed": failed}
