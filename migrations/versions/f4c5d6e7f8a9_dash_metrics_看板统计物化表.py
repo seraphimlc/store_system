@@ -13,6 +13,7 @@ def upgrade():
         sa.Column("month", sa.String(7), nullable=False),
         sa.Column("metric", sa.String(64), nullable=False),
         sa.Column("value", sa.Float(), nullable=False, server_default="0"),
+        sa.Column("payload", sa.Text(), nullable=True),
         sa.Column("person", sa.String(32), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("month", "metric", "person",
