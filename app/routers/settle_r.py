@@ -237,12 +237,13 @@ def dashboard_analysis(request: Request,
     prompt = (
         "你是巡店结算系统的经营分析师。下面是各月经营事实数据：\n\n"
         + facts + "\n\n" + focus +
-        "\n请用中文输出四节（每节 3-5 句，具体到数字，不要用表格）：\n"
-        "1) 整体趋势与幅度（点数/工资/店铺/人均，明确百分比）；\n"
-        "2) 结构与效率（1点2点结构、2点率、店均点数、人均产出，说明含义）；\n"
-        "3) 异常与风险（环比突变、2点率变化、人员进出与人均负荷、数据质量：重复/迟交/空白占比）；\n"
-        "4) 建议动作（3-5 条可执行建议，指名到具体指标或人群）。\n"
-        "只依据上面数据，不得臆测数据外原因。")
+        "\n请用中文输出，结论导向（每点先说结论、再用数据佐证，不要罗列数据）：\n"
+        "1) 一句话核心结论（本期经营总体如何）；\n"
+        "2) 变好的方面（与上月对比：哪些指标、幅度多少、可能原因）；\n"
+        "3) 变差的方面（与上月对比：哪些指标、幅度多少、可能原因——如新增店多为1点店、"
+        "重复巡店过多、2点率下滑、奖金口径变化等，明确指出数据支持哪个判断）；\n"
+        "4) 改进建议（3-5 条可执行建议，指名到具体指标、人群或门店，说明预期效果）。\n"
+        "只依据上面数据做判断，原因类表述须标注'数据显示'与推断区分开。")
     try:
         text = chat(prompt, max_tokens=2500, timeout=240)
     except Exception as e:  # noqa: BLE001
@@ -256,9 +257,7 @@ def _render_analysis(text: str, cached: bool = True) -> str:
     tag = ("<span class='hint'>（缓存）</span>" if cached else
            "<span class='hint'>（刚刚生成）</span>")
     return (f"<div style='white-space:pre-wrap;line-height:1.75'>{_h.escape(text)}</div>"
-            f"<p class='hint' style='margin-top:.4rem'>{tag}"
-            f"<a class='btn ghost' style='margin-left:.6rem;padding:.1rem .5rem' "
-            f"href='/dashboard/analysis?refresh=1'>重新生成</a></p>")
+            f"<p class='hint' style='margin-top:.4rem'>{tag}</p>")
 
 
 @router.get("/config", response_class=HTMLResponse)

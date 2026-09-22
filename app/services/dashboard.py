@@ -246,7 +246,9 @@ def ensure_staff_analysis(db, code, month, force=False) -> str:
             for x in ss),
         f"全公司最近月人均点数：{avg:.1f}",
         f"本人最近月({s_last['month']})点数{s_last['points']}，"
-        f"店数{s_last['records']}，重复巡店{s_last.get('dups', 0)}",
+        f"店数{s_last['records']}，重复巡店{s_last.get('dups', 0)}，"
+        f"重复率{(s_last.get('dups', 0) / s_last['records'] if s_last['records'] else 0):.0%}，"
+        f"2点率{(s_last['p2'] / (s_last['p1'] + s_last['p2']) if (s_last['p1'] + s_last['p2']) else 0):.0%}",
     ]
     if prev:
         lines.append(
@@ -255,12 +257,14 @@ def ensure_staff_analysis(db, code, month, force=False) -> str:
     prompt = (
         "你是巡店结算系统的员工绩效分析师。下面是该员工与全公司的数据：\n\n"
         + "\n".join(lines) +
-        "\n请用中文输出四节（每节 2-4 句，具体到数字）：\n"
-        "1) 该员工表现（点数/店数/工资水平与变化幅度）；\n"
-        "2) 效率评估（有效店产出、重复巡店数量是否偏多——重复越多效率越低）；\n"
-        "3) 与全公司的对比（人均水平、相对位置）；\n"
+        "\n请用中文输出，结论导向（每点先说结论、再用数据佐证）：\n"
+        "1) 一句话结论（该员工本期表现评价：好/一般/需关注）；\n"
+        "2) 对比结论（vs 上月与全公司：哪里变好、哪里变差，先说结论后数据）；\n"
+        "3) 归因判断（结合数据判断主要原因，明确支持哪个：是任务量/市场原因（店数与点数的同向变化）、"
+        "还是重复巡店太多（重复数与重复率偏高）、还是投放质量（2点率偏低）、或奖金口径等变化；"
+        "说明'数据显示…'推断依据）；\n"
         "4) 建议（1-3 条可执行建议）。\n"
-        "只依据上面数据，不得臆测。")
+        "只依据上面数据做判断，不得臆测数据外原因。")
     try:
         content = chat(prompt, max_tokens=1800, timeout=240)
     except Exception as e:  # noqa: BLE001

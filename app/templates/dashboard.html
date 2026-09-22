@@ -140,6 +140,7 @@
 <script src="/static/chart.umd.min.js"></script>
 <script>
 (function(){
+  function boot(){
   var C=(window.__PAGE_STATE__||{}).chart||{};
   function axis(){return {responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}};}
   function bar(id,label,data,color){var el=document.getElementById(id);if(!el||!(C.labels||[]).length)return;
@@ -179,6 +180,12 @@
   if(se&&C.staff_labels&&C.staff_labels.length){new Chart(se,{type:'bar',
     data:{labels:C.staff_labels,datasets:[{label:'点数',data:C.staff_points,backgroundColor:'rgba(47,111,237,.78)',borderRadius:4}]},
     options:axis()});}
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })();
 </script>
 {% endblock %}
