@@ -30,7 +30,7 @@ def test_product_page_public(client):
     r = client.get("/product", follow_redirects=False)
     assert r.status_code == 200
     html = r.text
-    assert "整体概念" in html
+    assert "系统解决什么问题" in html and "交付版 v5.0" in html
     assert "<table>" in html            # markdown 表格渲染
     assert "月度对账" in html
     raw = client.get("/product/raw")
