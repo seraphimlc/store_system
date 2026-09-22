@@ -39,5 +39,9 @@ data/*.txt
 # 日志
 *.log
 
+# MCP 服务（mcp_service/）：证据日志为 jsonl，不在上条 *.log 覆盖范围内
+# 注：mcp_service/.venv/ 已由上面的 .venv/ 规则覆盖（无前导斜杠，任意层级生效）
+mcp_service/logs/
+
 # 旧仓库历史备份/本地残留
 .git.orig/

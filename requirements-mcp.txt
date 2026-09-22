@@ -1,0 +1,15 @@
+# MCP 服务（mcp_service/）依赖 —— 独立进程、独立依赖，不影响现有 Web 应用
+#
+# 为什么包含应用依赖：MCP 服务要 `import app.services.*` / `app.models`，
+# 复用唯一的业务逻辑实现，避免判定/工资/对账出现第二份实现（见 spec §5.3）。
+#
+# 为什么必须 Python >= 3.10：mcp 官方 Python SDK 全部版本（1.x / 2.x）都要求 >= 3.10，
+# 而项目现有 .venv 是 3.9.6。生产镜像是 python:3.11-slim，满足要求；
+# 本地开发用 Homebrew python3.12 建独立 venv（mcp_service/.venv，已 gitignore）。
+# 见 spec §1.2 / §5.1 / 事实表 R6。
+-r requirements.txt
+-r requirements-web.txt
+
+# 精确锁定，不用 >=（spec §5.1）。2.x 把 FastMCP 改名为 MCPServer，
+# v1 的 `mcp.server.fastmcp` 会主动抛 ModuleNotFoundError，网上 v1 教程代码不可直接用。
+mcp==2.2.0
