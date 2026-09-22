@@ -3,7 +3,12 @@
 {% block content %}
 <div class="page-title">
   <h1>数据看板</h1>
-</div>
+  <span class="actions">
+    <form method="get" action="/dashboard" style="display:inline-flex;gap:.4rem;align-items:center;margin:0">
+      <select name="month" onchange="this.form.submit()">
+        {% for mo in months %}<option value="{{ mo }}" {% if mo == sel %}selected{% endif %}>{{ mo }}</option>{% endfor %}
+      </select>
+    </form>
 {% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
 
@@ -21,7 +26,7 @@
 
 {% if cur.d_points is defined %}
 <div class="hint" style="margin:.4rem 0">
-  环比（{{ monthly[-2].month }} → {{ cur.month }}）：
+  环比（{{ prev.month if prev else '—' }} → {{ cur.month }}）：
   点数 <b>{{ '%+.1f%%'|format((cur.d_points or 0) * 100) }}</b> ·
   工资 <b>{{ '%+.1f%%'|format((cur.d_amount or 0) * 100) }}</b> ·
   有效店 <b>{{ '%+.1f%%'|format((cur.d_records or 0) * 100) }}</b> ·

@@ -96,14 +96,19 @@ _AI_CACHE = {}
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: Optional[User] = Depends(require_login),
-              db: Session = Depends(get_db), staff: str = "",
+              db: Session = Depends(get_db), staff: str = "", month: str = "",
               msg: str = "", err: str = ""):
-    """管理端数据看板：逐月趋势图表 + 人员/质量指标 + 员工维度 + 模型分析。"""
+    """管理端数据看板：逐月趋势 + 当月视图(可切换历史月份) + 员工维度 + 模型分析。"""
     if user is None or user.role != "admin":
         return _denied()
     from app.services import dashboard as D
     from app.services import perf as _p
     monthly = D.monthly_series(db)
+    sel = month if month in [m["month"] for m in monthly] else (
+        monthly[-1]["month"] if monthly else "")
+    idx = [m["month"] for m in monthly].index(sel) if sel else -1
+    cur = monthly[idx] if idx >= 0 else None
+    prev = monthly[idx - 1] if idx > 0 else None
     labels = [m["month"][5:] + "月" for m in monthly]
     charts = {
         "points": D.svg_line([m["points"] for m in monthly], labels,
@@ -115,84 +120,63 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
         "p2rate": D.svg_line([round(m["p2rate"] * 100, 1) for m in monthly],
                              labels, color="#7c3aed", fmt="{:,.1f}"),
     }
-    cur = monthly[-1] if monthly else None
+    compare = None
+    if cur and prev:
+        compare = {"labels": ["总点数", "工资(万円)", "有效店", "人均点数",
+                              "人均工资(万円)", "2点率(%)"],
+                   "cur": [cur["points"], round(cur["amount"] / 10000, 1),
+                           cur["records"], round(cur["per_emp_points"], 1),
+                           round(cur["per_emp_amount"] / 10000, 1),
+                           round(cur["p2rate"] * 100, 1)],
+                   "prev": [prev["points"], round(prev["amount"] / 10000, 1),
+                            prev["records"], round(prev["per_emp_points"], 1),
+                            round(prev["per_emp_amount"] / 10000, 1),
+                            round(prev["p2rate"] * 100, 1)]}
     opts = D.staff_options(db)
     staff_series = D.staff_series(db, staff) if staff else []
     staff_name = dict(opts).get(staff, staff)
-    _p.warm_config(db, cur["month"] if cur else None)
+    if cur is None:
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request, "current_user": user, "monthly": [],
+            "cur": None, "prev": None, "compare": None, "charts": charts,
+            "opts": [], "staff": "", "months": [], "sel": "",
+            "staff_name": "", "staff_series": [], "top": [], "new_staff": [],
+            "gone_staff": [], "quality": {}, "msg": msg, "err": err,
+            "page_state": {"page": "dashboard", "months": [], "current": None,
+                           "staff": "", "sel": "", "chart": {}}})
+    _p.warm_config(db, sel)
     page_state = {"page": "dashboard", "months": [m["month"] for m in monthly],
-                  "current": cur, "staff": staff,
-                  "per_point": _p.month_per_point(db, cur["month"] if cur else ""),
-                  "bonus_group": _p.bonus_params(cur["month"] if cur else None)[0],
-                  "bonus_amount": _p.bonus_params(cur["month"] if cur else None)[1],
+                  "current": cur, "staff": staff, "sel": sel,
+                  "per_point": _p.month_per_point(db, sel),
+                  "bonus_group": _p.bonus_params(sel)[0],
+                  "bonus_amount": _p.bonus_params(sel)[1],
                   "chart": {
-                      "labels": [m["month"][5:] + "月" for m in monthly],
+                      "labels": labels,
                       "points": [m["points"] for m in monthly],
                       "amount": [m["amount"] for m in monthly],
                       "records": [m["records"] for m in monthly],
                       "p2rate": [round(m["p2rate"] * 100, 1) for m in monthly],
                       "p1": [m["p1"] for m in monthly],
                       "p2": [m["p2"] for m in monthly],
-                      "cur_p1": (cur["p1"] if cur else 0),
-                      "cur_p2": (cur["p2"] if cur else 0),
-                      "staff_points": [s["points"] for s in staff_series],
-                      "staff_records": [s["records"] for s in staff_series],
-                      "staff_amount": [s["amount"] for s in staff_series],
-                      "staff_labels": [s["month"][5:] + "月" for s in staff_series],
+                      "cur_p1": cur["p1"], "cur_p2": cur["p2"],
                       "employees": [m["employees"] for m in monthly],
                       "hc": D.headcount_changes(db),
-                      "compare": (lambda mo, cv:
-                          {"labels": ["总点数", "工资(万円)", "有效店", "人均点数",
-                                      "人均工资(万円)", "2点率(%)"],
-                           "cur": cv,
-                           "prev": [mo[-2]["points"], round(mo[-2]["amount"] / 10000, 1),
-                                    mo[-2]["records"], round(mo[-2]["per_emp_points"], 1),
-                                    round(mo[-2]["per_emp_amount"] / 10000, 1),
-                                    round(mo[-2]["p2rate"] * 100, 1)]})
-                          (monthly, ([monthly[-1]["points"],
-                                      round(monthly[-1]["amount"] / 10000, 1),
-                                      monthly[-1]["records"],
-                                      round(monthly[-1]["per_emp_points"], 1),
-                                      round(monthly[-1]["per_emp_amount"] / 10000, 1),
-                                      round(monthly[-1]["p2rate"] * 100, 1)]
-                                     if len(monthly) >= 2 else []))
-                          if len(monthly) >= 2 else None,
+                      "compare": compare,
+                      "staff_points": [x["points"] for x in staff_series],
+                      "staff_records": [x["records"] for x in staff_series],
+                      "staff_amount": [x["amount"] for x in staff_series],
+                      "staff_labels": [x["month"][5:] + "月" for x in staff_series],
                   }}
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
-        "cur": cur, "charts": charts, "opts": opts, "staff": staff,
-        "staff_name": staff_name, "staff_series": staff_series,
-        "top": D.top_staff(db, cur["month"], 8) if cur else [],
-        "new_staff": D.staff_changes(db, cur["month"])[0] if cur else [],
-        "gone_staff": D.staff_changes(db, cur["month"])[1] if cur else [],
-        "quality": D.quality_stats(db, cur["month"]) if cur else {},
+        "cur": cur, "prev": prev, "compare": compare, "charts": charts,
+        "opts": opts, "staff": staff, "months": [m["month"] for m in monthly],
+        "sel": sel, "staff_name": staff_name, "staff_series": staff_series,
+        "top": D.top_staff(db, sel, 8) if sel else [],
+        "new_staff": D.staff_changes(db, sel)[0] if sel else [],
+        "gone_staff": D.staff_changes(db, sel)[1] if sel else [],
+        "quality": D.quality_stats(db, sel) if sel else {},
         "msg": msg, "err": err, "page_state": page_state,
-    })
-
-
-@router.get("/dashboard/staff", response_class=HTMLResponse)
-def dashboard_staff_module(request: Request,
-                           user: Optional[User] = Depends(require_login),
-                           db: Session = Depends(get_db), staff: str = ""):
-    """员工维度模块（htmx 局部刷新，不整页跳转）：趋势图 + 明细 + 分析（存库懒生成）。"""
-    if user is None or user.role != "admin":
-        return _denied()
-    from app.services import dashboard as D
-    ss = D.staff_series(db, staff) if staff else []
-    chart = (D.svg_line([x["points"] for x in ss],
-                        [x["month"][5:] + "月" for x in ss],
-                        color="#2f6fed") if ss else "")
-    name = dict(D.staff_options(db)).get(staff, staff)
-    ok = D.staff_sample_ok(db, staff, ss[-1]["month"]) if (staff and ss) else False
-    analysis = ""
-    if staff and ss and ok:
-        analysis = D.ensure_staff_analysis(db, staff, ss[-1]["month"])
-    from app.services.dashboard import render_analysis_html
-    return templates.TemplateResponse("staff_module.html", {
-        "request": request, "current_user": user, "staff": staff,
-        "name": name, "series": ss, "chart": chart,
-        "analysis": render_analysis_html(analysis) if analysis else "",
-        "sample_ok": ok,
     })
 
 
