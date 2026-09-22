@@ -116,6 +116,7 @@ class DashMetric(Base):
     month = Column(String(7), nullable=False, index=True)
     metric = Column(String(64), nullable=False)
     value = Column(Float, nullable=False, default=0)
+    payload = Column(Text, nullable=True, default=None)   # 列表型指标(JSON字符串)
     person = Column(String(32), nullable=True, default=None)
     updated_at = Column(DateTime, nullable=False, default=_now)
     __table_args__ = (UniqueConstraint("month", "metric", "person",

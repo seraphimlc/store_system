@@ -105,10 +105,10 @@
 
 {% if quality %}
 <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">数据质量（{{ cur.month }}）</div>
-  <div class="hint">原始 {{ '{:,}'.format(quality.total) }} 条 · 有效 {{ '{:,}'.format(quality.by_status.get('valid', 0)) }} ·
-  跨文件重复 {{ '{:,}'.format(quality.by_status.get('cross_file_dup', 0)) }} · 迟交 {{ '{:,}'.format(quality.by_status.get('master_late', 0)) }} ·
-  从档 {{ '{:,}'.format(quality.by_status.get('from_sub', 0)) }} · 空白 {{ '{:,}'.format(quality.by_status.get('visible_blank', 0)) }} ·
-  有数据天数 {{ quality.valid_days }}</div></div>
+  <div class="hint">原始 {{ '{:,}'.format(quality.total or 0) }} 条 · 有效 {{ '{:,}'.format(quality.valid or 0) }} ·
+  跨文件重复 {{ '{:,}'.format(quality.cross_file_dup or 0) }} · 迟交 {{ '{:,}'.format(quality.master_late or 0) }} ·
+  从档 {{ '{:,}'.format(quality.from_sub or 0) }} · 空白 {{ '{:,}'.format(quality.visible_blank or 0) }} ·
+  有数据天数 {{ quality.valid_days or 0 }}</div></div>
 {% endif %}
 
 <div class="card">

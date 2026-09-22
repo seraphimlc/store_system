@@ -176,15 +176,22 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
                       "staff_amount": [x["amount"] for x in staff_series],
                       "staff_labels": [x["month"][5:] + "月" for x in staff_series],
                   }}
+    _pl = D.month_payloads(db, sel) if sel else {}
+    top = _pl.get("top_staff") or (D.top_staff(db, sel, 8) if sel else [])
+    new_staff = [(x["name"], (x["points"], x["amount"]))
+                 for x in _pl.get("new_staff", [])] or (
+                     D.staff_changes(db, sel)[0] if sel else [])
+    gone_staff = [(x["name"], (x["points"], x["amount"]))
+                  for x in _pl.get("gone_staff", [])] or (
+                      D.staff_changes(db, sel)[1] if sel else [])
+    quality = _pl.get("quality") or (D.quality_stats(db, sel) if sel else {})
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
         "cur": cur, "prev": prev, "compare": compare, "charts": charts,
         "opts": opts, "staff": staff, "months": [m["month"] for m in monthly],
         "sel": sel, "staff_name": staff_name, "staff_series": staff_series,
-        "top": D.top_staff(db, sel, 8) if sel else [],
-        "new_staff": D.staff_changes(db, sel)[0] if sel else [],
-        "gone_staff": D.staff_changes(db, sel)[1] if sel else [],
-        "quality": D.quality_stats(db, sel) if sel else {},
+        "top": top, "new_staff": new_staff, "gone_staff": gone_staff,
+        "quality": quality,
         "msg": msg, "err": err, "page_state": page_state,
     })
 
@@ -300,11 +307,10 @@ def perf(request: Request,
         month = months[-1] if months else ""
     rows = perf.month_perf(db, month)
     summary = perf.company_summary(db, month)
-    from app.models import DashMetric as _DM
-    _rows = db.query(_DM).filter(_DM.month == month,
-                                 _DM.metric == "dup").all() if month else []
-    dup_map = ({r.person: int(r.value) for r in _rows}
-               if _rows else perf.month_dup_map(db, month) if month else {})
+    from app.services import dashboard as _DD
+    dup_map = (_DD.month_payloads(db, month).get("dup_map")
+               if month else {}) or (perf.month_dup_map(db, month)
+                                     if month else {})
     dup_total = sum(dup_map.values())
     # 上月找平 = 上月未找平余量（diff−adjust，同一张表 payroll_period_rows）
     from app.services import period as _payroll
@@ -423,11 +429,10 @@ def perf_export(request: Request, user: Optional[User] =
     rows = perf.month_perf(db, month)
     daily = perf.daily_perf(db, month)
     summary = perf.company_summary(db, month)
-    from app.models import DashMetric as _DM
-    _rows = db.query(_DM).filter(_DM.month == month,
-                                 _DM.metric == "dup").all() if month else []
-    dup_map = ({r.person: int(r.value) for r in _rows}
-               if _rows else perf.month_dup_map(db, month) if month else {})
+    from app.services import dashboard as _DD
+    dup_map = (_DD.month_payloads(db, month).get("dup_map")
+               if month else {}) or (perf.month_dup_map(db, month)
+                                     if month else {})
     dup_total = sum(dup_map.values())
     from app.services import period as _payroll
     adj = _payroll.carry_map(db, month) if month else {}

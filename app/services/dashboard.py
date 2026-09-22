@@ -356,7 +356,9 @@ _METRICS = ("total_points", "total_amount", "records", "employees", "p1",
 
 def sync_dash_metrics(db, month: str) -> int:
     """计算该月全部看板指标写入 dash_metrics（先删该月再写；幂等）。
-    调用时机：算完工资（找平生成/月度重算）后。"""
+    数值型指标一行一个 value；列表型（新增/未出现/排行/质量/每人重复）
+    合并为单条 JSON(payload)——数据量小，一条即可。"""
+    import json
     from app.models import DashMetric, MonthPerfRecord
     from app.services import perf as _p
     ms = monthly_series(db)
@@ -366,6 +368,7 @@ def sync_dash_metrics(db, month: str) -> int:
     q = quality_stats(db, month)
     new_, gone_ = staff_changes(db, month)
     dup_map = _p.month_dup_map(db, month)
+    tops = top_staff(db, month, 8)
     kv = {
         "total_points": row["points"], "total_amount": row["amount"],
         "records": row["records"], "employees": row["employees"],
@@ -383,14 +386,28 @@ def sync_dash_metrics(db, month: str) -> int:
         "q_visible_blank": q["by_status"].get("visible_blank", 0),
         "q_valid_days": q["valid_days"],
     }
+    payloads = {
+        "new_staff": [{"name": n, "points": v[0], "amount": v[1]}
+                      for n, v in new_],
+        "gone_staff": [{"name": n, "points": v[0], "amount": v[1]}
+                       for n, v in gone_],
+        "top_staff": tops,
+        "quality": {"total": q["total"], "valid": q["by_status"].get("valid", 0),
+                    "cross_file_dup": q["by_status"].get("cross_file_dup", 0),
+                    "master_late": q["by_status"].get("master_late", 0),
+                    "from_sub": q["by_status"].get("from_sub", 0),
+                    "visible_blank": q["by_status"].get("visible_blank", 0),
+                    "valid_days": q["valid_days"]},
+        "dup_map": dup_map,
+    }
     db.query(DashMetric).filter(DashMetric.month == month).delete()
     for k, v in kv.items():
         db.add(DashMetric(month=month, metric=k, value=float(v or 0)))
-    for code, n in dup_map.items():
-        db.add(DashMetric(month=month, metric="dup", value=float(n),
-                          person=code))
+    for k, v in payloads.items():
+        db.add(DashMetric(month=month, metric=k, value=0,
+                          payload=json.dumps(v, ensure_ascii=False)))
     db.commit()
-    return len(kv) + len(dup_map)
+    return len(kv) + len(payloads)
 
 
 def monthly_series_from_db(db):
@@ -436,3 +453,18 @@ def month_has_metrics(db, month: str) -> bool:
     return db.query(DashMetric).filter(
         DashMetric.month == month,
         DashMetric.person.is_(None)).count() >= 5
+
+
+def month_payloads(db, month: str) -> dict:
+    """读该月列表型指标 JSON（{metric: 对象}）；无则空。"""
+    import json
+    from app.models import DashMetric
+    out = {}
+    for r in db.query(DashMetric).filter(
+            DashMetric.month == month,
+            DashMetric.payload.isnot(None)).all():
+        try:
+            out[r.metric] = json.loads(r.payload)
+        except Exception:  # noqa: BLE001
+            out[r.metric] = {}
+    return out
