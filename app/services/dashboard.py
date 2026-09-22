@@ -287,17 +287,21 @@ def staff_analysis(db, code, month="") -> str:
 
 
 def headcount_changes(db):
-    """逐月人员变化：每月新增/流失人数。"""
-    from app.models import MonthPerfRecord
-    ms = _months(db)
+    """逐月人员变化：新增/流失人数——读数化物表(dash_metrics)，零实时统计。"""
+    from app.models import DashMetric
+    g = {}
+    for r in db.query(DashMetric).filter(
+            DashMetric.person.is_(None),
+            DashMetric.metric.in_(("employees", "new_staff", "gone_staff"))).all():
+        g.setdefault(r.month, {})[r.metric] = int(r.value)
     out = []
-    prev = set()
-    for mo in ms:
-        cur = {r.person_code for r in db.query(MonthPerfRecord).filter(
-            MonthPerfRecord.month == mo).all()}
-        out.append({"month": mo, "new": len(cur - prev),
-                    "gone": len(prev - cur), "employees": len(cur)})
-        prev = cur
+    for mo in sorted(g):
+        v = g[mo]
+        if "employees" not in v:
+            continue
+        out.append({"month": mo, "new": v.get("new_staff", 0),
+                    "gone": v.get("gone_staff", 0),
+                    "employees": v["employees"]})
     return out
 
 
