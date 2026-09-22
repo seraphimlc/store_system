@@ -1,66 +1,108 @@
-# WorkBuddy × 巡店结算系统 · P0 连通性验证设计（Connectivity Spike）
+# WorkBuddy × 巡店结算系统 · P0 连通性验证设计（v2）
 
 - 日期：2026-09-22
 - 分支：`feat/workbuddy-integration`
-- 状态：设计已获用户确认，待评审
+- 状态：设计已获用户确认；v2 待评审
 - 上游设计：`docs/superpowers/specs/2026-09-21-workbuddy-mcp-integration-design.md`（v3，**零实现**）
-- 定位：本文**只覆盖 P0（连通性与鉴权透传验证）**。能力层、Token 表、审计、封账等属 P1/P2，不在本文范围。
+- 定位：本文**只覆盖 P0**。能力层全量、写工具、审计表、封账属 P1/P2。
+
+## v2 修订说明
+
+v1 的两处事实错误与八处设计缺陷由独立评审指出，已逐条复核并修正。主要变更：
+
+1. **架构前提重写**：原设计假设"自定义连接器 + 本机 HTTP 探路"。经查证生态实况（§2.3），确定为**服务端远端 MCP + 市场可分发包**。
+2. **删除多通道凭据 hack**（原 v1 §4.3 的 Bearer/`X-Visit-Token`/`?token=` 三通道）：`?token=` 会把凭据写进 URL 与日志，且与确认后的交付形态（header 注入）不符。改为**仅 Bearer 单通道**。
+3. **修正 F9 过度声称**：本机唯一的自定义连接器是 **stdio**（§2.2 E6），v1 据此声称"自定义连接器可行"却不区分传输，属过度声称。
+4. **修正 R1 回退机制**：v1 说自定义连接器注册在 `connectors/<uuid>/mcp.json` 且卡点是"加密的 enabled 列表"，**两者皆错**（§2.2 E7、E8）。
+5. **修正 F15 表述**：v1 称"无 Token 机制"，实为"无面向外部客户端的 API Token（Bearer）机制"。
+6. **补全 `visit_month_summary` 聚合口径**（§5.4）——v1 未定义，实现者可合法返回 `persons: 54`。
+7. **统一验收基准语义**（§7）——v1 在 §2.1/§5/§7 三处自相矛盾。
+8. **补 §12.2 与 v3 §14 的冲突记录**，并收录"`stateless_http` 已确认存在"（D2(a) 近乎零成本得解）。
 
 ---
 
-## 1. 背景与目标
+## 1. 已确认决策
 
-### 1.1 用户意图（本轮新增，v3 spec 未包含）
+### 1.1 用户定义的三条原则（2026-09-22）
 
-1. 巡店结算系统不再以网页为主要交付形态；**WorkBuddy 里的 agent/skill 是用户的操作界面**，MCP 是它伸进本系统的入口。
-2. 本系统是**私有化系统**：数据不出客户边界，**必须跑在客户自己的环境里**（用户 2026-09-22 明确选择）。
-3. 实际使用者用 **WorkBuddy 桌面客户端，装在客户内网的机器上**（用户明确选择）。
-4. 若整合效果与客户认可度成立，**网页形态可以下掉**——届时上传、身份、看板、导出等网页独占能力都必须在 MCP 侧有等价物。
-
-### 1.2 本轮的单一目标
-
-**用最小代价换取两个未知的确定性**：
-
-- **U1**：WorkBuddy 桌面客户端能否连接**本机 `127.0.0.1` 的 streamable HTTP MCP 端点**。
-- **U2**：客户端能否把凭据**透传**到该端点（`Authorization: Bearer` 是否被保留）。
-
-选 `127.0.0.1` 是因为它是"不可从公网到达"的**最强形式**：它通过则私网/内网端点基本可通过；它不通过则私有化路线需要换玩法（反向隧道或客户端侧 bridge）。这是一次**证伪优先**的探测，不是产品实现。
-
----
-
-## 2. 已确证事实（含证据）
-
-以下均为本机实测/查证所得，不是推测。
-
-| # | 事实 | 证据来源 |
+| # | 原则 | 对设计的约束 |
 |---|---|---|
-| F1 | `mcp` 官方 Python SDK **全部版本**（1.0 – 2.2.0）要求 **Python ≥ 3.10** | PyPI JSON API 逐版本 `requires_python` |
-| F2 | 生产镜像为 `python:3.11-slim`，可运行 `mcp` SDK | `deploy/Dockerfile:1` |
-| F3 | 本地项目 venv 为 **Python 3.9.6**，**无法安装 `mcp`** | `./.venv/bin/python -V` |
-| F4 | 本机另有 Homebrew `python3.12` / `python3.13`；`node v25.2.1` / `npx 11.6.2` | `command -v` |
-| F5 | 连接器配置为 `mcp.json` 的 `mcpServers` 表，支持 `streamableHttp`/`streamable-http`/`sse`/`stdio`/`http`，支持 `${VAR}` 插值、`headers`、`staticHeaders`、`timeout`、`disabledTools`、`staticEnv` | `~/.workbuddy/connectors/*/mcp.json` |
-| F6 | 客户端内嵌**官方 MCP TypeScript SDK**（`client/index.js`、`client/streamableHttp.js`、`client/sse.js`、`client/stdio.js`） | `/Applications/WorkBuddy.app/Contents/Resources/app.asar` |
-| F7 | 客户端支持协议版本 `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`、`2024-10-07`；SDK 服务端默认取 `2025-03-26` | asar 内 `SUPPORTED_PROTOCOL_VERSIONS` / `mcp-protocol-version` |
-| F8 | 市场连接器包格式 = `mcp.json` + `skills/<名>/SKILL.md` + `references/`；市场共 **270 个**包 | `~/.workbuddy/connectors-marketplace/connectors/fbs-connector/` |
-| F9 | **自定义 MCP 连接器可行且本机跑过** | `~/.workbuddy/logs/mcp-runtime/custom-mcp_playwright-5e9d46fa/` |
-| F10 | **自定义连接器受企业管理后台策略管控**：从企业后台拉 `USER_CHECK_PATH` 策略判 `allowed`，1.5s 超时、stale-cache、**fail-open** | asar 内 `EnterpriseCustomConnectorPolicy` / `EnterpriseCustomConnectorPolicyError` |
-| F11 | 客户端近期做过安全迁移：连接器状态里有 `headerOverridesBearerStripped: true`、`mcpSecurityMigrated: true` | `~/.workbuddy/connectors/*/connector-states.v3.json` |
-| F12 | 凭据按账号加密存储（aes-256-gcm + hkdf），有 `headerOverrides` / `envOverrides` 注入位 | 同上 + `README-DO-NOT-DELETE.txt` |
-| F13 | 客户端存在沙箱概念（agent 文件写入走 `extraAllowWrite` 白名单） | `~/.workbuddy/settings.json` |
-| F14 | 市场里存在明文 HTTP + 裸公网 IP 的连接器（`http://47.114.32.85:9010/mcp`），说明客户端直连端点、不强制 HTTPS | F5 同一批 mcp.json |
-| F15 | 本系统现有 **66 个路由**，**唯一返回 JSON 的端点是 `GET /healthz`**；无 Token 机制、无 `app/api/`、无 `app/mcp/`、无相关迁移 | 全路由清点（见 §9 附注） |
-| F16 | `deploy/entrypoint.sh:5` 为 `uvicorn --workers 2` | `deploy/entrypoint.sh` |
+| P1 | **现有 web 系统相关的能力和接口不能被影响** | 只做增量；不改既有路由行为/返回语义/数据模型既有列。"网页可下掉"是**未来业务决定**，不等于现在可动接口 |
+| P2 | **走正确标准的 WorkBuddy 接入方式**；后续还有很多系统接入，本系统只是第一个业务场景 | 不做一次性 trick；产物须拆出**可复用范式**（包结构、命名、鉴权、SKILL 写法、验收清单）；官方文档/后台口径优先于 reverse-engineering |
+| P3 | 系统**部署在客户服务器、走公网访问**；测试环境都在本机 | 端点公网可达（需 TLS）；本机是测试环境；内网穿透/反向隧道**不是**本客户的议题 |
 
-### 2.1 本地库实测基线（只读 SQL）
+**P3 修正了 v1 的推论**：v1 把"必须跑在客户自己的环境里"推论成"内网隔离、公网不可达"，并据此把 P0 定位为"私有化可达性验证"。正确理解是**专属实例 + 数据归属客户 + 公网可达**。
 
-验收基准**只能**是"与同一份库的 SQL 直查一致"，不能用 `AGENTS.md` 的数字——两者已经不一致：
+### 1.2 用户确认的四个形态决策
 
-| 月 | 行数 | 总点数 | 1点 | 2点 | 人数 | `AGENTS.md` 记为 |
+| 项 | 决策 | 依据 |
+|---|---|---|
+| 接入形态 | **官方/市场连接器（可分发包）** | 用户选择；生态有完整先例（§2.3） |
+| 连接器形态 | **远端 streamableHttp，MCP 随系统部署** | 用户选择；官方 bundle 有 `${VAR}` 插值 URL 先例（§2.3 X9） |
+| 实现边界 | **独立服务：同仓库、不同进程、独立依赖** | 用户选择；复用 `app/services/*`，现有 app/venv/镜像零影响 |
+| 鉴权 | **静态 Token（`auth_mode: token`）** | 用户选择；生态标准做法（§2.3 X4/X5） |
+
+---
+
+## 2. 事实基础
+
+**证据等级**：`实测` = 本机命令输出；`反编译` = 客户端 `app.asar` 提取；`外部` = npm/公开资料。**推论一律标注为推论**，不混入事实表。
+
+### 2.1 仓库与运行环境（实测）
+
+| # | 事实 | 证据 |
+|---|---|---|
+| R1 | 现有 **66 个路由**，**唯一返回 JSON 的端点是 `GET /healthz`** | 全路由清点 |
+| R2 | 无面向外部客户端的 **API Token（Bearer）机制**；`app/auth.py` 有签名会话 Cookie（itsdangerous + TTL）与 CSRF | `app/auth.py` |
+| R3 | 无 `app/api/`、无 `app/mcp/`、`requirements-web.txt` 无 `mcp` 依赖、无相关迁移 | 目录与依赖清单 |
+| R4 | 生产镜像 `python:3.11-slim`；`deploy/entrypoint.sh:5` 为 `uvicorn --workers 2` | `deploy/Dockerfile`、`deploy/entrypoint.sh` |
+| R5 | 本地项目 venv 为 **Python 3.9.6** | `./.venv/bin/python -V` |
+| R6 | `mcp` 官方 Python SDK **全部版本（1.0–2.2.0）要求 Python ≥ 3.10** | PyPI JSON API 逐版本 `requires_python` |
+| R7 | 本机有 Homebrew `python3.12` / `python3.13`；`node v25.2.1` | `command -v` |
+| R8 | `mcp==2.2.0` 在**全新 python3.12 venv 安装成功**（exit 0） | 实测安装 |
+| R9 | mcp 2.x **删除了 `mcp.server.fastmcp`**：`FastMCP` 改名 `MCPServer`（`from mcp.server.mcpserver import MCPServer`），旧路径主动抛 `ModuleNotFoundError` | 读已安装 SDK 源码 |
+| R10 | `MCPServer.run(transport="streamable-http", host=, port=, streamable_http_path=, json_response=, **stateless_http=**, session_idle_timeout=, max_sessions=, transport_security=)` | 读已安装 SDK 源码 |
+| R11 | `TransportSecuritySettings(enable_dns_rebinding_protection: bool = True, allowed_hosts: list, allowed_origins: list)`；`allowed_hosts` 支持 `"127.0.0.1:*"` 通配端口；`_validate_origin` 对**缺失 Origin 放行** | 读已安装 SDK 源码 |
+| R12 | 协议版本表：`KNOWN = 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25, 2026-07-28`；`HANDSHAKE = …2025-11-25`；`MODERN = 2026-07-28`（"无状态 per-request 信封"时代）；`LATEST = 2026-07-28` | `mcp_types/version.py` |
+
+### 2.2 WorkBuddy 客户端（反编译 + 实测）
+
+| # | 事实 | 证据 |
+|---|---|---|
+| E1 | 客户端内嵌**官方 MCP TypeScript SDK**（`client/index.js`、`streamableHttp.js`、`sse.js`、`stdio.js`） | `app.asar` |
+| E2 | 客户端支持的协议版本含 `2025-11-25`/`2025-06-18`/`2025-03-26`/`2024-11-05`；服务端默认取 `mcp-protocol-version ?? "2025-03-26"` | `app.asar` |
+| E3 | 市场连接器配置为 `mcp.json` 的 `mcpServers`；支持 `streamableHttp`/`streamable-http`/`sse`/`stdio`/`http`；支持 `${VAR}` 插值、`headers`、`staticHeaders`、`timeout`、`disabledTools`、`staticEnv` | `~/.workbuddy/connectors/*/mcp.json` |
+| E4 | 市场共 **270** 个连接器包，格式 = `mcp.json` + `skills/<名>/SKILL.md` + `references/` | `~/.workbuddy/connectors-marketplace/` |
+| E5 | 存在明文 HTTP + 裸公网 IP 的官方连接器（`http://47.114.32.85:9010/mcp`），说明客户端直连、不强制 HTTPS | 同上 |
+| E6 | **自定义连接器仅有 stdio 先例**：`~/.workbuddy/mcp.json` → `{"playwright": {"command": "npx", "args": ["@playwright/mcp@latest"], "disabled": false}}`；运行日志 `stdio MCP custom-mcp:playwright transport: command=npx`。**没有任何 HTTP 传输的自定义连接器被执行过** | `~/.workbuddy/mcp.json`、`~/.workbuddy/logs/` |
+| E7 | 自定义连接器注册表 = **`~/.workbuddy/mcp.json`**（明文），审批门 = **`~/.workbuddy/mcp-approvals.json`**（键 `sha256::<名字>` → 时间戳）。市场连接器则在 `connectors/<uuid>/mcp.json`，两处互不相同 | 实测读取 |
+| E8 | `connector-states.v3.json` 是**明文**（`"enabled": []` 可直接读），**只有凭据加密**（aes-256-gcm + hkdf，`.master.key`） | 实测读取 |
+| E9 | 企业自定义连接器策略从后台拉取（`EnterpriseCustomConnectorPolicy`，1.5s 超时、stale-cache、fail-open）；本机 `.policy-cache.json` 记录该企业账号 `{"allowed": true, "policy_mode": "all"}` | `app.asar` + `~/.workbuddy/.policy-cache.json` |
+| E10 | 连接器状态含 `headerOverridesBearerStripped: true`、`mcpSecurityMigrated: true` —— 近期做过"剥离 header 覆盖中 Bearer"的安全迁移 | `connector-states.v3.json` |
+| E11 | 客户端存在沙箱概念（`settings.json` 的 `sandbox.extraAllowWrite` 白名单） | `~/.workbuddy/settings.json` |
+
+### 2.3 生态与官方流程（外部）
+
+| # | 事实 | 证据 |
+|---|---|---|
+| X1 | **官方开放平台 `open.workbuddy.cn` 可达（HTTP 200）** | 实测 |
+| X2 | 第三方连接器的**标准打包结构**：`connector-meta.json`（含 `auth_mode`）+ `token-schema.json`（用户自填凭证表单）+ `mcp.json` + `icon.svg` + `skills/<名>/SKILL.md` | npm `workbuddy-postgres-connector` README |
+| X3 | **发布流程**：注册认证 open.workbuddy.cn → 后台创建「连接器」→ 上传 zip（`connector-meta.json` 须在 **zip 根层**）→ 测试环境调试 → 提交审核 → 上架市场 | 同上 |
+| X4 | `auth_mode: token` 的机制：用户点「连接」→ 客户端弹出 `token-schema.json` 描述的表单 → **凭据仅存本机 `~/.workbuddy`，不经过云端** → 连接时以 `${VAR}` 注入 | 同上 |
+| X5 | `auth_mode: token` **需 WorkBuddy ≥ 4.23.0**；`password` 类型字段满足审核安全红线（对话与日志中不出现明文密码） | 同上 |
+| X6 | **官方本地调试路径**：客户端「新建连接器 → 选择**本地目录**」，`mcp.json` 的 `command` 改 `node`、`args` 改绝对路径，env 照填——**无需先发布 npm、无需先上架** | 同上 |
+| X7 | 同构案例 `baihua-mes-mcp`：客户自建 MES 私有系统经 stdio 连接器开放给 WorkBuddy；MCP 工具只是**代理调用后端 HTTP 接口**（`/api/mcp/domains`、`/api/mcp/query`、`/api/mcp/aggregate`） | npm README |
+| X8 | 部署建议：给客户建**专用查询账号**（避免与网页端登录互踢 + 最小权限） | 同上 |
+| X9 | 官方 bundle 中存在 **`url` 用 `${VAR}` 插值**的连接器：`connector:tdengine` → `url: "${TDENGINE_API_SCHEMA}://${TDENGINE_API_HOST}:${TDENGINE_API_PORT}/api/v1/mcp/stream"` | E3 同批文件 |
+
+### 2.4 本地库基线（实测，只读 SQL）
+
+| 月 | 行数 | 总点数 | 1点 | 2点 | 人数 | `AGENTS.md` 记 |
 |---|---|---|---|---|---|---|
-| 2026-08 | 12507 | 16787 | 8227 | 4280 | 34 | 12511 / 16791 / 8231 / 4280 / 34 |
-| 2026-09 | 15067 | 19471 | 10663 | 4404 | 34 | 19572 / 10728 / 4422 / 15150（店） |
+| 2026-08 | 12507 | 16787 | 8227 | 4280 | 34 | 行数12511 / 点16791 / 1点8231 / 2点4280 / 人34 |
+| 2026-09 | 15067 | 19471 | 10663 | 4404 | 34 | 行数— / 点19572 / 1点10728 / 2点4422 / 店15150（**列义不同，勿逐格比对**） |
 
-这印证了 v3 spec §15.1 的未决决策 **D1**（验收基准数字）。**本设计不解决 D1，只声明验收方式为一致性断言。**
+与 `AGENTS.md` 的偏差是既存事实（对应 v3 §15.1 未决决策 **D1**）。**本设计不解决 D1**，验收语义见 §7。
 
 ---
 
@@ -68,221 +110,285 @@
 
 ### 3.1 做
 
-- 一个独立可运行的**最小 MCP 服务**（streamable HTTP，本机）。
-- 两个只读工具（`visit_ping`、`visit_month_summary`）。
-- Bearer 鉴权 + 三种凭据通道的可观测性（用于诊断 F11）。
-- 请求级证据日志。
-- 一份 P0 实测记录，含协议层事实与对 v3 spec 的修订建议。
-- 给用户的连接器配置值 + 人工步骤说明。
+- MCP 服务端最小实现（**独立进程**、目录 `mcp_service/`、依赖文件 `requirements-mcp.txt`）。
+- 两个只读工具 + 单一 Bearer 鉴权 + 请求级证据日志。
+- **连接器包骨架** `deploy/connector/visit-settle/`（`mcp.json` / `token-schema.json` / `connector-meta.json` / `icon.svg` / `skills/visit-settle/SKILL.md`）。
+- P0 实测记录 `docs/workbuddy-p0-验证记录.md`。
+- `.gitignore` 增补（`mcp_service/.venv/`、`mcp_service/logs/`）。
+- 依仓库强制约定更新 `docs/索引.md` 与 `AGENTS.md`（v3 §14 亦要求每期完成后更新）。
 
-### 3.2 不做（本轮硬边界）
+### 3.2 不做
 
-- **不改** `app/` 下任何文件、`requirements-web.txt`、`migrations/`、项目 `.venv`。
+- **不改** `app/` 下任何既有文件、不改既有路由行为与返回语义、不动 `migrations/`、**不动项目 `.venv`（3.9.6）**、不改 `requirements-web.txt`、不改 `deploy/Dockerfile`。
 - **不碰** 线上 `store-prod`、不做任何发布。
-- **不做任何写操作**：SQLite 以 `mode=ro` 打开，结构上不可写。
-- **不实现** `api_tokens`、`mcp_audit_log`、`sealed_months`、封账、预演、确认语（P1/P2）。
-- **不实现**上传通道、员工自助、调度器（v3 spec §16 的 YAGNI 清单继续有效）。
-- **不重构**现有 66 个路由。
+- **不做写操作**：数据连接以只读方式打开（§5.3），结构上不可写。
+- **不实现** `api_tokens` 表、`mcp_audit_log`、`sealed_months`、封账、预演、确认语、写工具（P1/P2）。
+- **不实现**上传通道、员工自助、调度器（v3 §16 的 YAGNI 清单继续有效）。
+- **不重写**任何业务逻辑；只用已结算的 `formal_records`，**不重新推导判重/锚点规则**。
 
 ---
 
-## 4. 设计
-
-### 4.1 运行时与依赖
-
-| 项 | 选择 | 理由 |
-|---|---|---|
-| 解释器 | Homebrew `python3.12` | F1/F3：项目 venv 3.9.6 装不了 `mcp` |
-| 依赖环境 | `spike/mcp/.venv`（**独立于项目 venv**，gitignore） | 零污染项目环境，不动现有 101 个测试 |
-| 依赖 | `mcp`（安装时确定版本并**精确锁定**写入 README 与记录） | 优先最新稳定版；若与客户端协议不兼容（F7）则降级并记录理由 |
-| 数据 | SQLite `file:<abs>store_settle_live.db?mode=ro` | 只读 URI，不可能写坏数据 |
-| 传输 | streamable HTTP | 与终局形态（客户端 ↔ 客户环境内的服务）同构 |
-| 监听 | `127.0.0.1`，端口默认 `8765`（`MCP_SPIKE_PORT` 可覆盖） | 最严可达性；端口可换 |
-
-不使用项目 venv、不 import `app.*`：spike 服务只依赖 `mcp` 与标准库（`sqlite3`/`hmac`/`json`/`logging`），**与主应用完全解耦**。
-
-### 4.2 目录结构
+## 4. 终局架构与 P0 的位置
 
 ```
-spike/mcp/
-  server.py         # MCP 服务：鉴权、日志、两个工具
-  run.sh            # 建/用 .venv 并启动（一条命令）
-  README.md         # 如何跑、要填给 WorkBuddy 的值、SDK 版本锁定记录
-  .env.example      # VISIT_SPIKE_TOKEN / MCP_SPIKE_PORT 示例
-  .venv/            # gitignore
-  logs/             # gitignore，请求级证据
-docs/workbuddy-p0-验证记录.md   # P0 实测记录（验收后填）
+客户服务器（公网 HTTPS，如 https://<customer-domain>）
+  nginx ──/──────────► FastAPI 现有应用（app/，--workers 2，不受影响）
+        └─/mcp────────► MCP 服务（mcp_service/，--workers 1，独立进程）
+                            └── import app.services.* / app.models（业务逻辑唯一一份）
+                                        │
+                                     DB（SQLite 本地 / PG 线上）
+
+WorkBuddy 桌面端（用户机）
+  └─ 连接器包（市场分发）：mcp.json(url=${VISIT_BASE_URL}/mcp, Authorization: Bearer ${VISIT_TOKEN})
+     + token-schema.json（地址 + Token，凭据只存本机）
 ```
 
-`spike/` 是**一次性探测代码**，P1 开始时其结论并入 `app/mcp/`，本目录删除——README 中明确标注，避免被误认为产品代码。
+P0 只实现图上 **`/mcp` 那条边 + 连接器包骨架**，且只读。
 
-### 4.3 服务端行为
+---
 
-**鉴权。** 三种凭据通道**同时接受**，优先级如下，且**每次请求记录实际命中的通道**：
+## 5. P0 服务端设计
 
-1. `Authorization: Bearer <token>`
-2. `X-Visit-Token: <token>`
-3. 查询参数 `?token=<token>`
+### 5.1 运行时
 
-用 `hmac.compare_digest` 比较。全部缺失或不匹配 → **401** + `WWW-Authenticate: Bearer`，响应体为 §4.4 的错误信封。
+| 项 | 选择 |
+|---|---|
+| 目录 | `mcp_service/`（同仓库、独立进程；与 `app/` 平级，边界一眼可见） |
+| 本地解释器 | Homebrew `python3.12` + `mcp_service/.venv/`（gitignore） |
+| 生产解释器 | 复用 `python:3.11-slim` 基础镜像（≥3.10 即满足 R6），**独立容器**，`--workers 1` |
+| 依赖 | `requirements-mcp.txt` = 应用依赖（以便 import `app.*`）+ `mcp==2.2.0`（R8 已实测） |
+| SDK | `mcp==2.2.0`，用 **`MCPServer`**（R9：`FastMCP` 在 2.x 已移除，v1 教程代码不可用） |
+| 传输 | streamable HTTP，路径 `/mcp`；本地 `127.0.0.1:8765`；生产由 nginx 反代 |
+| 无状态 | P0 用默认（有状态）。`stateless_http=True` 作为 P1 多实例/多 worker 的既定手段（R10） |
 
-> 同时接受多通道的唯一目的是把 F11（`headerOverridesBearerStripped`）的判定压缩成**一次往返**：若通道 1 失效而通道 2 有效，就确定是 Bearer 被剥离，而不是端点不可达。
-> **安全标注**：查询参数通道会把凭据写进 URL 与日志，**仅限本机 spike**；P1 必须移除，只保留单一通道。
+### 5.2 鉴权（单通道）
 
-**为什么必须记录"命中的通道"**：客户端界面报错通常只显示"连接失败"，无法区分"端点不可达 / 凭据被剥离 / 凭据错误"。服务端日志是唯一能给出确定结论的证据源。
+- 仅接受 `Authorization: Bearer <token>`；`hmac.compare_digest` 比较。
+- 缺失/不匹配 → **401** + `WWW-Authenticate: Bearer`，响应体为 §5.5 错误信封。
+- **启动即失败**：`VISIT_MCP_TOKEN` 未设置或为空 → 立刻退出非零（防止空配置静默通过，使 A3 失效）。
+- Token 来源：P0 用环境变量；P1 迁移到 `api_tokens` 表（v3 §6.1）。
+- **接缝设计**：能力函数签名为 `f(db, actor, **params)`，鉴权模块只负责"解析凭据 → `Actor`"。换 OAuth 时只替换该模块（v3 §6.2 保持不变）。
 
-**日志。** 每个请求一行 JSON 落到 `spike/mcp/logs/requests.jsonl`：`ts`、`method`、`path`、`header_names`（**只记名字，不记值**）、`auth_channel`（`bearer`/`x-visit-token`/`query`/`none`）、`auth_ok`、`protocol_version`（请求头 `mcp-protocol-version`）、`mcp_session_id`（有无 `Mcp-Session-Id`）、`status`、`duration_ms`、`body_digest`。凭据值一律不落日志。
+### 5.3 数据访问
 
-**协议协商。** 使用 SDK 默认协商；不硬编码 protocolVersion。日志记录实际协商结果（F7 的诊断依据）。
+- 复用 `app.db` / `app.models`（SQLAlchemy），**不写原生 SQL 拼接**。
+- 本地以只读 URI 打开：`DATABASE_URL="sqlite:///file:/<abs>/store_settle_live.db?mode=ro&uri=true"` —— 保留 v1 的"结构上不可写"保证，同时走 ORM。
+- 生产 `DATABASE_URL` 指向 PG；本服务账号一律只读权限。
 
-**Host 校验。** 本地 spike 允许 `127.0.0.1`/`localhost` 作为 Host，禁用会阻断本地连通的 DNS-rebinding 保护；在 README 中标注该放宽仅限 spike。
+### 5.4 工具契约
 
-### 4.4 工具契约
-
-统一信封（对齐 v3 spec §8）：
+统一信封（对齐 v3 §8）：
 
 ```
 成功: {ok: true,  data: {...}}
 失败: {ok: false, error: {code, message, hint}}
 ```
+信封同时作为 **MCP `structuredContent`** 返回，并附等价的序列化文本（P0 要观测客户端究竟 surface 哪一路——这是一条真实验收观察项，不是实现细节）。
 
-**工具 1 · `visit_ping`**（诊断用，P1 起删除）
+**工具 1 · `visit_ping`**（诊断用，P1 删除）
 
 ```
 visit_ping() -> {ok:true, data:{
-  server: "visit-settle-spike",
-  sdk_version: "...",
-  protocol_version: "<协商结果>",
-  client_info: "<客户端上报名称/版本>",
-  auth_channel: "bearer|x-visit-token|query",
-  auth_header_present: true|false,     # 是否收到过 Authorization 头（即使不匹配）
-  session_id_present: true|false,
+  server: "visit-settle-mcp",
+  sdk_version: "2.2.0",
+  protocol_version: "<本次协商结果>",
+  client_info: "<客户端上报的名称/版本>",
+  auth_header_seen: true|false,      # 是否收到 Authorization 头（不记值）
+  session_id_seen: true|false,       # 请求是否带 Mcp-Session-Id
   now: "<ISO8601>"
 }}
 ```
+中文描述：「诊断用：回显服务端身份、协商到的协议版本、以及本次调用是否携带了 Authorization 凭据头。用于排查 WorkBuddy 连接与鉴权问题。」
 
-描述写中文："诊断用：回显服务端身份、协商到的协议版本、以及本次调用实际使用的凭据通道。用于排查 WorkBuddy 连接与鉴权问题。"
+`auth_header_seen` 是 **E10（Bearer 可能被剥离）** 的可观测化手段——把猜测变成一条日志事实。
 
-**工具 2 · `visit_month_summary`**（唯一的真实数据工具）
+**工具 2 · `visit_month_summary`**（唯一真实数据工具）
+
+**聚合口径必须写死**（v1 未定义，实现者可合法返回 `persons: 54`）：
+
+> 数据来源 = 已结算的 **`formal_records`**。**不得**读 `persons` 表（54 行为全量人员，非本月），**不得**重新推导判重/锚点规则（那是 `flow.judge_import` 的职责，另行调用会与正式表口径分叉）。
+> 月份过滤用**范围比较**（跨 SQLite/PG 方言安全），不用 `substr`/`to_char`。
+
+```sql
+SELECT COUNT(*)                                    AS formal_rows,
+       SUM(points)                                 AS points_total,
+       SUM(CASE WHEN points = 1 THEN 1 ELSE 0 END)  AS p1_count,
+       SUM(CASE WHEN points = 2 THEN 1 ELSE 0 END)  AS p2_count,
+       COUNT(DISTINCT person_code)                  AS persons
+FROM formal_records
+WHERE japan_date >= :month_start AND japan_date < :next_month_start;
+```
+（`:month_start` = `YYYY-MM-01`，`:next_month_start` = 次月 01。实测该写法与 `substr` 写法结果一致：2026-09 = 15067/19471/10663/4404/34。）
 
 ```
 visit_month_summary(month: str) -> {ok:true, data:{
-  month: "2026-09",
-  formal_rows: 15067,
-  points_total: 19471,
-  p1_count: 10663,
-  p2_count: 4404,
-  persons: 34
+  month, formal_rows, points_total, p1_count, p2_count, persons
 }}
 ```
+- `month` 用 JSON Schema `pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$`；非法 → `BAD_MONTH`。**不用 `\d`**（v3 §7.2：`\d` 放行全角「２０２６-08」，会静默返回 0 行）。
+- 该月无数据 → **`ok:true` 且各计数为 0**，附 `hint` 说明。无数据是合法查询结果，不是失败。
+- 中文描述：「查询某结算月（格式 YYYY-MM）正式表的行数、总点数、1点/2点条数与人数。数据来自已结算的正式表，只读。」
 
-参数 `month` 用 JSON Schema `pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$`，越界/格式错 → `BAD_MONTH`（复用 v3 spec §7.2 的严格口径：`\d` 会放行全角而静默返回 0 行）。该月无数据 → `ok:true` 且各计数为 0，并附 `hint`（**不报错**：无数据是合法查询结果，不是失败）。
-
-描述写中文："查询某结算月（格式 YYYY-MM）正式表的行数、总点数、1点/2点条数与人数。只读。"
-
-**错误码**（本 spike 只用三个）：
+### 5.5 错误码（P0 只用三个）
 
 | code | 触发 | hint |
 |---|---|---|
-| `UNAUTHORIZED` | 三种通道均缺失或不匹配 | "请在 WorkBuddy 连接器设置中重新填写 Access Token" |
+| `UNAUTHORIZED` | 无/错 Bearer | "请在 WorkBuddy 连接器设置中重新填写 Access Token" |
 | `BAD_MONTH` | 月份格式非法 | "月份必须是 YYYY-MM，例如 2026-09" |
-| `INTERNAL` | 未预期异常（含 SQLite 打不开） | "系统内部错误，已记录；可重试" |
+| `INTERNAL` | 未预期异常（含 DB 打不开） | "系统内部错误，已记录；可重试"（只读工具，故非 `INTERNAL_WRITE`） |
 
-异常必须被捕获并转成信封，不允许穿透到协议层（v3 spec §8.2；只读工具故用 `INTERNAL` 而非 `INTERNAL_WRITE`）。
+异常必须被捕获并转成信封，不得穿透到协议层（v3 §8.2）。
 
-### 4.5 用户侧动作（人工，不可替代）
+### 5.6 传输安全与日志
+
+**Host/Origin（采纳"保留保护"而非 v1 的"关闭保护"）**
+
+SDK 行为（R11）：传入 settings 时 `enable_dns_rebinding_protection` 默认 `True`；`allowed_hosts` 支持 `"127.0.0.1:*"` 通配端口；**缺失 Origin 放行**。
+
+```python
+TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=["127.0.0.1:*", "localhost:*", "<生产域名>:*"],
+    allowed_origins=[],          # 缺失即放行；若客户端发来意外 Origin，日志会暴露
+)
+```
+**不关闭保护**（v1 的"禁用"既无必要、又更弱）。若实现中确认必须放宽，须登记为"P1 必须恢复"并写明理由。
+`Host`/`Origin` 原始值必须进日志：**意外 Origin 是本地连通的典型静默失败源**。
+
+**日志（`mcp_service/logs/requests.jsonl`）**：每请求一行
+`ts`、`method`、`path`（**查询串必须剥离/脱敏后记录**）、`header_names`（只记名字）、`auth_header_seen`、`host`、`origin`、`protocol_version`、`session_id_seen`、`status`、`duration_ms`、`body_digest`。
+**凭据值、查询串、请求体原文一律不落日志**（本设计不再保留任何凭据通道，无例外）。
+
+---
+
+## 6. 连接器包骨架（`deploy/connector/visit-settle/`）
+
+按 X2/X3 的结构，P0 只填必需项：
+
+| 文件 | P0 内容要点 |
+|---|---|
+| `connector-meta.json` | 名称/描述/图标/`auth_mode: "token"` |
+| `token-schema.json` | 两个字段：`VISIT_BASE_URL`（文本，如 `https://<customer-domain>`）、`VISIT_TOKEN`（`password` 类型） |
+| `mcp.json` | `{"type":"streamableHttp","url":"${VISIT_BASE_URL}/mcp","headers":{"Authorization":"Bearer ${VISIT_TOKEN}"},"timeout":300000}` |
+| `icon.svg` | 占位图标 |
+| `skills/visit-settle/SKILL.md` | 业务口径：月份必须 `YYYY-MM`；点数口径 1点/2点；先查后写；**P0 阶段本连接器只读** |
+
+`timeout` 取 300000ms：P1 的 `rebuild_month` 需重判整月并写上万行，60s 会超时并诱发重试（v3 §11）。
+
+**待官方确认的唯一可能翻案项（§11 U1）**：第三方提交的连接器是否允许 **用户自填 URL**（`${VISIT_BASE_URL}`）。X9 的先例来自官方 bundle；若审核不允许，退路见 R1。
+
+---
+
+## 7. 验收标准
+
+### 7.1 基准语义（统一，取代 v1 的三处矛盾）
+
+- **通过判据（唯一）**：`visit_month_summary("2026-09")` 的五个字段 **== 同一时刻对同一份库执行 §5.4 SQL 的结果**。
+- 库是可变对象（应用会写它；`AGENTS.md` 记录了月度重算），因此**冻结数字不作为判据**。
+- 冻结数字仅作**证据留档**：验证时记录 `(SQL 输出, 数据库文件 sha256)` 到实测记录，用于日后复现讨论。
+- §2.4 的数字是**设计时的观测**，不是判据。
+
+### 7.2 验收清单（全部客观可判）
+
+| # | 标准 | 判定 | 通过条件 |
+|---|---|---|---|
+| A1 | 客户端能连上并列出工具 | 客户端界面 | 可见 2 个工具且中文描述非空 |
+| A2 | 真实数据正确 | 脚本比对 | 五字段逐一 == 同刻 SQL 结果（§7.1） |
+| A3 | 错误凭据被拒 | **两侧同时** | 客户端可见拒绝 **且** 服务端日志有对应 401 |
+| A4 | 凭据头透传 | `visit_ping` 回显 + 日志 | `auth_header_seen == true`（若为 false 即命中 E10 风险 R2） |
+| A5 | 握手事实留档 | 实测记录 | 逐项回答：①`initialize` 是否成功 ②协商到的 `protocolVersion` ③请求是否带 `Mcp-Session-Id` ④服务端是否有状态即可工作 ⑤**尾斜杠与 `Accept` 头**的实际值 ⑥客户端 surface 的是 `structuredContent` 还是文本 |
+| A6 | 会话结论（D2） | 实测记录 | 明确写出：v3 §7.6 的 a/b/c 三条中，本 P0 **能**判定哪条、**不能**判定哪条及原因（P0 为单进程，故"多 worker 会话"整体不可判；但 a 已被 R10 证有） |
+
+A3 要求"两侧同时"是刻意的：只看客户端报错无法区分鉴权失败与协议失败。A5/A6 把 v1 那句不可判的"记录真实表现"换成逐项问答。
+
+---
+
+## 8. 测试
+
+T1–T4 不依赖 WorkBuddy，可无人跑完；T5 需要用户。
+
+| # | 文件 | 依赖 | 断言 |
+|---|---|---|---|
+| T1 | `mcp_service/tests/test_tools.py` | `pytest`、`mcp`（官方 **Python client SDK**）、临时 SQLite | 工具清单 = 2 且描述非空；`visit_month_summary` 五字段 == 同刻 SQL；非法月份 → `BAD_MONTH`；空月 → `ok:true` 且计数 0 |
+| T2 | `mcp_service/tests/test_auth.py` | 同上 | 无 Bearer → 401 + `WWW-Authenticate`；错 Bearer → 401；对 Bearer → 握手成功；**空配置启动 → 非零退出** |
+| T3 | `mcp_service/tests/test_readonly.py` | 同上 | 对连接执行写语句 → 数据库报只读错误（证明"结构上不可写"） |
+| T4 | `mcp_service/tests/test_logging.py` | 同上 | 日志行含 `host`/`origin`/`auth_header_seen`；**不含** Authorization 值、查询串、请求体原文 |
+| T5 | 人工 | WorkBuddy 桌面端 + 连接器包 | 满足 A1–A4 |
+
+**开发期进展门（不需要 WorkBuddy）**：T1–T4 全绿 + 官方 client SDK 端到端跑通，构成"服务端是对的"的证据；此后 T5 失败才可归因到客户端侧。
+
+---
+
+## 9. 风险与退路（每条退路均为可执行动作）
+
+| # | 风险 | 探测 | 退路（可执行） |
+|---|---|---|---|
+| R1 | **市场审核不允许用户自填 URL**（§6 唯一可能翻案项） | open.workbuddy.cn 后台/官方文档 | ① 改固定域名包（每客户一个包）② 退化成本地 stdio 包（X6/X7 范式）：包用 `node` 调同一套后端 HTTP API。**需在 P1 前定，否则包结构返工** |
+| R2 | Bearer 被剥离（E10） | `visit_ping.auth_header_seen` + 日志 | 服务端并行接受另一个自定义 header 名（如 `X-Visit-Token`），连接器侧改一处配置；架构不变 |
+| R3 | 客户端不认本机 `127.0.0.1` 端点 | T5 | ① 绑 `0.0.0.0` + 局域网 IP，**同时**保持 `enable_dns_rebinding_protection=True` 并把该 IP 加进 `allowed_hosts`（不得因放宽而关保护）② 本机测试**临时**用 stdio bridge（`npx mcp-remote <url>`）桥接：客户端对 stdio 自定义连接器有确证先例（E6）。**注意**：bridge 路径只能验 A1/A2，**不能**验 A4（凭据注入方式不同），须在记录中标注该局限 |
+| R4 | 协议版本不匹配 | 日志 `protocol_version` | 客户端上限 `2025-11-25`，服务端握手路径上限同为 `2025-11-25`（R12），默认应匹配；若不合，显式把协商版本固定到 `2025-11-25`，或降到 `mcp<2` 并记录理由。**不升到 `2026-07-28`**（客户端不支持该 "modern" 时代） |
+| R5 | 端口占用 | 启动时 | 换 `VISIT_MCP_PORT`；启动日志打印实际监听地址 |
+| R6 | 客户端能连但工具不可见 | 日志有 `tools/list` 而界面无 | 把 `tools/list` 原始响应体写入日志（临时提高日志级别），对照 E2 的协议版本确认 schema 形态；仍不通则用 stdio bridge 二分（服务端 vs 客户端） |
+
+---
+
+## 10. 人工步骤（不可替代）
 
 | 步 | 动作 | 卡点 |
 |---|---|---|
-| 0 | 在 WorkBuddy GUI 里找到「自定义连接器」入口并确认**可用**（F10 企业策略可能拦截），告知我它要求填哪些字段 | **阻塞**：这步不通，P0 无法继续 |
-| 1 | 按我给出的值填 URL 与 header/token | |
-| 2 | 让 agent 调用两个工具，把**界面原文**（成功或报错）反馈给我 | |
+| 0 | 客户端「新建连接器」→ 选择**本地目录**（X6）：`command=python3.12`、`args=["<abs>/mcp_service/server.py"]`，填 env（`VISIT_MCP_TOKEN` 等） | 前置探测。E9 显示企业策略 `allowed:true`，预期不阻塞 |
+| 1 | 让 agent 调用两个工具，把**界面原文**（成功或报错）反馈 | — |
+| 2 | 在 `open.workbuddy.cn` 确认 §11 U1（用户自填 URL 是否允许） | **影响 R1，建议尽早** |
 
-第 0 步若被企业策略拦截，退路见 §6。
-
----
-
-## 5. 验收标准
-
-| # | 标准 | 判定方式 |
-|---|---|---|
-| A1 | WorkBuddy 能连上并**列出两个工具**（中文描述完整） | 客户端界面可见 |
-| A2 | 正确凭据调用 `visit_month_summary("2026-09")` 返回的数字**与 SQL 直查逐项一致**（15067 / 19471 / 10663 / 4404 / 34） | 与 §2.1 基线逐项比对 |
-| A3 | 错误凭据被拒，且**客户端可见**拒绝、**服务端日志**有对应 401 | 两侧同时成立才算通过 |
-| A4 | 记录握手、认证、报错的**真实表现**；给出协议层会话事实（客户端是否发 `Mcp-Session-Id`、是否要求有状态），并明确说出 D2 的哪一半**未**被回答 | `docs/workbuddy-p0-验证记录.md` |
-
-A3 的"两侧同时成立"是刻意的：只看到客户端报错不足以判断是鉴权失败还是协议失败。
+步 0 走"本地目录"而非手改 `~/.workbuddy/mcp.json`：后者需匹配 `mcp-approvals.json` 的 `sha256::名` 审批键（E7），属绕过客户端安全门，不做。
 
 ---
 
-## 6. 风险与退路
+## 11. 未验证假设
 
-| # | 风险 | 探测方式 | 退路 |
+| # | 假设 | 风险 | 验证方式 |
 |---|---|---|---|
-| R1 | 企业策略禁止自定义连接器（F10） | 人工步 0 | 直接写 `~/.workbuddy/connectors/<uuid>/mcp.json`；受限于加密的 `enabled` 列表（F12），若无法使能则换账号或换一台非企业策略管控的机器 |
-| R2 | **Bearer 被剥离（F11）** | `visit_ping` 回显 + `auth_channel` 日志 | 改用 `X-Visit-Token` 或 `?token=`（服务端已同时支持，无需改代码） |
-| R3 | `127.0.0.1` 不可达 | 直接连 | 绑 `0.0.0.0` + 局域网 IP（同机不同网卡）；或改 stdio 本地进程（客户端已支持 stdio，F5/F6） |
-| R4 | 协议版本不匹配 | 握手日志 | 调 SDK 版本或显式指定 `protocolVersion` |
-| R5 | 端口占用 | 启动时检测并报错退出 | 换 `MCP_SPIKE_PORT` |
-| R6 | SDK 与客户端行为差异导致静默失败 | 官方 MCP **Python client SDK** 先做端到端自测 | 自测通过而客户端不通 → 问题定位在客户端侧，而非服务端 |
+| U1 | **第三方连接器允许用户自填 URL**（`${VISIT_BASE_URL}`） | 若不允许，包结构与分发方式返工（R1） | open.workbuddy.cn 后台/官方文档（人工步 2） |
+| U2 | 客户端能连本机/内网 HTTP MCP 端点 | 若客户端把 MCP 流量走云端网关，则本机测试不成立 | T5 |
+| U3 | 客户端会原样转发连接器模板注入的 `Authorization` 头 | E10 显示曾收紧过 Bearer | A4 |
+| U4 | 市场包的工具发现不依赖额外清单文件 | 若必须成包才能发现工具，本地目录调试路径受限 | T5 + X6 对照 |
+| U5 | 本机单进程结论可外推到生产多实例部署 | 生产为独立容器 `--workers 1`，但多副本仍需 `stateless_http` | P1 用 R10 的无状态开关验证 |
 
-R6 是这次设计的分界线：**先用官方 client SDK 证明服务端是对的，再去测客户端**。否则客户端不通时无法归因。
+**U1 是当前唯一可能推翻形态的未知**，其余都在 P0 内可证。
 
 ---
 
-## 7. 测试方式
+## 12. 与 v3 spec 的关系
 
-| 层 | 方式 | 断言 |
+### 12.1 必然修订项（P1 执行，本轮只记录）
+
+| # | v3 原文 | 为何要改 |
 |---|---|---|
-| T1 服务端正确性 | 官方 MCP Python client SDK 连本机端点（正常凭据） | 工具清单 = 2 个且描述非空；`visit_month_summary` 数字与 SQL 一致 |
-| T2 传输层 | `curl` 直接打 HTTP 端点 | 无凭据 → 401 + `WWW-Authenticate`；错凭据 → 401；对凭据 → 握手成功 |
-| T3 凭据通道 | `curl` 分别用 Bearer / `X-Visit-Token` / `?token=` 调用 `visit_ping` | 三种通道各自的 `auth_channel` 回显正确 |
-| T4 数据只读 | 尝试对连接执行写语句（测试内） | SQLite 报只读错误，证明不可能写坏数据 |
-| T5 端到端 | WorkBuddy 桌面客户端（人工） | 满足 A1–A3 |
+| 1 | §2「上传留在网页」（理由"远端服务拿不到本地 Excel"） | 用户 P1 原则下"网页可下掉"须有 MCP 侧等价物；且该理由本身不成立——远端 MCP 与文件是否本地无关 |
+| 2 | §2/§3「远端 MCP 挂在公网 `store-prod`」 | P3 已澄清方向正确（专属实例 + 公网），但需补"随系统部署到客户服务器 + nginx `/mcp`"的落地口径 |
+| 3 | §3「同进程挂载」 | 用户决策改为**独立进程/容器**（`mcp_service/`）；v3 §7.6 的 lifespan 与 `--workers 2` 会话议题随之消解 |
+| 4 | §7.6 决策 D2 | `stateless_http` 已确认存在（R10），选项 a 成立；协议层 `2026-07-28` "modern" 时代对 WorkBuddy **不可达**（E2 上限 `2025-11-25`） |
 
-T1–T4 不依赖 WorkBuddy，可在无人参与时跑完；T5 需要用户。
+### 12.2 与 v3 §14 的验收冲突（v1 遗漏，此处登记）
 
----
+v3 §14 把「查证 SDK 无状态能力」与「给出 D2 定论并回写 §7.6」列为 **P0** 验收项 ⑤。本 P0：
 
-## 8. 明确不做（YAGNI）
+- 「SDK 无状态能力」**已答**（R10：`stateless_http` 存在）——不再推迟；
+- 「D2 定论」**部分可答**：选项 a 成立；多 worker 会话因 P0 为单进程**不可判**，按 A6 明确列出"不可判"，留 P1 用 U5 补。
 
-- 不把 spike 挂进 FastAPI（方案 B，用户已选择 A 先行）。
-- 不用 Node/TS 重写服务端（方案 C）。
-- 不做鉴权以外的任何闸门（封账、预演、确认语）。
-- 不做审计表落库（只写文件日志）。
-- 不做连接器包（`skills/SKILL.md`）——"表达形式"是 P1 议题，P0 只到"工具能被发现并调用"。
-- 不解决 D1（验收基准数字）。
+**两文档对 P0 出口的要求以本节为准**，避免后续规划者读到两套 P0。
 
----
+### 12.3 本文档交付物归属
 
-## 9. 待回写 v3 spec 的修订项（P1 输入，本轮只记录）
-
-P0 完成后，v3 spec 有**两处必然需要修订**（用户 2026-09-22 的两条新约束直接推翻原文）：
-
-1. **§2「上传留在网页」** → 若网页可下掉，上传必须在 MCP 侧有等价物。"远端服务拿不到本地 Excel"这个理由，在"客户端与系统同处客户内网"的形态下**不再成立**。
-2. **§2/§3「远端 MCP 挂在公网 `store-prod`」** → 与"数据不出客户边界"冲突。终局应是 MCP 随系统部署在客户环境内，客户端经内网直连。
-
-另有两处受 P0 证据影响、待定：
-
-3. **§6 鉴权**：若 R2 成立（Bearer 被剥离），Token 注入通道需要重定。
-4. **§7.6 多 worker**：本 spike 为单进程，只能给协议层事实；D2 需 P1 补完。
+§3.1 的 `docs/workbuddy-p0-验证记录.md` 是**验收证据**；§12.1 的修订清单是**对 v3 的输入**，两者不重复：修订清单在 P1 开始时直接落到 v3 的新版本里。
 
 ---
 
-## 10. 未验证假设
+## 13. 明确不做（YAGNI）
 
-| 假设 | 风险 | 验证方式 |
-|---|---|---|
-| 客户端能连本机 `127.0.0.1` 的 HTTP 端点 | 若客户端把 MCP 流量走云端网关，则私有化路线不成立 | P0 T5（本文核心） |
-| 自定义连接器在**企业账号**下默认可用 | F10 显示受后台策略管控，可能被禁 | 人工步 0 |
-| 客户端会原样转发自定义 header | F11 显示曾收紧过 Bearer | T3 + T5 |
-| 客户端工具发现不依赖连接器包（`mcp.json` 之外的 `skills/`） | 若必须成包，自定义连接器的"表达形式"受限于官方包格式 | T5 观察是否直接列出裸工具 |
-| 本机 spike 结论可外推到客户内网部署 | 内网可能有出口代理/防火墙策略差异 | 无法在本轮验证，记录为明确假设 |
-
----
-
-## 附注
-
-- F15 的全路由清点另存于 `/tmp/wb_inventory_routes.md`（289 行，临时文件；关键结论已摘要进 §2）。
-- 本设计不修改 v3 spec 原文；修订在 P1 进行，避免在证据不足时改写定稿文档。
-</content>
+- 不做写工具、不做上传通道、不做审计表落库、不做封账/预演/确认语。
+- 不做 OAuth（用户已选静态 Token；仅保留 `凭据 → Actor` 接缝）。
+- 不把 MCP 挂进 FastAPI 进程。
+- 不用 Node/TS 重写服务端（交付形态为远端服务端 MCP，Python 可直连复用服务层）。
+- 不做连接器市场的正式提交（P0 只产出包骨架；提交与审核属后续阶段）。
+- 不解决 D1（基准数字）。
