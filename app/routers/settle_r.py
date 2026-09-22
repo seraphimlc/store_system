@@ -103,7 +103,16 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
         return _denied()
     from app.services import dashboard as D
     from app.services import perf as _p
-    monthly = D.monthly_series(db)
+    monthly = D.monthly_series_from_db(db)
+    _want = month if month and month in [m["month"] for m in monthly] else (
+        monthly[-1]["month"] if monthly else "")
+    if not monthly or not D.month_has_metrics(db, _want):
+        # 物化缺失（首次/新数据）→ 实时回填并写表
+        from app.models import MonthPerfRecord as _MPR
+        for _mo in sorted({r.month for r in db.query(_MPR).all()}):
+            if not D.month_has_metrics(db, _mo):
+                D.sync_dash_metrics(db, _mo)
+        monthly = D.monthly_series_from_db(db)
     sel = month if month in [m["month"] for m in monthly] else (
         monthly[-1]["month"] if monthly else "")
     idx = [m["month"] for m in monthly].index(sel) if sel else -1
@@ -291,7 +300,11 @@ def perf(request: Request,
         month = months[-1] if months else ""
     rows = perf.month_perf(db, month)
     summary = perf.company_summary(db, month)
-    dup_map = perf.month_dup_map(db, month) if month else {}
+    from app.models import DashMetric as _DM
+    _rows = db.query(_DM).filter(_DM.month == month,
+                                 _DM.metric == "dup").all() if month else []
+    dup_map = ({r.person: int(r.value) for r in _rows}
+               if _rows else perf.month_dup_map(db, month) if month else {})
     dup_total = sum(dup_map.values())
     # 上月找平 = 上月未找平余量（diff−adjust，同一张表 payroll_period_rows）
     from app.services import period as _payroll
@@ -410,7 +423,11 @@ def perf_export(request: Request, user: Optional[User] =
     rows = perf.month_perf(db, month)
     daily = perf.daily_perf(db, month)
     summary = perf.company_summary(db, month)
-    dup_map = perf.month_dup_map(db, month) if month else {}
+    from app.models import DashMetric as _DM
+    _rows = db.query(_DM).filter(_DM.month == month,
+                                 _DM.metric == "dup").all() if month else []
+    dup_map = ({r.person: int(r.value) for r in _rows}
+               if _rows else perf.month_dup_map(db, month) if month else {})
     dup_total = sum(dup_map.values())
     from app.services import period as _payroll
     adj = _payroll.carry_map(db, month) if month else {}
@@ -895,8 +912,13 @@ def payroll_settle_generate(request: Request, month: str = Form(""),
     from urllib.parse import quote as _q
     try:
         res = _payroll.sync_period_table(db, month)
+        from app.services import dashboard as _D
+        try:
+            _D.sync_dash_metrics(db, month)   # 算完工资 → 物化看板统计
+        except Exception:  # noqa: BLE001
+            pass
         return RedirectResponse(
-            f"/payroll-settle?month={month}&msg={_q('已生成/更新 ' + str(res.get('rows', 0)) + ' 人')}",
+            f"/payroll-settle?month={month}&msg={_q('已生成/更新 ' + str(res.get('rows', 0)) + ' 人，看板统计已刷新')}",
             status_code=303)
     except Exception as e:  # noqa: BLE001
         return RedirectResponse(

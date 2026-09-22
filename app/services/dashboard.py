@@ -342,3 +342,97 @@ def render_analysis_html(text: str) -> str:
             continue
         out.append(f"<p>{_fmt(line)}</p>")
     return '<div class="analysis">' + "".join(out) + "</div>"
+
+
+# ---------------- 看板统计物化（dash_metrics：月份-统计项-数值） ----------------
+
+_METRICS = ("total_points", "total_amount", "records", "employees", "p1",
+            "p2", "p2rate", "per_emp_points", "per_emp_amount",
+            "per_emp_records", "per_store_points", "dup_total",
+            "new_staff", "gone_staff", "q_total", "q_valid",
+            "q_cross_file_dup", "q_master_late", "q_from_sub",
+            "q_visible_blank", "q_valid_days")
+
+
+def sync_dash_metrics(db, month: str) -> int:
+    """计算该月全部看板指标写入 dash_metrics（先删该月再写；幂等）。
+    调用时机：算完工资（找平生成/月度重算）后。"""
+    from app.models import DashMetric, MonthPerfRecord
+    from app.services import perf as _p
+    ms = monthly_series(db)
+    row = next((m for m in ms if m["month"] == month), None)
+    if row is None:
+        return 0
+    q = quality_stats(db, month)
+    new_, gone_ = staff_changes(db, month)
+    dup_map = _p.month_dup_map(db, month)
+    kv = {
+        "total_points": row["points"], "total_amount": row["amount"],
+        "records": row["records"], "employees": row["employees"],
+        "p1": row["p1"], "p2": row["p2"], "p2rate": row["p2rate"],
+        "per_emp_points": row["per_emp_points"],
+        "per_emp_amount": row["per_emp_amount"],
+        "per_emp_records": row["per_emp_records"],
+        "per_store_points": row["per_store_points"],
+        "dup_total": sum(dup_map.values()),
+        "new_staff": len(new_), "gone_staff": len(gone_),
+        "q_total": q["total"], "q_valid": q["by_status"].get("valid", 0),
+        "q_cross_file_dup": q["by_status"].get("cross_file_dup", 0),
+        "q_master_late": q["by_status"].get("master_late", 0),
+        "q_from_sub": q["by_status"].get("from_sub", 0),
+        "q_visible_blank": q["by_status"].get("visible_blank", 0),
+        "q_valid_days": q["valid_days"],
+    }
+    db.query(DashMetric).filter(DashMetric.month == month).delete()
+    for k, v in kv.items():
+        db.add(DashMetric(month=month, metric=k, value=float(v or 0)))
+    for code, n in dup_map.items():
+        db.add(DashMetric(month=month, metric="dup", value=float(n),
+                          person=code))
+    db.commit()
+    return len(kv) + len(dup_map)
+
+
+def monthly_series_from_db(db):
+    """从 dash_metrics 读逐月指标（快，无实时聚合）。缺月→None 由调用方回填。"""
+    from app.models import DashMetric
+    rows = db.query(DashMetric).filter(
+        DashMetric.person.is_(None)).all()
+    g = {}
+    for r in rows:
+        g.setdefault(r.month, {})[r.metric] = r.value
+    out = []
+    for mo in sorted(g):
+        v = g[mo]
+        if "total_points" not in v:
+            continue
+        recs = v.get("records") or 0
+        n = v.get("employees") or 0
+        p1 = v.get("p1") or 0
+        p2 = v.get("p2") or 0
+        out.append({
+            "month": mo, "employees": int(n), "records": int(recs),
+            "p1": int(p1), "p2": int(p2),
+            "points": v.get("total_points") or 0,
+            "amount": v.get("total_amount") or 0,
+            "p2rate": (p2 / recs) if recs else 0.0,
+            "per_emp_points": (v.get("total_points") or 0) / n if n else 0,
+            "per_emp_amount": (v.get("total_amount") or 0) / n if n else 0,
+            "per_emp_records": recs / n if n else 0,
+            "per_store_points": (v.get("total_points") or 0) / recs if recs else 0,
+        })
+    for i in range(1, len(out)):
+        cur, prev = out[i], out[i - 1]
+        for k in ("points", "amount", "records", "employees",
+                  "per_emp_points", "per_emp_amount", "per_emp_records",
+                  "p2rate"):
+            b = prev[k] or 0
+            cur[f"d_{k}"] = ((cur[k] - b) / b) if b else None
+    return out
+
+
+def month_has_metrics(db, month: str) -> bool:
+    from app.models import DashMetric
+    return db.query(DashMetric).filter(
+        DashMetric.month == month,
+        DashMetric.person.is_(None)).count() >= 5

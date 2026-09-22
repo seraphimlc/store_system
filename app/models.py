@@ -109,6 +109,19 @@ class Person(Base):
 
 
 # ---------- §4.5 ----------
+class DashMetric(Base):
+    """看板统计物化表：月份-统计项-数值（person 可空=全公司），生成后读表零聚合。"""
+    __tablename__ = "dash_metrics"
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)
+    metric = Column(String(64), nullable=False)
+    value = Column(Float, nullable=False, default=0)
+    person = Column(String(32), nullable=True, default=None)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+    __table_args__ = (UniqueConstraint("month", "metric", "person",
+                                       name="uq_dash_metric"),)
+
+
 class StaffAnalysis(Base):
     """员工月度分析（算完工资后自动生成，存表供看板读取）。"""
     __tablename__ = "staff_analyses"
