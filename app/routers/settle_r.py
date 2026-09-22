@@ -193,6 +193,32 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
     })
 
 
+@router.get("/dashboard/staff", response_class=HTMLResponse)
+def dashboard_staff_module(request: Request,
+                           user: Optional[User] = Depends(require_login),
+                           db: Session = Depends(get_db), staff: str = ""):
+    """员工维度模块（htmx 局部刷新）：趋势图 + 明细 + 分析（懒生成存库）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    from app.services import dashboard as D
+    ss = D.staff_series(db, staff) if staff else []
+    chart = (D.svg_line([x["points"] for x in ss],
+                        [x["month"][5:] + "月" for x in ss],
+                        color="#2f6fed") if ss else "")
+    name = dict(D.staff_options(db)).get(staff, staff)
+    ok = D.staff_sample_ok(db, staff, ss[-1]["month"]) if (staff and ss) else False
+    analysis = ""
+    if staff and ss and ok:
+        analysis = D.ensure_staff_analysis(db, staff, ss[-1]["month"])
+    from app.services.dashboard import render_analysis_html
+    return templates.TemplateResponse("staff_module.html", {
+        "request": request, "current_user": user, "staff": staff,
+        "name": name, "series": ss, "chart": chart,
+        "analysis": render_analysis_html(analysis) if analysis else "",
+        "sample_ok": ok,
+    })
+
+
 @router.get("/dashboard/analysis", response_class=HTMLResponse)
 def dashboard_analysis(request: Request,
                        user: Optional[User] = Depends(require_login),
