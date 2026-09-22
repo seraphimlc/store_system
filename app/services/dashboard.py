@@ -413,13 +413,13 @@ def monthly_series_from_db(db):
         out.append({
             "month": mo, "employees": int(n), "records": int(recs),
             "p1": int(p1), "p2": int(p2),
-            "points": v.get("total_points") or 0,
-            "amount": v.get("total_amount") or 0,
+            "points": int(v.get("total_points") or 0),
+            "amount": int(v.get("total_amount") or 0),
             "p2rate": (p2 / recs) if recs else 0.0,
-            "per_emp_points": (v.get("total_points") or 0) / n if n else 0,
-            "per_emp_amount": (v.get("total_amount") or 0) / n if n else 0,
+            "per_emp_points": int(v.get("total_points") or 0) / n if n else 0,
+            "per_emp_amount": int(v.get("total_amount") or 0) / n if n else 0,
             "per_emp_records": recs / n if n else 0,
-            "per_store_points": (v.get("total_points") or 0) / recs if recs else 0,
+            "per_store_points": int(v.get("total_points") or 0) / recs if recs else 0,
         })
     for i in range(1, len(out)):
         cur, prev = out[i], out[i - 1]

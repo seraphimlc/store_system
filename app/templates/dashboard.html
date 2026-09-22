@@ -9,6 +9,8 @@
         {% for mo in months %}<option value="{{ mo }}" {% if mo == sel %}selected{% endif %}>{{ mo }}</option>{% endfor %}
       </select>
     </form>
+  </span>
+</div>
 {% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
 
