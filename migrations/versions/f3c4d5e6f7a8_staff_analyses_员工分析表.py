@@ -13,6 +13,8 @@ def upgrade():
         sa.Column("person_code", sa.String(32), nullable=False),
         sa.Column("month", sa.String(7), nullable=False),
         sa.Column("content", sa.Text(), nullable=False, server_default=""),
+        sa.Column("fingerprint", sa.String(64), nullable=False,
+                  server_default=""),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("person_code", "month",

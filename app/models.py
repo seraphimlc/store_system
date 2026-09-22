@@ -130,6 +130,7 @@ class StaffAnalysis(Base):
     person_code = Column(String(32), nullable=False, index=True)
     month = Column(String(7), nullable=False, index=True)
     content = Column(Text, nullable=False, default="")
+    fingerprint = Column(String(64), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now,
                         onupdate=_now)

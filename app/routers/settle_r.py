@@ -91,9 +91,6 @@ def my_perf(request: Request,
 
 
 # ---------------- V3 绩效 / 工资 ----------------
-_AI_CACHE = {}
-
-
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: Optional[User] = Depends(require_login),
               db: Session = Depends(get_db), staff: str = "", month: str = "",
@@ -199,25 +196,31 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
 @router.get("/dashboard/analysis", response_class=HTMLResponse)
 def dashboard_analysis(request: Request,
                        user: Optional[User] = Depends(require_login),
-                       db: Session = Depends(get_db), staff: str = "",
-                       refresh: int = 0):
-    """返回模型分析 HTML 片段（页面加载自动调用；结果按数据指纹缓存）。"""
+                       db: Session = Depends(get_db), staff: str = ""):
+    """返回模型分析 HTML 片段（页面加载自动调用）。
+    总体分析落盘（数据指纹缓存：数据不变读库秒开）；员工分析存 staff_analyses。"""
     if user is None or user.role != "admin":
         return _denied()
     from app.services import dashboard as D
     from app.services.ai_chat import configured, chat
-    facts = D.fact_text(db, staff or None)
-    key = str(abs(hash(facts))) + ("_" + staff if staff else "")
-    if not refresh and key in _AI_CACHE:
-        return HTMLResponse(_render_analysis(_AI_CACHE[key], cached=True))
+    if staff:
+        return HTMLResponse(_render_analysis(
+            D.ensure_staff_analysis(db, staff,
+                                    (D.staff_series(db, staff) or [{}])[-1].get("month", ""))))
+    import hashlib
+    from app.models import StaffAnalysis
+    facts = D.fact_text(db, None)
+    fp = hashlib.md5(facts.encode("utf-8")).hexdigest()
+    row = db.query(StaffAnalysis).filter(
+        StaffAnalysis.person_code == "COMPANY",
+        StaffAnalysis.month == "ALL").first()
+    if row and row.fingerprint == fp and row.content:
+        return HTMLResponse(_render_analysis(row.content, cached=True))
     if not configured():
         return HTMLResponse("<p class='hint'>未配置 AI（.env 的 AI_API_KEY）</p>")
-    focus = ("请重点分析该员工：与他自己的历史相比、与全公司平均相比，"
-             "指出变化、异常与建议。" if staff else
-             "请从整体经营视角分析。")
     prompt = (
         "你是巡店结算系统的经营分析师。下面是各月经营事实数据：\n\n"
-        + facts + "\n\n" + focus +
+        + facts +
         "\n请用中文输出，精炼要点式（不要段落废话，不要'总体来看/综上所述'等套话，每条一句话，关键数字用**加粗**）：\n"
         "1) **一句话结论**：本期经营总体如何；\n"
         "2) **变好**（最多3条）：指标、幅度、可能原因；\n"
@@ -228,7 +231,12 @@ def dashboard_analysis(request: Request,
         text = chat(prompt, max_tokens=2500, timeout=240)
     except Exception as e:  # noqa: BLE001
         return HTMLResponse(f"<p class='hint'>AI 分析失败：{type(e).__name__}</p>")
-    _AI_CACHE[key] = text
+    if row is None:
+        db.add(StaffAnalysis(person_code="COMPANY", month="ALL",
+                             fingerprint=fp, content=text))
+    else:
+        row.fingerprint, row.content = fp, text
+    db.commit()
     return HTMLResponse(_render_analysis(text, cached=False))
 
 
