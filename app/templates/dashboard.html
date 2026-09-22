@@ -44,6 +44,8 @@
     <canvas id="cHead" height="150"></canvas></div>
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">最新月店铺结构（1点/2点）</div>
     <canvas id="cDonut" height="150"></canvas></div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">环比对比（上两月 → 最新月）</div>
+    <canvas id="cCompare" height="150"></canvas></div>
 </div>
 
 <div class="card">
@@ -69,11 +71,23 @@
 </div>
 
 <div class="stat-grid grid" style="grid-template-columns:repeat(3,1fr)">
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期新增人员（{{ cur.month }}）</div>
-    {% if new_staff %}{% for n, v in new_staff[:10] %}<div>{{ n }} <span class="hint">{{ v[0] }}点 / ¥{{ '{:,}'.format(v[1]) }}</span></div>{% endfor %}
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期新增人员（{{ cur.month }}）<span class="hint">共{{ new_staff|length }}人</span></div>
+    {% if new_staff %}
+    <table class="grid-tbl">
+      <tr><th>姓名</th><th class="num">点数</th><th class="num">金额(円)</th></tr>
+      {% for n, v in new_staff %}<tr class="pg-new" {% if loop.index > 10 %}style="display:none"{% endif %}>
+        <td>{{ n }}</td><td class="num">{{ v[0] }}</td><td class="num">{{ '{:,}'.format(v[1]) }}</td></tr>{% endfor %}
+    </table>
+    {% if new_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('new')">展开全部（{{ new_staff|length }} 人）</a></p>{% endif %}
     {% else %}<p class="hint">无</p>{% endif %}</div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期未出现人员</div>
-    {% if gone_staff %}{% for n, v in gone_staff[:10] %}<div>{{ n }} <span class="hint">上月 {{ v[0] }}点</span></div>{% endfor %}
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期未出现人员 <span class="hint">共{{ gone_staff|length }}人</span></div>
+    {% if gone_staff %}
+    <table class="grid-tbl">
+      <tr><th>姓名</th><th class="num">上月点数</th><th class="num">上月金额(円)</th></tr>
+      {% for n, v in gone_staff %}<tr class="pg-gone" {% if loop.index > 10 %}style="display:none"{% endif %}>
+        <td>{{ n }}</td><td class="num">{{ v[0] }}</td><td class="num">{{ '{:,}'.format(v[1]) }}</td></tr>{% endfor %}
+    </table>
+    {% if gone_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('gone')">展开全部（{{ gone_staff|length }} 人）</a></p>{% endif %}
     {% else %}<p class="hint">无</p>{% endif %}</div>
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">点数排行 Top8</div>
     <table class="grid-tbl">
@@ -90,6 +104,13 @@
   从档 {{ '{:,}'.format(quality.by_status.get('from_sub', 0)) }} · 空白 {{ '{:,}'.format(quality.by_status.get('visible_blank', 0)) }} ·
   有数据天数 {{ quality.valid_days }}</div></div>
 {% endif %}
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析 · 总体分析（全公司） <span class="hint" style="font-weight:400">自动生成</span></h2>
+  <div hx-get="/dashboard/analysis" hx-trigger="load" hx-swap="innerHTML">
+    <p class="hint">分析生成中…（首次约 10-30 秒，之后读缓存）</p>
+  </div>
+</div>
 
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析
@@ -114,12 +135,7 @@
   </div>
 </div>
 
-<div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析 · {% if staff %}员工分析（{{ staff_name }}）{% else %}总体分析（全公司）{% endif %} <span class="hint" style="font-weight:400">自动生成</span></h2>
-  <div hx-get="/dashboard/analysis{% if staff %}?staff={{ staff }}{% endif %}" hx-trigger="load" hx-swap="innerHTML">
-    <p class="hint">分析生成中…（首次约 10-30 秒，之后读缓存）</p>
-  </div>
-</div>
+
 {% endif %}
 <script src="/static/chart.umd.min.js"></script>
 <script>
@@ -150,6 +166,15 @@
   if(d&&C.labels.length){new Chart(d,{type:'doughnut',data:{labels:['2点店','1点店'],
     datasets:[{data:[C.cur_p2||0,C.cur_p1||0],backgroundColor:['#7c3aed','#e5e7eb'],borderWidth:0}]},
     options:{responsive:true,cutout:'62%',plugins:{legend:{position:'bottom',labels:{boxWidth:12}}}}});}
+  var cm=document.getElementById('cCompare');
+  if(cm&&C.compare&&C.compare.cur&&C.compare.cur.length){var CP=C.compare;
+    new Chart(cm,{type:'bar',data:{labels:CP.labels,datasets:[
+      {label:'上月',data:CP.prev,backgroundColor:'rgba(160,170,190,.65)',borderRadius:3},
+      {label:'最新月',data:CP.cur,backgroundColor:'rgba(47,111,237,.8)',borderRadius:3}]},
+      options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
+        scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});}
+  window.pg=function(k){var rows=document.querySelectorAll('.pg-'+k);
+    rows.forEach(function(r){r.style.display='';});};
   var se=document.getElementById('cStaff');
   if(se&&C.staff_labels&&C.staff_labels.length){new Chart(se,{type:'bar',
     data:{labels:C.staff_labels,datasets:[{label:'点数',data:C.staff_points,backgroundColor:'rgba(47,111,237,.78)',borderRadius:4}]},

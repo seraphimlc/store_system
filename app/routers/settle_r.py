@@ -141,6 +141,22 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
                       "staff_labels": [s["month"][5:] + "月" for s in staff_series],
                       "employees": [m["employees"] for m in monthly],
                       "hc": D.headcount_changes(db),
+                      "compare": (lambda mo, cv:
+                          {"labels": ["总点数", "工资(万円)", "有效店", "人均点数",
+                                      "人均工资(万円)", "2点率(%)"],
+                           "cur": cv,
+                           "prev": [mo[-2]["points"], round(mo[-2]["amount"] / 10000, 1),
+                                    mo[-2]["records"], round(mo[-2]["per_emp_points"], 1),
+                                    round(mo[-2]["per_emp_amount"] / 10000, 1),
+                                    round(mo[-2]["p2rate"] * 100, 1)]})
+                          (monthly, ([monthly[-1]["points"],
+                                      round(monthly[-1]["amount"] / 10000, 1),
+                                      monthly[-1]["records"],
+                                      round(monthly[-1]["per_emp_points"], 1),
+                                      round(monthly[-1]["per_emp_amount"] / 10000, 1),
+                                      round(monthly[-1]["p2rate"] * 100, 1)]
+                                     if len(monthly) >= 2 else []))
+                          if len(monthly) >= 2 else None,
                   }}
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "current_user": user, "monthly": monthly,
