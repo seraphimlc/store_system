@@ -1,0 +1,8 @@
+{
+  "name": "visit-settle",
+  "display_name": "巡店结算",
+  "description": "查询巡店结算系统的结算月汇总（行数/点数/1点/2点/人数）。只读。",
+  "auth_mode": "token",
+  "icon": "icon.svg",
+  "version": "0.1.0"
+}

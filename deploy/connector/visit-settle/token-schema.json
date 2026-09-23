@@ -1,0 +1,18 @@
+{
+  "fields": [
+    {
+      "key": "VISIT_BASE_URL",
+      "label": "巡店结算系统地址",
+      "type": "text",
+      "required": true,
+      "placeholder": "https://your-domain.example"
+    },
+    {
+      "key": "VISIT_TOKEN",
+      "label": "巡店结算 Access Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "由管理员在系统中签发"
+    }
+  ]
+}
