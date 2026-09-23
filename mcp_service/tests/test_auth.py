@@ -125,6 +125,41 @@ def test_logs_host_origin_and_session_headers():
     assert rec["protocol_version"] == "2025-11-25"
 
 
+async def _consume_body_app(scope, receive, send):
+    """真实路径：MCP POST 会读取请求体（JSON-RPC）。"""
+    body = b""
+    while True:
+        m = await receive()
+        body += m.get("body", b"")
+        if not m.get("more_body", False):
+            break
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": body})
+
+
+def test_logs_body_digest_matching_consumed_body():
+    """§5.6 的 body_digest 必须等于下游实际消费的请求体摘要（原文不进日志）。"""
+    import hashlib
+
+    log = Recorder()
+    app = BearerAuthMiddleware(_consume_body_app, token=TOKEN, log=log)
+    _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())], query=b"")
+    rec = log.records[0]
+    assert "body_digest" in rec
+    # 测试的 receive 恒返回 body=b"{}"
+    assert rec["body_digest"] == hashlib.sha256(b"{}").hexdigest()
+
+
+def test_logs_body_digest_of_unread_body_is_empty_hash():
+    """下游不读请求体时（如 401 短路），摘要是空串的 sha256——不泄正文。"""
+    import hashlib
+
+    log = Recorder()
+    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
+    _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())], query=b"")
+    assert log.records[0]["body_digest"] == hashlib.sha256(b"").hexdigest()
+
+
 def test_logs_even_when_downstream_raises():
     """下游异常也必须留一行记录——否则正是最难查的那种失败。"""
     log = Recorder()

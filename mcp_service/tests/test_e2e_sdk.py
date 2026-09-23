@@ -134,10 +134,10 @@ def test_wrong_token_rejected_at_http_layer(server):
     """错误 Token 在 HTTP 层被 401 拒绝（A3 的服务端侧证据）。"""
 
     async def run():
-        import httpx2
+        import httpx
 
         url = f"http://127.0.0.1:{server}/mcp"
-        async with httpx2.AsyncClient() as client:
+        async with httpx.AsyncClient() as client:
             r = await client.post(
                 url, headers={"Authorization": "Bearer wrong"},
                 json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
