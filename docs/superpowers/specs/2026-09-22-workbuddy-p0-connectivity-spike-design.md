@@ -2,7 +2,7 @@
 
 - 日期：2026-09-22
 - 分支：`feat/workbuddy-integration`
-- 状态：设计已获用户确认；**P0 Chunk 1–3 已实现并提交**（`745c752 → 7a298e4`，`mcp_service/tests` **47 passed**，含真实进程 e2e）；Chunk 4（人工验收 + 证据文档 + 索引/AGENTS）待执行
+- 状态：设计已获用户确认；**P0 Chunk 1–3 已实现并提交**（`745c752…6a678da` 共 8 次提交，`mcp_service/tests` **49 passed**，含真实进程 e2e）；`docs/索引.md`/`AGENTS.md` 已更新（6a678da）；Chunk 4（人工验收 + 证据文档）待执行
 - 上游设计：`docs/superpowers/specs/2026-09-21-workbuddy-mcp-integration-design.md`（v3，**零实现**）
 - 定位：本文**只覆盖 P0**。能力层全量、写工具、审计表、封账属 P1/P2。
 
@@ -112,7 +112,7 @@ v1 的两处事实错误与八处设计缺陷由独立评审指出，已逐条�
 
 - MCP 服务端最小实现（**独立进程**、目录 `mcp_service/`、依赖文件 `requirements-mcp.txt`）。
 - 两个只读工具 + 单一 Bearer 鉴权 + 请求级证据日志。
-- 自动化测试 `mcp_service/tests/`（T1–T4 + 连接器包测试；**47 passed** 已实现）。
+- 自动化测试 `mcp_service/tests/`（T1–T4 + T6 连接器包测试；**49 passed** 已实现）。
 - **连接器包骨架** `deploy/connector/visit-settle/`（`mcp.json` / `token-schema.json` / `connector-meta.json` / `icon.svg` / `skills/visit-settle/SKILL.md`）。
 - P0 实测记录 `docs/workbuddy-p0-验证记录.md`。
 - `.gitignore` 增补（`mcp_service/logs/`；`mcp_service/.venv/` 由既有 `.venv/` 规则覆盖）——已提交（745c752）。
@@ -306,7 +306,7 @@ A3 要求"两侧同时"是刻意的：只看客户端报错无法区分鉴权失
 
 ## 8. 测试
 
-T1–T4 不依赖 WorkBuddy，可无人跑完；T5 需要用户。
+T1–T4 与 T6 不依赖 WorkBuddy，可无人跑完；T5 需要用户。
 
 | # | 文件 | 依赖 | 断言 |
 |---|---|---|---|
@@ -317,7 +317,7 @@ T1–T4 不依赖 WorkBuddy，可无人跑完；T5 需要用户。
 | T5 | 人工 | WorkBuddy 桌面端 + 连接器包 | 满足 A1–A6（A5/A6 依赖本次人工运行） |
 | T6 | `mcp_service/tests/test_connector_package.py` | `pytest` | 包结构完整；`auth_mode=token`；mcp.json 每个 `${VAR}` 都由 token-schema 声明（漏声明 = 客户端解析不出地址）；token 字段为 password 类型 |
 
-**开发期进展门（不需要 WorkBuddy）**：T1–T4 全绿 + 官方 client SDK 端到端跑通，构成"服务端是对的"的证据；此后 T5 失败才可归因到客户端侧。
+**开发期进展门（不需要 WorkBuddy）**：T1–T4、T6 全绿 + 官方 client SDK 端到端跑通，构成"服务端是对的"的证据；此后 T5 失败才可归因到客户端侧。
 
 ---
 
