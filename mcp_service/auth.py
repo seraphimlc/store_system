@@ -8,6 +8,7 @@ HTTP 401 + `WWW-Authenticate`；而验收项 A3 要求客户端可见拒绝 **�
 只接受 `Authorization: Bearer <token>` 单通道。不做查询参数通道：
 凭据会进 URL、进日志、进客户端历史（spec §5.2 明确排除）。
 """
+import hashlib
 import hmac
 import json
 import time
@@ -27,6 +28,20 @@ _UNAUTHORIZED = {
 _BEARER = "Bearer "
 
 
+class _BodyCapture:
+    """缓存请求体用于 body_digest；只记摘要，原文不进日志（spec §5.6）。"""
+
+    def __init__(self, receive):
+        self._receive = receive
+        self.parts: list[bytes] = []
+
+    async def __call__(self):
+        message = await self._receive()
+        if message["type"] == "http.request":
+            self.parts.append(message.get("body", b""))
+        return message
+
+
 class BearerAuthMiddleware:
     def __init__(self, app, token: str,
                  log: Callable[[dict[str, Any]], None]) -> None:
@@ -35,7 +50,8 @@ class BearerAuthMiddleware:
         self._log = log
 
     def _authorized(self, header: str) -> bool:
-        if not header.startswith(_BEARER):
+        # RFC 7235：auth scheme 大小写不敏感
+        if header[: len(_BEARER)].lower() != _BEARER.lower():
             return False
         return hmac.compare_digest(header[len(_BEARER):].strip(), self._token)
 
@@ -49,6 +65,7 @@ class BearerAuthMiddleware:
                    for k, v in raw}
         auth_header = headers.get("authorization", "")
         started = time.monotonic()
+        body = _BodyCapture(receive)
 
         record: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -65,6 +82,8 @@ class BearerAuthMiddleware:
         if not self._authorized(auth_header):
             record["status"] = 401
             record["duration_ms"] = int((time.monotonic() - started) * 1000)
+            record["body_digest"] = hashlib.sha256(
+                b"".join(body.parts)).hexdigest()
             self._log(record)
             await self._send_401(send)
             return
@@ -77,10 +96,12 @@ class BearerAuthMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_wrapper)
+            await self.app(scope, body, send_wrapper)
         finally:
             record["status"] = captured["status"]
             record["duration_ms"] = int((time.monotonic() - started) * 1000)
+            record["body_digest"] = hashlib.sha256(
+                b"".join(body.parts)).hexdigest()
             self._log(record)
 
     @staticmethod
