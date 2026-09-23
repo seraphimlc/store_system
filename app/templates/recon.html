@@ -24,7 +24,7 @@
 {% if tasks %}
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">对账记录</h2>
-  <table class="grid-tbl">
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>ID</th><th>月份</th><th>文件</th><th>格式</th><th>比对人数</th><th>差异数</th><th>状态</th><th>时间</th><th>结果</th></tr>
     {% for t in tasks %}
     <tr>
@@ -51,7 +51,7 @@
       </td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
 </div>
 {% endif %}
 
@@ -125,7 +125,7 @@
   {% endif %}
 
   {% if diffs %}
-  <table class="grid-tbl">
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>人员</th><th>编号</th><th class="num">系统点数</th><th class="num">对账点数</th>
         <th class="num">差异(点)</th><th class="num">应找平金额(円)</th><th>找平</th></tr>
     {% for d in diffs %}
@@ -143,7 +143,7 @@
       <td><span class="pill ok">自动 · {{ next_month }} 月工资扣/补</span></td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
   <p class="hint">找平金额(円，含奖金) = 系统已发金额 − 对账金额，<b>自动</b>写入薪资找平表并在 {{ next_month }} 月工资中扣/补（上半月不够扣 → 下半月 → 下月递延），无需人工确认。</p>
   {% endif %}
 

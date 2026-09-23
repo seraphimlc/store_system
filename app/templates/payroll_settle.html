@@ -22,7 +22,7 @@
 {% if not rows %}
 <p class="empty">该月暂无数据（点「生成/更新」从正式表与对账生成）</p>
 {% else %}
-<div class="stat-grid grid" style="grid-template-columns:repeat(5,1fr)">
+<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
   <div class="stat-card"><div class="k">分期已发(円)</div><div class="v">¥{{ '{:,}'.format(total.half_amt) }}</div>
     <div class="sub" style="font-size:.72rem">上半 {{ '{:,}'.format(total.half1) }} 点 / 下半 {{ '{:,}'.format(total.half2) }} 点</div></div>
   <div class="stat-card"><div class="k">奖金合计(円)</div><div class="v">¥{{ '{:,}'.format(total.bonus) }}</div>

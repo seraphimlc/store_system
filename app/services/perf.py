@@ -90,6 +90,18 @@ def _bonus_cfg(month: str = None):
     return group, amount
 
 
+def staff_visible_from(db) -> str:
+    """员工可见起始月（YYYY-MM）：SysConfig 表配置优先，未配置回退 env 默认。
+
+    员工端（/my/perf 等）只显示该月及之后的数据；返回空字符串=不限制。
+    """
+    from app.models import SysConfig
+    row = db.query(SysConfig).order_by(SysConfig.id.desc()).first()
+    if row is not None and getattr(row, "staff_visible_from", ""):
+        return row.staff_visible_from
+    return _get_settings().staff_visible_from
+
+
 # 系统配置缓存（全局单值：最新一条 SysConfig；保存配置后需 clear）
 _CONFIG_CACHE = {"row": None}
 

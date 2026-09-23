@@ -10,8 +10,11 @@
 </head>
 <body>
 {% if current_user %}
-<header class="topbar">
+<header class="topbar" x-data="{menu:false}">
   <span class="brand">巡店结算系统</span>
+  <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
+          :aria-expanded="menu ? 'true' : 'false'">☰</button>
+  <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
   {% if current_user.role == 'staff' %}
   <a class="nav" href="/my/perf"><b>我的绩效</b></a>
   {% else %}
@@ -33,6 +36,7 @@
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <button class="logout" type="submit">退出</button>
   </form>
+  </nav>
 </header>
 {% endif %}
 <main class="wrap">{% block content %}{% endblock %}</main>

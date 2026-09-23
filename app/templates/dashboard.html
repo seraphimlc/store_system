@@ -15,7 +15,7 @@
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
 
 {% if cur %}
-<div class="stat-grid grid" style="grid-template-columns:repeat(4,1fr)">
+<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
   <div class="stat-card"><div class="k">最新月份</div><div class="v">{{ cur.month }}</div></div>
   <div class="stat-card"><div class="k">总点数</div><div class="v">{{ '{:,}'.format(cur.points) }}</div></div>
   <div class="stat-card"><div class="k">工资总额(円)</div><div class="v">¥{{ '{:,}'.format(cur.amount) }}</div></div>
@@ -37,7 +37,7 @@
 </div>
 {% endif %}
 
-<div class="stat-grid grid" style="grid-template-columns:repeat(3,1fr)">
+<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">总点数（月度）</div>
     <canvas id="cPoints" height="150"></canvas></div>
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">工资总额（円，月度）</div>
@@ -56,7 +56,7 @@
 
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">逐月数据</h2>
-  <table class="grid-tbl">
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>月份</th><th>员工</th><th>有效店</th><th>1点店</th><th>2点店</th><th>2点率</th>
         <th>总点数</th><th>人均点数</th><th>店均点数</th><th>工资(円)</th><th>人均工资(円)</th></tr>
     {% for m in monthly %}
@@ -73,34 +73,34 @@
       <td class="num">¥{{ '{:,.0f}'.format(m.per_emp_amount) }}</td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
 </div>
 
-<div class="stat-grid grid" style="grid-template-columns:repeat(3,1fr)">
+<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期新增人员（{{ cur.month }}）<span class="hint">共{{ new_staff|length }}人</span></div>
     {% if new_staff %}
-    <table class="grid-tbl">
+    <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
       <tr><th>姓名</th><th class="num">点数</th><th class="num">金额(円)</th></tr>
       {% for n, v in new_staff %}<tr class="pg-new" {% if loop.index > 10 %}style="display:none"{% endif %}>
         <td>{{ n }}</td><td class="num">{{ v[0] }}</td><td class="num">{{ '{:,}'.format(v[1]) }}</td></tr>{% endfor %}
-    </table>
+    </table></div>
     {% if new_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('new')">展开全部（{{ new_staff|length }} 人）</a></p>{% endif %}
     {% else %}<p class="hint">无</p>{% endif %}</div>
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期未出现人员 <span class="hint">共{{ gone_staff|length }}人</span></div>
     {% if gone_staff %}
-    <table class="grid-tbl">
+    <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
       <tr><th>姓名</th><th class="num">上月点数</th><th class="num">上月金额(円)</th></tr>
       {% for n, v in gone_staff %}<tr class="pg-gone" {% if loop.index > 10 %}style="display:none"{% endif %}>
         <td>{{ n }}</td><td class="num">{{ v[0] }}</td><td class="num">{{ '{:,}'.format(v[1]) }}</td></tr>{% endfor %}
-    </table>
+    </table></div>
     {% if gone_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('gone')">展开全部（{{ gone_staff|length }} 人）</a></p>{% endif %}
     {% else %}<p class="hint">无</p>{% endif %}</div>
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">点数排行 Top8</div>
-    <table class="grid-tbl">
+    <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
       <tr><th>员工</th><th class="num">点数</th><th class="num">店数</th><th class="num">2点</th></tr>
       {% for t in top %}<tr><td>{{ t.name }}</td><td class="num">{{ t.points }}</td>
         <td class="num">{{ t.records }}</td><td class="num">{{ t.p2 }}</td></tr>{% endfor %}
-    </table></div>
+    </table></div></div>
 </div>
 
 {% if quality %}

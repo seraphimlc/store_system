@@ -2,7 +2,7 @@
 <div style="font-weight:600;margin:.2rem 0 .4rem">{{ name }}（{{ staff }}）点数趋势</div>
 {{ chart|safe }}
 {% if series %}
-<table class="grid-tbl" style="margin-top:.5rem">
+<div class="tbl-wrap" style="border:0;box-shadow:none;margin-top:.5rem"><table class="grid-tbl">
   <tr><th>月份</th><th>有效店</th><th>重复</th><th>1点店</th><th>2点店</th><th>点数</th><th>工资(円)</th></tr>
   {% for s in series %}
   <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td>
@@ -10,7 +10,7 @@
       <td class="num">{{ s.p1 }}</td><td class="num">{{ s.p2 }}</td>
       <td class="num">{{ s.points }}</td><td class="num">¥{{ '{:,}'.format(s.amount) }}</td></tr>
   {% endfor %}
-</table>
+</table></div>
 {% endif %}
 <div style="margin-top:.7rem">
   {% if analysis %}
