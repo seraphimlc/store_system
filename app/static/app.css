@@ -31,6 +31,9 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 1px 0 rgba(0,0,0,.15);
 }
 .topbar .brand { font-weight: 700; font-size: 1.02rem; letter-spacing: .2px; }
+.topbar .menu-btn { display: none; background: none; border: 1px solid #3a5680;
+  color: #dfe8ff; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  font-size: 1rem; line-height: 1.2; }
 .topbar a.nav { color: #cfe0ff; font-size: .95rem; padding: 4px 2px; }
 .topbar a.nav:hover { color: #fff; text-decoration: none; }
 .topbar .nav.disabled { color: #5c6f92; cursor: default; }
@@ -39,6 +42,26 @@ a:hover { text-decoration: underline; }
 .topbar .logout { background: none; border: 1px solid #3a5680; color: #dfe8ff;
   border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: .85rem; }
 .topbar .logout:hover { background: #1d335c; }
+.topbar .topnav { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+.topbar .logout-form { margin: 0; }
+
+/* 移动端顶栏：折叠为汉堡菜单 */
+@media (max-width: 860px) {
+  .topbar { flex-wrap: nowrap; gap: .6rem; padding: 0 .8rem; height: auto;
+    min-height: 50px; position: sticky; }
+  .topbar .menu-btn { display: inline-block; margin-left: auto; }
+  .topbar .topnav { display: none; position: absolute; top: 100%; left: 0; right: 0;
+    background: #10203f; flex-direction: column; align-items: stretch;
+    gap: 0; padding: .4rem 0 .7rem; box-shadow: 0 8px 18px rgba(8,18,44,.35);
+    max-height: calc(100vh - 54px); overflow-y: auto; }
+  .topbar .topnav.open { display: flex; }
+  .topbar .topnav a.nav, .topbar .topnav .user { padding: .6rem .9rem; font-size: .95rem;
+    border-top: 1px solid #1d335c; }
+  .topbar .topnav .nav.disabled { display: none; }
+  .topbar .topnav .spacer { display: none; }
+  .topbar .topnav .logout-form { padding: .7rem .9rem 0; }
+  .topbar .topnav .logout { width: 100%; }
+}
 
 main.wrap { max-width: 1180px; margin: 0 auto; padding: 1.4rem 1.5rem 3rem; }
 
@@ -100,6 +123,23 @@ table.grid-tbl td.num { font-variant-numeric: tabular-nums; }
 tr.totals { background: #f0f5ff; font-weight: 650; }
 .empty { padding: 1.6rem; text-align: center; color: var(--muted); }
 
+/* 移动端宽表：首列吸附，横向滚动 */
+@media (max-width: 760px) {
+  table.grid-tbl th:first-child, table.grid-tbl td:first-child {
+    position: sticky; left: 0; z-index: 1; background: #fff; }
+  table.grid-tbl th:first-child { background: #f7f9fc; }
+  table.grid-tbl tbody tr:hover td:first-child { background: #f6f9ff; }
+  tr.totals td:first-child { background: #f0f5ff; }
+}
+
+/* 统计卡：移动端自动换行自适应 */
+@media (max-width: 900px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 460px) {
+  .stat-grid { grid-template-columns: 1fr; }
+}
+
 /* 徽标 */
 .pill { display: inline-block; padding: .08rem .5rem; border-radius: 999px;
   font-size: .8rem; line-height: 1.5; }
@@ -123,7 +163,7 @@ details { font-size: .85rem; color: var(--muted); }
 /* 登录 */
 .login-body { min-height: 100vh; display: flex; align-items: center; justify-content: center;
   background: radial-gradient(1200px 500px at 20% -10%, #1d3f8f, #10203f 60%); }
-.login-card { width: 360px; background: #fff; border-radius: 14px; padding: 2rem;
+.login-card { width: min(360px, 92vw); background: #fff; border-radius: 14px; padding: 2rem;
   box-shadow: 0 18px 50px rgba(8,18,44,.35); }
 .login-card h1 { margin: 0 0 .4rem; font-size: 1.3rem; }
 .login-card .sub { color: var(--muted); margin-bottom: 1.2rem; font-size: .9rem; }
@@ -156,3 +196,18 @@ details { font-size: .85rem; color: var(--muted); }
 .analysis .a-sec { display: inline-block; font-size: .92rem; font-weight: 700;
   color: #fff; background: #2f6fed; padding: .14rem .7rem; border-radius: 5px;
   margin: .7rem 0 .35rem; letter-spacing: .02em; }
+
+/* 移动端通用适配（窄屏表单/标题/卡片不溢出） */
+@media (max-width: 760px) {
+  .page-title { flex-wrap: wrap; gap: .5rem; }
+  .page-title .sub { width: 100%; }
+  .card { padding: .9rem .85rem; }
+  input[type=text], input[type=password], input[type=date], input[type=number],
+  select, textarea { max-width: 100%; }
+  label.f { margin-bottom: .4rem; }
+  .tabs { flex-wrap: wrap; gap: .6rem; }
+  .btn { white-space: normal; }
+  table.grid-tbl { font-size: .82rem; }
+  table.grid-tbl th, table.grid-tbl td { padding: .5rem .55rem; }
+  .upload-zone { align-items: stretch; }
+}

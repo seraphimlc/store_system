@@ -51,11 +51,11 @@
   </div>
   {% if not daily %}<p class="empty">本月暂无逐日数据</p>
   {% else %}
-  <table class="grid-tbl">
+  <p class="hint" style="margin:.2rem 0 .5rem">重复巡店（同店重复,影响效率）：
+    <b style="color:{% if summary.dups > 5 %}#b02a37{% else %}#1a7f37{% endif %}">{{ summary.dups }} 家</b></p>
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>日期</th><th class="num">有效店</th><th class="num">1点</th><th class="num">2点</th><th class="num">点数</th></tr>
-</tr>
-        <tr><th style="text-align:left">重复巡店（同店重复,影响效率）</th>
-            <td class="num" style="font-weight:700;color:{% if summary.dups > 5 %}#b02a37{% else %}#1a7f37{% endif %}">{{ summary.dups }} 家</td>    {% for d in daily %}
+    {% for d in daily %}
     <tr>
       <td>{{ d.date }}</td>
       <td class="num">{{ d.records }}</td>
@@ -64,7 +64,7 @@
       <td class="num"><b>{{ d.points }}</b></td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
   {% endif %}
 </div>
 {% endif %}

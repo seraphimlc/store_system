@@ -32,6 +32,20 @@ def test_base_staff_nav():
     assert "我的绩效" in html
 
 
+def test_base_mobile_hamburger_menu():
+    """H5：顶栏带汉堡菜单按钮（窄屏折叠导航），导航项仍在 DOM 中。"""
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req())
+    assert 'class="menu-btn"' in html and "☰" in html
+    assert 'class="topnav"' in html
+    assert "数据看板" in html and "绩效工资" in html  # 折叠后内容仍在 DOM
+    staff = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="甲", role="staff"),
+        request=_req())
+    assert 'class="menu-btn"' in staff and "我的绩效" in staff
+
+
 def test_base_template_anonymous():
     html = _env().get_template("base.html").render(current_user=None,
                                                   request=_req())

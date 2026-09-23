@@ -25,7 +25,7 @@
 {% else %}
 {% set h1 = (period == 'half1') %}
 {% set pt = {} %}{# 该期点数/金额映射 #}
-<div class="stat-grid grid" style="grid-template-columns:repeat(4,1fr)">
+<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
   {% set tcarry = 0 if not h1 else adj_amt_total %}
   <div class="stat-card"><div class="k">员工数</div><div class="v">{{ summary.employees }}</div></div>
   <div class="stat-card"><div class="k">{% if h1 %}上半月点数{% else %}下半月点数{% endif %}</div>

@@ -37,7 +37,7 @@
   {% if r.children %}
   <details style="margin-top:.4rem">
     <summary>关联店铺（{{ r.children|length }} 条，展开可单独解绑某一条）</summary>
-    <table class="grid-tbl">
+    <div class="tbl-wrap" style="border:0;box-shadow:none;margin-top:.3rem"><table class="grid-tbl">
       <tr><th>Store ID</th><th>店名(当时写法)</th><th>城市 / 地址</th><th></th></tr>
       {% for c in r.children %}
       <tr>
@@ -53,7 +53,7 @@
         </td>
       </tr>
       {% endfor %}
-    </table>
+    </table></div>
   </details>
   {% endif %}
 </div>

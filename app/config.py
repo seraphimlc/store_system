@@ -67,6 +67,11 @@ class Settings:
     bonus_group_schedule: str = field(
         default_factory=lambda: os.environ.get(
             "BONUS_GROUP_SCHEDULE", "2026-09=75"))
+    # 员工可见起始月（YYYY-MM）：员工端只显示该月及之后的数据；
+    # SysConfig 表配置优先（/config 页可改），未配置时用本环境变量默认值
+    staff_visible_from: str = field(
+        default_factory=lambda: os.environ.get(
+            "STAFF_VISIBLE_FROM", "2026-10"))
 
 
 @lru_cache(maxsize=1)

@@ -387,15 +387,15 @@ def test_cross_day_dup_auto_hidden(client, tmp_path):
 
 
 def test_my_perf_page_staff_own_report(client, tmp_path):
-    """员工端 /my/perf：只显示本人日明细与月汇总（正式表有效店）。"""
+    """员工端 /my/perf：只显示本人日明细与月汇总（正式表有效店；起始月=2026-10）。"""
     from app.services import perf
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
     imp = _up(db, admin, "mp.xlsx", [
-        ["S1", "店1", "", "2026-08-01 09:00:00", "甲(111)", "R1",
+        ["S1", "店1", "", "2026-10-01 09:00:00", "甲(111)", "R1",
          "YES", "YES", "NO"],    # 1点
-        ["S2", "店2", "", "2026-08-02 09:00:00", "甲(111)", "R2",
+        ["S2", "店2", "", "2026-10-02 09:00:00", "甲(111)", "R2",
          "YES", "YES", "YES"],   # 2点
     ], tmp_path)
     db.close()
@@ -408,7 +408,7 @@ def test_my_perf_page_staff_own_report(client, tmp_path):
     client.post("/login", data={"username": "emp1", "password": "pw123456"},
                 follow_redirects=False)
     page = client.get("/my/perf").text
-    assert "我的绩效" in page and "2026-08-01" in page and "2026-08-02" in page
+    assert "我的绩效" in page and "2026-10-01" in page and "2026-10-02" in page
     # 汇总：2 店、3 点（1+2）、750円
     assert "总点数" in page and "750" in page
     # 员工看不到管理员页（越权仍被拦）

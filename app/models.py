@@ -147,6 +147,9 @@ class SysConfig(Base):
     per_point = Column(Integer, nullable=False, default=250)
     bonus_group = Column(Integer, nullable=False, default=68)
     bonus_amount = Column(Integer, nullable=False, default=3000)
+    # 员工可见起始月（YYYY-MM）：员工端只显示该月及之后的数据；空=不限制
+    staff_visible_from = Column(String(7), nullable=False, default="",
+                                server_default="")
     updated_by = Column(Integer, nullable=True)
     updated_at = Column(DateTime, nullable=False, default=_now)
 
