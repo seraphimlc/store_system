@@ -12,9 +12,12 @@ FastAPI + SQLAlchemy 2 + Alembic + Jinja2 + htmx：巡店文件 → 判定 → �
 ./.venv/bin/python -m pytest tests tests_web -q              # 全量
 ./scripts/dev_server.sh                                       # 本地服务(自动加载 .env 含 AI key)
 DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.py
+mcp_service/.venv/bin/python -m pytest mcp_service/tests -q  # MCP 服务测试（独立 3.12 venv）
+VISIT_MCP_TOKEN=xxx mcp_service/run.sh                        # 本机 MCP 服务（只读，独立进程）
 ```
 - 账号：`admin/demo123`；员工 `demo123`。**heredoc `python3 <<EOF` 偶发静默失败 → 一律写 scripts/*.py 文件执行**。
 - AI：本地 .env（AI_API_KEY/AI_BASE_URL/AI_MODEL=deepseek-v4-flash）；线上 deploy/.env。ai_chat.chat 自动重试 2 次。
+- **MCP 服务（WorkBuddy 接入，P0）**：独立进程 `mcp_service/`，只读、**不动 app/ 与主 venv（3.9.6）**；依赖 `requirements-mcp.txt`（`mcp==2.2.0` 需 Python ≥3.10，生产 3.11 可用）。启动前 **DATABASE_URL 必须显式设置**（`app/config.py` 的 `get_settings()` 带 @lru_cache，`app.db` import 时固化缓存，不设会静默连到空库）。设计/计划见 `docs/索引.md §1.5`。
 
 ## 关键基准（演示/验收必须一致）
 | 项 | 8月 | 7月 |
