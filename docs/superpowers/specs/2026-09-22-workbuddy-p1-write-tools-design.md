@@ -45,7 +45,7 @@
 **MCP 语义推导**（由 W1–W12 直接推出）：
 
 - `finalize`：原子可安全重试 → 异常信封可用普通 `INTERNAL` + 可重试 hint。
-- `rebuild`：非原子 + 无守卫 + 无快照 → **不可盲目重试**；必须先补源守卫（W7）、快照（W9）、preview 前置、确认语，错误信封一律 `INTERNAL_WRITE`（禁止自动重试）。
+- `rebuild`：非原子 + 无守卫 + 无快照 → **不可盲目重试**；必须先补源守卫（W7）、快照（W9）、preview 前置、确认语，错误信封一律 `INTERNAL_WRITE`（禁止自动重试；**补同步失败除外**——见 §6.2，返回 `ok:true` + `data.warnings`）。
 - `set_per_point`：幂等可重试，但**必须先 `ensure_config_warmed`**（W11），且自己补月份校验/封账/确认语（W12）。
 
 ---
@@ -77,7 +77,7 @@
 ```
 WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
    → 客户服务器 nginx /mcp → mcp_service/（独立进程, --workers 1）
-       → app/api 层能力函数 f(db, actor, **params)   ← 唯一真相（新增 actor）
+       → 能力层（mcp_service/capability.py）f(db, actor, **params)   ← 唯一真相（新增 actor；与 P0 同层，非 v3 的 app/api 目录）
        → app/services/*（仅改动 A/B 两处守卫）
        → DB（SQLite 本地 / PG 线上）
 ```
@@ -128,7 +128,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 
 | # | 工具 | 读/写 | 前置 | 封账 | 源守卫 | 幂等重试 |
 |---|---|---|---|---|---|---|
-| 1 | `visit_rebuild_preview(month)` | 读 | — | 是(提示) | 是(只读估算) | 安全 |
+| 1 | `visit_rebuild_preview(month)` | 读 | — | 是（命中即 `MONTH_SEALED`，§6.2） | 是(只读估算) | 安全 |
 | 2 | `visit_finalize_file(file_id)` | 写 | — | **是（按文件推导月份集合，任一命中即拒）** | — | **安全**（原子，W1） |
 | 3 | `visit_rebuild_month(month, preview_id, confirm_text)` | 写 | **preview 前置**（§6.3） | 是 | 是（改动 A） | **禁止自动重试**（W6） |
 | 4 | `visit_set_per_point(month, per_point, confirm_text)` | 写 | `ensure_config_warmed`（W11） | 是 | — | 安全（幂等，W12） |
@@ -137,7 +137,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 
 **`visit_rebuild_preview(month)`**（只读，P1 不删除）
 - 只读估算，不调 `rebuild_month`。返回（键名对齐 `judge_import` 真实统计键）：
-  `formal_rows_now` / `formal_points_now`、`raw_total` / `raw_by_status{valid,cross_file_dup,master_late,from_sub,no_ref,blank}`、`estimated_insert_rows`（=valid）、`dedup_sub_hits`、`affected_persons`、`sealed`（封账时返回 `MONTH_SEALED` 错误）、`preview_id` / `expires_at`、`notes`（估算基于当前 clean_status，重判可能改变分类）。
+  `formal_rows_now` / `formal_points_now`、`raw_total` / `raw_by_status{valid,cross_file_dup,master_late,from_sub,no_ref,blank}`、`estimated_insert_rows`（=valid，为入表**上限**，重判可能改变分类）、`dedup_sub_hits`、`affected_persons`、`sealed`（封账时返回 `MONTH_SEALED` 错误）、`preview_id` / `expires_at`、`notes`（估算基于当前 clean_status，重判可能改变分类）。
 - 一致性断言（定义两侧数据集，评审修正）：
   - `raw_by_status` 按该月 **raw_records** 的 `clean_status` 分组计数；除六键（valid/cross_file_dup/master_late/from_sub/no_ref/blank）外，**含 `other` 残差桶**（clean_status 为 NULL/历史遗留值，列本身 nullable）→ 断言 `raw_total == Σ(raw_by_status 各桶)`（含 other）；
   - `estimated_insert_rows = raw_by_status["valid"]`；
@@ -151,6 +151,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 - pending 申诉（文件粒度）→ `PENDING_APPEALS`。
 - 幂等：原子先删后插（flow.py:416→427），安全重试。
 - **意外异常信封：`INTERNAL`（原子，可安全重试）**——不是 `INTERNAL_WRITE`。
+- **成功返回 data**：`{file_id, affected_months: [...], formal_rows: <入表行数>}`。
 - **副作用如实告知**（hint）：stats/period/dash 是 best-effort 各自 commit，若失败提示"部分同步可能未完成，请用只读工具核对"。
 
 **`visit_rebuild_month(month, preview_id, confirm_text)`**
@@ -281,7 +282,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 
 | 层 | 方式 | 关键断言 |
 |---|---|---|
-| 能力层 | pytest + 既有空内存库 fixture + 构造数据 | 权限矩阵（staff 全拒、只读 Token 调写工具拒）、封账（**finalize 多月份推导**：文件跨封账月即整体拒绝并列出月份）、`NO_SOURCE_ROWS`（formal 行数不变）、`CONFIRM_REQUIRED`、`PREVIEW_REQUIRED`（缺/过期/换 token/换月）、`INTERNAL_WRITE` 兜底、幂等重放（finalize 两次调用结果一致） |
+| 能力层 | pytest + 既有空内存库 fixture + 构造数据 | 权限矩阵（staff 全拒、只读 Token 调写工具拒）、封账（**finalize 多月份推导**：文件跨封账月即整体拒绝并列出月份）、`NO_SOURCE_ROWS`（formal 行数不变）、`CONFIRM_REQUIRED`、`PREVIEW_REQUIRED`（缺/过期/换 token/换月）、`INTERNAL_WRITE` 兜底、幂等重放（finalize 两次调用结果一致）、`BAD_MONTH`/`BAD_PARAM`（per_point 非正）、`PENDING_APPEALS`（文件/月粒度）、`NOT_FOUND` |
 | 冷缓存 | 清 `perf._CONFIG_CACHE` 后走 `set_per_point` 路径 | 取到 sys_configs 的 75/1250 而非 env 默认 68/3000（W11） |
 | 审计 | 调用后查 `mcp_audit_log` | 成功/失败各一行；401 一行（tool=NULL）；params 无 Token 明文；audit_id 执行前已存在 |
 | 快照 | 真跑重算前 | `rebuild_snapshots` 一行且 row_count == 重算前该月 formal 行数；HTML 路径 audit_id 为 NULL 不报错 |
