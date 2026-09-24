@@ -37,7 +37,7 @@
 | W9 | `rebuild` 无快照/备份机制 | 同上 |
 | W10 | `set_month_per_point` 重算：该月 `month_perf_records.salary`（走 `_bonus_cfg` 奖金）+ 该月 `payroll_period_rows` 全量（adjust 自动写、prev_adjust 链式递延）；**只算目标月，M+1 结转陈旧**；`AdjustRecord` 锁存单价不受影响 | `perf.py:372-386` |
 | W11 | **配置缓存坑确认**：`_CONFIG_CACHE` 进程级全局；`set_month_per_point` 不 warm 不清缓存；`warm_config` 只在 4 个 HTML 路由调用（settle_r.py:164/308/424/966）。冷缓存下奖金按 env 默认 68/3000 而非 sys_configs（2026-09=75/1250）→ **静默写错钱** | `perf.py` |
-| W12 | `set_per_point` **无守卫**：无封账、服务层无月份格式校验（非法月静默 ok rows=0）、无确认语；幂等可重试 | `perf.py:372` |
+| W12 | `set_per_point` **无守卫**：无封账、无确认语；服务层对**合法格式但无数据**的月返回 ok rows=0，**非法格式月（如 2026-13）在 period 层抛 ValueError**（非静默）；幂等可重试 | `perf.py:372` + `period.py:22-26` |
 | W13 | `judge_import` 单 commit（:326），返回键 `valid/master_late/from_sub/cross_file_dup/no_ref/blank` | `flow.py:248-327` |
 | W14 | `app/db.py`：`SessionLocal = sessionmaker(expire_on_commit=False)`；`get_db` yield+close，无自动 commit | `app/db.py:44-52` |
 | W15 | P0 的 `sealed_months` / `rebuild_snapshots` / `mcp_audit_log` / `api_tokens` **全部 0 实现**（仅设计文档） | 全仓 grep |
@@ -83,7 +83,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 ```
 
 - 能力函数签名统一 `f(db, actor, **params)`（P0 的 `month_summary(db, month)` 在 P1 补上 `actor`——P0 是有意省略，此处显式声明补齐，不留静默继承）。
-- `actor`：`{uid, role, scopes}`，由 Token 鉴权模块构造；写工具检查 `role==admin && "write" in scopes`。
+- `actor`：`{uid, role, scopes, token_id}`（`token_id` 供闸门 6 的 preview 归属校验，沿 v3 §6.1），由 Token 鉴权模块构造；写工具检查 `role==admin && "write" in scopes`。
 - 每个写工具入口先 `ensure_config_warmed(db, month)`（W11 的强制对策）。
 
 ---
@@ -116,7 +116,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 
 `Authorization: Bearer <token>` → 取前 8 位查 `token_prefix` → 校验摘要且未吊销 → 更新 `last_used_at` → 构造 `Actor`。失败一律 401 + `WWW-Authenticate: Bearer`，**认证失败同样落审计**（§8）。
 
-**P0 环境变量 Token 的处置**：P1 起主路径走 api_tokens；`VISIT_MCP_TOKEN` 保留为**未初始化时的 bootstrap**（首次启动、表为空时），并在启动日志提示"已用 bootstrap Token，请尽快在网页签发正式 Token"。
+**P0 环境变量 Token 的处置**：P1 起主路径走 api_tokens；`VISIT_MCP_TOKEN` 保留为**未初始化时的 bootstrap**（首次启动、表为空时），并在启动日志提示"已用 bootstrap Token，请尽快在网页签发正式 Token"。**bootstrap 仅 `read` scope**：api_tokens 为空时用它构造 `Actor(scopes=["read"])`，写工具一律 `FORBIDDEN_TOOL`——防止未迁移的环境变量 Token 在写能力开通后直接获得写权限。
 
 ---
 
@@ -138,27 +138,38 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 **`visit_rebuild_preview(month)`**（只读，P1 不删除）
 - 只读估算，不调 `rebuild_month`。返回（键名对齐 `judge_import` 真实统计键）：
   `formal_rows_now` / `formal_points_now`、`raw_total` / `raw_by_status{valid,cross_file_dup,master_late,from_sub,no_ref,blank}`、`estimated_insert_rows`（=valid）、`dedup_sub_hits`、`affected_persons`、`sealed`（封账时返回 `MONTH_SEALED` 错误）、`preview_id` / `expires_at`、`notes`（估算基于当前 clean_status，重判可能改变分类）。
-- 一致性断言（沿 v3 §13）：`行数 == Σ分类计数`、`总点数 == Σ(点数×该点数行数)`——点数可为 0..9，不钉数值。
+- 一致性断言（定义两侧数据集，评审修正）：
+  - `raw_by_status` 按该月 **raw_records** 的 `clean_status` 分组计数；除六键（valid/cross_file_dup/master_late/from_sub/no_ref/blank）外，**含 `other` 残差桶**（clean_status 为 NULL/历史遗留值，列本身 nullable）→ 断言 `raw_total == Σ(raw_by_status 各桶)`（含 other）；
+  - `estimated_insert_rows = raw_by_status["valid"]`；
+  - 点数影响面：按该月 **valid raw** 的 `points` 分布给出 `raw_by_points` → 断言 `Σ(点数×count) == valid 行点数合计`（点数可为 0..9，不钉数值）；
+  - **`formal_points_now` 来自正式表（已结算口径），与 raw 估算不做等值断言**（两侧口径不同）；
+  - 预览测试必须用**全判定完成的 fixture**（raw 已判、formal 已建），否则六键计数会因 clean_status 未填而不成立。
 
 **`visit_finalize_file(file_id)`**
-- 封账判定：从该文件**全部 raw** 推导月份集合（复用 `auto_finalize_pipeline` 的现成推导，W4），任一命中封账月 → `MONTH_SEALED`（错误里列出命中月份）。
-- pending 申诉（文件粒度）→ `PENDING_APPEALS`（hint：申诉功能未开放，联系维护人员）。
-- 幂等：原子先删后插，安全重试。
+- 封账判定：月份集合 = **该文件全部 raw 的月份 ∪ 该文件 `FormalRecord` 的月份**（前者复用 `auto_finalize_pipeline` 的现成推导 W4；后者查该文件现有正式表行的 `japan_date` 月份）。任一命中封账月 → `MONTH_SEALED`（错误列出命中月份）。
+  **为什么用并集（评审修正）**：仅按 raw 推导在"raw 被清理、formal 保留"的状态下会漏判——如 8 月 raw 已清但 formal 在，只按 raw 推不出 8 月 → 封账闸门放行 → `finalize_import` 删该文件**跨全部月份**的 formal（flow.py:416）→ 毁掉已封账的 8 月。并集保证封账检查覆盖文件实际占用的全部月份。
+- pending 申诉（文件粒度）→ `PENDING_APPEALS`。
+- 幂等：原子先删后插（flow.py:416→427），安全重试。
+- **意外异常信封：`INTERNAL`（原子，可安全重试）**——不是 `INTERNAL_WRITE`。
 - **副作用如实告知**（hint）：stats/period/dash 是 best-effort 各自 commit，若失败提示"部分同步可能未完成，请用只读工具核对"。
 
 **`visit_rebuild_month(month, preview_id, confirm_text)`**
 - 前置校验（与会话无关，服务端强制）：
-  1. `preview_id` 存在、ok=True、`tool=="visit_rebuild_preview"`、**同一 token_id**、同一 month、created_at 在 **30 分钟窗**内 → 否则 `PREVIEW_REQUIRED`；
+  1. `preview_id` 存在、ok=True、`tool=="visit_rebuild_preview"`、**同一 `actor.token_id`**、同一 month、created_at 在 **30 分钟窗**内 → 否则 `PREVIEW_REQUIRED`；
   2. `confirm_text == "确认重算 {month}"` → 否则 `CONFIRM_REQUIRED`；
   3. 源守卫（改动 A）：该月 raw=0 而 formal>0 → `NO_SOURCE_ROWS`；
-  4. 封账：该月命中 → `MONTH_SEALED`。
-- 执行：服务层 `rebuild_month`（含改动 B 快照）→ **成功后补 `sync_period_table(month)` + `sync_dash_metrics`**（W8 缺口，仅 MCP 路径）。
-- 异常信封：`INTERNAL_WRITE`，**禁止自动重试**（W6：删后崩溃 = 空月；提示"先观察，用只读工具核对，必要时找维护人员"）。
+  4. 封账：该月命中 → `MONTH_SEALED`；
+  5. **月粒度 pending 申诉**（flow.py:477-483，rebuild 重判前检查该月）→ `PENDING_APPEALS`。
+- 执行：服务层 `rebuild_month`（含改动 B 快照）。
+- **成功后补同步（best-effort）**：`sync_period_table(month)` + `sync_dash_metrics` 各自 try/except（对齐 finalize 的 best-effort 口径，flow.py:641-649）。**失败语义（评审修正）**：rebuild 本身成功 → 返回 `ok:true` + `data.warnings: ["找平表/看板同步未完成，请用只读工具核对"]`；**不得**返回 `INTERNAL_WRITE`——否则既留下陈旧找平表又禁止重试，正是 W8/验收 5 要消灭的失败模式。
+- **意外异常信封：`INTERNAL_WRITE`，禁止自动重试**（W6：删后崩溃 = 空月；提示"先观察，用只读工具核对，必要时找维护人员"）。
+- **副作用如实告知**（hint）：重算会改写 clean_status、翻 from_sub、重建 stats；**M+1 递延结转会陈旧**（同 set_per_point 口径）；快照只能回灌正式表。
 
 **`visit_set_per_point(month, per_point, confirm_text)`**
 - 前置：`ensure_config_warmed(db, month)`（W11 强制，防写错钱）；`confirm_text == "确认改单价 {month} {per_point}"`；封账闸门。
-- 月份校验用 MONTH_PATTERN（W12：服务层不校验，MCP 必须自己挡非法月）。
+- 参数校验：月份用 MONTH_PATTERN（W12：服务层不校验，非法格式月会在 period 层抛 ValueError，MCP 必须先挡）→ 非法 `BAD_MONTH`；`per_point` 必须是**正整数**（HTML 路由 enforce settle_r.py:469，服务层不校验，`salary_for` 会把负数/零写成工资）→ 非法 `BAD_PARAM`。
 - 幂等：同值重跑安全。
+- **意外异常信封：`INTERNAL`（幂等，可安全重试）**——不是 `INTERNAL_WRITE`。
 - **副作用如实告知**（hint）：只重算目标月，**M+1 递延结转会陈旧**，如需对齐请对下月重跑或人工核对。
 
 ### 6.3 preview 前置的会话无关性
@@ -175,10 +186,12 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 | `NO_SOURCE_ROWS` | raw=0 且 formal>0 | "该月源记录已清理，重算会清空正式表，已拒绝" |
 | `PREVIEW_REQUIRED` | 缺/过期/不匹配 preview_id | "先调 visit_rebuild_preview(month=...)，把结果复述给用户后用返回的 preview_id 重算" |
 | `CONFIRM_REQUIRED` | 缺/错 confirm_text | "请复述确认语：确认重算 2026-09" |
-| `PENDING_APPEALS` | 文件有 pending 申诉 | "该文件有未决申诉，申诉功能未开放，请联系维护人员" |
+| `PENDING_APPEALS` | **文件或结算月**存在 pending 申诉（finalize 文件粒度 / rebuild 月粒度，flow.py:477-483） | "存在未决申诉，申诉功能未开放，请联系维护人员处理" |
+| `BAD_MONTH` | 月份格式非法（**写工具同样用此码**，不落 INTERNAL_WRITE） | "月份必须是 YYYY-MM，例如 2026-09" |
+| `BAD_PARAM` | 参数越界（如 `per_point` 非正整数） | "每点单价必须是正整数" |
 | `NOT_FOUND` | file_id 不存在 | "先调 visit_file_list(month=...) 获取正确 id" |
-| `INTERNAL` | 只读工具未预期异常 | （沿 P0，可重试） |
-| `INTERNAL_WRITE` | **写工具**未预期异常 | "可能已部分生效（重算在流程中间提交），**不要自动重试**；先用只读工具核对当前状态" |
+| `INTERNAL` | 只读工具及 **finalize / set_per_point**（原子/幂等，可重试）未预期异常 | （沿 P0，可重试） |
+| `INTERNAL_WRITE` | **仅 rebuild**（流程中间提交，删后崩溃 = 空月）未预期异常 | "重算可能已部分生效，**不要自动重试**；先用只读工具核对当前状态，必要时找维护人员" |
 
 ---
 
@@ -191,7 +204,7 @@ WorkBuddy 桌面端 → 连接器包(mcp.json, Bearer ${VISIT_TOKEN})
 | 3 | 封账 | `sealed_months` 表 + 能力层 `assert_not_sealed(db, months)`（**支持月份集合**，供 finalize） | 改已封账月 |
 | 4 | 源守卫 | 服务层改动 A + 能力层 `assert_has_source(db, month)` | 重算清空整月 |
 | 5 | 确认语 | `assert_confirm(text, expect)` | 降低误触（**非安全边界**，诚实定位：agent 能自己填对这句话） |
-| 6 | 预演前置 | preview_id 校验（同 token/同月/30 分钟窗/ok=True） | 未看影响面就重算 |
+| 6 | 预演前置 | preview_id 校验（**同一 `actor.token_id`**/同月/30 分钟窗/ok=True） | 未看影响面就重算 |
 | 7 | 配置就绪 | `ensure_config_warmed(db, month)` | 用错奖金参数写错钱（W11） |
 | 8 | 审计 | 两阶段写 `mcp_audit_log` | 不可追溯 |
 
@@ -303,7 +316,7 @@ v3 §4.2 的 #9–#11 工具、§6.1 api_tokens、§7 闸门、§9 审计在本�
 | 4 | preview_id / 确认语 / 封账 | 语义保留，实现落在 `mcp_service/` 能力层 + 服务层改动 A/B |
 | 5 | rebuild 后找平刷新 | **新增**：MCP 路径补 `sync_period_table`/`sync_dash_metrics`（v3 未覆盖 W8 缺口） |
 
-**P0 spec §12.1 修订项的落点**：除"上传"外全部在本设计中落实（独立进程、封账独立表、stateless_http、D2）。
+**P0 spec §12.1 修订项的落点**：独立进程、封账独立表、stateless_http、D2 已在本设计中落实；**"上传"除外（P2）**；**修订项 2（nginx `/mcp` 路由 + `mcp_service` 容器 + 发布步骤）标注为待办**——P1 验收在本机测试环境完成，客户服务器部署属发布阶段（届时补 `deploy/nginx.store-settle.conf` 的 `/mcp` 路由、`compose.yaml` 的 mcp_service 服务与发布步骤，并同步 `docs/索引.md`/`AGENTS.md`）。
 
 ---
 
