@@ -31,6 +31,8 @@ class User(Base):
     status = Column(String(16), nullable=False, default="active")
     # 首次登录/口令被管理员重置后必须改密（True=未改，除改密/退出外一律拦截）
     must_change_password = Column(Boolean, nullable=False, default=False)
+    # 界面语言：zh / ja / 空=自动（URL→cookie→浏览器语言）；员工可账号级指定
+    lang = Column(String(8), nullable=False, default="", server_default="")
     created_at = Column(DateTime, nullable=False, default=_now)
 
     @property

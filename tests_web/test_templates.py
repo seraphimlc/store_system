@@ -6,14 +6,27 @@ from pathlib import Path
 
 
 def _env():
-    return Environment(loader=FileSystemLoader(
+    env = Environment(loader=FileSystemLoader(
         str(Path(__file__).parent.parent / "app" / "templates")),
         autoescape=select_autoescape(["html"]))
+    from app.i18n import t as _t, LANG_NAMES as _LANG_NAMES
+    env.globals["t"] = _t
+    env.globals["LANG_NAMES"] = _LANG_NAMES
+
+    def _lang_url(request, lang):
+        q = dict(request.query_params)
+        q["lang"] = lang
+        return "?" + "&".join(f"{k}={v}" for k, v in q.items())
+    env.globals["lang_url"] = _lang_url
+    return env
 
 
 def _req():
     from types import SimpleNamespace as SN
-    return SN(state=SN(csrf="tok"))
+
+    class _QP(dict):
+        items = dict.items
+    return SN(state=SN(csrf="tok"), query_params=_QP(), cookies={})
 
 
 def test_base_template_renders_logged_in():

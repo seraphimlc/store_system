@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templating import get_templates
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -13,7 +13,7 @@ from app.routers.auth_r import csrf_ok, require_login
 from app.services import ai_batch, store_master
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = get_templates()
 
 
 def _denied():

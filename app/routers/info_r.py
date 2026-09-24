@@ -4,12 +4,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from app.templating import get_templates
 
 import markdown as _md
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = get_templates()
 
 _DOC = Path(__file__).resolve().parent.parent / "product_doc.md"
 

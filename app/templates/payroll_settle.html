@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}薪资找平 · {{ month or '全部' }}{% endblock %}
+{% block title %}{{ t('薪资找平 ·') }}{{ month or t('全部') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>薪资找平</h1>
-  <span class="sub">月内两期（1-15 / 16-月末）发薪后与期末对账找平：偏差>0 少付需补，<0 多付需扣。</span>
+<div class="page-title"><h1>{{ t('薪资找平') }}</h1>
+  <span class="sub">{{ t('月内两期（1-15 / 16-月末）发薪后与期末对账找平：偏差') }}>0 {{ t('少付需补，') }}<0 {{ t('多付需扣。') }}</span>
   <span class="actions">
     <form method="get" style="display:inline-flex;gap:.5rem;align-items:center">
-      <label class="f">月份
+      <label class="f">{{ t('月份') }}
         <select name="month" onchange="this.form.submit()">
           {% for m in months %}<option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>{% endfor %}
         </select></label>
@@ -13,41 +13,41 @@
     <form method="post" action="/payroll-settle/generate" style="display:inline">
       <input type="hidden" name="month" value="{{ month }}">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-      <button class="btn" style="padding:.25rem .6rem" type="submit">生成/更新</button>
+      <button class="btn" style="padding:.25rem .6rem" type="submit">{{ t('生成/更新') }}</button>
     </form>
-    <a class="btn ghost" style="padding:.25rem .6rem" href="/payroll-settle/export?month={{ month }}">导出 Excel</a>
+    <a class="btn ghost" style="padding:.25rem .6rem" href="/payroll-settle/export?month={{ month }}">{{ t('导出 Excel') }}</a>
   </span>
 </div>
-{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if not rows %}
-<p class="empty">该月暂无数据（点「生成/更新」从正式表与对账生成）</p>
+<p class="empty">{{ t('该月暂无数据（点') }}「{{ t('生成/更新') }}」{{ t('从正式表与对账生成）') }}</p>
 {% else %}
 <div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
-  <div class="stat-card"><div class="k">分期已发(円)</div><div class="v">¥{{ '{:,}'.format(total.half_amt) }}</div>
-    <div class="sub" style="font-size:.72rem">上半 {{ '{:,}'.format(total.half1) }} 点 / 下半 {{ '{:,}'.format(total.half2) }} 点</div></div>
-  <div class="stat-card"><div class="k">奖金合计(円)</div><div class="v">¥{{ '{:,}'.format(total.bonus) }}</div>
-    <div class="sub" style="font-size:.72rem">每满{{ bonus_g }}点奖{{ bonus_a }}·整月滚动不跨月</div></div>
-  <div class="stat-card"><div class="k">对账金额(円)</div><div class="v">¥{{ '{:,}'.format(total.settle_amt) }}</div>
-    <div class="sub" style="font-size:.72rem">对账 {{ '{:,}'.format(total.settle) }} 点</div></div>
-  <div class="stat-card"><div class="k">上月修正</div><div class="v">{{ '%+d' % total.prev }} 点</div>
+  <div class="stat-card"><div class="k">{{ t('分期已发(円)') }}</div><div class="v">¥{{ '{:,}'.format(total.half_amt) }}</div>
+    <div class="sub" style="font-size:.72rem">{{ t('上半') }}{{ '{:,}'.format(total.half1) }} {{ t('点 / 下半') }}{{ '{:,}'.format(total.half2) }} {{ t('点') }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('奖金合计(円)') }}</div><div class="v">¥{{ '{:,}'.format(total.bonus) }}</div>
+    <div class="sub" style="font-size:.72rem">{{ t('每满') }}{{ bonus_g }}{{ t('点奖') }}{{ bonus_a }}·{{ t('整月滚动不跨月') }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('对账金额(円)') }}</div><div class="v">¥{{ '{:,}'.format(total.settle_amt) }}</div>
+    <div class="sub" style="font-size:.72rem">{{ t('对账') }}{{ '{:,}'.format(total.settle) }} {{ t('点') }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('上月修正') }}</div><div class="v">{{ '%+d' % total.prev }} {{ t('点') }}</div>
     <div class="sub" style="font-size:.72rem">¥{{ '{:,}'.format(total.prev_amt) }}</div></div>
-  <div class="stat-card hl"><div class="k">本月对账偏差</div>
+  <div class="stat-card hl"><div class="k">{{ t('本月对账偏差') }}</div>
     <div class="v" style="color:{% if total.diff_amt >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">¥{{ '{:,}'.format(total.diff_amt) }}</div>
-    <div class="sub" style="font-size:.72rem">{{ '%+d' % total.diff }} 点</div></div>
+    <div class="sub" style="font-size:.72rem">{{ '%+d' % total.diff }} {{ t('点') }}</div></div>
 </div>
 <div class="card">
   <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
-    <tr><th>员工</th>
-        <th class="num" colspan="2">上半月(1-15)</th>
-        <th class="num" colspan="2">下半月(16-月末)</th>
-        <th class="num">奖金(円)</th>
-        <th class="num">分期已发(円)</th>
-        <th class="num" colspan="2">对账</th>
-        <th class="num" colspan="2">上月修正</th>
-        <th class="num" colspan="2">本月对账偏差(参考)=找平</th><th></th></tr>
-    <tr><th></th><th class="num">点</th><th class="num">円</th><th class="num">点</th><th class="num">円</th>
-        <th></th><th></th><th class="num">点</th><th class="num">円</th><th class="num">点</th><th class="num">円</th>
-        <th class="num">点</th><th class="num">円</th><th></th></tr>
+    <tr><th>{{ t('员工') }}</th>
+        <th class="num" colspan="2">{{ t('上半月(1-15)') }}</th>
+        <th class="num" colspan="2">{{ t('下半月(16-月末)') }}</th>
+        <th class="num">{{ t('奖金(円)') }}</th>
+        <th class="num">{{ t('分期已发(円)') }}</th>
+        <th class="num" colspan="2">{{ t('对账') }}</th>
+        <th class="num" colspan="2">{{ t('上月修正') }}</th>
+        <th class="num" colspan="2">{{ t('本月对账偏差(参考)') }}={{ t('找平') }}</th><th></th></tr>
+    <tr><th></th><th class="num">{{ t('点') }}</th><th class="num">{{ t('円') }}</th><th class="num">{{ t('点') }}</th><th class="num">{{ t('円') }}</th>
+        <th></th><th></th><th class="num">{{ t('点') }}</th><th class="num">{{ t('円') }}</th><th class="num">{{ t('点') }}</th><th class="num">{{ t('円') }}</th>
+        <th class="num">{{ t('点') }}</th><th class="num">{{ t('円') }}</th><th></th></tr>
     {% for r in rows %}
     <tr {% if r.code == staff %}style="outline:2px solid #888;outline-offset:-2px"{% endif %}>
       <td>{{ r.name }}<br><span class="hint">{{ r.code }}</span></td>
@@ -67,9 +67,9 @@
     {% endfor %}
   </table></div>
   <p class="hint" style="margin-top:.5rem">
-    「本月对账偏差(金额)」= 对账金额 − 系统已发金额（含奖金）：<b>负数=扣款、正数=补款</b>，即自动找平金额（无需人工操作）：
-    发薪时在上半月工资里扣/补，上半月不够扣 → 下半月继续扣，两期都不够 → 余额递延下月。
-    「上月修正(金额)」= 上月两期工资扣不完的余额（递延到本月继续扣）。
+    「{{ t('本月对账偏差(金额)') }}」= {{ t('对账金额') }}− {{ t('系统已发金额（含奖金）：') }}<b>{{ t('负数') }}={{ t('扣款、正数') }}={{ t('补款') }}</b>，{{ t('即自动找平金额（无需人工操作）：') }}
+    {{ t('发薪时在上半月工资里扣/补，上半月不够扣') }}→ {{ t('下半月继续扣，两期都不够') }}→ {{ t('余额递延下月。') }}
+    「{{ t('上月修正(金额)') }}」= {{ t('上月两期工资扣不完的余额（递延到本月继续扣）。') }}
   </p>
 </div>
 {% endif %}

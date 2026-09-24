@@ -1,9 +1,9 @@
 {% if staff %}
-<div style="font-weight:600;margin:.2rem 0 .4rem">{{ name }}（{{ staff }}）点数趋势</div>
+<div style="font-weight:600;margin:.2rem 0 .4rem">{{ name }}（{{ staff }}）{{ t('点数趋势') }}</div>
 {{ chart|safe }}
 {% if series %}
 <div class="tbl-wrap" style="border:0;box-shadow:none;margin-top:.5rem"><table class="grid-tbl">
-  <tr><th>月份</th><th>有效店</th><th>重复</th><th>1点店</th><th>2点店</th><th>点数</th><th>工资(円)</th></tr>
+  <tr><th>{{ t('月份') }}</th><th>{{ t('有效店') }}</th><th>{{ t('重复') }}</th><th>1{{ t('点店') }}</th><th>2{{ t('点店') }}</th><th>{{ t('点数') }}</th><th>{{ t('工资(円)') }}</th></tr>
   {% for s in series %}
   <tr><td>{{ s.month }}</td><td class="num">{{ s.records }}</td>
       <td class="num" style="color:{% if s.dups > 10 %}#b02a37{% else %}#666{% endif %}">{{ s.dups }}</td>
@@ -14,12 +14,12 @@
 {% endif %}
 <div style="margin-top:.7rem">
   {% if analysis %}
-  <div style="font-weight:600;margin-bottom:.3rem">员工分析</div>
+  <div style="font-weight:600;margin-bottom:.3rem">{{ t('员工分析') }}</div>
   {{ analysis|safe }}
   {% elif not sample_ok %}
-  <p class="hint">该员工数据样本不足（至少需 2 个月且有足够有效店），不生成分析。</p>
+  <p class="hint">{{ t('该员工数据样本不足（至少需 2 个月且有足够有效店），不生成分析。') }}</p>
   {% else %}
-  <p class="hint">分析生成中…（首次约 10-30 秒，完成后保存，之后秒开）</p>
+  <p class="hint">{{ t('分析生成中') }}…（{{ t('首次约 10-30 秒，完成后保存，之后秒开）') }}</p>
   {% endif %}
 </div>
 {% else %}{% endif %}

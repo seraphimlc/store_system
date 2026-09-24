@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                      UploadFile)
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templating import get_templates
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -14,7 +14,7 @@ from app.routers.auth_r import csrf_ok, require_login
 from app.services import importer
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = get_templates()
 
 MONTH_CHOICES = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]
 

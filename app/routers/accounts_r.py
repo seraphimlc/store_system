@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templating import get_templates
 from sqlalchemy.orm import Session
 
 from app.auth import hash_password, verify_password
@@ -13,7 +13,7 @@ from app.models import Person, User
 from app.routers.auth_r import csrf_ok, require_login
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = get_templates()
 
 # 员工状态：展示名 + 是否可登录 + 徽标样式
 STATUS_LABELS = {"active": "在岗", "leave": "请假", "disabled": "停用",
@@ -85,9 +85,33 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
         "request": request, "current_user": user, "staff": staff,
         "msg": msg, "status": status,
         "labels": STATUS_LABELS, "pill": _status_pill,
+        "langs": {"": "自动", "zh": "中文", "ja": "日本語"},
         "counts": {s: db.query(User).filter(User.role == "staff",
                                            User.status == s).count()
                    for s in STATUS_LABELS}})
+
+
+@router.post("/staff-admin/{uid}/lang")
+def staff_set_lang(uid: int, request: Request, lang: str = Form(""),
+                   csrf_token: str = Form(...),
+                   user: Optional[User] = Depends(require_login),
+                   db: Session = Depends(get_db)):
+    """设置员工账号的界面语言（zh/ja/空=自动）。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    target = db.get(User, uid)
+    if target is None or target.role != "staff":
+        raise HTTPException(404, "员工不存在")
+    if lang not in ("", "zh", "ja"):
+        raise HTTPException(400, f"未知语言: {lang}")
+    target.lang = lang
+    db.commit()
+    label = "自动" if not lang else "中文" if lang == "zh" else "日本語"
+    return RedirectResponse(
+        f"/staff-admin?msg=已设置 {target.username} 的界面语言为「{label}」",
+        status_code=303)
 
 
 @router.post("/staff-admin/{uid}/status")
