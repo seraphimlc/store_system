@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}数据看板{% endblock %}
+{% block title %}{{ t('数据看板') }}{% endblock %}
 {% block content %}
 <div class="page-title">
-  <h1>数据看板</h1>
+  <h1>{{ t('数据看板') }}</h1>
   <span class="actions">
     <form method="get" action="/dashboard" style="display:inline-flex;gap:.4rem;align-items:center;margin:0">
       <select name="month" onchange="this.form.submit()">
@@ -11,54 +11,54 @@
     </form>
   </span>
 </div>
-{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
-{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
+{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ t(err) }}</div>{% endif %}
 
 {% if cur %}
 <div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
-  <div class="stat-card"><div class="k">最新月份</div><div class="v">{{ cur.month }}</div></div>
-  <div class="stat-card"><div class="k">总点数</div><div class="v">{{ '{:,}'.format(cur.points) }}</div></div>
-  <div class="stat-card"><div class="k">工资总额(円)</div><div class="v">¥{{ '{:,}'.format(cur.amount) }}</div></div>
-  <div class="stat-card"><div class="k">有效店 / 员工</div><div class="v">{{ '{:,}'.format(cur.records) }} / {{ cur.employees }}</div></div>
-  <div class="stat-card"><div class="k">1点店 / 点数</div><div class="v">{{ '{:,}'.format(cur.p1) }} / {{ '{:,}'.format(cur.p1) }}</div></div>
-  <div class="stat-card"><div class="k">2点店 / 点数</div><div class="v">{{ '{:,}'.format(cur.p2) }} / {{ '{:,}'.format(cur.p2 * 2) }}</div></div>
-  <div class="stat-card"><div class="k">2点率 / 店均点数</div><div class="v">{{ '{:.1%}'.format(cur.p2rate) }} / {{ '{:.2f}'.format(cur.per_store_points) }}</div></div>
-  <div class="stat-card"><div class="k">人均点数 / 人均工资</div><div class="v">{{ '{:.0f}'.format(cur.per_emp_points) }} / ¥{{ '{:,.0f}'.format(cur.per_emp_amount) }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('最新月份') }}</div><div class="v">{{ cur.month }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('总点数') }}</div><div class="v">{{ '{:,}'.format(cur.points) }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('工资总额(円)') }}</div><div class="v">¥{{ '{:,}'.format(cur.amount) }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('有效店 / 员工') }}</div><div class="v">{{ '{:,}'.format(cur.records) }} / {{ cur.employees }}</div></div>
+  <div class="stat-card"><div class="k">1{{ t('点店 / 点数') }}</div><div class="v">{{ '{:,}'.format(cur.p1) }} / {{ '{:,}'.format(cur.p1) }}</div></div>
+  <div class="stat-card"><div class="k">2{{ t('点店 / 点数') }}</div><div class="v">{{ '{:,}'.format(cur.p2) }} / {{ '{:,}'.format(cur.p2 * 2) }}</div></div>
+  <div class="stat-card"><div class="k">2{{ t('点率 / 店均点数') }}</div><div class="v">{{ '{:.1%}'.format(cur.p2rate) }} / {{ '{:.2f}'.format(cur.per_store_points) }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('人均点数 / 人均工资') }}</div><div class="v">{{ '{:.0f}'.format(cur.per_emp_points) }} / ¥{{ '{:,.0f}'.format(cur.per_emp_amount) }}</div></div>
 </div>
 
 {% if cur.d_points is defined %}
 <div class="hint" style="margin:.4rem 0">
-  环比（{{ prev.month if prev else '—' }} → {{ cur.month }}）：
-  点数 <b>{{ '%+.1f%%'|format((cur.d_points or 0) * 100) }}</b> ·
-  工资 <b>{{ '%+.1f%%'|format((cur.d_amount or 0) * 100) }}</b> ·
-  有效店 <b>{{ '%+.1f%%'|format((cur.d_records or 0) * 100) }}</b> ·
-  人均点数 <b>{{ '%+.1f%%'|format((cur.d_per_emp_points or 0) * 100) }}</b> ·
-  2点率 <b>{{ '%+.1f'|format((cur.p2rate - monthly[-2].p2rate) * 100) }}pt</b>
+  {{ t('环比（') }}{{ prev.month if prev else '—' }} → {{ cur.month }}）：
+  {{ t('点数') }}<b>{{ '%+.1f%%'|format((cur.d_points or 0) * 100) }}</b> ·
+  {{ t('工资') }}<b>{{ '%+.1f%%'|format((cur.d_amount or 0) * 100) }}</b> ·
+  {{ t('有效店') }}<b>{{ '%+.1f%%'|format((cur.d_records or 0) * 100) }}</b> ·
+  {{ t('人均点数') }}<b>{{ '%+.1f%%'|format((cur.d_per_emp_points or 0) * 100) }}</b> ·
+  2{{ t('点率') }}<b>{{ '%+.1f'|format((cur.p2rate - monthly[-2].p2rate) * 100) }}pt</b>
 </div>
 {% endif %}
 
 <div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">总点数（月度）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('总点数（月度）') }}</div>
     <canvas id="cPoints" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">工资总额（円，月度）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('工资总额（円，月度）') }}</div>
     <canvas id="cAmount" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">有效店数（月度）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('有效店数（月度）') }}</div>
     <canvas id="cRecords" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">店铺结构演变（1点/2点堆叠）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('店铺结构演变（1点/2点堆叠）') }}</div>
     <canvas id="cStack" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">人员变化（员工数 + 新增/流失）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('人员变化（员工数 + 新增/流失）') }}</div>
     <canvas id="cHead" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">最新月店铺结构（1点/2点）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('最新月店铺结构（1点/2点）') }}</div>
     <canvas id="cDonut" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">环比对比（上两月 → 最新月）</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('环比对比（上两月') }}→ {{ t('最新月）') }}</div>
     <canvas id="cCompare" height="150"></canvas></div>
 </div>
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">逐月数据</h2>
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('逐月数据') }}</h2>
   <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
-    <tr><th>月份</th><th>员工</th><th>有效店</th><th>1点店</th><th>2点店</th><th>2点率</th>
-        <th>总点数</th><th>人均点数</th><th>店均点数</th><th>工资(円)</th><th>人均工资(円)</th></tr>
+    <tr><th>{{ t('月份') }}</th><th>{{ t('员工') }}</th><th>{{ t('有效店') }}</th><th>1{{ t('点店') }}</th><th>2{{ t('点店') }}</th><th>2{{ t('点率') }}</th>
+        <th>{{ t('总点数') }}</th><th>{{ t('人均点数') }}</th><th>{{ t('店均点数') }}</th><th>{{ t('工资(円)') }}</th><th>{{ t('人均工资(円)') }}</th></tr>
     {% for m in monthly %}
     <tr>
       <td>{{ m.month }}</td><td class="num">{{ m.employees }}</td>
@@ -77,55 +77,55 @@
 </div>
 
 <div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期新增人员（{{ cur.month }}）<span class="hint">共{{ new_staff|length }}人</span></div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">{{ t('本期新增人员（') }}{{ cur.month }}）<span class="hint">{{ t('共') }}{{ new_staff|length }}{{ t('人') }}</span></div>
     {% if new_staff %}
     <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
-      <tr><th>姓名</th><th class="num">点数</th><th class="num">金额(円)</th></tr>
+      <tr><th>{{ t('姓名') }}</th><th class="num">{{ t('点数') }}</th><th class="num">{{ t('金额(円)') }}</th></tr>
       {% for n, v in new_staff %}<tr class="pg-new" {% if loop.index > 10 %}style="display:none"{% endif %}>
         <td>{{ n }}</td><td class="num">{{ v[0] }}</td><td class="num">{{ '{:,}'.format(v[1]) }}</td></tr>{% endfor %}
     </table></div>
-    {% if new_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('new')">展开全部（{{ new_staff|length }} 人）</a></p>{% endif %}
-    {% else %}<p class="hint">无</p>{% endif %}</div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">本期未出现人员 <span class="hint">共{{ gone_staff|length }}人</span></div>
+    {% if new_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('new')">{{ t('展开全部（') }}{{ new_staff|length }} {{ t('人）') }}</a></p>{% endif %}
+    {% else %}<p class="hint">{{ t('无') }}</p>{% endif %}</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">{{ t('本期未出现人员') }}<span class="hint">{{ t('共') }}{{ gone_staff|length }}{{ t('人') }}</span></div>
     {% if gone_staff %}
     <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
-      <tr><th>姓名</th><th class="num">上月点数</th><th class="num">上月金额(円)</th></tr>
+      <tr><th>{{ t('姓名') }}</th><th class="num">{{ t('上月点数') }}</th><th class="num">{{ t('上月金额(円)') }}</th></tr>
       {% for n, v in gone_staff %}<tr class="pg-gone" {% if loop.index > 10 %}style="display:none"{% endif %}>
         <td>{{ n }}</td><td class="num">{{ v[0] }}</td><td class="num">{{ '{:,}'.format(v[1]) }}</td></tr>{% endfor %}
     </table></div>
-    {% if gone_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('gone')">展开全部（{{ gone_staff|length }} 人）</a></p>{% endif %}
-    {% else %}<p class="hint">无</p>{% endif %}</div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">点数排行 Top8</div>
+    {% if gone_staff|length > 10 %}<p class="hint"><a href="javascript:void 0" onclick="pg('gone')">{{ t('展开全部（') }}{{ gone_staff|length }} {{ t('人）') }}</a></p>{% endif %}
+    {% else %}<p class="hint">{{ t('无') }}</p>{% endif %}</div>
+  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">{{ t('点数排行 Top8') }}</div>
     <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
-      <tr><th>员工</th><th class="num">点数</th><th class="num">店数</th><th class="num">2点</th></tr>
-      {% for t in top %}<tr><td>{{ t.name }}</td><td class="num">{{ t.points }}</td>
-        <td class="num">{{ t.records }}</td><td class="num">{{ t.p2 }}</td></tr>{% endfor %}
+      <tr><th>{{ t('员工') }}</th><th class="num">{{ t('点数') }}</th><th class="num">{{ t('店数') }}</th><th class="num">2{{ t('点') }}</th></tr>
+      {% for tp in top %}<tr><td>{{ tp.name }}</td><td class="num">{{ tp.points }}</td>
+        <td class="num">{{ tp.records }}</td><td class="num">{{ tp.p2 }}</td></tr>{% endfor %}
     </table></div></div>
 </div>
 
 {% if quality %}
-<div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">数据质量（{{ cur.month }}）</div>
-  <div class="hint">原始 {{ '{:,}'.format(quality.total or 0) }} 条 · 有效 {{ '{:,}'.format(quality.valid or 0) }} ·
-  跨文件重复 {{ '{:,}'.format(quality.cross_file_dup or 0) }} · 迟交 {{ '{:,}'.format(quality.master_late or 0) }} ·
-  从档 {{ '{:,}'.format(quality.from_sub or 0) }} · 空白 {{ '{:,}'.format(quality.visible_blank or 0) }} ·
-  有数据天数 {{ quality.valid_days or 0 }}</div></div>
+<div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">{{ t('数据质量（') }}{{ cur.month }}）</div>
+  <div class="hint">{{ t('原始') }}{{ '{:,}'.format(quality.total or 0) }} {{ t('条 · 有效') }}{{ '{:,}'.format(quality.valid or 0) }} ·
+  {{ t('跨文件重复') }}{{ '{:,}'.format(quality.cross_file_dup or 0) }} · {{ t('迟交') }}{{ '{:,}'.format(quality.master_late or 0) }} ·
+  {{ t('从档') }}{{ '{:,}'.format(quality.from_sub or 0) }} · {{ t('空白') }}{{ '{:,}'.format(quality.visible_blank or 0) }} ·
+  {{ t('有数据天数') }}{{ quality.valid_days or 0 }}</div></div>
 {% endif %}
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">模型分析 · 总体分析（全公司）</h2>
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('模型分析 · 总体分析（全公司）') }}</h2>
   {% if company_analysis_html %}{{ company_analysis_html|safe }}
   {% else %}<div hx-get="/dashboard/analysis" hx-trigger="load" hx-swap="innerHTML">
-    <p class="hint">分析生成中…（首次约 10-30 秒，之后直接显示）</p>
+    <p class="hint">{{ t('分析生成中') }}…（{{ t('首次约 10-30 秒，之后直接显示）') }}</p>
   </div>{% endif %}
 </div>
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">员工维度分析</h2>
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('员工维度分析') }}</h2>
   <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
     <select name="staff" hx-get="/dashboard/staff" hx-target="#staffModule"
             hx-swap="innerHTML" hx-trigger="change"
             style="min-width:16rem">
-      <option value="">— 选择员工 —</option>
+      <option value="">— {{ t('选择员工') }}—</option>
       {% for code, name in opts %}
       <option value="{{ code }}" {% if code == staff %}selected{% endif %}>{{ name }}（{{ code }}）</option>
       {% endfor %}

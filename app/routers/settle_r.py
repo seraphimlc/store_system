@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import (APIRouter, Depends, File, Form, HTTPException,
                         Request, UploadFile)
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templating import get_templates
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -16,7 +16,7 @@ from app.routers.auth_r import csrf_ok, require_login
 from app.services import flow
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = get_templates()
 
 _REASON_CN = {"master_late": "同主档已有更早有效（本店非首次）",
               "from_sub": "从档编号，已归并到主档店铺",

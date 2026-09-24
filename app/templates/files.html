@@ -1,45 +1,45 @@
 {% extends "base.html" %}
-{% block title %}文件上传 · 巡店结算系统{% endblock %}
+{% block title %}{{ t('文件上传 · 巡店结算系统') }}{% endblock %}
 {% block content %}
 <div class="page-title">
-  <h1>文件上传</h1>
-  <span class="sub">上传 → 自动判定（有效自动入绩效 / 被滤可申诉）→ 处理申诉后入正式表</span>
+  <h1>{{ t('文件上传') }}</h1>
+  <span class="sub">{{ t('上传') }}→ {{ t('自动判定（有效自动入绩效 / 被滤可申诉）') }}→ {{ t('处理申诉后入正式表') }}</span>
 </div>
-{% if msg %}<div class="msg warn">{{ msg }}</div>{% endif %}
+{% if msg %}<div class="msg warn">{{ t(msg) }}</div>{% endif %}
 <form method="post" action="/files/upload" enctype="multipart/form-data">
   <fieldset>
-    <legend>上传并解析</legend>
+    <legend>{{ t('上传并解析') }}</legend>
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <div class="upload-zone">
       <input type="file" name="files" accept=".xlsx" multiple required>
-      <button class="btn" type="submit">上传并解析</button>
+      <button class="btn" type="submit">{{ t('上传并解析') }}</button>
     </div>
   </fieldset>
 </form>
 <div class="card" style="margin-top:1rem;padding:0;overflow:visible">
   <div class="tbl-wrap" style="box-shadow:none;border:0">
   <table class="grid-tbl">
-    <tr><th>文件名</th><th class="num">行数</th><th>判定 · 申诉 · 正式表</th>
-        <th>上传时间</th><th>操作</th></tr>
+    <tr><th>{{ t('文件名') }}</th><th class="num">{{ t('行数') }}</th><th>{{ t('判定 · 申诉 · 正式表') }}</th>
+        <th>{{ t('上传时间') }}</th><th>{{ t('操作') }}</th></tr>
     {% for f in files %}
     <tr>
       <td>{{ f.file_name }}</td>
       <td class="num">{{ f.parsed_rows }}</td>
       <td>
         {% set st = v3.get(f.id) %}
-        {% if f.status == 'failed' %}<span class="pill err">解析失败</span>
-          {% if f.errors %}<details><summary>详情</summary>
+        {% if f.status == 'failed' %}<span class="pill err">{{ t('解析失败') }}</span>
+          {% if f.errors %}<details><summary>{{ t('详情') }}</summary>
             {% for e in f.errors %}<li>{{ e }}</li>{% endfor %}</details>{% endif %}
         {% elif f.status == 'parsed' %}
         <div style="line-height:1.7">
           {% if st and st.judge %}<span class="hint">
-            有效 <b>{{ st.judge.valid }}</b>（自动入绩效）· 过滤 {{ st.judge.master_late + st.judge.from_sub + st.judge.cross_file_dup + st.judge.no_ref }}
-            （可申诉{{ st.judge.master_late }} / 从档{{ st.judge.from_sub }} /
-            同日重复{{ st.judge.cross_file_dup }} / 空编号{{ st.judge.no_ref }}）</span>{% endif %}
+            {{ t('有效') }}<b>{{ st.judge.valid }}</b>（{{ t('自动入绩效）· 过滤') }}{{ st.judge.master_late + st.judge.from_sub + st.judge.cross_file_dup + st.judge.no_ref }}
+            （{{ t('可申诉') }}{{ st.judge.master_late }} / {{ t('从档') }}{{ st.judge.from_sub }} /
+            {{ t('同日重复') }}{{ st.judge.cross_file_dup }} / {{ t('空编号') }}{{ st.judge.no_ref }}）</span>{% endif %}
           <div>
-            {% if st and st.pend_appeal %}<span class="pill err">申诉待处理 {{ st.pend_appeal }} 条</span>
-            {% else %}<span class="pill ok">无未决申诉</span>{% endif %}
-            {% if st and st.formal %}<span class="pill ok">已入正式表 {{ st.formal }} 条</span>{% endif %}
+            {% if st and st.pend_appeal %}<span class="pill err">{{ t('申诉待处理') }}{{ st.pend_appeal }} {{ t('条') }}</span>
+            {% else %}<span class="pill ok">{{ t('无未决申诉') }}</span>{% endif %}
+            {% if st and st.formal %}<span class="pill ok">{{ t('已入正式表') }}{{ st.formal }} {{ t('条') }}</span>{% endif %}
           </div>
         </div>
         {% else %}<span class="pill run">{{ f.status }}</span>{% endif %}
@@ -49,14 +49,14 @@
         <span style="display:flex;gap:.4rem;flex-wrap:wrap">
         {% if f.status == 'parsed' %}
           <a class="btn ghost" style="padding:.2rem .6rem"
-             href="/files/{{ f.id }}/report">判定明细</a>
+             href="/files/{{ f.id }}/report">{{ t('判定明细') }}</a>
           <a class="btn ghost" style="padding:.2rem .6rem"
-             href="/files/{{ f.id }}/layout">解析布局</a>
+             href="/files/{{ f.id }}/layout">{{ t('解析布局') }}</a>
           {% if current_user.role == 'admin' %}
           {% if st and not st.formal and not st.pend_appeal %}
           <form method="post" action="/files/{{ f.id }}/finalize">
             <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-            <button class="btn" style="padding:.2rem .6rem" type="submit">入正式表</button>
+            <button class="btn" style="padding:.2rem .6rem" type="submit">{{ t('入正式表') }}</button>
           </form>
           {% endif %}
           {% endif %}
@@ -64,13 +64,13 @@
         <form method="post" action="/files/{{ f.id }}/delete"
               onsubmit="return confirm('删除该文件将移除其全部原始记录')">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-          <button class="btn ghost danger-ghost" style="padding:.2rem .6rem" type="submit">删除</button>
+          <button class="btn ghost danger-ghost" style="padding:.2rem .6rem" type="submit">{{ t('删除') }}</button>
         </form>
         </span>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="5" class="empty">暂无文件 — 先上传一份巡店 Excel</td></tr>
+    <tr><td colspan="5" class="empty">{{ t('暂无文件') }}— {{ t('先上传一份巡店 Excel') }}</td></tr>
     {% endfor %}
   </table>
   </div>

@@ -1,24 +1,24 @@
 {% extends "base.html" %}
-{% block title %}解析布局 · {{ imp.file_name }}{% endblock %}
+{% block title %}{{ t('解析布局 ·') }}{{ imp.file_name }}{% endblock %}
 {% block content %}
 <div class="page-title">
-  <h1>解析布局（可纠正）</h1>
+  <h1>{{ t('解析布局（可纠正）') }}</h1>
   <span class="sub">
-    系统识别/人工纠正的列位置与取值语义；改完点「保存并重新解析」，
-    会清空该文件的原始行并按新布局重新解析、重新判定（不需要重传文件）。
+    {{ t('系统识别/人工纠正的列位置与取值语义') }}；{{ t('改完点') }}「{{ t('保存并重新解析') }}」，
+    {{ t('会清空该文件的原始行并按新布局重新解析、重新判定（不需要重传文件）。') }}
   </span>
   <span class="actions">
-    <a class="btn ghost" href="/files">← 文件上传</a>
-    <a class="btn ghost" href="/files/{{ imp.id }}/report">判定明细</a>
+    <a class="btn ghost" href="/files">← {{ t('文件上传') }}</a>
+    <a class="btn ghost" href="/files/{{ imp.id }}/report">{{ t('判定明细') }}</a>
   </span>
 </div>
 
-{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
-{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
+{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ t(err) }}</div>{% endif %}
 
 <div class="card">
   <div style="font-weight:600;margin-bottom:.4rem">{{ imp.file_name }}
-    <span class="hint">（{{ imp.parsed_rows }} 行 · {{ imp.status }}）</span></div>
+    <span class="hint">（{{ imp.parsed_rows }} {{ t('行 ·') }}{{ imp.status }}）</span></div>
   {% if imp.warnings %}
   <div class="hint" style="margin-bottom:.5rem">
     {% for w in imp.warnings %}· {{ w }}<br>{% endfor %}
@@ -29,7 +29,7 @@
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <table style="width:auto">
       <tr>
-        <th style="text-align:left">表头行号（1=第一行）</th>
+        <th style="text-align:left">{{ t('表头行号（1') }}={{ t('第一行）') }}</th>
         <td><input type="number" name="header_row" min="1" max="10"
                    value="{{ layout.header_row or 1 }}" style="width:5rem"></td>
       </tr>
@@ -38,36 +38,36 @@
         <th style="text-align:left">{{ label }}</th>
         <td><input type="number" name="{{ f }}" min="0" max="60"
                    value="{{ (layout.cols or {}).get(f) or '' }}" style="width:5rem">
-          {% if f in required %}<span class="hint">必需</span>{% endif %}</td>
+          {% if f in required %}<span class="hint">{{ t('必需') }}</span>{% endif %}</td>
       </tr>
       {% endfor %}
       <tr>
-        <th style="text-align:left">有效性取值语义</th>
+        <th style="text-align:left">{{ t('有效性取值语义') }}</th>
         <td><input name="visible_map" style="width:32rem"
                    value="{{ visible_map_text }}"
                    placeholder="AUDIT_SUCCESS=candidate, AUDIT_FAILED=blank">
-          <div class="hint">candidate=算巡店有效（参与计点、判重）；blank=不算（空白）</div></td>
+          <div class="hint">candidate={{ t('算巡店有效（参与计点、判重）') }}；blank={{ t('不算（空白）') }}</div></td>
       </tr>
       <tr>
-        <th style="text-align:left">投放取值点数</th>
+        <th style="text-align:left">{{ t('投放取值点数') }}</th>
         <td><input name="deploy_map" style="width:32rem"
                    value="{{ deploy_map_text }}"
                    placeholder="YES=2, NO=1, =1">
-          <div class="hint">该列每个值对应的点数（2点/1点）</div></td>
+          <div class="hint">{{ t('该列每个值对应的点数（2点/1点）') }}</div></td>
       </tr>
       <tr>
-        <th style="text-align:left">点数组合规则</th>
+        <th style="text-align:left">{{ t('点数组合规则') }}</th>
         <td><textarea name="point_rules_text" rows="6"
                    style="width:32rem;font-family:monospace;font-size:.8rem"
                    placeholder="OTHER|AUDIT_SUCCESS&amp;YES=2&#10;OTHER|AUDIT_SUCCESS&amp;NO|~=1&#10;AUDIT_FAILED&amp;YES=2&#10;AUDIT_FAILED&amp;NO|~=0">{{ point_rules_text }}</textarea>
-          <div class="hint">每行：<b>可见值|列表 &amp; 投放值|列表 = 点数</b>；~ 表示空字符串、* 表示任意。
-            文件自带「规则」说明时由模型自动提取，这里可改；未被规则覆盖的组合=不计成绩（0 点）。
+          <div class="hint">{{ t('每行：') }}<b>可见值|列表 &amp; 投放值|列表 = 点数</b>；~ {{ t('表示空字符串、') }}* {{ t('表示任意。') }}
+            {{ t('文件自带') }}「{{ t('规则') }}」{{ t('说明时由模型自动提取，这里可改') }}；{{ t('未被规则覆盖的组合') }}={{ t('不计成绩（0 点）。') }}
             <br>例（9 月口径）：OTHER|AUDIT_SUCCESS&amp;YES=2 /
             OTHER|AUDIT_SUCCESS&amp;NO|~=1 / AUDIT_FAILED&amp;YES=2 / AUDIT_FAILED&amp;NO|~=0</div></td>
       </tr>
     </table>
-    <p><button class="btn" type="submit">保存并重新解析</button>
-      <span class="hint">重新解析会按新布局覆盖该文件的行与判定结果</span></p>
+    <p><button class="btn" type="submit">{{ t('保存并重新解析') }}</button>
+      <span class="hint">{{ t('重新解析会按新布局覆盖该文件的行与判定结果') }}</span></p>
   </form>
 </div>
 {% endblock %}

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>巡店数据结算系统 · 产品说明</title>
+<title>{{ t('巡店数据结算系统 · 产品说明') }}</title>
 <style>
   :root { --brand:#2f5bea; --text:#1c2333; --muted:#5b6478; --line:#e4e7ef;
           --bg:#f6f7fb; --card:#fff; --ok:#1a7f37; --warn:#9a6700; }
@@ -48,13 +48,13 @@
 <body>
 <div class="banner">
   <div class="inner">
-    <h1>巡店数据结算系统 · 产品说明</h1>
-    <p>从原始巡店 Excel 到员工结算 —— 每一步都看得见、查得到、改有据</p>
+    <h1>{{ t('巡店数据结算系统 · 产品说明') }}</h1>
+    <p>{{ t('从原始巡店 Excel 到员工结算') }}—— {{ t('每一步都看得见、查得到、改有据') }}</p>
   </div>
 </div>
 <main class="doc"><div class="card">
 {{ body | safe }}
 </div></main>
-<div class="foot">巡店数据结算系统 v2.0 · 2026-09</div>
+<div class="foot">{{ t('巡店数据结算系统 v2') }}.0 · 2026-09</div>
 </body>
 </html>
