@@ -7,7 +7,7 @@
 <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">
   <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin">{{ t('全部') }} {{ counts.values()|sum }}</a>
   {% for s, label in labels.items() %}
-  <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin?status={{ s }}">{{ label }} {{ counts[s] }}</a>
+  <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin?status={{ s }}">{{ t(label) }} {{ counts[s] }}</a>
   {% endfor %}
 </div>
 <div class="card" style="margin-bottom:.8rem;padding:.5rem .8rem">
@@ -27,7 +27,7 @@
     <td>{{ u.username }}</td>
     <td>{{ u.display_name }}</td>
     <td>{{ u.person_code or '—' }}</td>
-    <td><span class="{{ pill(u.status) }}">{{ labels.get(u.status, u.status) }}</span></td>
+    <td><span class="{{ pill(u.status) }}">{{ t(labels.get(u.status, u.status)) }}</span></td>
     <td>
       <form method="post" action="/staff-admin/{{ u.id }}/lang"
             style="display:inline-flex;gap:.3rem;align-items:center">
@@ -46,7 +46,7 @@
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
         <select name="new_status" style="padding:.2rem .4rem">
           {% for s, label in labels.items() %}
-          <option value="{{ s }}" {% if s == u.status %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ s }}" {% if s == u.status %}selected{% endif %}>{{ t(label) }}</option>
           {% endfor %}
         </select>
         <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('改状态') }}</button>
