@@ -1,58 +1,58 @@
 {% extends "base.html" %}
-{% block title %}绩效与工资 · {{ month or '全部' }}{% endblock %}
+{% block title %}{{ t('绩效与工资 ·') }}{{ month or t('全部') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>绩效与工资</h1>
+<div class="page-title"><h1>{{ t('绩效与工资') }}</h1>
 
   <span class="actions">
     <form method="get" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-      <label class="f">月份
+      <label class="f">{{ t('月份') }}
         <select name="month" onchange="this.form.submit()">
           {% for m in months %}<option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>{% endfor %}
         </select></label>
-      <label class="f">期
+      <label class="f">{{ t('期') }}
         <select name="period" onchange="this.form.submit()" data-testid="perf-period">
-          <option value="half1" {% if period == 'half1' %}selected{% endif %}>上半月(1-15) · 20日发</option>
-          <option value="half2" {% if period == 'half2' %}selected{% endif %}>下半月(16-月末) · 次月5日发</option>
+          <option value="half1" {% if period == 'half1' %}selected{% endif %}>{{ t('上半月(1-15) · 20日发') }}</option>
+          <option value="half2" {% if period == 'half2' %}selected{% endif %}>{{ t('下半月(16-月末) · 次月5日发') }}</option>
         </select></label>
     </form>
     {% if rows and current_user.role == 'admin' %}
     <a class="btn" style="padding:.25rem .6rem"
-       href="/perf/export?month={{ month }}&period={{ period }}">导出工资表 Excel</a>
+       href="/perf/export?month={{ month }}&period={{ period }}">{{ t('导出工资表 Excel') }}</a>
     {% endif %}
   </span>
 </div>
-{% if not rows %}<p class="empty">该月暂无月绩效工资记录（需「入正式表」或「月度重算」后生成）</p>
+{% if not rows %}<p class="empty">{{ t('该月暂无月绩效工资记录（需') }}「{{ t('入正式表') }}」{{ t('或') }}「{{ t('月度重算') }}」{{ t('后生成）') }}</p>
 {% else %}
 {% set h1 = (period == 'half1') %}
 {% set pt = {} %}{# 该期点数/金额映射 #}
-<div class="stat-grid grid" style="grid-template-columns:repeat(4,1fr)">
+<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
   {% set tcarry = 0 if not h1 else adj_amt_total %}
-  <div class="stat-card"><div class="k">员工数</div><div class="v">{{ summary.employees }}</div></div>
-  <div class="stat-card"><div class="k">{% if h1 %}上半月点数{% else %}下半月点数{% endif %}</div>
+  <div class="stat-card"><div class="k">{{ t('员工数') }}</div><div class="v">{{ summary.employees }}</div></div>
+  <div class="stat-card"><div class="k">{% if h1 %}{{ t('上半月点数') }}{% else %}{{ t('下半月点数') }}{% endif %}</div>
     <div class="v">{% if h1 %}{{ '{:,}'.format(payroll_total.half1) }}{% else %}{{ '{:,}'.format(payroll_total.half2) }}{% endif %}</div></div>
-  <div class="stat-card"><div class="k">该期工资合计(円)</div>
+  <div class="stat-card"><div class="k">{{ t('该期工资合计(円)') }}</div>
     <div class="v">¥{% if h1 %}{{ '{:,}'.format(payroll_total.half1_amt) }}{% else %}{{ '{:,}'.format(payroll_total.half2_amt) }}{% endif %}</div></div>
   {% if h1 %}
-  <div class="stat-card"><div class="k">找平金额(上月余量×上月单价)</div>
+  <div class="stat-card"><div class="k">{{ t('找平金额(上月余量×上月单价)') }}</div>
     <div class="v" style="color:{% if tcarry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">¥{{ '{:,}'.format(tcarry) }}</div></div>
   {% else %}
-  <div class="stat-card"><div class="k">总点数(全月)</div><div class="v">{{ '{:,}'.format(summary.total_points) }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('总点数(全月)') }}</div><div class="v">{{ '{:,}'.format(summary.total_points) }}</div></div>
   {% endif %}
-  <div class="stat-card"><div class="k">重复巡店合计</div>
+  <div class="stat-card"><div class="k">{{ t('重复巡店合计') }}</div>
     <div class="v" style="color:#b02a37">{{ '{:,}'.format(dup_total) }}</div></div>
-  <div class="stat-card"><div class="k">1点店铺数 / 点数</div>
+  <div class="stat-card"><div class="k">1{{ t('点店铺数 / 点数') }}</div>
     <div class="v">{{ '{:,}'.format(summary.p1) }} / {{ '{:,}'.format(summary.p1) }}</div></div>
-  <div class="stat-card"><div class="k">2点店铺数 / 点数</div>
+  <div class="stat-card"><div class="k">2{{ t('点店铺数 / 点数') }}</div>
     <div class="v">{{ '{:,}'.format(summary.p2) }} / {{ '{:,}'.format(summary.p2 * 2) }}</div></div>
 </div>
 
 <div class="card">
-  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{% if h1 %}上半月(1-15) 发薪表{% else %}下半月(16-月末) 发薪表{% endif %} · {{ month }}
+  <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{% if h1 %}{{ t('上半月(1-15) 发薪表') }}{% else %}{{ t('下半月(16-月末) 发薪表') }}{% endif %} · {{ month }}
   </h2>
   <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
-    <tr><th>员工</th><th class="num">有效店</th><th class="num">点数(1/2)</th>
-        <th class="num">2点成功率</th><th class="num">重复店</th><th class="num">奖金(円)</th><th class="num">总金额(円)</th>
-        <th class="num">找平金额(円)</th><th class="num">应该付金额(円)</th><th></th></tr>
+    <tr><th>{{ t('员工') }}</th><th class="num">{{ t('有效店') }}</th><th class="num">{{ t('点数(1/2)') }}</th>
+        <th class="num">2{{ t('点成功率') }}</th><th class="num">{{ t('重复店') }}</th><th class="num">{{ t('奖金(円)') }}</th><th class="num">{{ t('总金额(円)') }}</th>
+        <th class="num">{{ t('找平金额(円)') }}</th><th class="num">{{ t('应该付金额(円)') }}</th><th></th></tr>
     {% for r in rows %}
     {% set hf = half_map.get(r.code, (0, 0, 0, 0, 0, 0)) %}
     {% set hs = half_stats.get(r.code, {'h1': (0,0,0), 'h2': (0,0,0)}) %}
@@ -73,7 +73,7 @@
       <td class="num">{{ st[0] }}</td>
       <td class="num">{{ hp1 }} / {{ hp2 }}</td>
       <td class="num">{{ '%.1f'|format(hrate * 100) }}%{% if hden %}
-        {% if hrate >= 0.37 %}<span class="pill ok">达标</span>{% else %}<span class="pill err">未达标</span>{% endif %}
+        {% if hrate >= 0.37 %}<span class="pill ok">{{ t('达标') }}</span>{% else %}<span class="pill err">{{ t('未达标') }}</span>{% endif %}
       {% else %}<span class="pill">-</span>{% endif %}
       </td>
       <td class="num" style="color:{% if dup_map.get(r.code, 0) > 10 %}#b02a37{% else %}#666{% endif %}">{{ dup_map.get(r.code, 0) }}</td>
@@ -82,20 +82,20 @@
       <td class="num" style="font-weight:700;color:{% if carry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">{% if carry %}¥{{ '{:+,}'.format(carry).replace('+','+') }}{% else %}¥0{% endif %}</td>
       {% set pm = pay_map.get(r.code, (0, 0)) %}
       {% if h1 %}{% set pay_cur = pm[0] %}{% else %}{% set pay_cur = pm[1] %}{% endif %}
-      <td class="num" style="font-weight:700;color:#333">¥{{ '{:,}'.format(pay_cur) }}{% if pay_cur < 0 %}<small style="color:#b02a37">（下期继续扣 ¥{{ '{:,}'.format(-pay_cur) }}）</small>{% endif %}</td>
+      <td class="num" style="font-weight:700;color:#333">¥{{ '{:,}'.format(pay_cur) }}{% if pay_cur < 0 %}<small style="color:#b02a37">（{{ t('下期继续扣') }}¥{{ '{:,}'.format(-pay_cur) }}）</small>{% endif %}</td>
       <td style="display:flex;gap:.3rem">
         <a class="btn ghost" style="padding:.12rem .45rem;font-size:.8rem"
 
         <a class="btn ghost" style="padding:.12rem .45rem;font-size:.8rem"
-           href="/payroll-settle?month={{ month }}&staff={{ r.code }}">找平</a>
+           href="/payroll-settle?month={{ month }}&staff={{ r.code }}">{{ t('找平') }}</a>
       </td>
     </tr>
     {% endfor %}
   </table></div>
   <p class="hint" style="margin-top:.4rem">
-    「奖金」=该期点数的奖金（每满{{ bonus_g }}点奖{{ bonus_a }}，整月滚动、不跨月）；「总金额」=该期点数×单价＋奖金；
-    「找平金额」=上月未找平余量<b>金额</b>（正=补发/负=扣回，按金额找平、含奖金差异）；
-    「应该付金额」=总金额＋找平金额；<b>上半月不够扣的部分转到下半月继续扣</b>（该行显示"下期继续扣"）——照此列发薪即可。
+    「{{ t('奖金') }}」={{ t('该期点数的奖金（每满') }}{{ bonus_g }}{{ t('点奖') }}{{ bonus_a }}，{{ t('整月滚动、不跨月）') }}；「{{ t('总金额') }}」={{ t('该期点数×单价') }}＋{{ t('奖金') }}；
+    「{{ t('找平金额') }}」={{ t('上月未找平余量') }}<b>{{ t('金额') }}</b>（{{ t('正') }}={{ t('补发/负') }}={{ t('扣回，按金额找平、含奖金差异）') }}；
+    「{{ t('应该付金额') }}」={{ t('总金额') }}＋{{ t('找平金额') }}；<b>{{ t('上半月不够扣的部分转到下半月继续扣') }}</b>（{{ t('该行显示') }}"{{ t('下期继续扣') }}"）——{{ t('照此列发薪即可。') }}
   </p>
 </div>
 {% endif %}

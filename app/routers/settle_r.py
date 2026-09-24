@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import (APIRouter, Depends, File, Form, HTTPException,
                         Request, UploadFile)
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templating import get_templates
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -16,7 +16,7 @@ from app.routers.auth_r import csrf_ok, require_login
 from app.services import flow
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = get_templates()
 
 _REASON_CN = {"master_late": "同主档已有更早有效（本店非首次）",
               "from_sub": "从档编号，已归并到主档店铺",
@@ -65,8 +65,18 @@ def my_perf(request: Request,
     mine = [r for r in db.query(FormalRecord).filter(
         FormalRecord.person_code == code).all()]
     months = sorted({(str(r.japan_date or ""))[:7] for r in mine if r.japan_date})
+    # 员工可见起始月：员工端只显示该月及之后（管理员不受影响）
+    svf = perf.staff_visible_from(db)
+    if svf:
+        months = [m for m in months if m >= svf]
     if month not in months:
         month = months[-1] if months else ""
+    if not month:
+        # 无可显示月份（无记录或被起始月全部隐藏）：直接空态，不读全量数据
+        return templates.TemplateResponse("my_perf.html", {
+            "request": request, "current_user": user, "month": "",
+            "months": months, "daily": [], "summary": None,
+            "date": "", "dates": []})
     daily = [d for d in perf.daily_perf(db, month)
              if d["code"] == code]
     dates = sorted({str(d["date"]) for d in daily})
@@ -298,10 +308,12 @@ def sys_config_page(request: Request,
     _p.warm_config(db, "2026-09")
     per_point = _p.month_per_point(db, "2026-09")
     g, a = _p.bonus_params("2026-09")
+    svf = _p.staff_visible_from(db)
     return templates.TemplateResponse("config.html", {
         "request": request, "current_user": user,
         "rows": rows, "cur": rows[0] if rows else None,
         "per_point": per_point, "bonus_g": g, "bonus_a": a,
+        "staff_visible_from": svf,
         "msg": "", "err": "",
     })
 
@@ -311,6 +323,7 @@ def sys_config_save(request: Request, csrf_token: str = Form(...),
                     per_point: int = Form(250),
                     bonus_group: int = Form(68),
                     bonus_amount: int = Form(3000),
+                    staff_visible_from: str = Form(""),
                     user: Optional[User] = Depends(require_login),
                     db: Session = Depends(get_db)):
     """保存系统配置（全局单值，最新一条生效）。"""
@@ -321,21 +334,28 @@ def sys_config_save(request: Request, csrf_token: str = Form(...),
     if not (0 < per_point <= 10000 and 0 < bonus_group <= 1000
             and 0 <= bonus_amount <= 1000000):
         return RedirectResponse("/config?err=配置值超出合理范围", status_code=303)
+    svf = (staff_visible_from or "").strip()
+    if svf and not (len(svf) == 7 and svf[:4].isdigit()
+                    and svf[4] == "-" and svf[5:].isdigit()):
+        return RedirectResponse("/config?err=员工可见起始月格式应为 YYYY-MM（留空=不限制）",
+                                status_code=303)
     from app.models import SysConfig
     row = db.query(SysConfig).order_by(SysConfig.id.desc()).first()
     if row is None:
         db.add(SysConfig(config_month="", per_point=per_point,
                          bonus_group=bonus_group, bonus_amount=bonus_amount,
+                         staff_visible_from=svf,
                          updated_by=user.id))
     else:
         row.per_point, row.bonus_group, row.bonus_amount =             per_point, bonus_group, bonus_amount
+        row.staff_visible_from = svf
         row.updated_by = user.id
     db.commit()
     from app.services import perf as _p
     _p.clear_config_cache()
     from urllib.parse import quote
     return RedirectResponse(
-        "/config?msg=" + quote(f"已保存：每点{per_point}円 / 满{bonus_group}点奖{bonus_amount}円"),
+        "/config?msg=" + quote(f"已保存：每点{per_point}円 / 满{bonus_group}点奖{bonus_amount}円 / 员工可见起始月{svf or '不限制'}"),
         status_code=303)
 
 

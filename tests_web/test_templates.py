@@ -6,14 +6,27 @@ from pathlib import Path
 
 
 def _env():
-    return Environment(loader=FileSystemLoader(
+    env = Environment(loader=FileSystemLoader(
         str(Path(__file__).parent.parent / "app" / "templates")),
         autoescape=select_autoescape(["html"]))
+    from app.i18n import t as _t, LANG_NAMES as _LANG_NAMES
+    env.globals["t"] = _t
+    env.globals["LANG_NAMES"] = _LANG_NAMES
+
+    def _lang_url(request, lang):
+        q = dict(request.query_params)
+        q["lang"] = lang
+        return "?" + "&".join(f"{k}={v}" for k, v in q.items())
+    env.globals["lang_url"] = _lang_url
+    return env
 
 
 def _req():
     from types import SimpleNamespace as SN
-    return SN(state=SN(csrf="tok"))
+
+    class _QP(dict):
+        items = dict.items
+    return SN(state=SN(csrf="tok"), query_params=_QP(), cookies={})
 
 
 def test_base_template_renders_logged_in():
@@ -30,6 +43,20 @@ def test_base_staff_nav():
         current_user=SimpleNamespace(display_name="甲", role="staff"),
         request=_req())
     assert "我的绩效" in html
+
+
+def test_base_mobile_hamburger_menu():
+    """H5：顶栏带汉堡菜单按钮（窄屏折叠导航），导航项仍在 DOM 中。"""
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req())
+    assert 'class="menu-btn"' in html and "☰" in html
+    assert 'class="topnav"' in html
+    assert "数据看板" in html and "绩效工资" in html  # 折叠后内容仍在 DOM
+    staff = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="甲", role="staff"),
+        request=_req())
+    assert 'class="menu-btn"' in staff and "我的绩效" in staff
 
 
 def test_base_template_anonymous():

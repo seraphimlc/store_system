@@ -1,52 +1,57 @@
 {% extends "base.html" %}
-{% block title %}系统配置{% endblock %}
+{% block title %}{{ t('系统配置') }}{% endblock %}
 {% block content %}
 <div class="page-title">
-  <h1>系统配置</h1>
-  <span class="sub">每点金额 / 达标点数 / 达标奖金 —— 按月生效，之后所有工资与找平计算都读取这里的值。</span>
+  <h1>{{ t('系统配置') }}</h1>
+  <span class="sub">{{ t('每点金额 / 达标点数 / 达标奖金 —— 按月生效，之后所有工资与找平计算都读取这里的值。') }}</span>
   <span class="actions">
-    <a class="btn ghost" href="/perf?month=2026-09">← 绩效工资</a>
+    <a class="btn ghost" href="/perf?month=2026-09">← {{ t('绩效工资') }}</a>
   </span>
 </div>
 
-{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ msg }}</div>{% endif %}
-{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ err }}</div>{% endif %}
+{% if msg %}<div class="card" style="border-left:4px solid #1a7f37">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ t(err) }}</div>{% endif %}
 
 <div class="card">
-  <div style="font-weight:600;margin-bottom:.4rem">当前配置（全局生效，最新保存值）</div>
-  <table>
-    <tr><th>每点金额(円)</th><th>达标点数</th><th>达标奖金(円)</th></tr>
+  <div style="font-weight:600;margin-bottom:.4rem">{{ t('当前配置（全局生效，最新保存值）') }}</div>
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table>
+    <tr><th>{{ t('每点金额(円)') }}</th><th>{{ t('达标点数') }}</th><th>{{ t('达标奖金(円)') }}</th></tr>
     <tr>
       <td class="num" style="font-weight:700">{{ per_point }}</td>
       <td class="num" style="font-weight:700">{{ bonus_g }}</td>
       <td class="num" style="font-weight:700">{{ bonus_a }}</td>
     </tr>
-  </table>
-  <p class="hint">示例：9 月每人工资 = 点数 × {{ per_point }} +（点数 ÷ {{ bonus_g }} 取整）× {{ bonus_a }}。</p>
+  </table></div>
+  <p class="hint">{{ t('示例：9 月每人工资 = 点数 ×') }} {{ per_point }} +（{{ t('点数') }} ÷ {{ bonus_g }} {{ t('取整）') }}× {{ bonus_a }}。</p>
 </div>
 
 <div class="card">
-  <div style="font-weight:600;margin-bottom:.4rem">修改配置（保存后全局生效；需对相关月份点「月度重算」+「薪资找平-生成/更新」）</div>
+  <div style="font-weight:600;margin-bottom:.4rem">{{ t('修改配置（保存后全局生效；需对相关月份点「月度重算」+「薪资找平-生成/更新」）') }}</div>
   <form method="post" action="/config/save">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <table style="width:auto">
-      <tr><th style="text-align:left">每点金额(円)</th>
+      <tr><th style="text-align:left">{{ t('每点金额(円)') }}</th>
         <td><input type="number" name="per_point" value="{{ per_point }}" style="width:6rem"></td></tr>
-      <tr><th style="text-align:left">达标点数</th>
+      <tr><th style="text-align:left">{{ t('达标点数') }}</th>
         <td><input type="number" name="bonus_group" value="{{ bonus_g }}" style="width:6rem"></td></tr>
-      <tr><th style="text-align:left">达标奖金(円)</th>
+      <tr><th style="text-align:left">{{ t('达标奖金(円)') }}</th>
         <td><input type="number" name="bonus_amount" value="{{ bonus_a }}" style="width:6rem"></td></tr>
+      <tr><th style="text-align:left">{{ t('员工可见起始月') }}</th>
+        <td><input type="text" name="staff_visible_from" value="{{ staff_visible_from }}"
+                   placeholder="YYYY-MM {{ t('或留空') }}" style="width:8rem"
+                   title="{{ t('员工端只显示该月及之后的数据；留空=不限制（管理员不受影响）') }}">
+          <span class="hint">{{ t('员工端只显示该月及之后；留空=不限制，管理员不受影响') }}</span></td></tr>
     </table>
-    <p><button class="btn" type="submit">保存</button>
-      <span class="hint">保存后需对相关月份点「月度重算」+「薪资找平-生成/更新」生效</span></p>
+    <p><button class="btn" type="submit">{{ t('保存') }}</button>
+      <span class="hint">{{ t('保存后需对相关月份点「月度重算」+「薪资找平-生成/更新」生效；员工可见起始月保存即生效') }}</span></p>
   </form>
 </div>
 
 {% if rows %}
 <div class="card">
-  <div style="font-weight:600;margin-bottom:.4rem">修改记录（最近一次在顶部）</div>
-  <table>
-    <tr><th>#</th><th>每点金额</th><th>达标点数</th><th>达标奖金</th></tr>
+  <div style="font-weight:600;margin-bottom:.4rem">{{ t('修改记录（最近一次在顶部）') }}</div>
+  <div class="tbl-wrap" style="border:0;box-shadow:none"><table>
+    <tr><th>#</th><th>{{ t('每点金额') }}</th><th>{{ t('达标点数') }}</th><th>{{ t('达标奖金') }}</th></tr>
     {% for r in rows %}
     <tr>
       <td>{{ r.id }}</td>
@@ -55,7 +60,7 @@
       <td class="num">{{ r.bonus_amount }}</td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
 </div>
 {% endif %}
 {% endblock %}

@@ -3,19 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>登录 · 巡店结算系统</title>
+<title>{{ t('登录') }} · {{ t('巡店结算系统') }}</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body class="login-body">
+<div style="position:absolute;top:.8rem;right:1rem;color:#dfe8ff;font-size:.9rem">
+  <a href="?lang=zh" style="color:#cfe0ff">中文</a>
+  <span style="color:#5c6f92">/</span>
+  <a href="?lang=ja" style="color:#cfe0ff">日本語</a>
+</div>
 <form class="login-card" method="post" action="/login">
-  <h1>巡店结算系统</h1>
-  <div class="sub">巡店数据导入 · 去重清洗 · 点数结算</div>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <label for="username">用户名</label>
+  <h1>{{ t('巡店结算系统') }}</h1>
+  <div class="sub">{{ t('巡店数据导入 · 去重清洗 · 点数结算') }}</div>
+  {% if error %}<div class="err">{{ t(error) }}</div>{% endif %}
+  <label for="username">{{ t('用户名') }}</label>
   <input id="username" name="username" autocomplete="username" required>
-  <label for="password">密码</label>
+  <label for="password">{{ t('密码') }}</label>
   <input id="password" type="password" name="password" autocomplete="current-password" required>
-  <button class="btn" type="submit">登 录</button>
+  <button class="btn" type="submit">{{ t('登 录') }}</button>
 </form>
 </body>
 </html>
