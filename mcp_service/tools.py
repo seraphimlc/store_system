@@ -108,14 +108,15 @@ def client_info_of(ctx: Context) -> str | None:
 
 def register(mcp: MCPServer) -> None:
     # 各批次模块自带 register（避免同文件并发改动）；此处统一接线
-    from mcp_service import (export_ops, read_ops, recon_ops, recon_write_ops,
-                             store_write_ops, write_tools)
+    from mcp_service import (export_ops, payroll_write_ops, read_ops, recon_ops,
+                             recon_write_ops, store_write_ops, write_tools)
     read_ops.register(mcp)
     recon_ops.register(mcp)
     export_ops.register(mcp)
     recon_write_ops.register(mcp)
     write_tools.register(mcp)
     store_write_ops.register(mcp)
+    payroll_write_ops.register(mcp)
 
     @mcp.tool(
         name="visit_ping",
