@@ -115,6 +115,11 @@ def mark_paid(db: Session, month: str, half: int, marked_by: int = None,
     return n
 
 
+def month_has_recon(db: Session, month: str) -> bool:
+    """该月是否有「当前」对账任务（供页面标注『待对账』）。"""
+    return bool(_current_recon(db, month))
+
+
 def _current_recon(db: Session, month: str) -> dict:
     """该月「当前」对账任务的 人→对账点数（无则空）。"""
     out = {}

@@ -824,6 +824,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
         "request": request, "current_user": user, "month": month,
         "months": months, "rows": rows, "total": total, "staff": staff,
         "bonus_g": bonus_g, "bonus_a": bonus_a,
+        "recon_pending": bool(month) and not _payroll.month_has_recon(db, month),
         "page_state": page_state})
 
 
