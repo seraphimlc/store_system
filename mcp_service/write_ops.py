@@ -31,8 +31,8 @@ def _file_months(db, import_id: int) -> set[str]:
     return {m for m in months if len(m) == 7}
 
 
-def upload_file(db, actor, *, filename: str | None = None,
-                content: bytes | None = None, path: str | None = None) -> dict[str, Any]:
+def _upload_visit(db, actor, *, filename: str | None = None,
+                  content: bytes | None = None, path: str | None = None) -> dict[str, Any]:
     """上传巡店 Excel → 解析 → 判定 → 自动入正式表（+工资/找平/看板刷新）。
 
     与网页上传走**同一条链路**（importer.upload_and_store → parse_file →
@@ -100,6 +100,91 @@ def upload_file(db, actor, *, filename: str | None = None,
         "pipeline_ok": fr.get("ok", True),
         "note": "已自动完成：判定 → 入正式表 → 工资/找平/看板/员工分析刷新",
     }}
+
+
+def upload_file(db, actor, *, filename: str | None = None,
+                content: bytes | None = None, path: str | None = None,
+                month: str | None = None) -> dict[str, Any]:
+    """**统一上传入口**：自动识别文件类型并路由到对应通道。
+
+    - 巡店记录（sheet 名 STORE_TASK_EXCEL_SHEET）→ 判定/入正式表全链路
+    - 对账明细（Alipay 结算数据等）→ 对账任务（月份可从文件日期推断）
+    - 手工结算对照件 / 无法识别的表头 → 明确报错并给指引（不抛晦涩异常）
+
+    用户只需"把文件丢进来"，不必自己判断走哪条通道。
+    """
+    from mcp_service import file_kind
+
+    guards.require_write(actor)
+
+    # 先解析内容（路径/base64），识别需要真实字节
+    raw = content
+    name = filename
+    if raw is None:
+        raw, name_from_path = _read_path(path)
+        name = name or name_from_path
+    if raw is None:
+        raise guards.GuardError("BAD_PARAM", "缺少文件内容",
+                                "请提供 content_base64 或 path")
+
+    info = file_kind.detect_kind(raw)
+    kind = info["kind"]
+
+    # 打不开为 Excel（非 xlsx 等）→ 交回巡店通道，由它给出标准错误
+    if kind == "unknown" and "无法打开为 Excel" in str(info.get("reason", "")):
+        return _upload_visit(db, actor, filename=name, content=raw, path=None)
+
+    if kind == "visit":
+        res = _upload_visit(db, actor, filename=name, content=raw, path=None)
+        if res.get("ok"):
+            res["data"]["detected"] = {"kind": "visit", "reason": info["reason"]}
+        return res
+
+    if kind == "recon":
+        from mcp_service import recon_write_ops
+
+        m = month or file_kind.infer_month(raw, "recon")
+        if not m:
+            raise guards.GuardError(
+                "BAD_PARAM", "无法从对账文件推断结算月",
+                "请在调用时提供 month（YYYY-MM），例如 month='2026-08'")
+        res = recon_write_ops.upload_recon(db, actor, month=m,
+                                           filename=name, content=raw)
+        if res.get("ok"):
+            res["data"]["detected"] = {"kind": "recon", "reason": info["reason"],
+                                       "month_inferred": month is None}
+        return res
+
+    if kind == "manual":
+        return {"ok": False, "error": {
+            "code": "MANUAL_SETTLEMENT_FILE",
+            "message": "这是手工结算对照件（巡回最终结算），系统无对应入库通道",
+            "hint": "它是核对用的「标准答案」，不是巡店记录也不是对账明细；"
+                    "如需逐人核对，请把它作为参考文件人工比对",
+        }}
+
+    return {"ok": False, "error": {
+        "code": "UNKNOWN_FILE",
+        "message": f"无法识别的文件类型：{info.get('reason')}",
+        "hint": "巡店记录应为 MarsNavi STORE VISIT RECORD（sheet 名 "
+                "STORE_TASK_EXCEL_SHEET）；对账明细应含 Statement Date/"
+                "Agent Name 等列",
+    }}
+
+
+def _read_path(path: str | None) -> tuple[bytes | None, str | None]:
+    """读本地路径（需显式开关）。"""
+    if not path:
+        return None, None
+    if not allow_local_path():
+        raise guards.GuardError(
+            "FORBIDDEN_TOOL", "本服务未开启本地路径上传",
+            "远端部署下不接受本地路径（安全考虑）；请改传 content_base64")
+    p = Path(path).expanduser()
+    if not p.is_file():
+        raise guards.GuardError("NOT_FOUND", f"文件不存在：{path}",
+                                "请确认路径正确，或改传 content_base64")
+    return p.read_bytes(), p.name
 
 
 def decode_base64(content_base64: str) -> bytes:

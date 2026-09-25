@@ -131,12 +131,15 @@ def register(mcp: MCPServer) -> None:
     @mcp.tool(
         name="visit_upload_file",
         description=(
-            "上传巡店 Excel 文件并自动完成后续全流程：解析 → 判定 → 入正式表 → "
-            "工资/找平/看板/员工分析刷新。需要写权限 Token。"
-            "参数：filename（文件名，如 2026-09巡店.xlsx）；"
-            "content_base64（文件内容的 base64 编码，跨机器上传用这个）；"
-            "path（本机绝对路径，仅当服务端开启本地路径模式时可用）。"
-            "封账月份的文件会被拒绝。"
+            "**统一上传入口：自动识别文件类型并走对应通道**，用户只需把文件丢进来。"
+            "识别规则：① 巡店记录（MarsNavi STORE VISIT RECORD，sheet 名 "
+            "STORE_TASK_EXCEL_SHEET）→ 解析 → 判定 → 入正式表 → 工资/找平/看板/员工分析全自动；"
+            "② 对账明细（如 Alipay 结算数据，含 Statement Date/Agent Name 等列）→ 对账任务"
+            "（月份自动从文件日期推断，也可用 month 指定）；"
+            "③ 手工结算对照件（巡回最终结算）→ 明确提示不入库；④ 无法识别 → 给出指引。"
+            "参数：filename；content_base64（文件内容 base64，跨机器上传用）；"
+            "path（本机绝对路径，仅服务端开启本地路径模式时可用）；month（可选，对账文件用）。"
+            "需要写权限 Token。封账月份的巡店文件会被拒绝。"
         ),
     )
     def visit_upload_file(
@@ -144,6 +147,7 @@ def register(mcp: MCPServer) -> None:
         filename: str | None = None,
         content_base64: str | None = None,
         path: str | None = None,
+        month: str | None = None,
     ) -> dict[str, Any]:
         from mcp_service import write_ops
 
@@ -151,7 +155,7 @@ def register(mcp: MCPServer) -> None:
 
         def run(db, actor):
             return write_ops.upload_file(db, actor, filename=filename,
-                                         content=content, path=path)
+                                         content=content, path=path, month=month)
 
         return _write_call(ctx, "visit_upload_file",
                            {"filename": filename, "path": path,
