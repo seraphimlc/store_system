@@ -19,7 +19,7 @@ from datetime import datetime
 from app.db import get_db  # noqa: F401
 from store_settle.rules import visible_is_candidate  # noqa: E402
 from app.models import (FormalRecord, ImportFile, Person, RawRecord,
-                        StoreEntity, User)
+                        RebuildSnapshot, StoreEntity, User)
 
 
 def norm_name(s) -> str:
@@ -474,6 +474,18 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         lo, hi = _d(y, m0, 1), _d(ny, nm, 1)
     except ValueError:      # 兜底：守卫被绕过时也不 500，视同格式错误
         return {"ok": False, "msg": "月份格式不正确（应为 YYYY-MM）"}
+    # 改动 A · 源数据守卫（spec §9）：该月 raw=0 而 formal>0 → 拒绝。
+    # 防止重算把整月正式表静默清空（本地库 2026-08 曾处此状态，W7）。
+    # 月份过滤与函数内既有写法一致：raw 用 LIKE ym（:484-485 同款），
+    # formal 用日期区间 [lo, hi)（:504-509 同款）。
+    if db.query(RawRecord.id).filter(
+            RawRecord.modified_raw.like(ym + "%")).count() == 0:
+        formal_cnt = db.query(FormalRecord.id).filter(
+            FormalRecord.japan_date >= lo,
+            FormalRecord.japan_date < hi).count()
+        if formal_cnt > 0:
+            return {"ok": False,
+                    "msg": f"该月无源记录(raw=0)但有正式表({formal_cnt})条，拒绝重算以免清空"}
     pend = (db.query(AppealRecord)
             .join(RawRecord, RawRecord.id == AppealRecord.raw_record_id)
             .filter(AppealRecord.status == "pending",
@@ -504,6 +516,24 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
     before = [f for f in db.query(FormalRecord).filter(
         FormalRecord.japan_date >= lo, FormalRecord.japan_date < hi).all()]
     pts_before = sum(f.points or 0 for f in before)
+    # 改动 B · 重算前证据留存（spec §9）：删除正式表**之前**把该月全量
+    # 序列化存 rebuild_snapshots（同月只保留最近一次：插入前删旧）；
+    # audit_id=None：HTML 路径无审计行，MCP 路径由能力层回填引用。
+    # 快照只能回灌正式表（重算还会改写 clean_status/重建 stats），非整月可逆。
+    import json as _json
+    db.query(RebuildSnapshot).filter(RebuildSnapshot.month == ym).delete()
+    db.add(RebuildSnapshot(
+        month=ym, audit_id=None,
+        payload_json=_json.dumps([{
+            "id": f.id, "import_id": f.import_id,
+            "raw_record_id": f.raw_record_id, "person_code": f.person_code,
+            "store_id_raw": f.store_id_raw,
+            "japan_date": str(f.japan_date) if f.japan_date else None,
+            "points": f.points,
+            "created_at": str(f.created_at) if f.created_at else None,
+        } for f in before], ensure_ascii=False, default=str),
+        row_count=len(before)))
+    db.commit()
     db.query(FormalRecord).filter(
         FormalRecord.japan_date >= lo,
         FormalRecord.japan_date < hi).delete()

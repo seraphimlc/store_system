@@ -39,7 +39,10 @@ def test_tools_are_registered(monkeypatch, tmp_path):
     monkeypatch.setenv("VISIT_MCP_LOG", str(tmp_path / "r.jsonl"))
     mcp = build_server()
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    assert names == {"visit_ping", "visit_month_summary", "visit_month_salary", "visit_upload_file"}
+    # 必含核心工具（用包含断言而非精确相等：新增工具不必改本测试）
+    assert {"visit_ping", "visit_month_summary", "visit_month_salary",
+            "visit_upload_file"} <= names
+    assert len(names) >= 4
 
 
 def test_dns_rebinding_protection_is_not_disabled():
