@@ -122,3 +122,34 @@ def test_revoke_requires_ownership(db):
 def test_issue_rejects_bad_scopes(db):
     with pytest.raises(ValueError):
         tokens.issue(db, user_id=1, name="x", scopes="write")
+
+
+# ---------- 测试期固定 Token（过渡方案）----------
+
+def test_static_rw_token_always_valid(db, monkeypatch):
+    """固定 Token 不依赖数据库行，且即使表里已有正式 Token 也有效。"""
+    monkeypatch.setenv("VISIT_MCP_TOKEN", "visit-test-rw-2026")
+    actor = tokens.resolve(db, "visit-test-rw-2026")
+    assert actor is not None
+    assert actor.can_write() is True
+    assert actor.token_id is None          # 非数据库 Token
+
+
+def test_static_read_token_cannot_write(db, monkeypatch):
+    monkeypatch.setenv("VISIT_MCP_READ_TOKEN", "visit-test-ro-2026")
+    actor = tokens.resolve(db, "visit-test-ro-2026")
+    assert actor is not None
+    assert actor.can_write() is False
+
+
+def test_static_tokens_can_be_disabled(db, monkeypatch):
+    monkeypatch.setenv("VISIT_MCP_TOKEN", "visit-test-rw-2026")
+    monkeypatch.setenv("VISIT_MCP_STATIC_TOKENS", "0")
+    assert tokens.resolve(db, "visit-test-rw-2026") is None
+
+
+def test_db_token_still_works_alongside_static(db, monkeypatch):
+    """固定 Token 与 api_tokens 并存（过渡期两条路都通）。"""
+    monkeypatch.setenv("VISIT_MCP_TOKEN", "visit-test-rw-2026")
+    assert tokens.resolve(db, RAW) is not None            # 库里的正式 Token
+    assert tokens.resolve(db, "visit-test-rw-2026") is not None

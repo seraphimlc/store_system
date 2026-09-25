@@ -29,6 +29,26 @@ def _digest(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def static_tokens() -> dict[str, list[str]]:
+    """测试期固定 Token（不依赖数据库，重启不变）。
+
+    由 env 提供：`VISIT_MCP_TOKEN`（read,write）/ `VISIT_MCP_READ_TOKEN`（read）。
+    `VISIT_MCP_STATIC_TOKENS=0` 可整体关闭（生产应关闭，改用 api_tokens）。
+    **这是过渡方案**：正式身份认证（签发页/吊销/按人审计）另立工作项。
+    """
+    import os
+    if os.environ.get("VISIT_MCP_STATIC_TOKENS", "1") == "0":
+        return {}
+    out: dict[str, list[str]] = {}
+    rw = (os.environ.get("VISIT_MCP_TOKEN") or "").strip()
+    ro = (os.environ.get("VISIT_MCP_READ_TOKEN") or "").strip()
+    if rw:
+        out[rw] = ["read", "write"]
+    if ro:
+        out[ro] = ["read"]
+    return out
+
+
 def resolve(db, raw: str, bootstrap_token: str | None = None) -> Actor | None:
     """解析 Bearer 明文 → Actor；无法识别返回 None（调用方回 401）。
 
@@ -37,6 +57,13 @@ def resolve(db, raw: str, bootstrap_token: str | None = None) -> Actor | None:
     """
     if not raw:
         return None
+
+    # 测试期固定 Token 优先（恒定有效，便于联调）
+    for tok, scopes in static_tokens().items():
+        if hmac.compare_digest(raw, tok):
+            admin = db.query(User).filter(User.role == "admin").first()
+            return Actor(uid=admin.id if admin else None, role="admin",
+                         scopes=scopes, token_id=None)
 
     row = db.query(ApiToken).filter(ApiToken.token_prefix == raw[:8]).first()
     if row is not None:
