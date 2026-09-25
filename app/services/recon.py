@@ -539,6 +539,16 @@ def run_task(db, task_id: int):
             try:
                 from app.services import period
                 period.sync_period_table(db, month)
+                # **本月差异是「下月结转(prev_adjust_amount)」的输入**：
+                # 下月若已存在找平行，必须一并重算——否则下月会保留
+                # 「本月尚未对账时」算出的旧结转（实测：8月对账晚上传后，
+                # 9月仍残留 -464,000 的旧值，而正确值应为 -59,000）。
+                from app.models import PayrollPeriodRow
+                nxt = _next_month(month)
+                has_next = db.query(PayrollPeriodRow).filter(
+                    PayrollPeriodRow.month == nxt).first() is not None
+                if has_next:
+                    period.sync_period_table(db, nxt)
             except Exception:  # noqa: BLE001
                 db.rollback()
         return t
