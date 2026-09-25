@@ -380,3 +380,36 @@ def test_links_both_directions(db):
     row = next(x for x in st["rows"] if x["person_code"] == "P001")
     assert row["adjust_id"] == a8.id
     assert row["recovered_by"][0]["amount"] == -2000
+
+
+def test_carry_survives_skipped_month(db):
+    """某月无工资行时，找平债务不能丢（结转以找平表为准，而非上月行）。"""
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    from app.services import period
+
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-6500, prev_adjust_amount=-6500))
+    db.commit()
+    period.sync_adjusts(db, "2026-08")
+    a = db.query(PayrollAdjust).filter_by(person_code="P001").first()
+    assert a.remaining == -6500
+
+    # 9月：该人**没有**工资行（无数据）→ 债务应留在找平表
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    assert db.query(PayrollPeriodRow).filter_by(
+        month="2026-09", person_code="P001").first() is None
+    assert a.remaining == -6500          # 债务未丢
+
+    # 10月：该人回来了（有 10000 工资）→ 应吸收 6500
+    db.add(PayrollPeriodRow(month="2026-10", person_code="P001",
+                            half1_points=40, half1_amount=10000,
+                            half1_bonus=0, half2_amount=0, half2_bonus=0,
+                            updated_at=__import__("datetime").datetime.utcnow()))
+    db.commit()
+    period.sync_period_table(db, "2026-10")
+    db.commit()
+    r10 = db.query(PayrollPeriodRow).filter_by(month="2026-10",
+                                               person_code="P001").first()
+    # 10月上半月 10000 ≥ 6500 → 全额吸收 → 结转 0
+    assert r10.prev_adjust_amount == 0

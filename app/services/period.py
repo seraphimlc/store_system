@@ -577,8 +577,22 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
     pm = _prev_month(month)
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == pm).all():
-        carry_in[r.person_code] = r.prev_adjust_amount or 0   # 上月结转
+        carry_in[r.person_code] = r.prev_adjust_amount or 0   # 上月结转（兜底）
         prev[r.person_code] = (r.diff_points or 0) - (r.adjust_points or 0)
+    # **找平表为准**：未结清余额按人汇总（source_month < 本月）。
+    # 为什么：某人某月没有找平行时（实测 8→9 月有 11 人如此），
+    # 从"上月找平行"读结转会**丢债**（-89,750 收不回来）；
+    # 找平表是跨月的债务台账，不会因中间某月没数据而丢失。
+    from app.models import PayrollAdjust
+    prior_debt = {}
+    for a_ in db.query(PayrollAdjust).filter(
+            PayrollAdjust.source_month < month,
+            PayrollAdjust.status == "in_progress").all():
+        prior_debt[a_.person_code] = (prior_debt.get(a_.person_code, 0)
+                                      + (a_.remaining or 0))
+    for code_, debt in prior_debt.items():
+        if debt:
+            carry_in[code_] = debt
     names = {p.code: p.display_name for p in db.query(Person).all()}
     existing = {r.person_code: r for r in db.query(PayrollPeriodRow).filter(
         PayrollPeriodRow.month == month).all()}
