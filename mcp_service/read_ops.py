@@ -950,4 +950,4 @@ def register_integrity(mcp: MCPServer) -> None:
         ),
     )
     def visit_verify_integrity(ctx: Context) -> dict[str, Any]:
-        return _run_read(ctx, verify_integrity)
+        return _invoke(ctx, lambda db: verify_integrity(db))
