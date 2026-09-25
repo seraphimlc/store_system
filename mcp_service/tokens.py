@@ -47,8 +47,11 @@ def resolve(db, raw: str, bootstrap_token: str | None = None) -> Actor | None:
         user = db.get(User, row.user_id)
         if user is None or not getattr(user, "is_active", True):
             return None
-        row.last_used_at = datetime.utcnow()
-        db.commit()
+        try:                      # 只读部署下记账失败不应影响鉴权（读工具仍可用）
+            row.last_used_at = datetime.utcnow()
+            db.commit()
+        except Exception:         # noqa: BLE001
+            db.rollback()
         scopes = [s.strip() for s in (row.scopes or "read").split(",") if s.strip()]
         return Actor(uid=user.id, role=user.role, scopes=scopes, token_id=row.id)
 

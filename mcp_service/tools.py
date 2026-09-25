@@ -53,6 +53,35 @@ def _envelope_error(code: str, message: str, hint: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": code, "message": message, "hint": hint}}
 
 
+def _write_call(ctx: Context, tool: str, params: dict, fn, *, retryable: bool):
+    """写工具统一包装：actor → 闸门/业务 → 错误信封。
+
+    retryable=True（finalize/set_per_point：原子或幂等）→ 意外异常用 INTERNAL（可重试）
+    retryable=False（rebuild：流程中间提交）→ INTERNAL_WRITE（**禁止自动重试**）
+    """
+    from mcp_service import guards
+
+    actor = actor_from_ctx(ctx)
+    if actor is None:
+        return _envelope_error("UNAUTHORIZED", "未认证",
+                               "请在 WorkBuddy 连接器设置中重新填写 Access Token")
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        return fn(db, actor)
+    except guards.GuardError as exc:
+        return _envelope_error(exc.code, exc.message, exc.hint)
+    except Exception as exc:  # noqa: BLE001
+        if retryable:
+            return _envelope_error("INTERNAL", repr(exc),
+                                   "系统内部错误，已记录；可重试")
+        return _envelope_error(
+            "INTERNAL_WRITE", repr(exc),
+            "该操作可能已部分生效，**不要自动重试**；先用只读工具核对当前状态")
+    finally:
+        db.close()
+
+
 def actor_from_ctx(ctx: Context):
     """从请求头解析 Actor（P1 写工具与审计用）。
 
@@ -91,6 +120,36 @@ def register(mcp: MCPServer) -> None:
             protocol_version=ctx.protocol_version,
             client_info=_client_info(ctx),
         )}
+
+    @mcp.tool(
+        name="visit_upload_file",
+        description=(
+            "上传巡店 Excel 文件并自动完成后续全流程：解析 → 判定 → 入正式表 → "
+            "工资/找平/看板/员工分析刷新。需要写权限 Token。"
+            "参数：filename（文件名，如 2026-09巡店.xlsx）；"
+            "content_base64（文件内容的 base64 编码，跨机器上传用这个）；"
+            "path（本机绝对路径，仅当服务端开启本地路径模式时可用）。"
+            "封账月份的文件会被拒绝。"
+        ),
+    )
+    def visit_upload_file(
+        ctx: Context,
+        filename: str | None = None,
+        content_base64: str | None = None,
+        path: str | None = None,
+    ) -> dict[str, Any]:
+        from mcp_service import write_ops
+
+        content = write_ops.decode_base64(content_base64) if content_base64 else None
+
+        def run(db, actor):
+            return write_ops.upload_file(db, actor, filename=filename,
+                                         content=content, path=path)
+
+        return _write_call(ctx, "visit_upload_file",
+                           {"filename": filename, "path": path,
+                            "has_content": bool(content_base64)},
+                           run, retryable=False)
 
     @mcp.tool(
         name="visit_month_salary",

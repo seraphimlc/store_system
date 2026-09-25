@@ -5,5 +5,12 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DB="${1:-$REPO_ROOT/store_settle_live.db}"
 : "${VISIT_MCP_TOKEN:?必须设置 VISIT_MCP_TOKEN}"
-export DATABASE_URL="sqlite:///file:${DB}?mode=ro&uri=true"
+# VISIT_MCP_RW=0 → 只读打开（仅只读部署）；默认读写（P1 写工具需要）
+if [ "${VISIT_MCP_RW:-1}" = "0" ]; then
+  export DATABASE_URL="sqlite:///file:${DB}?mode=ro&uri=true"
+  echo "[run.sh] 数据库以**只读**模式打开（VISIT_MCP_RW=0）" >&2
+else
+  export DATABASE_URL="sqlite:///${DB}"
+  echo "[run.sh] 数据库以**读写**模式打开（写工具可用；只读请设 VISIT_MCP_RW=0）" >&2
+fi
 exec "$REPO_ROOT/mcp_service/.venv/bin/python" "$REPO_ROOT/mcp_service/server.py"
