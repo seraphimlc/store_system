@@ -310,7 +310,7 @@ def test_unexpected_exception_maps_to_internal(factory, monkeypatch):
     assert "boom" in got["error"]["message"]
 
 
-def test_register_exposes_four_tools():
+def test_register_exposes_five_tools():
     """register(mcp) 注册全部 4 个工具，且描述为中文、写明只读与日元。"""
     from mcp.server.mcpserver import MCPServer
     mcp = MCPServer(name="test-recon", version="0")
@@ -318,9 +318,37 @@ def test_register_exposes_four_tools():
     tools = asyncio.run(mcp.list_tools())
     names = {t.name for t in tools}
     assert names == {"visit_recon_status", "visit_recon_diff",
-                     "visit_recon_adjust_state", "visit_recon_settlement"}
+                     "visit_recon_adjust_state", "visit_recon_settlement",
+                     "visit_settlement_trace"}
     desc = {t.name: t.description for t in tools}
     for name in names:
         assert "只读" in desc[name]
         assert ("JPY" in desc[name]) or ("日元" in desc[name])
     assert "month" in desc["visit_recon_adjust_state"]
+
+
+def test_settlement_trace_filters(factory):
+    """四维过滤：全部 / 源月 / 人 / 单笔找平 / 单笔发放，双向明细齐全。"""
+    from app.models import PayrollAdjust, PayrollPayment, PayrollPeriodRow
+    from app.services import period
+    db = factory()
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, prev_adjust_amount=-10000))
+    db.commit()
+    period.sync_adjusts(db, "2026-08")
+    a = db.query(PayrollAdjust).filter_by(person_code="P001").first()
+    period.record_payment(db, "2026-09", "P001", 2, amount=5000, points=20)
+    pay = db.query(PayrollPayment).filter_by(person_code="P001").first()
+
+    got = recon_ops._settlement_trace(db)
+    assert got["summary"]["adjust_count"] >= 1
+    got = recon_ops._settlement_trace(db, month="2026-08")
+    assert all(x["source_month"] == "2026-08" for x in got["adjusts"])
+    got = recon_ops._settlement_trace(db, person="P001")
+    assert got["adjusts"][0]["person_code"] == "P001"
+    assert got["adjusts"][0]["recovered_by"][0]["payment_id"] == pay.id
+    got = recon_ops._settlement_trace(db, adjust_id=a.id)
+    assert len(got["adjusts"]) == 1 and got["adjusts"][0]["adjust_id"] == a.id
+    got = recon_ops._settlement_trace(db, payment_id=pay.id)
+    assert got["payments"][0]["payment_id"] == pay.id
+    assert got["payments"][0]["adjusts"][0]["adjust_id"] == a.id

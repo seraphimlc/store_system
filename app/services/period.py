@@ -261,6 +261,98 @@ def allocate_settlement(db: Session, person_code: str, absorbed: int,
     return alloc
 
 
+def settlement_trace(db: Session, month: str = None, person: str = None,
+                     adjust_id: int = None, payment_id: int = None) -> dict:
+    """找平↔薪资 **双向轨迹查询**（用户要求的专用查询口）。
+
+    - 无过滤 → 全部找平的汇总 + 明细
+    - month → 该**源月**的找平（也可命中该月发放的关联）
+    - person → 该人所有找平（支持工号精确/姓名包含）
+    - adjust_id → 单笔找平完整轨迹（原始/已找平/剩余/结清 + 被哪几期回收）
+    - payment_id → 单笔发放冲了哪几笔找平
+    """
+    from app.models import (PayrollAdjust, PayrollPayment, PayrollSettlementLink,
+                            Person)
+    names = {p.code: p.display_name for p in db.query(Person).all()}
+
+    def _person_match(code: str, key: str) -> bool:
+        return code == key or key in (names.get(code) or "")
+
+    q = db.query(PayrollAdjust)
+    if adjust_id is not None:
+        q = q.filter(PayrollAdjust.id == adjust_id)
+    if month:
+        q = q.filter(PayrollAdjust.source_month == month)
+    adjusts = q.order_by(PayrollAdjust.source_month, PayrollAdjust.id).all()
+    if person:
+        key = person.strip()
+        adjusts = [a for a in adjusts if _person_match(a.person_code, key)]
+
+    out_adjusts = []
+    for a in adjusts:
+        rec = adjust_payment_links(db, a.id)
+        out_adjusts.append({
+            "adjust_id": a.id, "source_month": a.source_month,
+            "person_code": a.person_code,
+            "name": names.get(a.person_code, a.person_code),
+            "adjust_amount": a.adjust_amount or 0,
+            "settled_amount": a.settled_amount or 0,
+            "remaining": a.remaining or 0,
+            "status": a.status,
+            "settled_at": str(a.settled_at) if a.settled_at else None,
+            "source_task_id": a.source_task_id,
+            "source_row_id": a.source_row_id,
+            "recovered_by": rec,
+        })
+
+    out_payments = []
+    if payment_id is not None:
+        for p_ in db.query(PayrollPayment).filter(
+                PayrollPayment.id == payment_id).all():
+            out_payments.append({
+                "payment_id": p_.id, "month": p_.month, "seq": p_.seq,
+                "person_code": p_.person_code,
+                "name": names.get(p_.person_code, p_.person_code),
+                "amount": p_.amount or 0, "points": p_.points or 0,
+                "bonus": p_.bonus or 0,
+                "adjust_applied": p_.adjust_applied or 0,
+                "adjust_leftover": p_.adjust_leftover,
+                "adjusts": payment_adjust_links(db, p_.id),
+            })
+    elif month:
+        for p_ in db.query(PayrollPayment).filter(
+                PayrollPayment.month == month).all():
+            links = payment_adjust_links(db, p_.id)
+            if links:
+                out_payments.append({
+                    "payment_id": p_.id, "month": p_.month, "seq": p_.seq,
+                    "person_code": p_.person_code,
+                    "name": names.get(p_.person_code, p_.person_code),
+                    "amount": p_.amount or 0, "adjust_applied": p_.adjust_applied or 0,
+                    "adjusts": links,
+                })
+
+    data = {
+        "currency": "JPY",
+        "filters": {"month": month, "person": person,
+                    "adjust_id": adjust_id, "payment_id": payment_id},
+        "adjusts": out_adjusts,
+        "payments": out_payments,
+        "summary": {
+            "adjust_count": len(out_adjusts),
+            "settled": sum(1 for x in out_adjusts if x["status"] == "settled"),
+            "in_progress": sum(1 for x in out_adjusts
+                               if x["status"] != "settled"),
+            "total_adjust_amount": sum(x["adjust_amount"] for x in out_adjusts),
+            "total_settled": sum(x["settled_amount"] for x in out_adjusts),
+            "total_remaining": sum(x["remaining"] for x in out_adjusts),
+        },
+    }
+    if not out_adjusts and not out_payments:
+        data["hint"] = "无匹配的找平/回收记录（合法结果，不是错误）"
+    return data
+
+
 def payment_adjust_links(db: Session, payment_id: int) -> list:
     """一笔发放 → 冲了哪几笔找平（含找平源月/原始金额/本次冲抵额）。"""
     from app.models import PayrollAdjust, PayrollSettlementLink

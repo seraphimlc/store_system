@@ -96,6 +96,14 @@ def visit_recon_diff(ctx: Context, task_id: int | None = None,
                                                  month=month))
 
 
+def visit_settlement_trace(ctx: Context, month: str = None,
+                           person: str = None, adjust_id: int = None,
+                           payment_id: int = None) -> dict[str, Any]:
+    return _run_read(ctx, lambda db: _settlement_trace(
+        db, month=month, person=person, adjust_id=adjust_id,
+        payment_id=payment_id))
+
+
 def visit_recon_settlement(ctx: Context, month: str) -> dict[str, Any]:
     return _run_read(ctx, lambda db: _recon_settlement(db, month))
 
@@ -313,6 +321,16 @@ def _recon_diff(db, task_id: int | None = None,
     return data
 
 
+def _settlement_trace(db, month=None, person=None, adjust_id=None,
+                      payment_id=None) -> dict[str, Any]:
+    """找平↔薪资 双向轨迹（月/人/找平笔/发放笔 四维过滤）。"""
+    if month is not None and str(month).strip() != "":
+        _validate_optional_month(month)
+    from app.services import period
+    return period.settlement_trace(db, month=month, person=person,
+                                   adjust_id=adjust_id, payment_id=payment_id)
+
+
 def _recon_settlement(db, month: str) -> dict[str, Any]:
     """找平结清状态（只读）：该月对账差异扣/补到哪一步、是否已结清。"""
     _require_month(month)
@@ -431,3 +449,15 @@ def register(mcp: MCPServer) -> None:
                  "**核对『某笔对账是否已找平完毕』用我**；逐笔证据（哪期扣多少、来源任务）"
                  "见 visit_payroll_rows 的台账字段。参数：month（YYYY-MM）。只读，日元。")
              )(visit_recon_settlement)
+    mcp.tool(name="visit_settlement_trace", title="找平薪资双向轨迹",
+             annotations=read_ann("找平薪资双向轨迹"),
+             description=(
+                 "**找平 ↔ 薪资 双向轨迹查询**（核对『谁欠谁、还了多少、从哪期扣的』用我）。"
+                 "四个过滤维度（可单用/组合，全不传=全部找平汇总）："
+                 "month=源月（如 2026-08，同时列出该月发放的冲抵）；person=工号或姓名；"
+                 "adjust_id=单笔找平（给完整轨迹：原始/已找平/剩余/是否结清 + 被哪几期回收）；"
+                 "payment_id=单笔发放（列出它冲了哪几笔找平，可能跨月多条）。"
+                 "返回 adjusts[]（找平及 recovered_by 反向明细）与 payments[]（发放及 adjusts 正向明细）"
+                 "+ summary（笔数/已结清数/原始合计/已找平合计/剩余合计）。"
+                 "只读；金额为日元（JPY）。")
+             )(visit_settlement_trace)
