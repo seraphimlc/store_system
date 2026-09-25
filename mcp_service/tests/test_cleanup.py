@@ -162,3 +162,21 @@ def test_mutual_exclusion_guidance_in_descriptions():
     for name, keyword in expect.items():
         assert keyword in descs[name], f"{name} 描述缺少互斥指引关键词 {keyword!r}"
         assert "什么时候用我" in descs[name], f"{name} 描述缺少「什么时候用我」首句"
+
+
+def test_payroll_rows_exposes_paid_state(db):
+    """find pay rows carry paid_half flags from the ledger (export=paid fact)."""
+    from datetime import date
+    from app.models import (PayrollPayment, PayrollPeriodRow)
+    db.add(PayrollPeriodRow(month="2026-09", person_code="P001",
+                            half1_amount=1000, half2_amount=500,
+                            half1_points=4, half2_points=2,
+                            diff_amount=0, adjust_amount=0))
+    db.add(PayrollPayment(month="2026-09", person_code="P001", seq=1,
+                          points=4, amount=1000))
+    db.commit()
+    from mcp_service import read_ops
+    data = read_ops.payroll_rows(db, "2026-09")
+    row = next(x for x in data["rows"] if x["person_code"] == "P001")
+    assert row["paid_half1"] is True and row["paid_half2"] is False
+    assert data["paid_summary"]["half1_persons"] == 1

@@ -349,6 +349,12 @@ def payroll_rows(db, month: str, person: str | None = None) -> dict[str, Any]:
     rows = period.period_rows(db, month)
     half_stats = period.half_stats_map(db, month)
     carry = period.carry_map(db, month)
+    from app.models import PayrollPayment
+    paid = {}
+    for (code, seq) in db.query(PayrollPayment.person_code,
+                                PayrollPayment.seq).filter(
+            PayrollPayment.month == month).all():
+        paid.setdefault(code, set()).add(seq)
     out = []
     for r in rows:
         code = r["code"]
@@ -377,12 +383,18 @@ def payroll_rows(db, month: str, person: str | None = None) -> dict[str, Any]:
             "adjust_amount": r["adj_amt"],
             "carry_points": cr[0],
             "carry_amount": cr[1],
+            "paid_half1": 1 in paid.get(code, set()),
+            "paid_half2": 2 in paid.get(code, set()),
         })
     if person:
         key = person.strip()
         out = [x for x in out
                if x["person_code"] == key or key in (x["name"] or "")]
-    data = {"month": month, "currency": "JPY", "rows": out, "count": len(out)}
+    data = {"month": month, "currency": "JPY", "rows": out, "count": len(out),
+            "paid_summary": {
+                "half1_persons": sum(1 for x in out if x["paid_half1"]),
+                "half2_persons": sum(1 for x in out if x["paid_half2"]),
+                "note": "paid_half1/2 来自发放台账（导出发薪表即视为该期已发）"}}
     if not out:
         data["hint"] = "该月无找平行（合法结果，不是错误）"
     return data
