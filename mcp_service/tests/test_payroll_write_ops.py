@@ -338,3 +338,45 @@ def test_adjust_table_tracks_progress_fifo(db):
     row = next(x for x in st["rows"] if x["person_code"] == "P001")
     assert row["source"] == "payroll_adjusts"
     assert row["remaining"] == -8000
+
+
+# ---------- 双向可查：发放 ↔ 找平 多对多 ----------
+
+def test_links_both_directions(db):
+    """一笔发放可冲多笔找平（FIFO 跨月）；一笔找平可查被哪几期回收。"""
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    from app.services import period
+
+    db.add(PayrollPeriodRow(month="2026-07", person_code="P001",
+                            diff_amount=-3000, prev_adjust_amount=-3000))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, prev_adjust_amount=-13000))
+    db.commit()
+    period.sync_adjusts(db, "2026-07")
+    period.sync_adjusts(db, "2026-08")
+    a7 = db.query(PayrollAdjust).filter_by(source_month="2026-07").first()
+    a8 = db.query(PayrollAdjust).filter_by(source_month="2026-08").first()
+
+    # 一笔发放吸收 5000 → FIFO：7月 3000 + 8月 2000
+    period.record_payment(db, "2026-09", "P001", 2, amount=5000, points=20)
+    from app.models import PayrollPayment
+    pay = db.query(PayrollPayment).filter_by(month="2026-09",
+                                             person_code="P001").first()
+
+    # 正向：发放 → 找平（两条）
+    fwd = period.payment_adjust_links(db, pay.id)
+    assert len(fwd) == 2
+    assert [x["source_month"] for x in fwd] == ["2026-07", "2026-08"]
+    assert [x["amount"] for x in fwd] == [-3000, -2000]
+
+    # 反向：找平 → 发放
+    rev7 = period.adjust_payment_links(db, a7.id)
+    assert len(rev7) == 1 and rev7[0]["payment_id"] == pay.id
+    assert rev7[0]["amount"] == -3000 and rev7[0]["seq"] == 2
+    assert a7.status == "settled"
+
+    # settlement_status 行内含 recovered_by
+    st = period.settlement_status(db, "2026-08")
+    row = next(x for x in st["rows"] if x["person_code"] == "P001")
+    assert row["adjust_id"] == a8.id
+    assert row["recovered_by"][0]["amount"] == -2000

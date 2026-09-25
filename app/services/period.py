@@ -108,21 +108,24 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
                     if cur is None or t.id > cur.id:
                         cur = t
             src_task = cur.id if cur else None
-            # FIFO 冲找平表（进度落库，可直查）
-            try:
-                allocate_settlement(db, person_code, take)
-            except Exception:  # noqa: BLE001  分配失败不影响台账登记
-                db.rollback()
 
-    db.add(PayrollPayment(month=month, person_code=person_code, seq=seq,
-                          points=points or 0, amount=amount or 0,
-                          bonus=bonus or 0, adjust_applied=adjust_applied or 0,
-                          note=note, paid_by=paid_by,
-                          adjust_source_type=src_type,
-                          adjust_source_month=src_month,
-                          adjust_source_row_id=src_row,
-                          adjust_source_task_id=src_task,
-                          adjust_leftover=leftover))
+    pay = PayrollPayment(month=month, person_code=person_code, seq=seq,
+                         points=points or 0, amount=amount or 0,
+                         bonus=bonus or 0, adjust_applied=adjust_applied or 0,
+                         note=note, paid_by=paid_by,
+                         adjust_source_type=src_type,
+                         adjust_source_month=src_month,
+                         adjust_source_row_id=src_row,
+                         adjust_source_task_id=src_task,
+                         adjust_leftover=leftover)
+    db.add(pay)
+    db.flush()                      # 拿到 payment.id 才能写关联行
+    if adjust_applied:
+        try:
+            allocate_settlement(db, person_code, adjust_applied,
+                                payment_id=pay.id, month=month)
+        except Exception:  # noqa: BLE001  关联失败不影响台账登记
+            db.rollback()
     db.commit()
     return True
 
@@ -217,12 +220,16 @@ def sync_adjusts(db: Session, month: str) -> int:
     return n
 
 
-def allocate_settlement(db: Session, person_code: str, absorbed: int) -> list:
+def allocate_settlement(db: Session, person_code: str, absorbed: int,
+                        payment_id: int = None, month: str = None) -> list:
     """把一笔发放吸收的找平额按 **FIFO**（先欠的先还）冲最早的未结清找平行。
 
     absorbed 与 remaining 同号（负=扣回/正=补发）。返回分配明细（可追溯）。
+    payment_id 给出时，同时写 **关联行**（payroll_settlement_links），实现双向可查：
+    - 一笔发放 → 冲了哪几笔找平（可能多条，跨月）
+    - 一笔找平 → 被哪几期发放回收的（可能多条，跨期）
     """
-    from app.models import PayrollAdjust
+    from app.models import PayrollAdjust, PayrollSettlementLink
     if not absorbed:
         return []
     alloc = []
@@ -244,10 +251,44 @@ def allocate_settlement(db: Session, person_code: str, absorbed: int) -> list:
         if a.remaining == 0:
             a.status, a.settled_at = "settled", _now_utc()
         a.updated_at = _now_utc()
+        if payment_id is not None:
+            db.add(PayrollSettlementLink(
+                adjust_id=a.id, payment_id=payment_id, month=month,
+                person_code=person_code, amount=take))
         alloc.append({"adjust_id": a.id, "source_month": a.source_month,
                       "amount": take})
     db.commit()
     return alloc
+
+
+def payment_adjust_links(db: Session, payment_id: int) -> list:
+    """一笔发放 → 冲了哪几笔找平（含找平源月/原始金额/本次冲抵额）。"""
+    from app.models import PayrollAdjust, PayrollSettlementLink
+    out = []
+    for lk in db.query(PayrollSettlementLink).filter(
+            PayrollSettlementLink.payment_id == payment_id).all():
+        a = db.get(PayrollAdjust, lk.adjust_id)
+        out.append({"adjust_id": lk.adjust_id,
+                    "source_month": a.source_month if a else None,
+                    "adjust_amount": (a.adjust_amount if a else None),
+                    "amount": lk.amount,
+                    "adjust_status": (a.status if a else None)})
+    return out
+
+
+def adjust_payment_links(db: Session, adjust_id: int) -> list:
+    """一笔找平 → 从哪几期薪资里回收的（含发放月/期号/金额）。"""
+    from app.models import PayrollPayment, PayrollSettlementLink
+    out = []
+    for lk in db.query(PayrollSettlementLink).filter(
+            PayrollSettlementLink.adjust_id == adjust_id).order_by(
+            PayrollSettlementLink.month, PayrollSettlementLink.id).all():
+        p = db.get(PayrollPayment, lk.payment_id)
+        out.append({"payment_id": lk.payment_id, "month": lk.month,
+                    "seq": (p.seq if p else None),
+                    "payment_amount": (p.amount if p else None),
+                    "amount": lk.amount})
+    return out
 
 
 def settlement_status(db: Session, month: str) -> dict[str, Any]:
@@ -272,6 +313,7 @@ def settlement_status(db: Session, month: str) -> dict[str, Any]:
     if adj_rows:
         names = {p.code: p.display_name for p in db.query(Person).all()}
         out = [{
+            "adjust_id": a.id,
             "person_code": a.person_code,
             "name": names.get(a.person_code, a.person_code),
             "adjust_amount": a.adjust_amount or 0,
@@ -281,6 +323,8 @@ def settlement_status(db: Session, month: str) -> dict[str, Any]:
             "settled_at": str(a.settled_at) if a.settled_at else None,
             "source_task_id": a.source_task_id,
             "source": "payroll_adjusts",          # 来自找平表
+            # 反向可查：这笔找平从哪几期薪资里回收的
+            "recovered_by": adjust_payment_links(db, a.id),
         } for a in adj_rows]
         data = {"month": month, "currency": "JPY", "rows": out,
                 "count": len(out), "source": "payroll_adjusts",

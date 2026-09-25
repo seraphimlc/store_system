@@ -349,7 +349,14 @@ def payroll_rows(db, month: str, person: str | None = None) -> dict[str, Any]:
     rows = period.period_rows(db, month)
     half_stats = period.half_stats_map(db, month)
     carry = period.carry_map(db, month)
-    from app.models import PayrollPayment
+    from app.models import PayrollPayment, PayrollSettlementLink
+    # 正向可查：本月各笔发放冲了哪几笔找平（跨月）
+    links_by_person = {}
+    for lk in db.query(PayrollSettlementLink).filter(
+            PayrollSettlementLink.month == month).all():
+        links_by_person.setdefault(lk.person_code, []).append({
+            "payment_id": lk.payment_id, "adjust_id": lk.adjust_id,
+            "amount": lk.amount})
     paid = {}
     for (code, seq) in db.query(PayrollPayment.person_code,
                                 PayrollPayment.seq).filter(
@@ -385,6 +392,13 @@ def payroll_rows(db, month: str, person: str | None = None) -> dict[str, Any]:
             "carry_amount": cr[1],
             "paid_half1": 1 in paid.get(code, set()),
             "paid_half2": 2 in paid.get(code, set()),
+            # 正向可查：本月发放冲了哪些找平（含找平源月与原始金额）
+            "settlement_links": [
+                {**l, "source_month": (db.get(
+                    __import__("app.models", fromlist=["PayrollAdjust"]).PayrollAdjust,
+                    l["adjust_id"]).source_month
+                    if db.get(__import__("app.models", fromlist=["PayrollAdjust"]).PayrollAdjust, l["adjust_id"]) else None)}
+                for l in links_by_person.get(code, [])],
         })
     if person:
         key = person.strip()

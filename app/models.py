@@ -585,3 +585,26 @@ class PayrollAdjust(Base):
     status = Column(String(12), nullable=False, default="in_progress")
     settled_at = Column(DateTime, nullable=True)                   # 结清时间
     updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PayrollSettlementLink(Base):
+    """**找平回收明细**：发放（payroll_payments）↔ 找平（payroll_adjusts）多对多。
+
+    用户要求双向可查：
+    - 一笔薪资（某月某期）→ 冲了哪几笔找平（FIFO 可能同时冲多个月）
+    - 一笔找平 → 被哪几期薪资回收的（可能跨多期/多月）
+    单一来源字段（payroll_payments.adjust_source_*）只能表达一对一，故独立成表。
+    """
+    __tablename__ = "payroll_settlement_links"
+    __table_args__ = (UniqueConstraint("adjust_id", "payment_id",
+                                       name="uq_link_adjust_payment"),)
+
+    id = Column(Integer, primary_key=True)
+    adjust_id = Column(Integer, ForeignKey("payroll_adjusts.id"),
+                       nullable=False, index=True)      # 哪笔找平
+    payment_id = Column(Integer, ForeignKey("payroll_payments.id"),
+                        nullable=False, index=True)     # 哪笔发放冲的
+    month = Column(String(7), nullable=False, index=True)   # 发放月
+    person_code = Column(String(32), nullable=False, index=True)
+    amount = Column(Integer, nullable=False, default=0)     # 本次冲抵（负=扣回）
+    created_at = Column(DateTime, nullable=False, default=_now)
