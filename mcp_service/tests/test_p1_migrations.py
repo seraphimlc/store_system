@@ -26,13 +26,17 @@ def test_four_tables_exist():
             "rebuild_snapshots"} <= names
 
 
-def test_sealed_month_preseeded():
+def test_sealed_months_table_is_queryable():
+    """封账是**运行期可变配置**（可封可解），故只断言表可用，不断言当前内容。
+
+    迁移里预置 2026-08 的意图由 test_migration_files_are_chained 校验（文件内容）；
+    本机为「重新上传演练」已解除 8 月封账，属预期状态。
+    """
     con = _ro()
     try:
-        rows = con.execute("SELECT month FROM sealed_months").fetchall()
+        con.execute("SELECT month, note FROM sealed_months").fetchall()
     finally:
         con.close()
-    assert ("2026-08",) in rows
 
 
 def test_token_prefix_unique_index_exists():
