@@ -199,6 +199,7 @@ def register(mcp) -> None:
         title="分期对账偏差表导出",
         annotations=read_ann("分期对账偏差表导出"),
         description=(
+            "**DEPRECATED（当前流程不需要，保留兼容）**：找平表导出非发薪流程必需；如需请告知维护方恢复。发薪请用 visit_export_salary。\n"
             "导出月度分期对账偏差表 Excel（找平用）：某结算月（YYYY-MM）每人 "
             "上半月/下半月点数与金额、奖金、分期已发、对账点数/金额、上月修正、"
             "对账偏差、找平点与金额（17 列台账）。"
@@ -226,6 +227,7 @@ def register(mcp) -> None:
         title="对账差异清单导出",
         annotations=read_ann("对账差异清单导出"),
         description=(
+            "**DEPRECATED（当前流程不需要，保留兼容）**：对账差异导出非发薪流程必需；如需请告知维护方恢复。发薪请用 visit_export_salary。\n"
             "导出对账差异 Excel（对账用）：某对账任务（task_id）的差异明细"
             "（人员/编号/系统点数/对账点数/差异）+ 反向名单（系统有而对账文件无）。"
             "适合对账完成后导出差异清单给管理员核对。"
@@ -248,6 +250,7 @@ def register(mcp) -> None:
         title="月度对账报告导出",
         annotations=read_ann("月度对账报告导出"),
         description=(
+            "**DEPRECATED（当前流程不需要，保留兼容）**：对账报告导出非发薪流程必需；如需请告知维护方恢复。发薪请用 visit_export_salary。\n"
             "导出月度对账报告 Excel（月终报告用）：某对账任务（task_id）的完整"
             "月度对账报告——报告摘要 + 员工×日问题行 + 差异明细 + 反向名单 + "
             "找平确认留痕（+ 差异归因/AI解读，若任务有）。"

@@ -430,6 +430,7 @@ def register(mcp: MCPServer) -> None:
         title="对账产物下载",
         annotations=read_ann("对账产物下载"),
         description=(
+            "**DEPRECATED（当前流程不需要，保留兼容）**：对账原始产物下载非发薪流程必需；如需请告知维护方恢复。发薪请用 visit_export_salary。\n"
             "下载某对账任务（task_id）的**原始产物文件** xlsx：优先返回 "
             "task.params.result_path 落盘的产物；不存在则按网页 /recon/result "
             "路由逻辑现算生成。"
