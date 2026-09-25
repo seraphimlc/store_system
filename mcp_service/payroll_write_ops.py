@@ -293,7 +293,8 @@ def _next_month(month: str) -> str:
     return f"{y + 1}-01" if m == 12 else f"{y}-{m + 1:02d}"
 
 
-def payroll_mark_paid(db, actor, *, month: str, half, unmark: bool = False) -> dict:
+def payroll_mark_paid(db, actor, *, month: str, half, unmark: bool = False,
+                      person_code: str = None) -> dict:
     """标记/取消「某月某期已实际发薪」（找平吸收额度只算未发薪的期）。
 
     为什么重要：上月对账差异要在本月两期工资里扣/补，但**已发薪的期改不了**。
@@ -313,7 +314,8 @@ def payroll_mark_paid(db, actor, *, month: str, half, unmark: bool = False) -> d
         raise guards.GuardError("BAD_PARAM", f"half 只能是 1 或 2，收到 {h}",
                                 "half=1 表示上半月，half=2 表示下半月")
 
-    changed = period.mark_paid(db, month, h, marked_by=actor.uid, unmark=unmark)
+    affected = period.mark_paid(db, month, h, marked_by=actor.uid,
+                                unmark=unmark, person_code=person_code)
     period.sync_period_table(db, month)          # 标记后立即重算吸收
     nxt = _next_month(month)
     from app.models import PayrollPeriodRow
@@ -324,7 +326,7 @@ def payroll_mark_paid(db, actor, *, month: str, half, unmark: bool = False) -> d
     return {"ok": True, "data": {
         "month": month, "half": h,
         "action": "取消标记" if unmark else "标记已发薪",
-        "changed": changed,
+        "affected_persons": affected,
         "paid_halves": sorted(period.paid_halves(db, month)),
         "note": "已重算本月及下月找平：吸收额度只使用未发薪的期",
     }}
@@ -431,16 +433,21 @@ def register(mcp: MCPServer) -> None:
             "标记/取消「某结算月的某期（上半月/下半月）已实际发薪」。"
             "**发薪后请及时标记**：找平的「上月结转」只能从未发薪的期里扣/补，"
             "已发薪的期改不了；不标记会让系统误以为结转已处理而漏扣。"
-            "标记后系统自动重算本月与下月的找平。参数：month（YYYY-MM）；"
-            "half（1=上半月，2=下半月）；unmark（true=取消标记）。需要写权限。"
+            "标记后系统自动重算本月与下月的找平。**写入发放台账（含金额快照）**，"
+            "台账是历史事实、不会被后续重算改写。参数：month（YYYY-MM）；"
+            "half（1=上半月，2=下半月）；person_code（可选，留空=该期全部人，"
+            "整期发薪用）；unmark（true=取消登记/更正）。需要写权限。"
         ),
     )
     def visit_payroll_mark_paid(ctx: Context, month: str, half: int,
-                                unmark: bool = False) -> dict[str, Any]:
+                                unmark: bool = False,
+                                person_code: str = None) -> dict[str, Any]:
         return _write_call(ctx, "visit_payroll_mark_paid",
-                           {"month": month, "half": half, "unmark": unmark},
+                           {"month": month, "half": half, "unmark": unmark,
+                            "person_code": person_code},
                            lambda db, actor: payroll_mark_paid(
-                               db, actor, month=month, half=half, unmark=unmark),
+                               db, actor, month=month, half=half, unmark=unmark,
+                               person_code=person_code),
                            retryable=True)
 
     @mcp.tool(

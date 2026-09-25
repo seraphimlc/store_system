@@ -517,3 +517,32 @@ class PayrollPaidMark(Base):
     half = Column(Integer, nullable=False)                    # 1=上半月 2=下半月
     marked_by = Column(Integer, nullable=True)
     marked_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PayrollPayment(Base):
+    """**发放台账（不可变历史事实）**：某月某人第 seq 期实际发了多少。
+
+    为什么要独立成表：`payroll_period_rows` 是**计算结果**（会随数据/对账/规则重算），
+    而"已经发了 375,000"是**历史事实**，不能再被重算改写。两者混在一张表里会导致：
+    8月对账晚上传 → 9月整行重算 → 已发的上半月数字也被改；且吸收逻辑不知道哪期已发
+    → 高估吸收能力 → **漏扣**（实测 -59,000 被误判为已吸收）。
+
+    - seq 不固定：一月发 2 次就 seq=1,2；发 3 次就 1,2,3（不写死两期）
+    - amount 是**发放时快照**，之后重算不影响它
+    - adjust_applied 记该期实际抵扣/补发的找平额（负=扣）
+    """
+    __tablename__ = "payroll_payments"
+    __table_args__ = (UniqueConstraint("month", "person_code", "seq",
+                                       name="uq_payment_inst"),)
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)      # 归属结算月 YYYY-MM
+    person_code = Column(String(32), nullable=False, index=True)
+    seq = Column(Integer, nullable=False)                      # 第几期（1,2,3…）
+    points = Column(Integer, nullable=False, default=0)        # 该期点数（快照）
+    amount = Column(Integer, nullable=False, default=0)        # 实发金额 円（快照）
+    bonus = Column(Integer, nullable=False, default=0)         # 其中奖金 円
+    adjust_applied = Column(Integer, nullable=False, default=0)  # 该期实际抵扣/补发 円
+    note = Column(String(255), nullable=True)
+    paid_at = Column(DateTime, nullable=False, default=_now)
+    paid_by = Column(Integer, nullable=True)

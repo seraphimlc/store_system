@@ -49,8 +49,11 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _envelope_error(code: str, message: str, hint: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message, "hint": hint}}
+def _envelope_error(code: str, message: str, hint: str,
+                    **extra: Any) -> dict[str, Any]:
+    """统一失败信封（含 retryable；码表见 mcp_service/envelope.py）。"""
+    from mcp_service import envelope
+    return envelope.error(code, message, hint, **extra)
 
 
 def _write_call(ctx: Context, tool: str, params: dict, fn, *, retryable: bool):

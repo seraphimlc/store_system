@@ -532,8 +532,10 @@ def store_search(db, q: str, limit: int = 20) -> dict[str, Any]:
 # 信封与注册（薄适配层）
 # ---------------------------------------------------------------------------
 
-def _envelope_error(code: str, message: str, hint: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message, "hint": hint}}
+def _envelope_error(code: str, message: str, hint: str, **extra: Any) -> dict[str, Any]:
+    """统一失败信封（含 retryable）。"""
+    from mcp_service import envelope
+    return envelope.error(code, message, hint, **extra)
 
 
 def _call(db, fn) -> dict[str, Any]:

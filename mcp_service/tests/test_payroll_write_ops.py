@@ -195,3 +195,63 @@ def test_paid_mark_reduces_absorption_capacity(db):
                                                person_code="P001").first()
     # 上半月已发 → 可吸收额度=下半月(0) → 结转 -59000 未被吸收 → 递延进下月结转
     assert row.prev_adjust_amount == row.diff_amount - 59000
+
+
+# ---------- 发放台账（方案 C 第一步：计算与实发分离）----------
+
+def test_record_payment_snapshots_amount(db):
+    """台账记录的是**发放时快照**，后续重算不改写它。"""
+    from datetime import date
+    from app.models import (FormalRecord, ImportFile, PayrollPayment,
+                            PayrollPeriodRow, Person, PersonDailyStat)
+    from app.services import period
+
+    db.add(Person(code="P001", display_name="甲"))
+    db.add(ImportFile(id=9, file_name="f.xlsx", file_sha256="y", file_size=1,
+                      stored_path="/tmp/y.xlsx", uploaded_by=1, status="parsed",
+                      parsed_sheets=[], ignored_sheets=[], warnings=[], errors=[]))
+    db.add(FormalRecord(import_id=9, raw_record_id=1, person_code="P001",
+                        store_id_raw="0101", japan_date=date(2026, 9, 3), points=1))
+    db.add(PersonDailyStat(person_code="P001", ref_date=date(2026, 9, 3),
+                           records=1, p1=1, p2=0, points=1))
+    db.commit()
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+
+    assert period.record_payment(db, "2026-09", "P001", 1, paid_by=1) is True
+    row = db.query(PayrollPayment).filter_by(month="2026-09",
+                                             person_code="P001").first()
+    snapshot = row.amount
+    assert snapshot == 250          # 1 点 × 250 円（发放时快照）
+    # 再登记同一期 → 不覆盖（事实不可重写）
+    assert period.record_payment(db, "2026-09", "P001", 1) is False
+    assert db.query(PayrollPayment).filter_by(month="2026-09",
+                                              person_code="P001").count() == 1
+    # 重算后台账金额不变
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    assert db.query(PayrollPayment).filter_by(
+        month="2026-09", person_code="P001").first().amount == snapshot
+
+
+def test_paid_seqs_reads_ledger(db):
+    from app.services import period
+    from app.models import PayrollPayment
+    assert period.paid_seqs(db, "2026-09") == set()
+    db.add(PayrollPayment(month="2026-09", person_code="P001", seq=1,
+                          points=10, amount=2500))
+    db.commit()
+    assert period.paid_seqs(db, "2026-09") == {1}
+
+
+def test_unmark_removes_ledger_rows(db):
+    from app.services import period
+    from app.models import PayrollPayment, PayrollPeriodRow
+    db.add(PayrollPeriodRow(month="2026-09", person_code="P001",
+                            half1_amount=1000, half1_points=4))
+    db.commit()
+    n = period.mark_paid(db, "2026-09", 1, marked_by=1)
+    assert n == 1
+    assert db.query(PayrollPayment).count() == 1
+    removed = period.mark_paid(db, "2026-09", 1, unmark=True)
+    assert removed == 1 and db.query(PayrollPayment).count() == 0

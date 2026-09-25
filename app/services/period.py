@@ -26,32 +26,93 @@ def _month_bounds(month: str):
     return st, en
 
 
-def paid_halves(db: Session, month: str) -> set:
-    """该月已实际发薪的期（1=上半月 2=下半月）。未标记=都还没发。"""
-    from app.models import PayrollPaidMark
-    return {r.half for r in db.query(PayrollPaidMark).filter(
+def paid_seqs(db: Session, month: str) -> set:
+    """该月**已实际发放**的期号集合（来自发放台账；兼容旧的标记表）。"""
+    from app.models import PayrollPaidMark, PayrollPayment
+    seqs = {r.seq for r in db.query(PayrollPayment).filter(
+        PayrollPayment.month == month).all()}
+    # 兼容：早期只有"标记"没有台账时，把标记视作已发（无金额快照）
+    seqs |= {r.half for r in db.query(PayrollPaidMark).filter(
         PayrollPaidMark.month == month).all()}
+    return seqs
+
+
+def paid_halves(db: Session, month: str) -> set:
+    """向后兼容别名（= paid_seqs）。"""
+    return paid_seqs(db, month)
+
+
+def record_payment(db: Session, month: str, person_code: str, seq: int,
+                   amount: int = None, points: int = None, bonus: int = None,
+                   adjust_applied: int = 0, note: str = None,
+                   paid_by: int = None) -> bool:
+    """登记一次实际发放（台账，不可变）。金额默认取当前计算值（快照落库）。
+
+    已登记过的 (月,人,期) 不覆盖——事实一旦记下就不该被重写；如需更正请先删除该行。
+    """
+    from app.models import PayrollPayment, PayrollPeriodRow
+    row = db.query(PayrollPayment).filter(
+        PayrollPayment.month == month,
+        PayrollPayment.person_code == person_code,
+        PayrollPayment.seq == seq).first()
+    if row is not None:
+        return False
+    calc = db.query(PayrollPeriodRow).filter(
+        PayrollPeriodRow.month == month,
+        PayrollPeriodRow.person_code == person_code).first()
+    if amount is None:
+        amount = (calc.half1_amount if seq == 1 else calc.half2_amount) if calc else 0
+    if points is None:
+        points = (calc.half1_points if seq == 1 else calc.half2_points) if calc else 0
+    if bonus is None:
+        bonus = (calc.half1_bonus if seq == 1 else calc.half2_bonus) if calc else 0
+    db.add(PayrollPayment(month=month, person_code=person_code, seq=seq,
+                          points=points or 0, amount=amount or 0,
+                          bonus=bonus or 0, adjust_applied=adjust_applied or 0,
+                          note=note, paid_by=paid_by))
+    db.commit()
+    return True
 
 
 def mark_paid(db: Session, month: str, half: int, marked_by: int = None,
-              unmark: bool = False) -> bool:
-    """标记/取消「该期已发薪」。返回是否有变更。"""
-    from app.models import PayrollPaidMark
+              unmark: bool = False, person_code: str = None) -> int:
+    """登记/取消「该期已发薪」。**写入发放台账**（含金额快照）。返回影响人数。
+
+    - person_code 为空 → 该月**全部人**的这一期（整期发薪的常见场景）
+    - unmark=True → 删除台账行（用于更正误登记）
+    """
+    from app.models import PayrollPaidMark, PayrollPayment, PayrollPeriodRow
     if half not in (1, 2):
         raise ValueError("half 只能是 1（上半月）或 2（下半月）")
-    row = db.query(PayrollPaidMark).filter(
-        PayrollPaidMark.month == month, PayrollPaidMark.half == half).first()
+
+    q = db.query(PayrollPeriodRow).filter(PayrollPeriodRow.month == month)
+    if person_code:
+        q = q.filter(PayrollPeriodRow.person_code == person_code)
+    codes = [r.person_code for r in q.all()]
+
     if unmark:
-        if row is None:
-            return False
-        db.delete(row)
+        n = db.query(PayrollPayment).filter(
+            PayrollPayment.month == month, PayrollPayment.seq == half)
+        if person_code:
+            n = n.filter(PayrollPayment.person_code == person_code)
+        n = n.delete(synchronize_session=False)
+        db.query(PayrollPaidMark).filter(
+            PayrollPaidMark.month == month, PayrollPaidMark.half == half).delete(
+            synchronize_session=False)
         db.commit()
-        return True
-    if row is not None:
-        return False
-    db.add(PayrollPaidMark(month=month, half=half, marked_by=marked_by))
-    db.commit()
-    return True
+        return n
+
+    n = 0
+    for code in codes:
+        if record_payment(db, month, code, half, paid_by=marked_by):
+            n += 1
+    # 兼容旧标记表（历史代码/页面可能读它）
+    if db.query(PayrollPaidMark).filter(
+            PayrollPaidMark.month == month,
+            PayrollPaidMark.half == half).first() is None:
+        db.add(PayrollPaidMark(month=month, half=half, marked_by=marked_by))
+        db.commit()
+    return n
 
 
 def _current_recon(db: Session, month: str) -> dict:
@@ -141,7 +202,7 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             (half1 if r.ref_date.day <= 15 else half2).get(
                 r.person_code, 0) + r.points
     settle = _current_recon(db, month)
-    paid = paid_halves(db, month)      # 已发薪的期（吸收额度只用未发的期）
+    paid = paid_seqs(db, month)        # 已发放的期（吸收额度只用**未发放**的期）
     # 结转链（金额，正=补/负=扣）：
     #   本月行存「下月要扣/补的余额」= −本月金额差 + 本月扣剩余额
     #   - 上月结转(上月 prev_adjust_amount)在本月两期工资里扣/补，
