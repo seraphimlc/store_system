@@ -546,3 +546,9 @@ class PayrollPayment(Base):
     note = Column(String(255), nullable=True)
     paid_at = Column(DateTime, nullable=False, default=_now)
     paid_by = Column(Integer, nullable=True)
+    # ---- 找平抵扣溯源（否则只有一个金额 = 空穴来风，出 bug 没法查）----
+    adjust_source_type = Column(String(12), nullable=True)     # carry | diff
+    adjust_source_month = Column(String(7), nullable=True)     # 产生结转的月份（上月）
+    adjust_source_row_id = Column(Integer, nullable=True)      # 上月 payroll_period_rows.id
+    adjust_source_task_id = Column(Integer, nullable=True)     # 上月当前对账任务 id（可空）
+    adjust_leftover = Column(Integer, nullable=True)           # 扣完后仍需递延的金额（负）

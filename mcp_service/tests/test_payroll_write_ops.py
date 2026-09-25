@@ -255,3 +255,49 @@ def test_unmark_removes_ledger_rows(db):
     assert db.query(PayrollPayment).count() == 1
     removed = period.mark_paid(db, "2026-09", 1, unmark=True)
     assert removed == 1 and db.query(PayrollPayment).count() == 0
+
+
+# ---------- 找平抵扣溯源（adjust_applied 必须指向来源记录）----------
+
+def test_payment_adjust_trace_points_to_source(db):
+    """抵扣金额带来源：type=carry + 上月找平行 id + 对账任务 id，且剩余递延自洽。"""
+    from datetime import date
+    from app.models import (FormalRecord, ImportFile, PayrollPayment,
+                            PayrollPeriodRow, Person, PersonDailyStat,
+                            ReconTask)
+    from app.services import period
+
+    db.add(Person(code="P001", display_name="甲"))
+    db.add(ImportFile(id=9, file_name="f.xlsx", file_sha256="y", file_size=1,
+                      stored_path="/tmp/y.xlsx", uploaded_by=1, status="parsed",
+                      parsed_sheets=[], ignored_sheets=[], warnings=[], errors=[]))
+    db.add(FormalRecord(import_id=9, raw_record_id=1, person_code="P001",
+                        store_id_raw="0101", japan_date=date(2026, 9, 20), points=20))
+    db.add(PersonDailyStat(person_code="P001", ref_date=date(2026, 9, 20),
+                           records=1, p1=20, p2=0, points=20))
+    # 8月：对账任务 + 找平结转 -10000
+    db.add(ReconTask(id=88, kind="monthly_v3", status="done", created_by=1,
+                     params={"month": "2026-08", "kind": "daily_records",
+                             "version": 1, "current": True}, summary={}))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, diff_points=-40,
+                            prev_adjust_amount=-10000))
+    db.commit()
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    r9 = db.query(PayrollPeriodRow).filter_by(month="2026-09",
+                                              person_code="P001").first()
+    # 9月上半月先发（对账未到 → 无抵扣），下半月发 → 吸收结转
+    period.record_payment(db, "2026-09", "P001", 1, amount=0)
+    period.record_payment(db, "2026-09", "P001", 2, amount=r9.half2_amount,
+                          points=20)
+    db.commit()
+    p2 = db.query(PayrollPayment).filter_by(month="2026-09", person_code="P001",
+                                            seq=2).first()
+    assert p2.adjust_applied < 0                      # 有抵扣
+    assert p2.adjust_source_type == "carry"
+    assert p2.adjust_source_month == "2026-08"
+    assert p2.adjust_source_row_id is not None       # 指向 8 月找平行
+    assert p2.adjust_source_task_id == 88            # 指向 8 月对账任务
+    # 自洽：抵扣 + 剩余递延 == 结转总额
+    assert p2.adjust_applied + (p2.adjust_leftover or 0) == -10000

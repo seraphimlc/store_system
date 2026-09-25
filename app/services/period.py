@@ -49,8 +49,15 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
     """登记一次实际发放（台账，不可变）。金额默认取当前计算值（快照落库）。
 
     已登记过的 (月,人,期) 不覆盖——事实一旦记下就不该被重写；如需更正请先删除该行。
+
+    **找平抵扣溯源**（adjust_applied 不能是空穴来风）：登记时按结转链算出
+    这笔实发应抵扣多少（上月结转按 seq 顺序被本月未发的期吸收），并记下来源：
+    - adjust_source_type/month/row_id/task_id → 指向**产生这笔结转的月份**的
+      找平行（payroll_period_rows）与其对账任务（recon_tasks），可反查；
+    - adjust_leftover → 扣完这笔后仍需递延的金额（负），与下月结转链自洽。
     """
     from app.models import PayrollPayment, PayrollPeriodRow
+
     row = db.query(PayrollPayment).filter(
         PayrollPayment.month == month,
         PayrollPayment.person_code == person_code,
@@ -66,10 +73,49 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
         points = (calc.half1_points if seq == 1 else calc.half2_points) if calc else 0
     if bonus is None:
         bonus = (calc.half1_bonus if seq == 1 else calc.half2_bonus) if calc else 0
+
+    # ---- 溯源计算：本笔实发要吸收多少上月结转 ----
+    src_type = src_month = src_row = src_task = None
+    leftover = None
+    pm = _prev_month(month)   # 模块级已定义：mm-1（上月），12月→y-1-12
+    prev_row = db.query(PayrollPeriodRow).filter(
+        PayrollPeriodRow.month == pm,
+        PayrollPeriodRow.person_code == person_code).first()
+    carry = prev_row.prev_adjust_amount or 0 if prev_row else 0   # 负=要扣
+    if carry < 0:
+        absorbed = 0
+        for q in db.query(PayrollPayment).filter(
+                PayrollPayment.month == month,
+                PayrollPayment.person_code == person_code).all():
+            absorbed += q.adjust_applied or 0                    # 已扣的（负）
+        remaining = carry + absorbed                             # 还要扣的（负）
+        if remaining < 0:
+            paid_amt = amount or 0
+            take = max(remaining, -paid_amt)                     # 本笔最多扣 paid_amt
+            adjust_applied = take
+            leftover = remaining - take                          # 扣完仍需递延（负）
+            src_type = "carry"
+            src_month = pm
+            src_row = prev_row.id
+            from app.models import ReconTask
+            cur = None
+            for t in db.query(ReconTask).filter(
+                    ReconTask.kind == "monthly_v3").all():
+                pp = t.params or {}
+                if pp.get("month") == pm and not pp.get("replaced_by"):
+                    if cur is None or t.id > cur.id:
+                        cur = t
+            src_task = cur.id if cur else None
+
     db.add(PayrollPayment(month=month, person_code=person_code, seq=seq,
                           points=points or 0, amount=amount or 0,
                           bonus=bonus or 0, adjust_applied=adjust_applied or 0,
-                          note=note, paid_by=paid_by))
+                          note=note, paid_by=paid_by,
+                          adjust_source_type=src_type,
+                          adjust_source_month=src_month,
+                          adjust_source_row_id=src_row,
+                          adjust_source_task_id=src_task,
+                          adjust_leftover=leftover))
     db.commit()
     return True
 
