@@ -288,6 +288,48 @@ def config_set(db, actor, *, per_point=None, bonus_group=None,
 
 # ---------- 注册 ----------
 
+def _next_month(month: str) -> str:
+    y, m = int(month[:4]), int(month[5:7])
+    return f"{y + 1}-01" if m == 12 else f"{y}-{m + 1:02d}"
+
+
+def payroll_mark_paid(db, actor, *, month: str, half, unmark: bool = False) -> dict:
+    """标记/取消「某月某期已实际发薪」（找平吸收额度只算未发薪的期）。
+
+    为什么重要：上月对账差异要在本月两期工资里扣/补，但**已发薪的期改不了**。
+    不标记的话，系统会以为结转已被吸收，实际漏扣（实测：9月上半月已发、下半月为0时，
+    8月结转的 -59,000 被误判为已处理）。标记后重算，未吸收部分正确递延下月。
+    """
+    from app.services import period
+
+    guards.require_write(actor)
+    month = guards.validate_month(month)
+    try:
+        h = int(half)
+    except (TypeError, ValueError):
+        raise guards.GuardError("BAD_PARAM", f"half 非法：{half!r}",
+                                "half=1 表示上半月，half=2 表示下半月") from None
+    if h not in (1, 2):
+        raise guards.GuardError("BAD_PARAM", f"half 只能是 1 或 2，收到 {h}",
+                                "half=1 表示上半月，half=2 表示下半月")
+
+    changed = period.mark_paid(db, month, h, marked_by=actor.uid, unmark=unmark)
+    period.sync_period_table(db, month)          # 标记后立即重算吸收
+    nxt = _next_month(month)
+    from app.models import PayrollPeriodRow
+    if db.query(PayrollPeriodRow).filter(
+            PayrollPeriodRow.month == nxt).first() is not None:
+        period.sync_period_table(db, nxt)        # 下月结转随之变化
+    db.commit()
+    return {"ok": True, "data": {
+        "month": month, "half": h,
+        "action": "取消标记" if unmark else "标记已发薪",
+        "changed": changed,
+        "paid_halves": sorted(period.paid_halves(db, month)),
+        "note": "已重算本月及下月找平：吸收额度只使用未发薪的期",
+    }}
+
+
 def register(mcp: MCPServer) -> None:
     """父会话在 server.py 里调用（与 mcp_service.tools.register 并列）。"""
     from mcp_service.tools import _write_call
@@ -382,6 +424,24 @@ def register(mcp: MCPServer) -> None:
                             "half2_amount": half2_amount,
                             "adjust_delta": adjust_delta},
                            run, retryable=False)
+
+    @mcp.tool(
+        name="visit_payroll_mark_paid",
+        description=(
+            "标记/取消「某结算月的某期（上半月/下半月）已实际发薪」。"
+            "**发薪后请及时标记**：找平的「上月结转」只能从未发薪的期里扣/补，"
+            "已发薪的期改不了；不标记会让系统误以为结转已处理而漏扣。"
+            "标记后系统自动重算本月与下月的找平。参数：month（YYYY-MM）；"
+            "half（1=上半月，2=下半月）；unmark（true=取消标记）。需要写权限。"
+        ),
+    )
+    def visit_payroll_mark_paid(ctx: Context, month: str, half: int,
+                                unmark: bool = False) -> dict[str, Any]:
+        return _write_call(ctx, "visit_payroll_mark_paid",
+                           {"month": month, "half": half, "unmark": unmark},
+                           lambda db, actor: payroll_mark_paid(
+                               db, actor, month=month, half=half, unmark=unmark),
+                           retryable=True)
 
     @mcp.tool(
         name="visit_config_set",

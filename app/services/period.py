@@ -26,6 +26,34 @@ def _month_bounds(month: str):
     return st, en
 
 
+def paid_halves(db: Session, month: str) -> set:
+    """该月已实际发薪的期（1=上半月 2=下半月）。未标记=都还没发。"""
+    from app.models import PayrollPaidMark
+    return {r.half for r in db.query(PayrollPaidMark).filter(
+        PayrollPaidMark.month == month).all()}
+
+
+def mark_paid(db: Session, month: str, half: int, marked_by: int = None,
+              unmark: bool = False) -> bool:
+    """标记/取消「该期已发薪」。返回是否有变更。"""
+    from app.models import PayrollPaidMark
+    if half not in (1, 2):
+        raise ValueError("half 只能是 1（上半月）或 2（下半月）")
+    row = db.query(PayrollPaidMark).filter(
+        PayrollPaidMark.month == month, PayrollPaidMark.half == half).first()
+    if unmark:
+        if row is None:
+            return False
+        db.delete(row)
+        db.commit()
+        return True
+    if row is not None:
+        return False
+    db.add(PayrollPaidMark(month=month, half=half, marked_by=marked_by))
+    db.commit()
+    return True
+
+
 def _current_recon(db: Session, month: str) -> dict:
     """该月「当前」对账任务的 人→对账点数（无则空）。"""
     out = {}
@@ -113,6 +141,7 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             (half1 if r.ref_date.day <= 15 else half2).get(
                 r.person_code, 0) + r.points
     settle = _current_recon(db, month)
+    paid = paid_halves(db, month)      # 已发薪的期（吸收额度只用未发的期）
     # 结转链（金额，正=补/负=扣）：
     #   本月行存「下月要扣/补的余额」= −本月金额差 + 本月扣剩余额
     #   - 上月结转(上月 prev_adjust_amount)在本月两期工资里扣/补，
@@ -151,7 +180,14 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         diff_amt = settle_amt - (h1_amt + h2_amt)
         # 下月结转 = 本月金额差 + 本月扣剩余额（负=下月继续扣；正=下月补发）
         #   （上月结转先在本月两期工资里扣：本月两期+上月结转<0 的部分才递延）
-        left_this = carry_in.get(code, 0) + h1_amt + h2_amt
+        # 可吸收额度 = **未发薪的期**的金额（已发薪的期改不了，不能算作可扣）
+        # 否则会出现「上半月已发、下半月为 0 → 结转被判定已吸收，实际漏扣」。
+        capacity = 0
+        if 1 not in paid:
+            capacity += h1_amt
+        if 2 not in paid:
+            capacity += h2_amt
+        left_this = carry_in.get(code, 0) + capacity
         prev_amt = diff_amt + (left_this if left_this < 0 else 0)
         sh1 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h1"]
         sh2 = hstat.get(code, {"h1": (0, 0, 0), "h2": (0, 0, 0)})["h2"]

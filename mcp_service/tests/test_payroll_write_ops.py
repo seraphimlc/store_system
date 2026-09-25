@@ -124,7 +124,7 @@ def test_config_set_rejects_bad_values(db):
 
 # ---------- 注册清单 ----------
 
-def test_register_defines_five_tools():
+def test_register_defines_six_tools():
     class _MCP:
         def __init__(self):
             self.names = []
@@ -140,4 +140,58 @@ def test_register_defines_five_tools():
     payroll_write_ops.register(m)
     assert set(m.names) == {
         "visit_recon_interpret", "visit_recon_adjust", "visit_payroll_generate",
-        "visit_payroll_update", "visit_config_set"}
+        "visit_payroll_update", "visit_config_set", "visit_payroll_mark_paid"}
+
+
+# ---------- 发薪标记（找平吸收额度只算未发薪的期）----------
+
+def test_mark_paid_requires_write(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_mark_paid(db, R, month="2026-09", half=1)
+    assert e.value.code == "FORBIDDEN_TOOL"
+
+
+def test_mark_paid_rejects_bad_half(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_mark_paid(db, W, month="2026-09", half=3)
+    assert e.value.code == "BAD_PARAM"
+
+
+def test_mark_paid_then_unmark(db):
+    res = payroll_write_ops.payroll_mark_paid(db, W, month="2026-09", half=1)
+    assert res["ok"] is True and res["data"]["paid_halves"] == [1]
+    res2 = payroll_write_ops.payroll_mark_paid(db, W, month="2026-09", half=1,
+                                               unmark=True)
+    assert res2["data"]["paid_halves"] == []
+
+
+def test_paid_mark_reduces_absorption_capacity(db):
+    """已发薪的期不计入可吸收额度 → 上月结转未被吸收的部分递延下月。"""
+    from datetime import date
+    from app.models import (FormalRecord, ImportFile, PayrollPeriodRow,
+                            PersonDailyStat, Person)
+    from app.services import period
+
+    db.add(Person(code="P001", display_name="甲"))
+    db.add(ImportFile(id=9, file_name="f.xlsx", file_sha256="y", file_size=1,
+                      stored_path="/tmp/y.xlsx", uploaded_by=1, status="parsed",
+                      parsed_sheets=[], ignored_sheets=[], warnings=[], errors=[]))
+    # 上月(2026-08)结转：-59000 円
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-59000, prev_adjust_amount=-59000,
+                            adjust_amount=0, adjust_points=0, diff_points=-200))
+    # 本月(2026-09)：上半月 375000 已发、下半月 0
+    db.add(FormalRecord(import_id=9, raw_record_id=1, person_code="P001",
+                        store_id_raw="0101", japan_date=date(2026, 9, 3),
+                        points=1))
+    db.add(PersonDailyStat(person_code="P001", ref_date=date(2026, 9, 3),
+                           records=1, p1=1, p2=0, points=1))
+    db.commit()
+
+    period.mark_paid(db, "2026-09", 1)          # 上半月已发
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    row = db.query(PayrollPeriodRow).filter_by(month="2026-09",
+                                               person_code="P001").first()
+    # 上半月已发 → 可吸收额度=下半月(0) → 结转 -59000 未被吸收 → 递延进下月结转
+    assert row.prev_adjust_amount == row.diff_amount - 59000

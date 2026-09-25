@@ -499,3 +499,21 @@ class RebuildSnapshot(Base):
     payload_json = Column(Text, nullable=False)
     row_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PayrollPaidMark(Base):
+    """发薪标记：某月某期（上半月/下半月）是否已实际发薪。
+
+    为什么需要：找平的「上月结转」要在本月两期工资里扣/补，但**已发薪的期改不了**。
+    系统没有发薪动作（只导出发薪表、线下发），所以必须由管理员显式标记；
+    `period.sync_period_table` 只把**未标记的期**算作可吸收额度，
+    否则会出现「上半月已发、下半月为 0 → 结转被判定已吸收，实际漏扣」。
+    """
+    __tablename__ = "payroll_paid_marks"
+    __table_args__ = (UniqueConstraint("month", "half", name="uq_paid_mark"),)
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)     # YYYY-MM
+    half = Column(Integer, nullable=False)                    # 1=上半月 2=下半月
+    marked_by = Column(Integer, nullable=True)
+    marked_at = Column(DateTime, nullable=False, default=_now)
