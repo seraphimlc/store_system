@@ -13,7 +13,9 @@ FastAPI + SQLAlchemy 2 + Alembic + Jinja2 + htmx：巡店文件 → 判定 → �
 ./scripts/dev_server.sh                                       # 本地服务(自动加载 .env 含 AI key)
 DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.py
 mcp_service/.venv/bin/python -m pytest mcp_service/tests -q  # MCP 服务测试（独立 3.12 venv）
-VISIT_MCP_TOKEN=xxx mcp_service/run.sh                        # 本机 MCP 服务（只读，独立进程）
+VISIT_MCP_TOKEN=xxx mcp_service/run.sh                        # 本机 MCP 服务（HTTP，只读，独立进程）
+DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
+  mcp_service/.venv/bin/python mcp_service/server.py --stdio   # stdio 模式（WorkBuddy 直接拉起，无需端口）
 ```
 - 账号：`admin/demo123`；员工 `demo123`。**heredoc `python3 <<EOF` 偶发静默失败 → 一律写 scripts/*.py 文件执行**。
 - AI：本地 .env（AI_API_KEY/AI_BASE_URL/AI_MODEL=deepseek-v4-flash）；线上 deploy/.env。ai_chat.chat 自动重试 2 次。

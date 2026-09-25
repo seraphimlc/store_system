@@ -73,6 +73,11 @@ def test_empty_month_returns_zeros_with_hint(db):
     assert "hint" in got
 
 
+def test_currency_is_jpy(db):
+    """金额单位必须是日元（避免 agent 表述成人民币元）。"""
+    assert capability.month_salary(db, "2026-09")["currency"] == "JPY"
+
+
 def test_bad_month_rejected(db):
     with pytest.raises(capability.BadMonth):
         capability.month_salary(db, "2026-9")

@@ -90,8 +90,8 @@ def month_salary(db, month: str, person: str | None = None) -> dict[str, Any]:
                 if r["code"] == key or key in (r["name"] or "")]
     if not rows:
         return {"month": month, "persons": 0, "total_points": 0,
-                "total_salary": 0, "per_point": None, "rows": [],
-                "hint": "该月无薪资数据（合法结果，不是错误）"}
+                "total_salary": 0, "currency": "JPY", "per_point": None,
+                "rows": [], "hint": "该月无薪资数据（合法结果，不是错误）"}
 
     per_point = next((r["per_point"] for r in rows if r.get("per_point")), None)
     return {
@@ -99,6 +99,7 @@ def month_salary(db, month: str, person: str | None = None) -> dict[str, Any]:
         "persons": len(rows),
         "total_points": sum(r["points"] or 0 for r in rows),
         "total_salary": sum(r["amount"] or 0 for r in rows),
+        "currency": "JPY",          # 金额单位为日元（円）；勿写成人民币元
         "per_point": per_point,
         "rows": [{
             "person_code": r["code"], "name": r["name"],
