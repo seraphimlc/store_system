@@ -70,11 +70,11 @@ def test_prev_adjust_chain_carry(client):
     db.commit()
     period.sync_period_table(db, "2026-08")
     rows = {r["code"]: r for r in period.period_rows(db, "2026-08")}
-    # 8月：两期=2,500、diff=+2,500；A 上月结转-25,000 吸收2,500后剩-22,500
-    #   → 结转9月 = −2,500 + (−22,500) = −25,000；B 无结转 → 结转9月 = −2,500
-    assert rows["A"]["prev_amt"] == -25000        # 上月修正列=上月结转
+    # 8月无对账任务 → 本月金额差=0（2026-09-25 修复，不再全额扣）；
+    # prev_amt = 上月结转列（carry-in，来自 7 月行），与本月差异无关。
+    assert rows["A"]["prev_amt"] == -25000        # 上月结转输入
     assert rows["B"]["prev_amt"] == 0             # B 无结转
-    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"] == -2500  # 负=扣款
+    assert rows["A"]["adj_amt"] == rows["A"]["diff_amt"] == 0  # 无对账=0
     # carry_map（发薪表上月找平列）：上月结转余额（正补/负扣）
     cm = period.carry_map(db, "2026-08")
     assert cm["A"] == [0, -25000] and cm.get("B") is None
@@ -82,19 +82,37 @@ def test_prev_adjust_chain_carry(client):
 
 
 def test_adjust_auto_equals_diff_amount(client):
-    """找平自动=金额差（无点击操作）：生成后 adj_amt==diff_amt，重新生成保持。"""
+    """找平自动=金额差（无点击操作）：**有对账任务**时 adj_amt==diff_amt。
+
+    无对账任务时差异记 0（不产生"全额扣"幻影差异，2026-09-25 修复）。
+    """
+    from app.models import ReconTask, ReconDataRow
     db = appdb.SessionLocal()
     db.add(Person(code="111", display_name="甲"))
     db.add(PersonDailyStat(person_code="111", ref_date=date(2026, 8, 1),
                            points=5))
+    # 先看无对账：差异 0（旧行为是 −5×250 = 全额扣，已修）
     db.commit()
     period.sync_period_table(db, "2026-08")
     rows = period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -5 * 250  # 负=扣款
-    assert rows[0]["diff"] == -5                       # 偏差点数=参考值
-    period.sync_period_table(db, "2026-08")         # 重新生成
+    assert rows[0]["diff_amt"] == 0 and rows[0]["adj_amt"] == 0
+
+    # 再建对账任务（对账 3 点 vs 系统 5 点 → 差 −2 点 = −500 円）
+    db.add(ReconTask(id=1, kind="monthly_v3", status="done", created_by=1,
+                     params={"month": "2026-08", "kind": "daily_records",
+                             "version": 1, "current": True},
+                     summary={}, created_at=datetime.utcnow()))
+    db.add(ReconDataRow(task_id=1, ref_date=date(2026, 8, 1),
+                        person_code="111", person_name="甲",
+                        points=3, cnt=3))
+    db.commit()
+    period.sync_period_table(db, "2026-08")
     rows = period.period_rows(db, "2026-08")
-    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -5 * 250  # 负=扣款  # 自动保持
+    assert rows[0]["diff_amt"] == rows[0]["adj_amt"] == -2 * 250  # 负=扣款
+    assert rows[0]["diff"] == -2                       # 偏差点数=参考值
+    period.sync_period_table(db, "2026-08")         # 重新生成保持
+    rows = period.period_rows(db, "2026-08")
+    assert rows[0]["adj_amt"] == rows[0]["diff_amt"] == -2 * 250
     db.close()
 
 

@@ -202,6 +202,7 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
             (half1 if r.ref_date.day <= 15 else half2).get(
                 r.person_code, 0) + r.points
     settle = _current_recon(db, month)
+    has_recon = bool(settle)           # 该月是否有当前对账任务（无则差异记 0，不产生全额扣）
     paid = paid_seqs(db, month)        # 已发放的期（吸收额度只用**未发放**的期）
     # 结转链（金额，正=补/负=扣）：
     #   本月行存「下月要扣/补的余额」= −本月金额差 + 本月扣剩余额
@@ -238,7 +239,9 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         h1_amt = h1 * per_point + b1
         h2_amt = h2 * per_point + b2
         # 金额差（含奖金）= 对账金额 − 系统已发金额（负=系统多发→扣款；正=系统少发→补款）
-        diff_amt = settle_amt - (h1_amt + h2_amt)
+        # **无对账任务时记 0**：否则 sp=0 → 差异 = −全月工资 → 找平显示"全额扣"并结转下月
+        # （实测：7/9 月无对账任务时，金额差 = 整月工资，会误导页面并可能误扣下月发薪）
+        diff_amt = (settle_amt - (h1_amt + h2_amt)) if has_recon else 0
         # 下月结转 = 本月金额差 + 本月扣剩余额（负=下月继续扣；正=下月补发）
         #   （上月结转先在本月两期工资里扣：本月两期+上月结转<0 的部分才递延）
         # 可吸收额度 = **未发薪的期**的金额（已发薪的期改不了，不能算作可扣）

@@ -51,9 +51,10 @@ class MiscError(RuntimeError):
         self.code, self.message, self.hint = code, message, hint
 
 
-def _envelope_error(code: str, message: str, hint: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message,
-                                   "hint": hint}}
+def _envelope_error(code: str, message: str, hint: str, **extra) -> dict[str, Any]:
+    """统一失败信封（含 retryable；码表见 mcp_service/envelope.py）。"""
+    from mcp_service import envelope
+    return envelope.error(code, message, hint, **extra)
 
 
 def _call(db, fn) -> dict[str, Any]:
