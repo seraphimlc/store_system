@@ -115,6 +115,17 @@ def mark_paid(db: Session, month: str, half: int, marked_by: int = None,
     return n
 
 
+def register_exported_half(db: Session, month: str, half: int,
+                            paid_by: int = None) -> int:
+    """**导出 = 发放事实**：系统无发薪反馈（导出 Excel 后离线按表发放），
+    所以「导出发薪表」就是事实触发点——把该期全部人的金额快照写入台账。
+
+    - 同 (月,人,期) 已存在不覆盖（第一次导出即事实，更正需显式 unmark）
+    - 返回新登记人数；幂等
+    """
+    return mark_paid(db, month, half, marked_by=paid_by)
+
+
 def month_has_recon(db: Session, month: str) -> bool:
     """该月是否有「当前」对账任务（供页面标注『待对账』）。"""
     return bool(_current_recon(db, month))

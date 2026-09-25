@@ -493,6 +493,14 @@ def perf_export(request: Request, user: Optional[User] =
         month = months[-1] if months else ""
     from app.services import report
     data, fname = report.build_payroll_workbook(db, month, period)
+    # 导出 = 发放事实：系统无发薪反馈，导出后离线按表发放 → 该期金额快照入台账
+    if month:
+        try:
+            from app.services import period as _payroll
+            half = 1 if period == "half1" else 2
+            _payroll.register_exported_half(db, month, half, paid_by=user.id)
+        except Exception:  # noqa: BLE001  登记失败不影响下载
+            db.rollback()
     from fastapi.responses import StreamingResponse
     import io
     bio = io.BytesIO(data)
