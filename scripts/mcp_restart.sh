@@ -41,6 +41,22 @@ for i in $(seq 1 40); do
   if [ "$i" = "40" ]; then echo "  ❌ 超时未就绪，见 $LOG"; exit 1; fi
 done
 
+echo "[3.5/4] 等待 MCP 应用就绪（握手；端口开放≠应用就绪）"
+READY=0
+for i in $(seq 1 20); do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${PORT}/mcp" \
+    -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+    -H "Authorization: Bearer ${VISIT_MCP_READ_TOKEN:-visit-test-ro-2026}" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ready","version":"0"}}}' 2>/dev/null)
+  if [ "${CODE}" = "200" ]; then echo "  就绪（第 ${i} 次探测）"; READY=1; break; fi
+  sleep 1
+done
+if [ "${READY}" != "1" ]; then
+  echo "  ❌ 应用未就绪（最后 HTTP ${CODE}）；日志尾部："
+  tail -5 "$LOG" | sed 's/^/     /'
+  exit 1
+fi
+
 echo "[4/4] 验证工具清单与自洽检查"
 "$PY" - <<'PYEOF'
 import asyncio, os
