@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""P1 只读 MCP 工具能力层：9 个只读工具的聚合实现与注册（一个批次）。
+"""P1 只读 MCP 工具能力层：11 个只读工具的聚合实现与注册（P2-10/11 新增
+visit_list_tasks / visit_list_months）。
 
 职责边界（与 tools.py 的反向划分）：
 - 本模块 = 能力层：一个业务能力一个函数 f(db, **params) -> dict，业务聚合放这里；
@@ -28,6 +29,7 @@ from sqlalchemy import func
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp_service.capability import BadMonth, MONTH_PATTERN
+from mcp_service.annotations import read as read_ann
 
 
 class NotFound(RuntimeError):
@@ -528,6 +530,141 @@ def store_search(db, q: str, limit: int = 20) -> dict[str, Any]:
     return data
 
 
+def _iso(dt) -> str | None:
+    if dt is None:
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") if hasattr(dt, "strftime") \
+        else str(dt)
+
+
+def list_tasks(db, month: str | None = None, kind: str | None = None,
+               status: str | None = None) -> dict[str, Any]:
+    """统一任务列表：巡店导入（ImportFile）+ 对账任务（ReconTask）。
+
+    - kind 过滤：`daily_records`（巡店=ImportFile）/ `recon`（对账=ReconTask）；
+      空则两类都返回。
+    - month 过滤：巡店按「涉及月份」（raw ∪ formal）命中；对账按 params.month。
+    - status 过滤：按传入值字符串匹配（巡店 uploaded/parsed/failed；
+      对账 pending/running/done/failed）。
+    - 每条含：id/month/kind/filename/status/version/is_previous/created_at/
+      finished_at/replaced_previous_ids。
+    - is_previous：对账任务的旧版本标记（params.replaced_by 非空）。
+    - replaced_previous_ids：被本任务标记为上一版的旧任务 id 列表
+      （从被替换者的 replaced_by 反向推导；巡店通道无此语义 → []）。
+    """
+    kind_n = (kind or "").strip().lower() or None
+    if kind_n and kind_n not in ("daily_records", "recon"):
+        raise BadParam(f"未知 kind：{kind!r}",
+                       "可选：daily_records（巡店记录）/ recon（对账明细），不传=全部")
+    month_f = None
+    if month is not None and str(month).strip() != "":
+        month_f = _validate_month(str(month).strip())
+    status_f = (status or "").strip() or None
+
+    out: list[dict[str, Any]] = []
+
+    # ---- 巡店导入（ImportFile）：kind=daily_records ----
+    if kind_n in (None, "daily_records"):
+        from app.models import FormalRecord, ImportFile, RawRecord
+        raw_months: dict[int, set[str]] = {}
+        for imp_id, mod in db.query(RawRecord.import_id,
+                                    RawRecord.modified_raw).all():
+            if mod:
+                raw_months.setdefault(imp_id, set()).add(str(mod)[:7])
+        formal_months: dict[int, set[str]] = {}
+        for imp_id, jd in db.query(FormalRecord.import_id,
+                                   FormalRecord.japan_date).all():
+            if jd is not None:
+                formal_months.setdefault(imp_id, set()).add(str(jd)[:7])
+        for f in db.query(ImportFile).order_by(ImportFile.id.desc()).all():
+            months = sorted(raw_months.get(f.id, set())
+                            | formal_months.get(f.id, set()))
+            if month_f and month_f not in months:
+                continue
+            if status_f and (f.status or "") != status_f:
+                continue
+            out.append({
+                "id": f.id,
+                "month": ",".join(months),
+                "kind": "daily_records",
+                "filename": f.file_name,
+                "status": f.status,
+                "version": None,
+                "is_previous": False,
+                "created_at": _iso(f.created_at),
+                "finished_at": None,
+                "replaced_previous_ids": [],
+            })
+
+    # ---- 对账任务（ReconTask）：kind=recon ----
+    if kind_n in (None, "recon"):
+        from app.models import ReconTask
+        for t in db.query(ReconTask).filter(
+                ReconTask.kind == "monthly_v3").order_by(
+                ReconTask.id.desc()).all():
+            p = t.params or {}
+            m = p.get("month", "")
+            if month_f and m != month_f:
+                continue
+            if status_f and (t.status or "") != status_f:
+                continue
+            replaced = [e.id for e in db.query(ReconTask).filter(
+                ReconTask.kind == "monthly_v3").all()
+                if (e.params or {}).get("replaced_by") == t.id]
+            out.append({
+                "id": t.id,
+                "month": m,
+                "kind": "recon",
+                "filename": p.get("file", ""),
+                "status": t.status,
+                "version": p.get("version"),
+                "is_previous": bool(p.get("replaced_by")),
+                "created_at": _iso(t.created_at),
+                "finished_at": _iso(t.finished_at),
+                "replaced_previous_ids": sorted(replaced),
+            })
+
+    out.sort(key=lambda x: x["id"], reverse=True)
+    data: dict[str, Any] = {"tasks": out, "total": len(out)}
+    if not out:
+        data["hint"] = "无符合条件的任务（合法结果，不是错误）"
+    return data
+
+
+def list_months(db) -> dict[str, Any]:
+    """系统内有数据的月份：formal_records / month_perf_records / recon_tasks 三类各计数。"""
+    from app.models import FormalRecord, MonthPerfRecord, ReconTask
+
+    formal: dict[str, int] = {}
+    for (jd,) in db.query(FormalRecord.japan_date).all():
+        if jd is not None:
+            m = str(jd)[:7]
+            formal[m] = formal.get(m, 0) + 1
+    perf: dict[str, int] = {}
+    for (m,) in db.query(MonthPerfRecord.month).all():
+        if m:
+            perf[m] = perf.get(m, 0) + 1
+    recon: dict[str, int] = {}
+    for t in db.query(ReconTask).filter(
+            ReconTask.kind == "monthly_v3").all():
+        p = t.params or {}
+        m = p.get("month")
+        if m and not p.get("replaced_by"):
+            recon[m] = recon.get(m, 0) + 1
+
+    all_months = sorted(set(formal) | set(perf) | set(recon))
+    months = [{
+        "month": m,
+        "formal_records": formal.get(m, 0),
+        "month_perf_records": perf.get(m, 0),
+        "recon_tasks": recon.get(m, 0),
+    } for m in all_months]
+    data: dict[str, Any] = {"months": months, "total": len(months)}
+    if not months:
+        data["hint"] = "系统尚无任何月数据（合法结果，不是错误）"
+    return data
+
+
 # ---------------------------------------------------------------------------
 # 信封与注册（薄适配层）
 # ---------------------------------------------------------------------------
@@ -568,10 +705,12 @@ def _invoke(ctx: Context, fn) -> dict[str, Any]:
 
 
 def register(mcp: MCPServer) -> None:
-    """注册 9 个只读工具（一个批次；由父会话接入 tools.py）。"""
+    """注册 11 个只读工具（P2-10/11 新增 visit_list_tasks / visit_list_months）。"""
 
     @mcp.tool(
         name="visit_file_list",
+        title="巡店导入文件列表",
+        annotations=read_ann("巡店导入文件列表"),
         description=(
             "只读列出巡店导入文件：每个文件的 id、文件名、解析状态、解析行数、上传时间、"
             "涉及结算月，以及判定分类计数（有效/同店跨日/从档/跨文件重复/空白等，"
@@ -585,6 +724,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_file_report",
+        title="巡店文件判定明细",
+        annotations=read_ann("巡店文件判定明细"),
         description=(
             "只读查看单个巡店文件的判定明细：按 clean_status 分桶计数 + 每桶抽样若干行"
             "（店名/日期/判定/过滤原因），以及已入正式表条数与待处理申诉数。"
@@ -599,6 +740,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_perf_ranking",
+        title="月度绩效排行",
+        annotations=read_ann("月度绩效排行"),
         description=(
             "只读查询某结算月（YYYY-MM）绩效排行：按点数降序取前 N 名，含姓名、点数、"
             "1点/2点店数、工资（日元円，currency=JPY）。"
@@ -616,6 +759,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_dashboard",
+        title="月度看板指标",
+        annotations=read_ann("月度看板指标"),
         description=(
             "只读查询某结算月（YYYY-MM）看板指标：人数/有效店/1点2点/总点数/总工资/2点率/"
             "人均等，优先读物化表 dash_metrics，缺失时回退实时计算；并附 perf.company_summary"
@@ -630,6 +775,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_payroll_rows",
+        title="薪资找平表",
+        annotations=read_ann("薪资找平表"),
         description=(
             "只读查询某结算月（YYYY-MM）薪资找平（分期对账偏差）表：每人两期（上半月/"
             "下半月）点数、金额、奖金、店数快照，以及对账/上月修正/偏差/找平与递延余额"
@@ -645,6 +792,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_person_detail",
+        title="员工日明细",
+        annotations=read_ann("员工日明细"),
         description=(
             "只读查询某员工在某结算月（YYYY-MM）的日明细：person_daily_stats"
             "（日期/点数/店数/1点2点）+ 该月汇总（有效店/点数/工资，日元円）。"
@@ -659,6 +808,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_config_get",
+        title="结算配置查询",
+        annotations=read_ann("结算配置查询"),
         description=(
             "只读查看当前生效的结算配置：每点单价（円）、奖金门槛与奖额"
             "（每满门槛点奖奖额，可按月 schedule 覆盖）、员工可见起始月。"
@@ -671,6 +822,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_staff_list",
+        title="员工账号列表",
+        annotations=read_ann("员工账号列表"),
         description=(
             "只读列出员工账号：用户名、角色、状态（在岗/请假/停用/离职）、是否绑定人员"
             "（person_code）、最近登录（Token 最近使用时间），可按状态筛选。"
@@ -683,6 +836,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_store_search",
+        title="店铺主档检索",
+        annotations=read_ann("店铺主档检索"),
         description=(
             "只读检索店铺主档：按店铺编号/名称/规范化名/城市 LIKE 模糊匹配，"
             "返回店名、规范化名、城市、地址、是否主档等。"
@@ -692,3 +847,39 @@ def register(mcp: MCPServer) -> None:
     )
     def visit_store_search(ctx: Context, q: str, limit: int = 20) -> dict[str, Any]:
         return _invoke(ctx, lambda db: store_search(db, q, limit=limit))
+
+    @mcp.tool(
+        name="visit_list_tasks",
+        title="历史任务列表",
+        annotations=read_ann("历史任务列表"),
+        description=(
+            "只读列出历史任务（巡店导入 + 对账任务统一列表）：每条含 id/month/kind/"
+            "filename/status/version/is_previous/created_at/finished_at/"
+            "replaced_previous_ids。"
+            "kind 过滤：daily_records（巡店=导入文件）/ recon（对账=对账任务），"
+            "不传=两类都返回；month 过滤（YYYY-MM，巡店按涉及月份命中、对账按任务月份）；"
+            "status 过滤按字符串匹配。"
+            "什么时候用：回答『这个月上传过哪些文件/对账任务、当前是哪一版』。"
+            "关键约束：只读；同月重传后旧对账任务 is_previous=true 且被新任务的"
+            "replaced_previous_ids 记录。"
+        ),
+    )
+    def visit_list_tasks(ctx: Context, month: str | None = None,
+                         kind: str | None = None,
+                         status: str | None = None) -> dict[str, Any]:
+        return _invoke(ctx, lambda db: list_tasks(db, month=month,
+                                                  kind=kind, status=status))
+
+    @mcp.tool(
+        name="visit_list_months",
+        title="有数据月份列表",
+        annotations=read_ann("有数据月份列表"),
+        description=(
+            "只读列出系统内有数据的月份（YYYY-MM）：正式表（formal_records）/ "
+            "月绩效（month_perf_records）/ 对账任务（recon_tasks）三类各计数。"
+            "什么时候用：回答『系统里有哪几个月的结算数据』『某月有没有对过账』。"
+            "关键约束：只读；空系统返回 ok:True 与空列表（合法结果，不是错误）。"
+        ),
+    )
+    def visit_list_months(ctx: Context) -> dict[str, Any]:
+        return _invoke(ctx, lambda db: list_months(db))

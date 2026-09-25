@@ -16,6 +16,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from mcp_service import guards
 from mcp_service.tools import _write_call
+from mcp_service.annotations import write as write_ann
 
 
 def _entity_summary(e) -> dict[str, Any]:
@@ -244,6 +245,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_store_merge_pair",
+        title="合并候选店名",
+        annotations=write_ann("合并候选店名", idempotent=False),
         description=(
             "合并一对候选店名：把候选对里另一实体并入 keep 指定的主档。"
             "参数：pair_id（候选对 id）；keep（**候选对中一个实体的 id**，"
@@ -258,6 +261,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_store_skip_pair",
+        title="标记不同店",
+        annotations=write_ann("标记不同店", idempotent=False),
         description=(
             "把一对候选店名标记为「不同店」（不再合并，也不再有提示）。"
             "参数：pair_id（候选对 id）；kind 可选（exact/fuzzy）。"
@@ -269,6 +274,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_store_split_entity",
+        title="拆分店铺实体",
+        annotations=write_ann("拆分店铺实体", idempotent=False),
         description=(
             "拆分被误合并的店铺实体：把该实体拆回自己为主档（撤销并入）。"
             "参数：entity_id（实体 id，可用 visit_store_search 检索）；"
@@ -283,6 +290,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_store_apply_all",
+        title="整批应用合并",
+        annotations=write_ann("整批应用合并", idempotent=False),
         description=(
             "整批应用推荐合并：A 组（同名归一化全等）每组并入最早建档实体，"
             "跨城市组自动留出待人工。参数：confirm_text 必须原文："

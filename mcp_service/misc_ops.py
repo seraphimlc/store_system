@@ -34,6 +34,8 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp_service import guards
 from mcp_service.export_ops import _authorize, _ok_data
 from mcp_service.tools import _write_call
+from mcp_service.annotations import read as read_ann
+from mcp_service.annotations import write as write_ann
 
 _DOC_PATH = Path(__file__).resolve().parent.parent / "app" / "product_doc.md"
 _DOC_CHAR_LIMIT = 8000
@@ -365,6 +367,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_file_layout",
+        title="文件解析布局",
+        annotations=read_ann("文件解析布局"),
         description=(
             "只读查看某巡店文件的**解析布局**：表头行（header_row）、列映射"
             "（cols：店铺ID/店名/巡店时间/提交人/有效/投放/记录编号各列）、"
@@ -378,6 +382,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_product_doc",
+        title="产品说明文档",
+        annotations=read_ann("产品说明文档"),
         description=(
             "只读返回系统产品说明原文（app/product_doc.md，纯 Markdown 文本）："
             "系统怎么用、判重与点数规则、工资与奖金规则、每月流程等。"
@@ -389,6 +395,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_staff_set_status",
+        title="员工状态修改",
+        annotations=write_ann("员工状态修改", idempotent=True),
         description=(
             "修改员工账号状态（写）：active 在岗 / leave 请假 / disabled 停用 / "
             "resigned 离职；停用/离职联动 is_active=False（禁登录），数据永不删除。"
@@ -404,6 +412,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_store_ai_run",
+        title="启动AI批处理",
+        annotations=write_ann("启动AI批处理", idempotent=False),
         description=(
             "启动店铺主档 **B 组 AI 批处理**（写；后台任务，通常几分钟）。"
             "复用网页 /stores/ai-run 口径：无待处理候选 → started=False + hint；"
@@ -417,6 +427,8 @@ def register(mcp: MCPServer) -> None:
 
     mcp.tool(
         name="visit_export_recon_result",
+        title="对账产物下载",
+        annotations=read_ann("对账产物下载"),
         description=(
             "下载某对账任务（task_id）的**原始产物文件** xlsx：优先返回 "
             "task.params.result_path 落盘的产物；不存在则按网页 /recon/result "

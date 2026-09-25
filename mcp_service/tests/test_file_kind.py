@@ -35,7 +35,7 @@ def test_visit_detected_by_sheet_name():
         ["010104709202609150", "Honegori", "2026-09-16 07:54:44"],
     ]})
     info = file_kind.detect_kind(content)
-    assert info["kind"] == "visit"
+    assert info["kind"] == "daily_records"
     assert "STORE_TASK_EXCEL_SHEET" in info["reason"]
 
 
@@ -78,7 +78,7 @@ def test_sheet_name_wins_over_overlapping_headers():
          "Agent Name", "Statement Date"],
         ["0101", "2026-09-01 10:00:00", "甲(2188)", "0101", "甲", "2026-09-01"],
     ]})
-    assert file_kind.detect_kind(content)["kind"] == "visit"
+    assert file_kind.detect_kind(content)["kind"] == "daily_records"
 
 
 def test_infer_month_from_datetime_cells():
@@ -111,7 +111,7 @@ def test_unknown_returns_options_for_user_choice(monkeypatch):
     err = res["error"]
     assert err["code"] == "NEED_FILE_KIND"
     kinds = [o["kind"] for o in err["options"]]
-    assert kinds == ["visit", "recon"]
+    assert kinds == ["daily_records", "recon"]
     assert "询问用户" in err["hint"]
 
 

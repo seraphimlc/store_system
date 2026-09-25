@@ -71,11 +71,11 @@ def _upload_visit(db, actor, *, filename: str | None = None,
 
     importer.parse_file(imp, db)
     if imp.status == "failed":
-        return {"ok": False, "error": {
-            "code": "PARSE_FAILED",
-            "message": "；".join((imp.errors or [])[:3]) or "解析失败",
-            "hint": "文件格式无法识别；可在网页端「解析布局」页人工纠正表头后再试",
-        }}
+        from mcp_service import envelope
+        return envelope.error(
+            "PARSE_FAILED",
+            "；".join((imp.errors or [])[:3]) or "解析失败",
+            "文件格式无法识别；可在网页端「解析布局」页人工纠正表头后再试")
 
     months = sorted(_file_months(db, imp.id))
     hit = guards.sealed_months(db, months)
@@ -98,13 +98,15 @@ def _upload_visit(db, actor, *, filename: str | None = None,
         "judge": judge,
         "formal_added": fr.get("added", 0),
         "pipeline_ok": fr.get("ok", True),
+        "is_overwrite": False,     # 巡店通道无"覆盖上一版"语义（sha256 去重防重复）
         "note": "已自动完成：判定 → 入正式表 → 工资/找平/看板/员工分析刷新",
     }}
 
 
 # 让用户做选择时展示的选项（agent 据此询问，用户答完用 kind 重传）
 KIND_OPTIONS = [
-    {"kind": "visit", "label": "巡店记录（MarsNavi STORE VISIT RECORD）",
+    {"kind": "daily_records",
+     "label": "巡店记录（MarsNavi STORE VISIT RECORD）",
      "effect": "解析→判定→入正式表→工资/找平/看板刷新"},
     {"kind": "recon", "label": "对账明细（如支付宝/结算数据）",
      "effect": "建对账任务→与系统人日统计比对→差异行"},
@@ -113,19 +115,28 @@ KIND_OPTIONS = [
 
 def upload_file(db, actor, *, filename: str | None = None,
                 content: bytes | None = None, path: str | None = None,
-                month: str | None = None, kind: str | None = None) -> dict[str, Any]:
+                month: str | None = None, kind: str | None = None,
+                dry_run: bool = False) -> dict[str, Any]:
     """**统一上传入口**：自动识别文件类型并路由到对应通道。
 
     - 巡店记录（sheet 名 STORE_TASK_EXCEL_SHEET）→ 判定/入正式表全链路
     - 对账明细（Alipay 结算数据等）→ 对账任务（月份可从文件日期推断）
     - 手工结算对照件 / 无法识别的表头 → 明确报错并给指引（不抛晦涩异常）
 
+    `dry_run=True`（P2-12）：只做 识别(detect_kind) + 推断月份(infer_month)
+    + 查将替换的对账任务，**不写入任何数据**；返回影响预估供模型复述给用户。
+
     用户只需"把文件丢进来"，不必自己判断走哪条通道。
     """
-    from mcp_service import file_kind
+    from mcp_service import file_kind, envelope
 
     guards.require_write(actor)
 
+    # P0-1：path 与 content_base64 互斥且必须其一（描述已声明，此处强制）
+    if content is not None and path is not None:
+        raise guards.GuardError(
+            "BAD_PARAM", "path 与 content_base64 不可同时提供",
+            "二选一：跨机器上传用 content_base64，本机同机用 path")
     # 先解析内容（路径/base64），识别需要真实字节
     raw = content
     name = filename
@@ -140,25 +151,52 @@ def upload_file(db, actor, *, filename: str | None = None,
     detected = info["kind"]
 
     # 用户/模型显式指定类型时优先（用于"识别不出来 → 问用户 → 重传"）
-    forced = (kind or "").strip().lower() or None
-    if forced and forced not in ("visit", "recon"):
+    forced = file_kind.normalize_kind(kind)
+    if forced and forced not in ("daily_records", "recon"):
         raise guards.GuardError(
-            "BAD_PARAM", f"kind 只能是 visit 或 recon，收到 {kind!r}",
-            "巡店记录用 kind='visit'；对账明细用 kind='recon'")
+            "BAD_PARAM", f"kind 只能是 daily_records 或 recon，收到 {kind!r}",
+            "巡店记录用 kind='daily_records'（旧值 'visit' 兼容）；"
+            "对账明细用 kind='recon'")
     if forced:
         detected = forced
-        info = {"kind": forced, "reason": f"由调用方指定（kind={forced}）",
+        info = {"kind": forced,
+                "reason": f"由调用方指定（kind={forced}）",
                 "sheets": info.get("sheets", []), "header": info.get("header", [])}
     kind = detected
+
+    # ---------------- dry_run：只预估，不写入 ----------------
+    if dry_run:
+        est = file_kind.estimate(raw, kind)
+        month_est = month or (
+            file_kind.infer_month(raw, "recon") if kind == "recon" else None)
+        will_replace = []
+        if kind == "recon" and month_est:
+            from app.models import ReconTask
+            will_replace = sorted(
+                t.id for t in db.query(ReconTask).filter(
+                    ReconTask.kind == "monthly_v3").all()
+                if (t.params or {}).get("month") == month_est
+                and not (t.params or {}).get("replaced_by"))
+        return {"ok": True, "data": {
+            "dry_run": True,
+            "detected": {"kind": kind, "reason": info.get("reason", "")},
+            "month": month_est,
+            "will_replace_task_ids": will_replace,
+            "estimated_rows": est["estimated_rows"],
+            "estimated_persons": est["estimated_persons"],
+            "hint": "dry_run=true：未写入任何数据；以上为识别与影响预估，"
+                    "确认后再用 dry_run=false 正式上传",
+        }}
 
     # 打不开为 Excel（非 xlsx 等）→ 交回巡店通道，由它给出标准错误
     if kind == "unknown" and "无法打开为 Excel" in str(info.get("reason", "")):
         return _upload_visit(db, actor, filename=name, content=raw, path=None)
 
-    if kind == "visit":
+    if kind == "daily_records":
         res = _upload_visit(db, actor, filename=name, content=raw, path=None)
         if res.get("ok"):
-            res["data"]["detected"] = {"kind": "visit", "reason": info["reason"]}
+            res["data"]["detected"] = {
+                "kind": "daily_records", "reason": info["reason"]}
         return res
 
     if kind == "recon":
@@ -174,28 +212,30 @@ def upload_file(db, actor, *, filename: str | None = None,
         if res.get("ok"):
             res["data"]["detected"] = {"kind": "recon", "reason": info["reason"],
                                        "month_inferred": month is None}
+            # P1-7：task.kind 反映实际识别结果（recon），不暴露内部固定值
+            task_row = res["data"].get("task")
+            if isinstance(task_row, dict):
+                task_row["kind"] = "recon"
         return res
 
     if kind == "manual":
-        return {"ok": False, "error": {
-            "code": "MANUAL_SETTLEMENT_FILE",
-            "message": "这是手工结算对照件（巡回最终结算），系统无对应入库通道",
-            "options": KIND_OPTIONS,
-            "hint": "它是核对用的「标准答案」，不是巡店记录也不是对账明细。"
-                    "如用户确认要按巡店记录或对账明细处理，请带 kind 参数重传"
-                    "（kind='visit' / kind='recon'）；否则作为参考文件人工比对。",
-        }}
+        return envelope.error(
+            "MANUAL_SETTLEMENT_FILE",
+            "这是手工结算对照件（巡回最终结算），系统无对应入库通道",
+            "它是核对用的「标准答案」，不是巡店记录也不是对账明细。"
+            "如用户确认要按巡店记录或对账明细处理，请带 kind 参数重传"
+            "（kind='daily_records' / kind='recon'）；否则作为参考文件人工比对。",
+            options=KIND_OPTIONS)
 
-    return {"ok": False, "error": {
-        "code": "NEED_FILE_KIND",
-        "message": f"无法自动识别文件类型：{info.get('reason')}",
-        "options": KIND_OPTIONS,
-        "seen": {"sheets": info.get("sheets", []),
-                 "header": [h for h in info.get("header", []) if h][:12]},
-        "hint": "请**询问用户**这个文件属于下面哪一类，然后带上 kind 参数重新上传"
-                "（kind='visit' 巡店记录 / kind='recon' 对账明细）。"
-                "不要自行猜测类型。",
-    }}
+    return envelope.error(
+        "NEED_FILE_KIND",
+        f"无法自动识别文件类型：{info.get('reason')}",
+        "请**询问用户**这个文件属于下面哪一类，然后带上 kind 参数重新上传"
+        "（kind='daily_records' 巡店记录 / kind='recon' 对账明细）。"
+        "不要自行猜测类型。",
+        options=KIND_OPTIONS,
+        seen={"sheets": info.get("sheets", []),
+              "header": [h for h in info.get("header", []) if h][:12]})
 
 
 def _read_path(path: str | None) -> tuple[bytes | None, str | None]:

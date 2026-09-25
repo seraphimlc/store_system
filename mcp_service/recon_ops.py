@@ -19,6 +19,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from app.db import SessionLocal
 from mcp_service.capability import MONTH_PATTERN
+from mcp_service.annotations import read as read_ann
 
 # 注册时经 tools.py 接线：tools.register 内调用 recon_ops.register(mcp)。
 # 本文件只实现 register；工具函数定义在模块级（便于单测直接调用与断言信封）。
@@ -184,7 +185,7 @@ def _recon_status(db, month: str | None = None) -> dict[str, Any]:
         tasks.append({
             "id": t.id,
             "month": p.get("month", ""),
-            "kind": s.get("kind", p.get("kind", "")),
+            "kind": "recon" if t.kind == "monthly_v3" else s.get("kind", p.get("kind", "")),
             "filename": p.get("file", ""),
             "status": t.status,
             "created_at": _iso(t.created_at),
@@ -288,7 +289,7 @@ def _recon_diff(db, task_id: int | None = None,
 
     data: dict[str, Any] = {
         "task": {"id": task.id, "month": m,
-                 "kind": s.get("kind", p.get("kind", "")),
+                 "kind": "recon" if task.kind == "monthly_v3" else s.get("kind", p.get("kind", "")),
                  "filename": p.get("file", ""),
                  "status": task.status,
                  "version": p.get("version"),
@@ -400,9 +401,12 @@ _DESC_ADJUST = (
 
 def register(mcp: MCPServer) -> None:
     """注册 3 个对账只读工具（父会话在 tools.py 里接线调用）。"""
-    mcp.tool(name="visit_recon_status", description=_DESC_STATUS)(
-        visit_recon_status)
-    mcp.tool(name="visit_recon_diff", description=_DESC_DIFF)(
-        visit_recon_diff)
-    mcp.tool(name="visit_recon_adjust_state", description=_DESC_ADJUST)(
-        visit_recon_adjust_state)
+    mcp.tool(name="visit_recon_status", title="对账任务列表",
+             annotations=read_ann("对账任务列表"),
+             description=_DESC_STATUS)(visit_recon_status)
+    mcp.tool(name="visit_recon_diff", title="对账差异明细",
+             annotations=read_ann("对账差异明细"),
+             description=_DESC_DIFF)(visit_recon_diff)
+    mcp.tool(name="visit_recon_adjust_state", title="薪资找平状态",
+             annotations=read_ann("薪资找平状态"),
+             description=_DESC_ADJUST)(visit_recon_adjust_state)

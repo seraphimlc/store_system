@@ -15,6 +15,7 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer
 
 from mcp_service import guards
+from mcp_service.annotations import write as write_ann
 
 
 def _to_int(value, name: str, *, lo: int, hi: int) -> int:
@@ -338,6 +339,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_recon_interpret",
+        title="对账结果AI解读",
+        annotations=write_ann("对账结果AI解读", idempotent=True),
         description=(
             "用 AI 解读某对账任务的结果并写入任务 summary.ai_interpret（覆盖旧解读）。"
             "**可能耗时**：AI 调用最长约 10 分钟（timeout 600s），期间请勿重复并发调用；"
@@ -355,6 +358,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_recon_adjust",
+        title="对账差异找平",
+        annotations=write_ann("对账差异找平", idempotent=True),
         description=(
             "对账差异找平（**涉钱**）：action=add 确认找平（记入下月工资，正=补发/负=扣回），"
             "action=remove 取消找平（同步撤销写入薪资找平表的金额增量）。"
@@ -380,6 +385,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_payroll_generate",
+        title="生成薪资找平表",
+        annotations=write_ann("生成薪资找平表", idempotent=True),
         description=(
             "生成/更新某月的薪资找平表（**涉钱**）：同步该月分期对账偏差表，"
             "并刷新看板统计。封账月份拒绝（MONTH_SEALED）；生成前强制加载系统配置"
@@ -397,6 +404,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_payroll_update",
+        title="人工修正找平金额",
+        annotations=write_ann("人工修正找平金额", idempotent=False),
         description=(
             "人工修正某人某月的两期金额与找平增量（**涉钱**，会影响发薪与递延："
             "两期实发与下月结转）。confirm_text 必须原文：`确认修正 {month} {person_code}`。"
@@ -429,6 +438,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_payroll_mark_paid",
+        title="标记发薪",
+        annotations=write_ann("标记发薪", idempotent=True),
         description=(
             "标记/取消「某结算月的某期（上半月/下半月）已实际发薪」。"
             "**发薪后请及时标记**：找平的「上月结转」只能从未发薪的期里扣/补，"
@@ -452,6 +463,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_config_set",
+        title="保存系统配置",
+        annotations=write_ann("保存系统配置", idempotent=True),
         description=(
             "保存系统配置（**涉钱**）：每点单价 per_point（円/点）、奖金门槛 "
             "bonus_group（点）、奖额 bonus_amount（円）。confirm_text 必须原文："

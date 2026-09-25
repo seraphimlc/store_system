@@ -21,7 +21,7 @@ EXPECTED_TOOLS = {
     "visit_file_list", "visit_file_report", "visit_perf_ranking",
     "visit_dashboard", "visit_payroll_rows", "visit_person_detail",
     "visit_config_get", "visit_staff_list", "visit_store_search",
-}
+    "visit_list_tasks", "visit_list_months"}
 
 
 @pytest.fixture()

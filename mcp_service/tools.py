@@ -12,6 +12,8 @@ from mcp.server.mcpserver import Context, MCPServer
 from pydantic import Field
 
 from mcp_service.capability import MONTH_PATTERN
+from mcp_service.annotations import read as read_ann
+from mcp_service.annotations import write as write_ann
 
 
 def _client_info(ctx: Context) -> str | None:
@@ -54,6 +56,25 @@ def _envelope_error(code: str, message: str, hint: str,
     """统一失败信封（含 retryable；码表见 mcp_service/envelope.py）。"""
     from mcp_service import envelope
     return envelope.error(code, message, hint, **extra)
+
+
+def _check_upload_sources(path: str | None,
+                          content_base64: str | None) -> dict[str, Any] | None:
+    """P0-1 参数互斥：`path` 与 `content_base64` 必须且只能提供其一。
+
+    都传 → BAD_REQUEST；都不传 → BAD_REQUEST（hint 说明）。
+    返回 None 表示通过；否则返回错误信封（调用方直接 return）。
+    """
+    if content_base64 and path:
+        return _envelope_error(
+            "BAD_REQUEST", "path 与 content_base64 不可同时提供",
+            "二选一：跨机器用 content_base64；本机路径模式用 path，不要同时传")
+    if not content_base64 and not path:
+        return _envelope_error(
+            "BAD_REQUEST", "必须提供 path 或 content_base64 之一",
+            "请把文件内容以 base64 传入（content_base64），"
+            "或在本机路径模式下给绝对路径（path）；两者都不可缺失")
+    return None
 
 
 def _write_call(ctx: Context, tool: str, params: dict, fn, *, retryable: bool):
@@ -125,6 +146,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_ping",
+        title="服务诊断回显",
+        annotations=read_ann("服务诊断回显"),
         description=(
             "诊断用：回显服务端身份、协商到的协议版本、以及本次调用是否携带了 "
             "Authorization 凭据头。用于排查 WorkBuddy 连接与鉴权问题。"
@@ -139,7 +162,10 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_upload_file",
+        title="上传巡店/对账文件",
+        annotations=write_ann("上传巡店/对账文件", idempotent=False),
         description=(
+            "必须提供 path 或 content_base64 之一，不可同时提供，也不可都不提供。"
             "**统一上传入口：自动识别文件类型并走对应通道**，用户只需把文件丢进来。"
             "识别规则：① 巡店记录（MarsNavi STORE VISIT RECORD，sheet 名 "
             "STORE_TASK_EXCEL_SHEET）→ 解析 → 判定 → 入正式表 → 工资/找平/看板/员工分析全自动；"
@@ -148,9 +174,26 @@ def register(mcp: MCPServer) -> None:
             "③ 手工结算对照件（巡回最终结算）→ 明确提示不入库；④ 无法识别 → 给出指引。"
             "参数：filename；content_base64（文件内容 base64，跨机器上传用）；"
             "path（本机绝对路径，仅服务端开启本地路径模式时可用）；month（可选，对账文件用）；"
-            "kind（可选，强制指定 visit/recon）。"
+            "kind（可选，强制指定 daily_records/recon，兼容旧值 visit）；"
+            "dry_run（可选，默认 false；true=只识别+推断月份+查将替换的对账任务，"
+            "**不写入**，返回影响预估）。"
+            "**detected 字段说明**：返回里的 detected = {kind, reason, month_inferred}；"
+            "kind 为实际识别结果（daily_records=巡店 / recon=对账），reason 为识别依据，"
+            "month_inferred=true 表示对账月份是从文件推断的。"
             "**若返回 NEED_FILE_KIND（识别不出），必须询问用户该文件属于哪一类，"
             "拿到答复后带 kind 参数重新上传，不要自行猜测。**"
+            "**幂等与覆盖语义：**"
+            "- 文件级去重：按内容 sha256。字节相同的文件重复上传返回 DUPLICATE_FILE，不重复入库。"
+            "- 同月覆盖：同一结算月的同类型数据重复上传会「覆盖」上一版本"
+            "（旧任务 replaced、version 递增），不是追加。"
+            "- 不同月份互不影响。"
+            "**错误码表**（失败返回 {ok:false, error:{code,message,retryable,hint}}）："
+            "PARSE_FAILED 文件无法解析（不可重试，需修正文件）；DUPLICATE_FILE 内容指纹已存在"
+            "（不可重试）；INTERNAL_WRITE 服务端写入异常、可能已部分生效"
+            "（**禁止自动重试**）；TEMPLATE_SHEET_MISSING 未找到巡店模板 sheet（不可重试）；"
+            "MONTH_SEALED / MONTH_CLOSED 目标月份已封账（不可重试）；AUTH_FAILED / "
+            "UNAUTHORIZED / FORBIDDEN_TOOL 鉴权或权限不足（不可重试）；BAD_REQUEST / "
+            "BAD_PARAM / BAD_MONTH 参数不合法（不可重试）。"
             "需要写权限 Token。封账月份的巡店文件会被拒绝。"
         ),
     )
@@ -161,7 +204,11 @@ def register(mcp: MCPServer) -> None:
         path: str | None = None,
         month: str | None = None,
         kind: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
+        bad = _check_upload_sources(path, content_base64)
+        if bad is not None:
+            return bad
         from mcp_service import write_ops
 
         content = write_ops.decode_base64(content_base64) if content_base64 else None
@@ -169,18 +216,26 @@ def register(mcp: MCPServer) -> None:
         def run(db, actor):
             return write_ops.upload_file(db, actor, filename=filename,
                                          content=content, path=path,
-                                         month=month, kind=kind)
+                                         month=month, kind=kind,
+                                         dry_run=dry_run)
 
         return _write_call(ctx, "visit_upload_file",
                            {"filename": filename, "path": path,
-                            "has_content": bool(content_base64)},
+                            "has_content": bool(content_base64),
+                            "dry_run": dry_run},
                            run, retryable=False)
 
     @mcp.tool(
         name="visit_month_salary",
+        title="月度薪资查询",
+        annotations=read_ann("月度薪资查询"),
         description=(
             "查询某结算月（格式 YYYY-MM）的员工薪资：人数、总点数、总工资，"
             "以及每人点数与工资明细。可选 person 参数按工号或姓名筛选。"
+            "字段口径：points（该人总点数）/ p1·p2（1点/2点条数）/ per_point"
+            "（单价，円/点）/ salary（应付工资円）/ settle_amount（实际结算额円，"
+            "未对账为 0）/ diff_amount（=settle_amount−salary，未对账时为 0）。"
+            "person 匹配规则：工号精确匹配；姓名包含匹配；同名返回全部。"
             "数据来自已物化的月绩效记录（已结算口径），只读。"
             "注意：金额单位为日元（円，字段 currency=JPY），不要表述为人民币元。"
         ),
@@ -208,6 +263,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_month_summary",
+        title="月度正式表汇总",
+        annotations=read_ann("月度正式表汇总"),
         description=(
             "查询某结算月（格式 YYYY-MM）正式表的行数、总点数、1点/2点条数与人数。"
             "数据来自已结算的正式表，只读。"

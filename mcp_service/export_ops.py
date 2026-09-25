@@ -152,9 +152,12 @@ def register(mcp) -> None:
     from pydantic import Field
 
     from app.db import SessionLocal
+    from mcp_service.annotations import read as read_ann
 
     @mcp.tool(
         name="visit_export_salary",
+        title="发薪表导出",
+        annotations=read_ann("发薪表导出"),
         description=(
             "导出发薪表 Excel（发薪用）：某结算月（YYYY-MM，period=half1 上半月/"
             "half2 下半月）的发薪表——汇总 sheet + 每人一 sheet 的日明细"
@@ -175,12 +178,26 @@ def register(mcp) -> None:
             return err
         db = SessionLocal()
         try:
-            return _run_export(db, "salary", month=month, period=period)
+            res = _run_export(db, "salary", month=month, period=period)
+            # 导出 = 发放事实：系统无发薪反馈，导出后离线按表发放 → 台账快照
+            if res.get("ok"):
+                try:
+                    from app.services import period as _payroll
+                    half = 1 if period == "half1" else 2
+                    n = _payroll.register_exported_half(db, month, half)
+                    res["data"]["ledger"] = {
+                        "seq": half, "registered": n,
+                        "note": "导出发薪表即视为该期已发薪（台账快照，同期再次导出不覆盖）"}
+                except Exception:  # noqa: BLE001
+                    db.rollback()
+            return res
         finally:
             db.close()
 
     @mcp.tool(
         name="visit_export_payroll_settle",
+        title="分期对账偏差表导出",
+        annotations=read_ann("分期对账偏差表导出"),
         description=(
             "导出月度分期对账偏差表 Excel（找平用）：某结算月（YYYY-MM）每人 "
             "上半月/下半月点数与金额、奖金、分期已发、对账点数/金额、上月修正、"
@@ -206,6 +223,8 @@ def register(mcp) -> None:
 
     @mcp.tool(
         name="visit_export_recon_diff",
+        title="对账差异清单导出",
+        annotations=read_ann("对账差异清单导出"),
         description=(
             "导出对账差异 Excel（对账用）：某对账任务（task_id）的差异明细"
             "（人员/编号/系统点数/对账点数/差异）+ 反向名单（系统有而对账文件无）。"
@@ -226,6 +245,8 @@ def register(mcp) -> None:
 
     @mcp.tool(
         name="visit_export_recon_report",
+        title="月度对账报告导出",
+        annotations=read_ann("月度对账报告导出"),
         description=(
             "导出月度对账报告 Excel（月终报告用）：某对账任务（task_id）的完整"
             "月度对账报告——报告摘要 + 员工×日问题行 + 差异明细 + 反向名单 + "

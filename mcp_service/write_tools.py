@@ -19,6 +19,8 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from mcp_service import guards
 from mcp_service.tools import _write_call
+from mcp_service.annotations import write as write_ann
+from mcp_service.annotations import preview as preview_ann
 
 
 # ---------- 适配层 ----------
@@ -287,6 +289,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_finalize_file",
+        title="出正式表",
+        annotations=write_ann("出正式表", idempotent=True),
         description=(
             "把某个已上传文件的判定结果写入正式表（自动完成工资/找平/看板刷新）。"
             "幂等，可安全重试。文件涉及封账月份（raw 月份 ∪ 正式表月份任一命中）"
@@ -303,6 +307,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_rebuild_preview",
+        title="月度重算预演",
+        annotations=preview_ann("月度重算预演"),
         description=(
             "月度重算前的只读预演：估算该月正式表现状、raw 判定分布与点数影响面，"
             "并生成 preview_id（30 分钟有效）。重算前必须先调用本工具，"
@@ -319,6 +325,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_rebuild_month",
+        title="月度重算重建",
+        annotations=write_ann("月度重算重建", idempotent=False),
         description=(
             "按结算月重算并重建正式表（重判 + 保护申诉成果 + 重建）。"
             "必须先调 visit_rebuild_preview 拿 preview_id，并把确认语原文填入 "
@@ -339,6 +347,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="visit_set_per_point",
+        title="设置点数单价",
+        annotations=write_ann("设置点数单价", idempotent=True),
         description=(
             "设置某结算月的点数单价（円/点）并重算该月工资与找平表。"
             "confirm_text 必须原文：确认改单价 {month} {per_point}。"

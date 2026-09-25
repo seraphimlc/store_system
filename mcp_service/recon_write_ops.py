@@ -19,6 +19,10 @@ def _read_content(content: bytes | None, path: str | None) -> tuple[bytes, str |
     """解析文件内容：base64 直传优先；本地路径需显式开关（远端=任意文件读取风险）。"""
     from mcp_service import write_ops
 
+    if content is not None and path is not None:
+        raise guards.GuardError(
+            "BAD_PARAM", "path 与 content_base64 不可同时提供",
+            "二选一：跨机器上传用 content_base64，本机同机用 path")
     if content is not None:
         return content, None
     if not path:
@@ -65,12 +69,18 @@ def upload_recon(db, actor, *, month: str, filename: str | None = None,
     # 复用只读工具的汇总口径（同一真相）
     status = recon_ops._recon_status(db, month)
     task_row = next((x for x in status.get("tasks", []) if x["id"] == task.id), None)
+    if task_row is not None:
+        # P1-7：task.kind 反映实际识别结果（detected.kind = recon），
+        # 不再暴露内部固定值（daily_records）
+        from mcp_service.file_kind import KIND_RECON
+        task_row["kind"] = KIND_RECON
 
     return {"ok": True, "data": {
         "task_id": task.id,
         "month": month,
         "status": task.status,
         "replaced_previous_ids": older,
+        "is_overwrite": bool(older),     # P0-3：同月已有版本 → 覆盖（旧任务标记为上一版）
         "task": task_row,
         "currency": "JPY",
         "note": "对账已同步完成；差异明细用 visit_recon_diff(month=...) 查询，"
@@ -79,15 +89,26 @@ def upload_recon(db, actor, *, month: str, filename: str | None = None,
 
 
 def register(mcp: MCPServer) -> None:
-    from mcp_service.tools import _write_call
+    from mcp_service.tools import _write_call, _check_upload_sources
+    from mcp_service.annotations import write as write_ann
 
     @mcp.tool(
         name="visit_upload_recon",
+        title="上传对账文件",
+        annotations=write_ann("上传对账文件", idempotent=False),
         description=(
+            "必须提供 path 或 content_base64 之一，不可同时提供，也不可都不提供。"
             "上传**对账文件**（如支付宝结算数据，逐条明细含日期/店/人员）并同步完成对账："
             "解析 → 与系统人日统计比对 → 生成差异行与结果。需要写权限 Token。"
             "参数：month（结算月 YYYY-MM）；filename；content_base64（文件内容 base64）；"
             "path（本机绝对路径，仅服务端开启本地路径模式时可用）。"
+            "**幂等与覆盖语义**：同月重复上传会「覆盖」上一版本（旧任务标记为上一版、"
+            "version 递增），返回 is_overwrite=true 与 replaced_previous_ids；"
+            "字节相同的文件按内容 sha256 去重，重复上传返回 DUPLICATE_FILE 不重复入库。"
+            "**错误码表**：PARSE_FAILED（文件无法解析，不可重试）；DUPLICATE_FILE（内容指纹"
+            "已存在，不可重试）；INTERNAL_WRITE（写入异常可能已部分生效，**禁止自动重试**）；"
+            "BAD_REQUEST / BAD_PARAM / BAD_MONTH（参数不合法，不可重试）；AUTH_FAILED / "
+            "UNAUTHORIZED / FORBIDDEN_TOOL（鉴权或权限不足，不可重试）。"
             "注意：巡店记录请改用 visit_upload_file，本工具只处理对账明细文件。"
         ),
     )
@@ -98,6 +119,9 @@ def register(mcp: MCPServer) -> None:
         content_base64: str | None = None,
         path: str | None = None,
     ) -> dict[str, Any]:
+        bad = _check_upload_sources(path, content_base64)
+        if bad is not None:
+            return bad
         from mcp_service import write_ops
 
         content = write_ops.decode_base64(content_base64) if content_base64 else None
