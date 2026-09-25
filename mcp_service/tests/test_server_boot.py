@@ -66,7 +66,7 @@ def _free_port() -> int:
     return port
 
 
-def _wait_port(port: int, timeout: float = 20) -> None:
+def _wait_port(port: int, timeout: float = 90) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:

@@ -440,3 +440,62 @@ class MonthPerfRecord(Base):
     rate37 = Column(Float, nullable=False, default=0.0)
     pass37 = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=_now)
+
+
+# ---------------------------------------------------------------------------
+# P1（WorkBuddy 接入）：Token / 审计 / 封账 / 重算快照
+# 设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md
+# ---------------------------------------------------------------------------
+
+class ApiToken(Base):
+    """MCP Access Token（绑定到人，可吊销）。spec §5.1。"""
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False, default="")
+    token_prefix = Column(String(16), nullable=False, unique=True, index=True)
+    token_hash = Column(String(64), nullable=False)          # sha256 十六进制
+    scopes = Column(String(64), nullable=False, default="read")   # read / read,write
+    created_at = Column(DateTime, nullable=False, default=_now)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class McpAuditLog(Base):
+    """MCP 调用审计（两阶段写入：先插行 ok=NULL，返回前回填）。spec §8。"""
+    __tablename__ = "mcp_audit_log"
+
+    id = Column(Integer, primary_key=True)
+    token_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, nullable=True)
+    tool = Column(String(64), nullable=True)
+    params_json = Column(Text, nullable=True)                # 脱敏，不含 Token 明文
+    ok = Column(Boolean, nullable=True)                      # 执行中为 NULL
+    error_code = Column(String(32), nullable=True)
+    detail = Column(Text, nullable=True)
+    client_info = Column(String(255), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class SealedMonth(Base):
+    """封账月份：表内月份一律禁止写入（闸门 3）。spec §7。"""
+    __tablename__ = "sealed_months"
+
+    month = Column(String(7), primary_key=True)              # YYYY-MM
+    note = Column(String(255), nullable=True)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class RebuildSnapshot(Base):
+    """重算前正式表全量快照（只能回灌正式表，非整月可逆）。spec §9 改动 B。"""
+    __tablename__ = "rebuild_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)
+    audit_id = Column(Integer, nullable=True)                # 不加 FK：HTML 路径无审计行
+    payload_json = Column(Text, nullable=False)
+    row_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=_now)
