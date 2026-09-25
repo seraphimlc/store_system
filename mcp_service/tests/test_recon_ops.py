@@ -310,15 +310,15 @@ def test_unexpected_exception_maps_to_internal(factory, monkeypatch):
     assert "boom" in got["error"]["message"]
 
 
-def test_register_exposes_three_tools():
-    """register(mcp) 注册全部 3 个工具，且描述为中文、写明只读与日元。"""
+def test_register_exposes_four_tools():
+    """register(mcp) 注册全部 4 个工具，且描述为中文、写明只读与日元。"""
     from mcp.server.mcpserver import MCPServer
     mcp = MCPServer(name="test-recon", version="0")
     recon_ops.register(mcp)
     tools = asyncio.run(mcp.list_tools())
     names = {t.name for t in tools}
     assert names == {"visit_recon_status", "visit_recon_diff",
-                     "visit_recon_adjust_state"}
+                     "visit_recon_adjust_state", "visit_recon_settlement"}
     desc = {t.name: t.description for t in tools}
     for name in names:
         assert "只读" in desc[name]

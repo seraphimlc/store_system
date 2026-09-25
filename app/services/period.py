@@ -7,6 +7,8 @@
 """
 from datetime import date as _date
 
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from app.models import FormalRecord, PayrollPeriodRow, Person, ReconResult, ReconTask
@@ -159,6 +161,59 @@ def mark_paid(db: Session, month: str, half: int, marked_by: int = None,
         db.add(PayrollPaidMark(month=month, half=half, marked_by=marked_by))
         db.commit()
     return n
+
+
+def settlement_status(db: Session, month: str) -> dict[str, Any]:
+    """某结算月（对账源月）的找平**结清状态**：这笔差异扣/补到哪一步了。
+
+    依据：找平链（payroll_period_rows.prev_adjust_amount 逐月结转的债务）。
+    - diff_amount：源月原始差异（负=应扣/正=应补）
+    - chain：源月及其后各月的结转债务（prev_adjust_amount）
+    - remaining：最新一期的债务（≠0 = 还没找平完）
+    - recovered：diff_amount − remaining（该源月差异已实际回收的金额）
+    - status：remaining==0 → settled（已结清）；否则 in_progress
+
+    说明：当多个月份差异交错时，recovered 口径为"该源月差异的回收进度"近似，
+    事件级证据以 payroll_payments 的 adjust_applied/adjust_source_* 为准（逐笔可查）。
+    """
+    from app.models import PayrollPeriodRow, Person
+
+    def _next_month(m: str) -> str:
+        y, mm = int(m[:4]), int(m[5:7])
+        return f"{y + 1}-01" if mm == 12 else f"{y}-{mm + 1:02d}"
+
+    names = {p.code: p.display_name for p in db.query(Person).all()}
+    months = sorted({r.month for r in db.query(PayrollPeriodRow).all()})
+    out = []
+    for r in db.query(PayrollPeriodRow).filter(
+            PayrollPeriodRow.month == month).order_by(
+            PayrollPeriodRow.person_code).all():
+        diff = r.diff_amount or 0
+        chain = [{"month": month, "debt": r.prev_adjust_amount or 0}]
+        cur = r.prev_adjust_amount or 0
+        m = _next_month(month)
+        while m in months and cur != 0:
+            nxt = db.query(PayrollPeriodRow).filter(
+                PayrollPeriodRow.month == m,
+                PayrollPeriodRow.person_code == r.person_code).first()
+            if nxt is None:
+                break
+            cur = nxt.prev_adjust_amount or 0
+            chain.append({"month": m, "debt": cur})
+            m = _next_month(m)
+        out.append({
+            "person_code": r.person_code,
+            "name": names.get(r.person_code, r.person_code),
+            "diff_amount": diff,
+            "chain": chain,
+            "remaining": cur if cur != 0 else 0,
+            "recovered": (diff or 0) - (cur if cur != 0 else 0),
+            "status": "settled" if cur == 0 else "in_progress",
+        })
+    data = {"month": month, "currency": "JPY", "rows": out, "count": len(out)}
+    if not out:
+        data["hint"] = "该月无找平数据（合法结果，不是错误）"
+    return data
 
 
 def register_exported_half(db: Session, month: str, half: int,

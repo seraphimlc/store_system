@@ -96,6 +96,10 @@ def visit_recon_diff(ctx: Context, task_id: int | None = None,
                                                  month=month))
 
 
+def visit_recon_settlement(ctx: Context, month: str) -> dict[str, Any]:
+    return _run_read(ctx, lambda db: _recon_settlement(db, month))
+
+
 def visit_recon_adjust_state(ctx: Context, month: str) -> dict[str, Any]:
     """某月找平状态（只读）。month 必填 YYYY-MM。"""
     return _run_read(ctx, lambda db: _recon_adjust_state(db, month))
@@ -309,6 +313,13 @@ def _recon_diff(db, task_id: int | None = None,
     return data
 
 
+def _recon_settlement(db, month: str) -> dict[str, Any]:
+    """找平结清状态（只读）：该月对账差异扣/补到哪一步、是否已结清。"""
+    _require_month(month)
+    from app.services import period
+    return period.settlement_status(db, month)
+
+
 def _recon_adjust_state(db, month: str) -> dict[str, Any]:
     _require_month(month)
     from app.models import AdjustRecord, MonthPerfRecord, PayrollPeriodRow
@@ -410,3 +421,13 @@ def register(mcp: MCPServer) -> None:
     mcp.tool(name="visit_recon_adjust_state", title="薪资找平状态",
              annotations=read_ann("薪资找平状态"),
              description=_DESC_ADJUST)(visit_recon_adjust_state)
+    mcp.tool(name="visit_recon_settlement", title="找平结清状态",
+             annotations=read_ann("找平结清状态"),
+             description=(
+                 "查询某结算月**找平的结清状态**：这笔对账差异扣/补到哪一步、是否已找平完毕。"
+                 "返回每人 diff_amount（原始差异）/ chain（源月及后续各月结转债务）/ "
+                 "recovered（已回收）/ remaining（还没扣补完的余额）/ "
+                 "status（settled=已结清 / in_progress=找平中）。"
+                 "**核对『某笔对账是否已找平完毕』用我**；逐笔证据（哪期扣多少、来源任务）"
+                 "见 visit_payroll_rows 的台账字段。参数：month（YYYY-MM）。只读，日元。")
+             )(visit_recon_settlement)
