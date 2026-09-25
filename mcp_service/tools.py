@@ -136,6 +136,7 @@ def register(mcp: MCPServer) -> None:
                              recon_ops, recon_write_ops, store_write_ops,
                              write_tools)
     read_ops.register(mcp)
+    read_ops.register_integrity(mcp)
     recon_ops.register(mcp)
     export_ops.register(mcp)
     recon_write_ops.register(mcp)

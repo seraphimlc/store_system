@@ -667,6 +667,12 @@ def list_tasks(db, month: str | None = None, kind: str | None = None,
     return data
 
 
+def verify_integrity(db) -> dict[str, Any]:
+    """数据自洽检查（系统内置）：找平表/台账/关联/找平行 四表互相印证。"""
+    from app.services import integrity
+    return integrity.check_all(db)
+
+
 def list_months(db) -> dict[str, Any]:
     """系统内有数据的月份：formal_records / month_perf_records / recon_tasks 三类各计数。"""
     from app.models import FormalRecord, MonthPerfRecord, ReconTask
@@ -924,3 +930,24 @@ def register(mcp: MCPServer) -> None:
     )
     def visit_list_months(ctx: Context) -> dict[str, Any]:
         return _invoke(ctx, lambda db: list_months(db))
+
+
+def register_integrity(mcp: MCPServer) -> None:
+    """单独注册自洽检查工具（避免与既有 register 段冲突）。"""
+    from mcp_service.annotations import read as read_ann
+
+    @mcp.tool(
+        name="visit_verify_integrity",
+        title="数据自洽检查",
+        annotations=read_ann("数据自洽检查"),
+        description=(
+            "**数据自洽检查**：核对找平表/台账/关联表/找平行四类数字是否互相印证"
+            "（8 项：找平金额=该月差异 / 已找平+剩余=原始 / 状态一致 / 关联=台账抵扣 / "
+            "关联=已找平 / 台账快照vs应发（提示，非错误）/ 抵扣来源可反查 / 递延链符号一致）。"
+            "什么时候用：怀疑数据不一致、想确认系统算得对、或上线/重算后做核对。"
+            "返回 checks[]（每项 pass/fail/info + 反例明细）与 summary（通过数/失败数/规模）。"
+            "只读、无参数。"
+        ),
+    )
+    def visit_verify_integrity(ctx: Context) -> dict[str, Any]:
+        return _run_read(ctx, verify_integrity)
