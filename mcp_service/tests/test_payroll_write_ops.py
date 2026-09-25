@@ -301,3 +301,40 @@ def test_payment_adjust_trace_points_to_source(db):
     assert p2.adjust_source_task_id == 88            # 指向 8 月对账任务
     # 自洽：抵扣 + 剩余递延 == 结转总额
     assert p2.adjust_applied + (p2.adjust_leftover or 0) == -10000
+
+
+# ---------- 找平表（进度为存储事实，FIFO 回收）----------
+
+def test_adjust_table_tracks_progress_fifo(db):
+    """找平行记录 原始/已找平/剩余/状态/结清时间；回收按 FIFO 冲最早未结清。"""
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    from app.services import period
+
+    # 两笔找平：7月 -3000（更早）、8月 -10000
+    db.add(PayrollPeriodRow(month="2026-07", person_code="P001",
+                            diff_amount=-3000, prev_adjust_amount=-3000))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, prev_adjust_amount=-10000))
+    db.commit()
+    period.sync_adjusts(db, "2026-07")
+    period.sync_adjusts(db, "2026-08")
+    rows = db.query(PayrollAdjust).filter_by(person_code="P001").order_by(
+        PayrollAdjust.source_month).all()
+    assert [r.adjust_amount for r in rows] == [-3000, -10000]
+    assert all(r.status == "in_progress" for r in rows)
+
+    # 回收 5000 → FIFO：先冲 7月 3000（结清），再冲 8月 2000
+    period.allocate_settlement(db, "P001", -5000)
+    db.commit()
+    a7, a8 = rows
+    db.refresh(a7); db.refresh(a8)
+    assert a7.settled_amount == -3000 and a7.remaining == 0
+    assert a7.status == "settled" and a7.settled_at is not None
+    assert a8.settled_amount == -2000 and a8.remaining == -8000
+    assert a8.status == "in_progress"
+
+    # settlement_status 读表（不再链条推导）
+    st = period.settlement_status(db, "2026-08")
+    row = next(x for x in st["rows"] if x["person_code"] == "P001")
+    assert row["source"] == "payroll_adjusts"
+    assert row["remaining"] == -8000

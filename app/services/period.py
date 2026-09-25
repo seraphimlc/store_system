@@ -108,6 +108,11 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
                     if cur is None or t.id > cur.id:
                         cur = t
             src_task = cur.id if cur else None
+            # FIFO 冲找平表（进度落库，可直查）
+            try:
+                allocate_settlement(db, person_code, take)
+            except Exception:  # noqa: BLE001  分配失败不影响台账登记
+                db.rollback()
 
     db.add(PayrollPayment(month=month, person_code=person_code, seq=seq,
                           points=points or 0, amount=amount or 0,
@@ -163,6 +168,88 @@ def mark_paid(db: Session, month: str, half: int, marked_by: int = None,
     return n
 
 
+def _now_utc():
+    from datetime import datetime as _dt
+    return _dt.utcnow()
+
+
+def sync_adjusts(db: Session, month: str) -> int:
+    """为该月找平差异 upsert **找平行**（进度保留，不重置已找平金额）。
+
+    每笔差异一行：adjust_amount=该月 diff；settled_amount 保留历史回收；
+    remaining=adjust_amount−settled_amount；归零 → status=settled + settled_at。
+    """
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    task = None
+    for t in db.query(ReconTask).filter(ReconTask.kind == "monthly_v3").all():
+        pp = t.params or {}
+        if pp.get("month") == month and not pp.get("replaced_by"):
+            if task is None or t.id > task:
+                task = t.id
+    n = 0
+    for r in db.query(PayrollPeriodRow).filter(
+            PayrollPeriodRow.month == month).all():
+        diff = r.diff_amount or 0
+        row = db.query(PayrollAdjust).filter(
+            PayrollAdjust.source_month == month,
+            PayrollAdjust.person_code == r.person_code).first()
+        if row is None:
+            if diff == 0:
+                continue
+            db.add(PayrollAdjust(source_month=month, person_code=r.person_code,
+                                 source_task_id=task, source_row_id=r.id,
+                                 adjust_amount=diff, settled_amount=0,
+                                 remaining=diff, status="in_progress",
+                                 updated_at=_now_utc()))
+        else:
+            row.adjust_amount = diff
+            row.source_task_id = task or row.source_task_id
+            row.source_row_id = r.id
+            row.remaining = diff - (row.settled_amount or 0)
+            if row.remaining == 0:
+                if row.status != "settled":
+                    row.status, row.settled_at = "settled", _now_utc()
+            else:
+                row.status, row.settled_at = "in_progress", None
+            row.updated_at = _now_utc()
+        n += 1
+    db.commit()
+    return n
+
+
+def allocate_settlement(db: Session, person_code: str, absorbed: int) -> list:
+    """把一笔发放吸收的找平额按 **FIFO**（先欠的先还）冲最早的未结清找平行。
+
+    absorbed 与 remaining 同号（负=扣回/正=补发）。返回分配明细（可追溯）。
+    """
+    from app.models import PayrollAdjust
+    if not absorbed:
+        return []
+    alloc = []
+    rest = absorbed
+    rows = db.query(PayrollAdjust).filter(
+        PayrollAdjust.person_code == person_code,
+        PayrollAdjust.status == "in_progress").order_by(
+        PayrollAdjust.source_month, PayrollAdjust.id).all()
+    for a in rows:
+        if rest == 0:
+            break
+        rem = a.remaining or 0
+        if rem == 0 or (rem > 0) != (rest > 0):
+            continue                      # 方向不同 → 不是同一笔的回收
+        take = rest if abs(rest) <= abs(rem) else rem
+        a.settled_amount = (a.settled_amount or 0) + take
+        a.remaining = rem - take
+        rest -= take
+        if a.remaining == 0:
+            a.status, a.settled_at = "settled", _now_utc()
+        a.updated_at = _now_utc()
+        alloc.append({"adjust_id": a.id, "source_month": a.source_month,
+                      "amount": take})
+    db.commit()
+    return alloc
+
+
 def settlement_status(db: Session, month: str) -> dict[str, Any]:
     """某结算月（对账源月）的找平**结清状态**：这笔差异扣/补到哪一步了。
 
@@ -176,7 +263,29 @@ def settlement_status(db: Session, month: str) -> dict[str, Any]:
     说明：当多个月份差异交错时，recovered 口径为"该源月差异的回收进度"近似，
     事件级证据以 payroll_payments 的 adjust_applied/adjust_source_* 为准（逐笔可查）。
     """
-    from app.models import PayrollPeriodRow, Person
+    from app.models import PayrollAdjust, PayrollPeriodRow, Person
+
+    # 优先读**找平表**（进度是存储事实，非推导）；无行时回退链条推导
+    adj_rows = db.query(PayrollAdjust).filter(
+        PayrollAdjust.source_month == month).order_by(
+        PayrollAdjust.person_code).all()
+    if adj_rows:
+        names = {p.code: p.display_name for p in db.query(Person).all()}
+        out = [{
+            "person_code": a.person_code,
+            "name": names.get(a.person_code, a.person_code),
+            "adjust_amount": a.adjust_amount or 0,
+            "settled_amount": a.settled_amount or 0,
+            "remaining": a.remaining or 0,
+            "status": a.status,
+            "settled_at": str(a.settled_at) if a.settled_at else None,
+            "source_task_id": a.source_task_id,
+            "source": "payroll_adjusts",          # 来自找平表
+        } for a in adj_rows]
+        data = {"month": month, "currency": "JPY", "rows": out,
+                "count": len(out), "source": "payroll_adjusts",
+                "settled_count": sum(1 for x in out if x["status"] == "settled")}
+        return data
 
     def _next_month(m: str) -> str:
         y, mm = int(m[:4]), int(m[5:7])
@@ -426,6 +535,11 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
         m.diff_points = pr.diff_points
         m.diff_amount = pr.diff_amount
     db.commit()
+    # 同步**找平表**（进度落库：谁欠多少、已还多少、是否结清）
+    try:
+        sync_adjusts(db, month)
+    except Exception:  # noqa: BLE001  找平表同步失败不影响主流程
+        db.rollback()
     return {"rows": len(codes), "month": month, "settle": len(settle)}
 
 

@@ -552,3 +552,36 @@ class PayrollPayment(Base):
     adjust_source_row_id = Column(Integer, nullable=True)      # 上月 payroll_period_rows.id
     adjust_source_task_id = Column(Integer, nullable=True)     # 上月当前对账任务 id（可空）
     adjust_leftover = Column(Integer, nullable=True)           # 扣完后仍需递延的金额（负）
+
+
+class PayrollAdjust(Base):
+    """**找平表**：一行 = 一笔找平（某月差异 × 某人），进度是**存下来的事实**。
+
+    为什么独立成表（用户要求）：
+    - 找平进度（已找平/剩余/是否结清）应是可直接查询的一等数据，
+      而不是每次查询靠找平链（prev_adjust_amount）反推；
+    - 多月差异交错时链条反推会失真（旧实现只能给"近似回收额"）；
+    - 可记录"结清时间/结清于哪一期"，便于对账与 bug 排查；
+    - 这张表就是找平的账：谁欠谁、欠多少、还了多少、何时还清。
+
+    约定：
+    - adjust_amount：原始找平金额（负=应扣/正=应补，含奖金口径）
+    - settled_amount：已找平金额（逐步累加，与 adjust_amount 同号）
+    - remaining：剩余（= adjust_amount − settled_amount；0 = 已结清）
+    - 回收顺序：**FIFO**（先欠的先还），一笔发放吸收的金额优先冲最早的未结清找平
+    """
+    __tablename__ = "payroll_adjusts"
+    __table_args__ = (UniqueConstraint("source_month", "person_code",
+                                       name="uq_adjust_person"),)
+
+    id = Column(Integer, primary_key=True)
+    source_month = Column(String(7), nullable=False, index=True)   # 产生差异的月份
+    person_code = Column(String(32), nullable=False, index=True)
+    source_task_id = Column(Integer, nullable=True)                # 对账任务 id
+    source_row_id = Column(Integer, nullable=True)                 # 该月找平行 id
+    adjust_amount = Column(Integer, nullable=False, default=0)     # 原始找平金额
+    settled_amount = Column(Integer, nullable=False, default=0)    # 已找平
+    remaining = Column(Integer, nullable=False, default=0)         # 剩余
+    status = Column(String(12), nullable=False, default="in_progress")
+    settled_at = Column(DateTime, nullable=True)                   # 结清时间
+    updated_at = Column(DateTime, nullable=False, default=_now)
