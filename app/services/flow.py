@@ -539,9 +539,12 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         FormalRecord.japan_date < hi).delete()
     db.commit()
     added = 0
-    # 从档排除（精确名单）：同店异写法的店已归并从档，重建时不入正式表，
-    # 保证"同一家店不同写法只算一次"（数据修复定的"最合理识别逻辑"）。
-    # 仅排除明确归并的 4 组，不动历史从档（历史从档店正常有效）。
+    # 从档排除（精确名单 + 自动合并留痕）：同店异写法的店已归并从档，重建时不入
+    # 正式表，保证"同一家店不同写法只算一次"（数据修复定的"最合理识别逻辑"）。
+    # ① 精确名单：历史修复定死的 4 组（DEDUP_SUB_STORES，可 env 覆盖），保持原口径；
+    # ② 自动化口径：凡当前为从档且留有合并留痕（StoreMergeLog，exact 程序必同/
+    #    人工 exact 合并产生）的 store_id 一并排除；历史从档（promote_or_link
+    #    同名归并、无合并日志）不受影响，仍正常有效。
     import os
     sub_ids = set(os.environ.get(
         "DEDUP_SUB_STORES",
@@ -549,6 +552,10 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         "0101047092026081903348200|0101047092026060970019734").split("|"))
     if sub_ids == {""}:
         sub_ids = set()
+    from app.models import StoreMergeLog as _SML
+    sub_ids |= {sid for (sid,) in db.query(StoreEntity.store_id_raw).join(
+        _SML, _SML.entity_id == StoreEntity.id).filter(
+        StoreEntity.master_id != StoreEntity.id).all() if sid}
     # 各文件布局里的点数组合规则（AI 从"规则"说明提取/人工纠正）
     _rules_by_imp = {i.id: ((i.layout or {}).get("point_rules"))
                      for i in db.query(ImportFile).all()}
@@ -570,9 +577,17 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
     pts_after = sum(f.points or 0 for f in after)
     from app.services import perf as _perf
     _perf.sync_month_stats(db, ym)        # 同步 person_daily_stats（用规范月串）
+    # 重算一步到位：内部同步找平表（best-effort，失败只置 synced=false 不中断）
+    synced = False
+    try:
+        from app.services import period as _pay
+        _pay.sync_period_table(db, ym)
+        synced = True
+    except Exception:  # noqa: BLE001
+        synced = False
     return {"ok": True, "files": files, "formal_before": len(before),
             "formal_after": len(after), "points_before": pts_before,
-            "points_after": pts_after}
+            "points_after": pts_after, "synced": synced}
 
 
 # ---------------- 员工确认 / 绩效申诉（页面辅助） ----------------
@@ -657,8 +672,10 @@ def resolve_appeal(db, appeal_id, decision, actor_id, file_id=None) -> dict:
 
 
 def auto_finalize_pipeline(db, fid: int, user_id: int = None) -> dict:
-    """入正式表 + 全自动后续：工资/找平 + 看板统计 + 员工分析预生成(后台)。
-    供「入正式表」按钮与「上传自动入表」共用。返回 finalize 结果。"""
+    """入正式表 + 全自动后续：店铺候选对增量生成 + exact 自动合并 + 受影响月重算
+    （合并发生时）/ 工资找平 + 看板统计 + 员工分析预生成(后台)。
+    候选对/自动合并/重算均为 best-effort：任何异常都不影响入表主流程。
+    返回 finalize 结果 + months（合并发生时含 auto_merged_groups/recomputed_months）。"""
     res = finalize_import(db, fid, user_id)
     if not res["ok"]:
         return res
@@ -666,17 +683,48 @@ def auto_finalize_pipeline(db, fid: int, user_id: int = None) -> dict:
     _months = sorted({(r.modified_raw or "")[:7] for r in
                       db.query(_RR).filter(_RR.import_id == fid).all()
                       if r.modified_raw})
-    from app.services import period as _pay
-    from app.services import dashboard as _D
-    for _mo in _months:
+    # —— 店铺主档自动化（缺口1+2+3；best-effort，异常吞掉不阻断上传）——
+    from sqlalchemy import or_ as _or
+    from app.services import store_master as _sm
+    try:
+        _sids = [s[0] for s in db.query(_RR.store_id_raw).filter(
+            _RR.import_id == fid, _RR.store_id_raw != "").distinct().all()]
+        _sids = [s for s in _sids if s.strip()]
+        _conds = [StoreEntity.first_seen_import_id == fid]
+        if _sids:
+            _conds.append(StoreEntity.store_id_raw.in_(_sids))
+        _ent_ids = [e[0] for e in db.query(StoreEntity.id).filter(
+            _or(*_conds)).all()]
+        if _ent_ids:
+            _sm.build_pairs_for_entities(db, _ent_ids)
+    except Exception:  # noqa: BLE001  best-effort：候选对失败不影响上传
+        pass
+    res["auto_merged_groups"] = 0
+    try:
+        res["auto_merged_groups"] = _sm.auto_merge_exact(db, user_id)
+    except Exception:  # noqa: BLE001  best-effort
+        pass
+    if res["auto_merged_groups"]:
+        # 本次有合并 → 重算受影响月份（rebuild + 找平 + 看板，内部各自 best-effort）
         try:
-            _pay.sync_period_table(db, _mo)
-        except Exception:  # noqa: BLE001
+            _rc = _sm.recompute_affected_months(db, month_hint=_months,
+                                                user_id=user_id)
+            res["recomputed_months"] = _rc.get("months", [])
+            res["recompute_warnings"] = _rc.get("warnings", [])
+        except Exception:  # noqa: BLE001  best-effort
             pass
-        try:
-            _D.sync_dash_metrics(db, _mo)
-        except Exception:  # noqa: BLE001
-            pass
+    else:
+        from app.services import period as _pay
+        from app.services import dashboard as _D
+        for _mo in _months:
+            try:
+                _pay.sync_period_table(db, _mo)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _D.sync_dash_metrics(db, _mo)
+            except Exception:  # noqa: BLE001
+                pass
     db.commit()
     import threading as _th
     from app.db import SessionLocal as _SL

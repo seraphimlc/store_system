@@ -68,8 +68,13 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 7. 旧机（8.216.43.224 / `ssh store-old`）仅保留数据供回滚（改回 DNS A 记录 + compose up 即恢复），不参与发布。
 
 ## 已知坑
-- **店铺主档候选对不会自动生成**（`store_master.build_pairs` 原先从未被调用）→ 同店不同写法
-  （空格/全角）各算一家店、**静默多算点数**（实测 8 月多 4 条且与线上不一致，无任何报错）。
+- **店铺主档自动化（2026-09 修复）**：`auto_finalize_pipeline` 内已自动
+  `store_master.build_pairs_for_entities`（增量候选对）→ `auto_merge_exact`（exact 程序必同
+  自动合并，保留 id 最大为主档，跨城市组跳过）→ 有合并时 `recompute_affected_months`
+  （受影响月 = 文件月 ∪ 被并实体 raw 月，逐月 rebuild+找平+看板，全部 best-effort 不阻断上传）。
+  `flow.rebuild_month` 成功路径末尾自动同步找平表（返回 `synced`），并从档排除扩展到
+  "有合并留痕(StoreMergeLog)的从档"，历史从档（无日志）不受影响。测试：tests_web/test_store_auto.py。
+  历史坑：候选对原先从未生成 → 同店不同写法（空格/全角）各算一家店、静默多算点数（8 月多 4 条）。
 - **找平债务跨月**：某人某月无工资行时，结转必须从**找平表**（`payroll_adjusts.remaining`）读，
   不能只从"上月找平行"读——否则债务丢失（实测 11 人 / -89,750 收不回）。
 - **薪资四表**：`payroll_period_rows`（应发，会重算）/ `payroll_payments`（实发台账，不可改写，

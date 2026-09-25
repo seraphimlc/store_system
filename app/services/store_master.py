@@ -92,29 +92,55 @@ def _pending_pairs(db, kind):
 
 
 def build_pairs(db, fuzzy_threshold: float = 0.90):
-    """程序建候选：同 norm 且同 city 组 → exact 对；近似桶 → fuzzy 对（保留原有状态）。"""
+    """程序建候选：同 norm 且同 city 组 → exact 对；近似桶 → fuzzy 对（保留原有状态）。
+    全量版：委托增量版，目标 = 全部当前主档实体。"""
+    ids = [e.id for e in db.query(StoreEntity).filter(
+        StoreEntity.master_id == StoreEntity.id).all()]
+    return build_pairs_for_entities(db, ids, fuzzy_threshold=fuzzy_threshold)
+
+
+def build_pairs_for_entities(db, entity_ids, fuzzy_threshold: float = 0.90) -> dict:
+    """增量建候选：只为指定实体（须为当前主档且有 norm）找兄弟生成 exact/fuzzy 对。
+
+    复用 build_pairs 的分组逻辑：
+      exact = 同 name_norm 的主档两两成对（归一化全等→程序必同）；
+      fuzzy = 同 city(含都空)+首字符+长度桶内 SequenceMatcher≥fuzzy_threshold。
+    只生成"至少一端为目标实体"的对——每对在其任一成员首次被"涉及"时生成一次；
+    已存在的对不重复插入（幂等）。避免全表重复开销。
+    """
     from collections import defaultdict
+    target_ids = set(entity_ids or [])
+    if not target_ids:
+        return {"added": 0}
     ents = db.query(StoreEntity).all()
-    by_norm_city = defaultdict(list)
-    for e in ents:
-        if not e.name_norm or e.master_id != e.id:
-            continue
-        by_norm_city[(e.name_norm, e.city or "")].append(e)
+    by_id = {e.id: e for e in ents}
+    targets = [by_id[i] for i in target_ids
+               if i in by_id and by_id[i].master_id == by_id[i].id
+               and by_id[i].name_norm]
+    if not targets:
+        return {"added": 0}
+    target_ids = {t.id for t in targets}
     existing = set()
     for p in db.query(StorePair.entity_a, StorePair.entity_b).all():
         existing.add(tuple(sorted((p[0], p[1]))))
     added = 0
-    # exact：同 norm（同 city 约束放宽到同 city 或都空）——按用户"差不多即可"：仅按 norm 分组，city 作展示
+
+    def _has_target(ids):
+        return any(i in target_ids for i in ids)
+
+    # exact：同 name_norm 的主档间建对（仅涉及目标）
     exact_groups = defaultdict(list)
     for e in ents:
         if e.master_id == e.id and e.name_norm:
             exact_groups[e.name_norm].append(e)
     for g in exact_groups.values():
         gs = sorted(g, key=lambda x: x.id)
-        if len(gs) < 2:
+        if len(gs) < 2 or not _has_target(e.id for e in gs):
             continue
         for i in range(len(gs)):
             for j in range(i + 1, len(gs)):
+                if not (gs[i].id in target_ids or gs[j].id in target_ids):
+                    continue
                 key = (gs[i].id, gs[j].id)
                 if key in existing:
                     continue
@@ -122,19 +148,23 @@ def build_pairs(db, fuzzy_threshold: float = 0.90):
                                  kind="exact"))
                 existing.add(key)
                 added += 1
-    # fuzzy：同 city（含都空）、首字符同、长度近的桶内比
+    # fuzzy：同 city（含都空）、首字符同、长度近的桶内比（仅涉及目标）
     buckets = defaultdict(list)
     for e in ents:
         if e.master_id != e.id or not e.name_norm:
             continue
         buckets[(e.city or "", e.name_norm[:1], len(e.name_norm) // 2)].append(e)
     for lst in buckets.values():
+        if not _has_target(e.id for e in lst):
+            continue
         if len(lst) < 2 or len(lst) > 500:
             continue
         lst.sort(key=lambda x: x.id)
         for i in range(len(lst)):
             na = lst[i].name_norm
             for j in range(i + 1, len(lst)):
+                if not (lst[i].id in target_ids or lst[j].id in target_ids):
+                    continue
                 nb = lst[j].name_norm
                 if abs(len(na) - len(nb)) > 2 or len(na) < 3:
                     continue
@@ -149,6 +179,103 @@ def build_pairs(db, fuzzy_threshold: float = 0.90):
                     added += 1
     db.commit()
     return {"added": added}
+
+
+def auto_merge_exact(db, user_id=None) -> int:
+    """exact 候选自动合并：kind=='exact' 且 status=='pending' 的对按同 name_norm
+    分组，每组保留 **id 最大** 的实体为主档（与线上口径一致），调用 merge_name_group
+    并入其它成员。已知城市≥2 且不同的组（跨城市）跳过——判定不同店留人工
+    （与 auto_skip_cross_city / apply_all_recommended 同规则）。
+    fuzzy 对不自动合并（需人工/AI）。返回合并的组数；幂等（已并对的 status=merged）。"""
+    pair_ids = set()
+    for p in db.query(StorePair.entity_a, StorePair.entity_b).filter(
+            StorePair.kind == "exact", StorePair.status == "pending").all():
+        pair_ids.add(p[0])
+        pair_ids.add(p[1])
+    if not pair_ids:
+        return 0
+    ents = {e.id: e for e in db.query(StoreEntity).all()}
+    groups = {}
+    for eid in pair_ids:
+        e = ents.get(eid)
+        if e is None or e.master_id != e.id or not e.name_norm:
+            continue
+        groups.setdefault(e.name_norm, []).append(e)
+    merged_groups = 0
+    for norm, members in groups.items():
+        members = sorted(set(members), key=lambda x: x.id)
+        if len(members) < 2:
+            continue
+        known = {m.city for m in members if m.city}
+        if len(known) > 1:   # 跨城市 → 判定不同店，留人工
+            continue
+        keep = members[-1]   # id 最大为主档（与线上口径一致）
+        merge_name_group(db, norm, keep.id, user_id,
+                         note="自动合并：归一化全等(程序必同)")
+        merged_groups += 1
+    return merged_groups
+
+
+def recompute_affected_months(db, month_hint=None, user_id=None) -> dict:
+    """店铺主档变更后重算受影响月份（best-effort 逐月，互不中断）。
+
+    受影响月份：month_hint（"YYYY-MM" 或列表）给出则用之；无法精确定位
+    （缺省/非法）退化为"存在正式表的全部月份"。
+    逐月依次调 flow.rebuild_month + period.sync_period_table +
+    dashboard.sync_dash_metrics，各自 try/except，失败记入 warnings 不中断。
+    返回处理了哪些月（同时打印）与逐月结果。"""
+    import re as _re
+    months = []
+    if month_hint:
+        hints = (month_hint if isinstance(month_hint, (list, tuple, set))
+                 else [month_hint])
+        for h in hints:
+            h = (h or "").strip()
+            if _re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", h or ""):
+                months.append(h)
+        months = sorted(set(months))
+    if not months:
+        from app.models import FormalRecord
+        months = sorted({str(f.japan_date or "")[:7]
+                         for f in db.query(FormalRecord).all()
+                         if f.japan_date})
+    # 精确扩展：凡"当前为从档且有合并留痕"的实体，其 raw 所在月一并重算——
+    # 合并改变这些月的正式表口径（如首次部署时旧有 pending exact 组被并，
+    # 受影响月未必在 month_hint 内；8 月多算即由此类合并修复）。
+    # 历史从档（promote_or_link 同名归并、无合并日志）不在其中，不受影响。
+    _merged_sids = [sid for (sid,) in db.query(StoreEntity.store_id_raw).join(
+        StoreMergeLog, StoreMergeLog.entity_id == StoreEntity.id).filter(
+        StoreEntity.master_id != StoreEntity.id).all() if sid]
+    if _merged_sids:
+        _extra = sorted({(r[0] or "")[:7] for r in db.query(
+            RawRecord.modified_raw).filter(
+            RawRecord.store_id_raw.in_(_merged_sids)).all() if r[0]})
+        if _extra:
+            months = sorted(set(months) | set(_extra))
+    from app.services import flow as _flow
+    from app.services import period as _period
+    from app.services import dashboard as _dash
+    warnings = []
+    results = {}
+    for m in months:
+        m_res = {}
+        try:
+            m_res["rebuild"] = _flow.rebuild_month(db, m, user_id)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{m}: 月度重算失败 {exc!r}")
+        try:
+            m_res["period_sync"] = _period.sync_period_table(db, m)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{m}: 找平同步失败 {exc!r}")
+        try:
+            m_res["dash_sync"] = _dash.sync_dash_metrics(db, m)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{m}: 看板同步失败 {exc!r}")
+        results[m] = m_res
+    db.commit()
+    if months:
+        print(f"[store_master] recompute_affected_months: 已处理 {', '.join(months)}")
+    return {"months": months, "warnings": warnings, "results": results}
 
 
 def merge_pair(db, pair_id: int, keep_entity_id: int, user_id, basis="manual",
