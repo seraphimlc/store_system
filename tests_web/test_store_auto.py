@@ -168,8 +168,13 @@ def test_auto_merge_exact_skips_cross_city(client):
 
 # ---------------- 缺口3：合并后自动重算受影响月份（2 → 1） ----------------
 
-def test_upload_auto_merge_recomputes_affected_month(client, tmp_path):
-    """上传链路：建候选 → 自动合并 → 重算受影响月，正式表口径 2 → 1。"""
+def test_upload_auto_merge_recomputes_affected_month(client, tmp_path,
+                                                      monkeypatch):
+    """上传链路：建候选 → 自动合并 → 重算受影响月，正式表口径 2 → 1。
+
+    自动合并**默认关闭**（会改变历史口径、偏离线上），需显式开启开关才验证该路径。
+    """
+    monkeypatch.setenv("STORE_AUTO_MERGE_EXACT", "1")
     _seed_admin(client)
     db = appdb.SessionLocal()
     admin = db.query(User).first()
@@ -286,6 +291,29 @@ def test_rebuild_month_returns_synced_and_refreshes_period(client, tmp_path):
         PayrollPeriodRow.month == "2026-08").all()
     assert len(rows) == 1          # 甲 的找平行已由 rebuild 内部同步生成
     assert rows[0].person_code == "111"
+    db.close()
+
+
+def test_recompute_skips_sealed_months(client, tmp_path):
+    """自动化尊重封账：sealed_months 表内月份跳过重算（记 warning），不写入。"""
+    _seed_admin(client)
+    db = appdb.SessionLocal()
+    admin = db.query(User).first()
+    imp = _up(db, admin, "u1.xlsx", [
+        ["S-1", "店1", "", "2026-08-01 09:00:00", "甲(111)", "R1",
+         "YES", "YES", "NO"],
+    ], tmp_path)
+    db.close()
+    flow.process_import(db_fresh(), imp.id)
+    db = appdb.SessionLocal()
+    flow.finalize_import(db, imp.id)
+    from app.models import SealedMonth
+    db.add(SealedMonth(month="2026-08", note="测试封账"))
+    db.commit()
+    out = store_master.recompute_affected_months(db, month_hint="2026-08")
+    assert out["months"] == []
+    assert any("封账" in w for w in out["warnings"])
+    assert db.query(FormalRecord).count() == 1   # 正式表未被改写
     db.close()
 
 
