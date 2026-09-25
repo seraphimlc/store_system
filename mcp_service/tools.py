@@ -230,8 +230,11 @@ def register(mcp: MCPServer) -> None:
         title="月度薪资查询",
         annotations=read_ann("月度薪资查询"),
         description=(
+            "**什么时候用我**：要看每人明细/薪资时用我。"
             "查询某结算月（格式 YYYY-MM）的员工薪资：人数、总点数、总工资，"
-            "以及每人点数与工资明细。可选 person 参数按工号或姓名筛选。"
+            "以及每人点数与工资明细。可选 person 参数按工号或姓名筛选；"
+            "可选 sort_by 参数（points=按总点数降序【默认】/ amount=按工资金额降序）"
+            "与 limit 参数（默认 0=返回全部；>0 只返回前 N 名，配合 sort_by 可当排行用）。"
             "字段口径：points（该人总点数）/ p1·p2（1点/2点条数）/ per_point"
             "（单价，円/点）/ salary（应付工资円）/ settle_amount（实际结算额円，"
             "未对账为 0）/ diff_amount（=settle_amount−salary，未对账时为 0）。"
@@ -244,16 +247,21 @@ def register(mcp: MCPServer) -> None:
         month: Annotated[str, Field(pattern=MONTH_PATTERN)],
         ctx: Context,
         person: str | None = None,
+        sort_by: str = "points",
+        limit: int = 0,
     ) -> dict[str, Any]:
         from app.db import SessionLocal
         from mcp_service import capability
 
         db = SessionLocal()
         try:
-            data = capability.month_salary(db, month, person=person)
+            data = capability.month_salary(db, month, person=person,
+                                            sort_by=sort_by, limit=limit)
         except capability.BadMonth as exc:
             return _envelope_error("BAD_MONTH", str(exc),
                                    "月份必须是 YYYY-MM，例如 2026-09")
+        except capability.BadParam as exc:
+            return _envelope_error("BAD_PARAM", str(exc), exc.hint or "")
         except Exception as exc:  # noqa: BLE001
             return _envelope_error("INTERNAL", repr(exc),
                                    "系统内部错误，已记录；可重试")
@@ -266,8 +274,11 @@ def register(mcp: MCPServer) -> None:
         title="月度正式表汇总",
         annotations=read_ann("月度正式表汇总"),
         description=(
+            "**什么时候用我**：只要汇总数字（行数/点数/人数）时用我。"
             "查询某结算月（格式 YYYY-MM）正式表的行数、总点数、1点/2点条数与人数。"
             "数据来自已结算的正式表，只读。"
+            "这是 visit_dashboard 的精简版：需要质量/排行/人员变动等更多指标时请用 "
+            "visit_dashboard（同一月份，字段更全）。"
         ),
     )
     def visit_month_summary(

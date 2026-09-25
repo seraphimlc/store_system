@@ -240,12 +240,25 @@ def perf_ranking(db, month: str, limit: int = 10) -> dict[str, Any]:
     return data
 
 
-def dashboard_metrics(db, month: str) -> dict[str, Any]:
-    """月度看板指标：优先读物化表 dash_metrics，缺失时回退实时计算；附 perf.company_summary。"""
+def dashboard_metrics(db, month: str, top: int = 8) -> dict[str, Any]:
+    """月度看板指标：优先读物化表 dash_metrics，缺失时回退实时计算。
+
+    主结构 = metrics（字段全集：employees/records/p1/p2/points/amount/p2rate/"
+    "per_emp_points/per_emp_amount/per_emp_records/per_store_points/dup_total）；
+    不再单独返回 company_summary（其 6 个字段数值与 metrics 全等，已合并）。
+    top：top_staff 条数，默认 8；top=0 时不返回 top_staff 键。
+    """
     _validate_month(month)
     from app.models import DashMetric
     from app.services import dashboard as D
     from app.services import perf
+
+    try:
+        top = int(top)
+    except (TypeError, ValueError):
+        raise BadParam(f"top 必须是非负整数：{top!r}", "top 默认 8；top=0 表示不返回排行")
+    if top < 0:
+        raise BadParam(f"top 必须是非负整数：{top!r}", "top 默认 8；top=0 表示不返回排行")
 
     source = "dash_metrics" if D.month_has_metrics(db, month) else "realtime"
 
@@ -289,7 +302,7 @@ def dashboard_metrics(db, month: str) -> dict[str, Any]:
         metrics["dup_total"] = int(vals.get("dup_total") or 0)
         pl = D.month_payloads(db, month)
         quality = _norm_quality(pl.get("quality"))
-        top_staff = pl.get("top_staff") or []
+        top_staff = (pl.get("top_staff") or [])[:top] if top > 0 else None
         dup_map = pl.get("dup_map") or {}
         new_staff = pl.get("new_staff") or []
         gone_staff = pl.get("gone_staff") or []
@@ -304,7 +317,7 @@ def dashboard_metrics(db, month: str) -> dict[str, Any]:
         metrics = _metrics(p1, p2, recs, n, pts, amt)
         metrics["dup_total"] = sum(perf.month_dup_map(db, month).values())
         quality = _norm_quality(D.quality_stats(db, month))
-        top_staff = D.top_staff(db, month, 8)
+        top_staff = D.top_staff(db, month, top) if top > 0 else None
         dup_map = perf.month_dup_map(db, month)
         new_staff = [{"name": name, "points": v[0], "amount": v[1]}
                      for name, v in D.staff_changes(db, month)[0]]
@@ -315,14 +328,14 @@ def dashboard_metrics(db, month: str) -> dict[str, Any]:
         "month": month,
         "source": source,
         "metrics": metrics,
-        "company_summary": perf.company_summary(db, month),
         "quality": quality,
-        "top_staff": top_staff,
         "dup_map": dup_map,
         "new_staff": new_staff,
         "gone_staff": gone_staff,
         "currency": "JPY",          # 金额单位：日元（円）
     }
+    if top > 0:
+        data["top_staff"] = top_staff
     if not metrics["records"] and not metrics["employees"]:
         data["hint"] = "该月无数据（合法结果，不是错误）"
     return data
@@ -743,9 +756,10 @@ def register(mcp: MCPServer) -> None:
         title="月度绩效排行",
         annotations=read_ann("月度绩效排行"),
         description=(
+            "**DEPRECATED（已弃用）**：请用 visit_month_salary(sort_by='points', limit=N) "
+            "实现同口径排行（按点数降序取前 N，字段更全）。本工具保留兼容、不再演进。"
             "只读查询某结算月（YYYY-MM）绩效排行：按点数降序取前 N 名，含姓名、点数、"
             "1点/2点店数、工资（日元円，currency=JPY）。"
-            "什么时候用：看本月谁的绩效最高、管理层月度汇报。"
             "关键约束：只读；limit 默认 10、最大 100；数据来自已物化的月绩效记录"
             "（month_perf_records），不实时重算。"
         ),
@@ -762,26 +776,29 @@ def register(mcp: MCPServer) -> None:
         title="月度看板指标",
         annotations=read_ann("月度看板指标"),
         description=(
-            "只读查询某结算月（YYYY-MM）看板指标：人数/有效店/1点2点/总点数/总工资/2点率/"
-            "人均等，优先读物化表 dash_metrics，缺失时回退实时计算；并附 perf.company_summary"
-            "与质量/排行/人员变动。"
-            "什么时候用：月度经营总览、给管理层的月度快照。"
+            "**什么时候用我**：要经营总览/质量/人员变动分析时用我。"
+            "只读查询某结算月（YYYY-MM）看板指标：metrics 为主结构（人数/有效店/1点2点/"
+            "总点数/总工资/2点率/人均/店均等字段全集，含 dup_total），另附质量 quality/"
+            "排行 top_staff/人员变动 new_staff·gone_staff/重复 dup_map。"
+            "优先读物化表 dash_metrics，缺失时回退实时计算。"
+            "参数 top：top_staff 条数，默认 8；top=0 表示不返回排行。"
             "关键约束：只读；金额为日元円（currency=JPY）；空月返回 ok:True 与零值。"
         ),
     )
     def visit_dashboard(month: Annotated[str, Field(pattern=MONTH_PATTERN)],
-                        ctx: Context) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: dashboard_metrics(db, month))
+                        ctx: Context,
+                        top: int = 8) -> dict[str, Any]:
+        return _invoke(ctx, lambda db: dashboard_metrics(db, month, top=top))
 
     @mcp.tool(
         name="visit_payroll_rows",
         title="薪资找平表",
         annotations=read_ann("薪资找平表"),
         description=(
+            "**什么时候用我**：发薪/找平维度（两期分期/递延），非绩效维度。"
             "只读查询某结算月（YYYY-MM）薪资找平（分期对账偏差）表：每人两期（上半月/"
             "下半月）点数、金额、奖金、店数快照，以及对账/上月修正/偏差/找平与递延余额"
             "（carry）。"
-            "什么时候用：核对两期发薪与找平执行情况、回答『某人上月差多少』。"
             "关键约束：只读；金额为日元円（currency=JPY）；person 可选，按工号或姓名筛选。"
         ),
     )
@@ -795,9 +812,10 @@ def register(mcp: MCPServer) -> None:
         title="员工日明细",
         annotations=read_ann("员工日明细"),
         description=(
+            "**什么时候用我**：month_salary 的日粒度下钻（先看月汇总，再下钻到某人的"
+            "每日明细）。"
             "只读查询某员工在某结算月（YYYY-MM）的日明细：person_daily_stats"
             "（日期/点数/店数/1点2点）+ 该月汇总（有效店/点数/工资，日元円）。"
-            "什么时候用：员工月度表现核对、绩效沟通前查底数。"
             "关键约束：只读；person 必填，支持工号精确或姓名包含；找不到返回 NOT_FOUND。"
         ),
     )

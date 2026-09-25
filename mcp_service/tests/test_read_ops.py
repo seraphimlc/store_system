@@ -297,9 +297,25 @@ def test_dashboard_materialized(db):
     assert got["metrics"]["records"] == 3
     assert got["metrics"]["points"] == 3
     assert got["metrics"]["amount"] == 1500
-    assert got["company_summary"]["total_amount"] == 1500
+    assert "company_summary" not in got          # 已合并进 metrics，不再单独返回
     assert got["top_staff"][0]["code"] == "P001"
     assert got["currency"] == "JPY"
+
+
+def test_dashboard_top_param(db):
+    s, _ = db
+    got0 = read_ops.dashboard_metrics(s, "2026-09", top=0)
+    assert "top_staff" not in got0               # top=0 不返回排行
+    got1 = read_ops.dashboard_metrics(s, "2026-09", top=1)
+    assert len(got1["top_staff"]) == 1
+    assert got1["top_staff"][0]["code"] == "P001"
+
+
+def test_dashboard_bad_top(db):
+    s, _ = db
+    got = read_ops._call(s, lambda d: read_ops.dashboard_metrics(d, "2026-09", top=-1))
+    assert got["ok"] is False
+    assert got["error"]["code"] == "BAD_PARAM"
 
 
 def test_dashboard_realtime_fallback_empty(db):

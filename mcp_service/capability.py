@@ -21,6 +21,14 @@ class BadMonth(ValueError):
     pass
 
 
+class BadParam(ValueError):
+    """参数非法（如 sort_by/limit 取值错误）→ 适配层转 BAD_PARAM 信封。"""
+
+    def __init__(self, message: str, hint: str = "") -> None:
+        super().__init__(message)
+        self.hint = hint
+
+
 class CapabilityError(RuntimeError):
     def __init__(self, code: str, message: str, hint: str = "") -> None:
         super().__init__(message)
@@ -68,7 +76,8 @@ def month_summary(db, month: str) -> dict[str, Any]:
     }
 
 
-def month_salary(db, month: str, person: str | None = None) -> dict[str, Any]:
+def month_salary(db, month: str, person: str | None = None,
+                 sort_by: str = "points", limit: int = 0) -> dict[str, Any]:
     """某结算月薪资（**读已物化的 month_perf_records，不重算**）。
 
     为什么绝不重算：工资 = 每点单价 + 每满门槛点奖金，而这两项按月可配。
@@ -77,9 +86,22 @@ def month_salary(db, month: str, person: str | None = None) -> dict[str, Any]:
     （正是设计文档警告的"静默写错钱"）。故一律读物化值。
 
     person：按 person_code 精确或姓名包含匹配（可选）。
+    sort_by：rows 排序字段，points（总点数，默认）或 amount（工资金额），降序。
+    limit：截断条数，默认 0=全部；>0 只返回前 N 名（配合 sort_by 做排行）。
     """
     if not re.fullmatch(MONTH_PATTERN, month or ""):
         raise BadMonth(f"月份格式非法：{month!r}，应为 YYYY-MM")
+    if sort_by not in ("points", "amount"):
+        raise BadParam(f"sort_by 必须是 points 或 amount：{sort_by!r}",
+                       "points=按总点数降序（默认）；amount=按工资金额降序")
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        raise BadParam(f"limit 必须是非负整数：{limit!r}",
+                       "limit 默认 0=全部；传正整数只返回前 N 名")
+    if limit < 0:
+        raise BadParam(f"limit 必须是非负整数：{limit!r}",
+                       "limit 默认 0=全部；传正整数只返回前 N 名")
 
     from app.services import perf
 
@@ -92,6 +114,11 @@ def month_salary(db, month: str, person: str | None = None) -> dict[str, Any]:
         return {"month": month, "persons": 0, "total_points": 0,
                 "total_salary": 0, "currency": "JPY", "per_point": None,
                 "rows": [], "hint": "该月无薪资数据（合法结果，不是错误）"}
+
+    # 排序（默认 points 降序，与 perf_ranking 同口径）+ 可选截断
+    rows = sorted(rows, key=lambda r: r[sort_by] or 0, reverse=True)
+    if limit > 0:
+        rows = rows[:limit]
 
     per_point = next((r["per_point"] for r in rows if r.get("per_point")), None)
     return {

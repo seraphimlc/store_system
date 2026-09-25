@@ -97,6 +97,8 @@ def register(mcp: MCPServer) -> None:
         title="上传对账文件",
         annotations=write_ann("上传对账文件", idempotent=False),
         description=(
+            "**DEPRECATED（已弃用）**：统一入口请用 visit_upload_file（自动识别文件类型，"
+            "对账明细可显式 kind='recon' 强制走对账通道）。本工具保留兼容、不再演进。"
             "必须提供 path 或 content_base64 之一，不可同时提供，也不可都不提供。"
             "上传**对账文件**（如支付宝结算数据，逐条明细含日期/店/人员）并同步完成对账："
             "解析 → 与系统人日统计比对 → 生成差异行与结果。需要写权限 Token。"
@@ -109,7 +111,6 @@ def register(mcp: MCPServer) -> None:
             "已存在，不可重试）；INTERNAL_WRITE（写入异常可能已部分生效，**禁止自动重试**）；"
             "BAD_REQUEST / BAD_PARAM / BAD_MONTH（参数不合法，不可重试）；AUTH_FAILED / "
             "UNAUTHORIZED / FORBIDDEN_TOOL（鉴权或权限不足，不可重试）。"
-            "注意：巡店记录请改用 visit_upload_file，本工具只处理对账明细文件。"
         ),
     )
     def visit_upload_recon(
