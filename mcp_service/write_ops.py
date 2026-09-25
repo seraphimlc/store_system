@@ -102,9 +102,18 @@ def _upload_visit(db, actor, *, filename: str | None = None,
     }}
 
 
+# 让用户做选择时展示的选项（agent 据此询问，用户答完用 kind 重传）
+KIND_OPTIONS = [
+    {"kind": "visit", "label": "巡店记录（MarsNavi STORE VISIT RECORD）",
+     "effect": "解析→判定→入正式表→工资/找平/看板刷新"},
+    {"kind": "recon", "label": "对账明细（如支付宝/结算数据）",
+     "effect": "建对账任务→与系统人日统计比对→差异行"},
+]
+
+
 def upload_file(db, actor, *, filename: str | None = None,
                 content: bytes | None = None, path: str | None = None,
-                month: str | None = None) -> dict[str, Any]:
+                month: str | None = None, kind: str | None = None) -> dict[str, Any]:
     """**统一上传入口**：自动识别文件类型并路由到对应通道。
 
     - 巡店记录（sheet 名 STORE_TASK_EXCEL_SHEET）→ 判定/入正式表全链路
@@ -128,7 +137,19 @@ def upload_file(db, actor, *, filename: str | None = None,
                                 "请提供 content_base64 或 path")
 
     info = file_kind.detect_kind(raw)
-    kind = info["kind"]
+    detected = info["kind"]
+
+    # 用户/模型显式指定类型时优先（用于"识别不出来 → 问用户 → 重传"）
+    forced = (kind or "").strip().lower() or None
+    if forced and forced not in ("visit", "recon"):
+        raise guards.GuardError(
+            "BAD_PARAM", f"kind 只能是 visit 或 recon，收到 {kind!r}",
+            "巡店记录用 kind='visit'；对账明细用 kind='recon'")
+    if forced:
+        detected = forced
+        info = {"kind": forced, "reason": f"由调用方指定（kind={forced}）",
+                "sheets": info.get("sheets", []), "header": info.get("header", [])}
+    kind = detected
 
     # 打不开为 Excel（非 xlsx 等）→ 交回巡店通道，由它给出标准错误
     if kind == "unknown" and "无法打开为 Excel" in str(info.get("reason", "")):
@@ -159,16 +180,21 @@ def upload_file(db, actor, *, filename: str | None = None,
         return {"ok": False, "error": {
             "code": "MANUAL_SETTLEMENT_FILE",
             "message": "这是手工结算对照件（巡回最终结算），系统无对应入库通道",
-            "hint": "它是核对用的「标准答案」，不是巡店记录也不是对账明细；"
-                    "如需逐人核对，请把它作为参考文件人工比对",
+            "options": KIND_OPTIONS,
+            "hint": "它是核对用的「标准答案」，不是巡店记录也不是对账明细。"
+                    "如用户确认要按巡店记录或对账明细处理，请带 kind 参数重传"
+                    "（kind='visit' / kind='recon'）；否则作为参考文件人工比对。",
         }}
 
     return {"ok": False, "error": {
-        "code": "UNKNOWN_FILE",
-        "message": f"无法识别的文件类型：{info.get('reason')}",
-        "hint": "巡店记录应为 MarsNavi STORE VISIT RECORD（sheet 名 "
-                "STORE_TASK_EXCEL_SHEET）；对账明细应含 Statement Date/"
-                "Agent Name 等列",
+        "code": "NEED_FILE_KIND",
+        "message": f"无法自动识别文件类型：{info.get('reason')}",
+        "options": KIND_OPTIONS,
+        "seen": {"sheets": info.get("sheets", []),
+                 "header": [h for h in info.get("header", []) if h][:12]},
+        "hint": "请**询问用户**这个文件属于下面哪一类，然后带上 kind 参数重新上传"
+                "（kind='visit' 巡店记录 / kind='recon' 对账明细）。"
+                "不要自行猜测类型。",
     }}
 
 

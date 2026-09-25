@@ -93,3 +93,35 @@ def test_infer_month_from_datetime_cells():
 
 def test_infer_month_ignores_visit_files():
     assert file_kind.infer_month(b"whatever", "visit") is None
+
+
+# ---------- 识别不出来 → 让用户选择（kind 覆盖）----------
+
+def test_unknown_returns_options_for_user_choice(monkeypatch):
+    """识别不出时返回结构化选项 + 指示 agent 询问用户（不自行猜测）。"""
+    from mcp_service import write_ops
+    from mcp_service import guards, tokens
+
+    class _Actor:
+        uid, role, scopes, token_id = 1, "admin", ["read", "write"], None
+
+    content = _xlsx({"Sheet1": [["foo", "bar"], [1, 2]]})
+    res = write_ops.upload_file(None, _Actor(), filename="x.xlsx", content=content)
+    assert res["ok"] is False
+    err = res["error"]
+    assert err["code"] == "NEED_FILE_KIND"
+    kinds = [o["kind"] for o in err["options"]]
+    assert kinds == ["visit", "recon"]
+    assert "询问用户" in err["hint"]
+
+
+def test_kind_override_rejects_invalid_value():
+    from mcp_service import write_ops, guards
+
+    class _Actor:
+        uid, role, scopes, token_id = 1, "admin", ["read", "write"], None
+
+    with pytest.raises(guards.GuardError) as e:
+        write_ops.upload_file(None, _Actor(), filename="x.xlsx",
+                              content=b"not xlsx", kind="bogus")
+    assert e.value.code == "BAD_PARAM"

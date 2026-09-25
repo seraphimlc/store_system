@@ -138,7 +138,10 @@ def register(mcp: MCPServer) -> None:
             "（月份自动从文件日期推断，也可用 month 指定）；"
             "③ 手工结算对照件（巡回最终结算）→ 明确提示不入库；④ 无法识别 → 给出指引。"
             "参数：filename；content_base64（文件内容 base64，跨机器上传用）；"
-            "path（本机绝对路径，仅服务端开启本地路径模式时可用）；month（可选，对账文件用）。"
+            "path（本机绝对路径，仅服务端开启本地路径模式时可用）；month（可选，对账文件用）；"
+            "kind（可选，强制指定 visit/recon）。"
+            "**若返回 NEED_FILE_KIND（识别不出），必须询问用户该文件属于哪一类，"
+            "拿到答复后带 kind 参数重新上传，不要自行猜测。**"
             "需要写权限 Token。封账月份的巡店文件会被拒绝。"
         ),
     )
@@ -148,6 +151,7 @@ def register(mcp: MCPServer) -> None:
         content_base64: str | None = None,
         path: str | None = None,
         month: str | None = None,
+        kind: str | None = None,
     ) -> dict[str, Any]:
         from mcp_service import write_ops
 
@@ -155,7 +159,8 @@ def register(mcp: MCPServer) -> None:
 
         def run(db, actor):
             return write_ops.upload_file(db, actor, filename=filename,
-                                         content=content, path=path, month=month)
+                                         content=content, path=path,
+                                         month=month, kind=kind)
 
         return _write_call(ctx, "visit_upload_file",
                            {"filename": filename, "path": path,
