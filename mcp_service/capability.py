@@ -66,3 +66,45 @@ def month_summary(db, month: str) -> dict[str, Any]:
         "p2_count": row.p2_count or 0,
         "persons": row.persons or 0,
     }
+
+
+def month_salary(db, month: str, person: str | None = None) -> dict[str, Any]:
+    """某结算月薪资（**读已物化的 month_perf_records，不重算**）。
+
+    为什么绝不重算：工资 = 每点单价 + 每满门槛点奖金，而这两项按月可配。
+    本地库实测：2026-09 的工资是按「250/点 + 每满75点奖1250」物化的，
+    但 sys_configs 里 2026-09 写着 68/3000 —— 若按当前配置重算会得到不同的钱
+    （正是设计文档警告的"静默写错钱"）。故一律读物化值。
+
+    person：按 person_code 精确或姓名包含匹配（可选）。
+    """
+    if not re.fullmatch(MONTH_PATTERN, month or ""):
+        raise BadMonth(f"月份格式非法：{month!r}，应为 YYYY-MM")
+
+    from app.services import perf
+
+    rows = perf.month_perf(db, month)
+    if person:
+        key = person.strip()
+        rows = [r for r in rows
+                if r["code"] == key or key in (r["name"] or "")]
+    if not rows:
+        return {"month": month, "persons": 0, "total_points": 0,
+                "total_salary": 0, "per_point": None, "rows": [],
+                "hint": "该月无薪资数据（合法结果，不是错误）"}
+
+    per_point = next((r["per_point"] for r in rows if r.get("per_point")), None)
+    return {
+        "month": month,
+        "persons": len(rows),
+        "total_points": sum(r["points"] or 0 for r in rows),
+        "total_salary": sum(r["amount"] or 0 for r in rows),
+        "per_point": per_point,
+        "rows": [{
+            "person_code": r["code"], "name": r["name"],
+            "points": r["points"], "p1": r["p1"], "p2": r["p2"],
+            "salary": r["amount"],
+            "settle_amount": r.get("settle_amount"),
+            "diff_amount": r.get("diff_amount"),
+        } for r in rows],
+    }

@@ -93,6 +93,35 @@ def register(mcp: MCPServer) -> None:
         )}
 
     @mcp.tool(
+        name="visit_month_salary",
+        description=(
+            "查询某结算月（格式 YYYY-MM）的员工薪资：人数、总点数、总工资，"
+            "以及每人点数与工资明细。可选 person 参数按工号或姓名筛选。"
+            "数据来自已物化的月绩效记录（已结算口径），只读。"
+        ),
+    )
+    def visit_month_salary(
+        month: Annotated[str, Field(pattern=MONTH_PATTERN)],
+        ctx: Context,
+        person: str | None = None,
+    ) -> dict[str, Any]:
+        from app.db import SessionLocal
+        from mcp_service import capability
+
+        db = SessionLocal()
+        try:
+            data = capability.month_salary(db, month, person=person)
+        except capability.BadMonth as exc:
+            return _envelope_error("BAD_MONTH", str(exc),
+                                   "月份必须是 YYYY-MM，例如 2026-09")
+        except Exception as exc:  # noqa: BLE001
+            return _envelope_error("INTERNAL", repr(exc),
+                                   "系统内部错误，已记录；可重试")
+        finally:
+            db.close()
+        return {"ok": True, "data": data}
+
+    @mcp.tool(
         name="visit_month_summary",
         description=(
             "查询某结算月（格式 YYYY-MM）正式表的行数、总点数、1点/2点条数与人数。"
