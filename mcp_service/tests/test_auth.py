@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
-"""鉴权中间件：HTTP 层 401 + WWW-Authenticate，且 401 也要落日志。
+"""鉴权中间件（P1：查 api_tokens 表）：HTTP 层 401 + WWW-Authenticate，且 401 也落日志。
 
 用 asyncio.run 驱动（而非 pytest-asyncio），避免为中间件测试引入新依赖。
 """
 import asyncio
+import hashlib
 import json
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.models import ApiToken, Base, User
 from mcp_service.auth import BearerAuthMiddleware
 
-TOKEN = "g" * 32
+TOKEN = "g" * 43
 
 
 class Recorder:
@@ -19,6 +25,27 @@ class Recorder:
         self.records.append(record)
 
 
+@pytest.fixture(autouse=True)
+def _token_db(tmp_path, monkeypatch):
+    """临时库 + 一枚有效 Token，并让中间件用它查表。"""
+    eng = create_engine(f"sqlite:///{tmp_path}/auth.db",
+                        connect_args={"check_same_thread": False})
+    Base.metadata.create_all(eng)
+    S = sessionmaker(bind=eng, expire_on_commit=False)
+    s = S()
+    u = User(username="admin", password_hash="x", role="admin", is_active=True)
+    s.add(u)
+    s.commit()
+    s.add(ApiToken(user_id=u.id, name="t", token_prefix=TOKEN[:8],
+                   token_hash=hashlib.sha256(TOKEN.encode()).hexdigest(),
+                   scopes="read,write"))
+    s.commit()
+    s.close()
+    monkeypatch.setattr("app.db.SessionLocal", S)
+    yield
+    eng.dispose()
+
+
 async def _ok_app(scope, receive, send):
     await send({"type": "http.response.start", "status": 200, "headers": []})
     await send({"type": "http.response.body", "body": b"ok"})
@@ -27,6 +54,18 @@ async def _ok_app(scope, receive, send):
 async def _boom_app(scope, receive, send):
     await send({"type": "http.response.start", "status": 500, "headers": []})
     raise RuntimeError("boom after response start")
+
+
+async def _consume_body_app(scope, receive, send):
+    """真实路径：MCP POST 会读取请求体（JSON-RPC）。"""
+    body = b""
+    while True:
+        m = await receive()
+        body += m.get("body", b"")
+        if not m.get("more_body", False):
+            break
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": body})
 
 
 async def _asgi_call(app, headers, path="/mcp", query=b"token=LEAK"):
@@ -56,10 +95,13 @@ def _call(app, headers, path="/mcp", query=b"token=LEAK"):
     return asyncio.run(_asgi_call(app, headers, path, query))
 
 
+def _mw(app, log):
+    return BearerAuthMiddleware(app, log=log, bootstrap_token=None)
+
+
 def test_missing_bearer_returns_401():
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    r = _call(app, [(b"host", b"127.0.0.1:8765")])
+    r = _call(_mw(_ok_app, log), [(b"host", b"127.0.0.1:8765")])
     assert r["status"] == 401
     assert (b"www-authenticate", b"Bearer") in r["headers"]
     assert json.loads(r["body"])["error"]["code"] == "UNAUTHORIZED"
@@ -67,30 +109,26 @@ def test_missing_bearer_returns_401():
 
 def test_wrong_bearer_returns_401():
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    r = _call(app, [(b"authorization", b"Bearer wrong")])
+    r = _call(_mw(_ok_app, log), [(b"authorization", b"Bearer wrong")])
     assert r["status"] == 401
 
 
 def test_bearer_without_prefix_returns_401():
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    r = _call(app, [(b"authorization", TOKEN.encode())])
+    r = _call(_mw(_ok_app, log), [(b"authorization", TOKEN.encode())])
     assert r["status"] == 401
 
 
 def test_correct_bearer_passes_through():
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    r = _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())])
+    r = _call(_mw(_ok_app, log), [(b"authorization", f"Bearer {TOKEN}".encode())])
     assert r["status"] == 200
     assert r["body"] == b"ok"
 
 
 def test_401_is_logged_with_status_and_query_redacted():
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    _call(app, [(b"host", b"127.0.0.1:8765")])
+    _call(_mw(_ok_app, log), [(b"host", b"127.0.0.1:8765")])
     assert len(log.records) == 1
     rec = log.records[0]
     assert rec["status"] == 401
@@ -99,19 +137,20 @@ def test_401_is_logged_with_status_and_query_redacted():
     assert "LEAK" not in json.dumps(rec)
 
 
-def test_correct_bearer_logs_auth_header_seen_true():
+def test_correct_bearer_logs_actor_and_header_seen():
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())])
-    assert log.records[0]["auth_header_seen"] is True
-    assert log.records[0]["status"] == 200
+    _call(_mw(_ok_app, log), [(b"authorization", f"Bearer {TOKEN}".encode())])
+    rec = log.records[0]
+    assert rec["auth_header_seen"] is True
+    assert rec["status"] == 200
+    assert rec["token_id"] is not None          # P1：记下命中的 Token 行
+    assert rec["actor_uid"] is not None
 
 
 def test_logs_host_origin_and_session_headers():
     """意外 Origin 是本地连通的典型静默失败源，必须留证据（spec §5.6）。"""
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    _call(app, [
+    _call(_mw(_ok_app, log), [
         (b"authorization", f"Bearer {TOKEN}".encode()),
         (b"host", b"127.0.0.1:8765"),
         (b"origin", b"app://workbuddy"),
@@ -125,47 +164,29 @@ def test_logs_host_origin_and_session_headers():
     assert rec["protocol_version"] == "2025-11-25"
 
 
-async def _consume_body_app(scope, receive, send):
-    """真实路径：MCP POST 会读取请求体（JSON-RPC）。"""
-    body = b""
-    while True:
-        m = await receive()
-        body += m.get("body", b"")
-        if not m.get("more_body", False):
-            break
-    await send({"type": "http.response.start", "status": 200, "headers": []})
-    await send({"type": "http.response.body", "body": body})
-
-
 def test_logs_body_digest_matching_consumed_body():
     """§5.6 的 body_digest 必须等于下游实际消费的请求体摘要（原文不进日志）。"""
-    import hashlib
-
     log = Recorder()
-    app = BearerAuthMiddleware(_consume_body_app, token=TOKEN, log=log)
-    _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())], query=b"")
+    _call(_mw(_consume_body_app, log),
+          [(b"authorization", f"Bearer {TOKEN}".encode())], query=b"")
     rec = log.records[0]
-    assert "body_digest" in rec
-    # 测试的 receive 恒返回 body=b"{}"
     assert rec["body_digest"] == hashlib.sha256(b"{}").hexdigest()
 
 
 def test_logs_body_digest_of_unread_body_is_empty_hash():
     """下游不读请求体时（如 401 短路），摘要是空串的 sha256——不泄正文。"""
-    import hashlib
-
     log = Recorder()
-    app = BearerAuthMiddleware(_ok_app, token=TOKEN, log=log)
-    _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())], query=b"")
+    _call(_mw(_ok_app, log),
+          [(b"authorization", f"Bearer {TOKEN}".encode())], query=b"")
     assert log.records[0]["body_digest"] == hashlib.sha256(b"").hexdigest()
 
 
 def test_logs_even_when_downstream_raises():
     """下游异常也必须留一行记录——否则正是最难查的那种失败。"""
     log = Recorder()
-    app = BearerAuthMiddleware(_boom_app, token=TOKEN, log=log)
     try:
-        _call(app, [(b"authorization", f"Bearer {TOKEN}".encode())])
+        _call(_mw(_boom_app, log),
+              [(b"authorization", f"Bearer {TOKEN}".encode())])
     except RuntimeError:
         pass
     assert len(log.records) == 1
@@ -179,10 +200,28 @@ def test_non_http_scope_passes_through():
     async def _app(scope, receive, send):
         seen["type"] = scope["type"]
 
-    app = BearerAuthMiddleware(_app, token=TOKEN, log=Recorder())
+    app = _mw(_app, Recorder())
 
     async def _run():
         await app({"type": "lifespan"}, None, None)
 
     asyncio.run(_run())
     assert seen["type"] == "lifespan"
+
+
+def test_bootstrap_token_is_read_only(tmp_path, monkeypatch):
+    """表内无 Token 时 env token 生效但仅 read（spec §5.3）。"""
+    eng = create_engine(f"sqlite:///{tmp_path}/boot.db",
+                        connect_args={"check_same_thread": False})
+    Base.metadata.create_all(eng)
+    S = sessionmaker(bind=eng, expire_on_commit=False)
+    s = S()
+    s.add(User(username="admin", password_hash="x", role="admin", is_active=True))
+    s.commit()
+    s.close()
+    monkeypatch.setattr("app.db.SessionLocal", S)
+    log = Recorder()
+    app = BearerAuthMiddleware(_ok_app, log=log, bootstrap_token="env-token")
+    assert _call(app, [(b"authorization", b"Bearer env-token")])["status"] == 200
+    assert log.records[0]["token_id"] is None      # bootstrap 无 Token 行
+    eng.dispose()

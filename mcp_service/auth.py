@@ -43,17 +43,27 @@ class _BodyCapture:
 
 
 class BearerAuthMiddleware:
-    def __init__(self, app, token: str,
-                 log: Callable[[dict[str, Any]], None]) -> None:
-        self.app = app
-        self._token = token
-        self._log = log
+    """Bearer 鉴权（P1：查 api_tokens 表；env token 降级为���读 bootstrap）。"""
 
-    def _authorized(self, header: str) -> bool:
+    def __init__(self, app, log: Callable[[dict[str, Any]], None],
+                 bootstrap_token: str | None = None) -> None:
+        self.app = app
+        self._log = log
+        self._bootstrap = bootstrap_token
+
+    def _authorize(self, header: str):
+        """返回 Actor 或 None（spec §5.3）。"""
         # RFC 7235：auth scheme 大小写不敏感
         if header[: len(_BEARER)].lower() != _BEARER.lower():
-            return False
-        return hmac.compare_digest(header[len(_BEARER):].strip(), self._token)
+            return None
+        raw = header[len(_BEARER):].strip()
+        from app.db import SessionLocal
+        from mcp_service import tokens
+        db = SessionLocal()
+        try:
+            return tokens.resolve(db, raw, bootstrap_token=self._bootstrap)
+        finally:
+            db.close()
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -79,7 +89,8 @@ class BearerAuthMiddleware:
             "session_id_seen": bool(headers.get("mcp-session-id")),
         }
 
-        if not self._authorized(auth_header):
+        actor = self._authorize(auth_header)
+        if actor is None:
             record["status"] = 401
             record["duration_ms"] = int((time.monotonic() - started) * 1000)
             record["body_digest"] = hashlib.sha256(
@@ -87,6 +98,9 @@ class BearerAuthMiddleware:
             self._log(record)
             await self._send_401(send)
             return
+
+        record["actor_uid"] = actor.uid
+        record["token_id"] = actor.token_id
 
         captured = {"status": 200}
 

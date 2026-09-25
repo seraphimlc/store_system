@@ -59,7 +59,7 @@ def build_app(settings: config.McpSettings, public_host: str | None = None):
         transport_security=transport_security_settings(public_host),
     )
     log = RequestLogger(settings.log_path)
-    return BearerAuthMiddleware(app, token=settings.token, log=log)
+    return BearerAuthMiddleware(app, log=log, bootstrap_token=settings.token)
 
 
 def main() -> int:

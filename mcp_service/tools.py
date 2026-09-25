@@ -5,6 +5,7 @@
 业务聚合在 capability.py，业务逻辑复用 app.services.*（不重复实现）。
 P1 起：payload 构建函数从本文件拆出，本文件只保留注册（见计划评审建议）。
 """
+import os
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -50,6 +51,30 @@ def _now_iso() -> str:
 
 def _envelope_error(code: str, message: str, hint: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": code, "message": message, "hint": hint}}
+
+
+def actor_from_ctx(ctx: Context):
+    """从请求头解析 Actor（P1 写工具与审计用）。
+
+    中间件已在 HTTP 层拦 401；这里为拿到 actor（含 token_id）再解析一次——
+    一次前缀索引查询，成本可忽略，换来不必在 ASGI 层透传���态。
+    """
+    headers = {k.lower(): v for k, v in (ctx.headers or {}).items()}
+    raw = headers.get("authorization", "")
+    if raw[:7].lower() != "bearer ":
+        return None
+    from app.db import SessionLocal
+    from mcp_service import tokens
+    db = SessionLocal()
+    try:
+        return tokens.resolve(db, raw[7:].strip(),
+                              bootstrap_token=os.environ.get("VISIT_MCP_TOKEN"))
+    finally:
+        db.close()
+
+
+def client_info_of(ctx: Context) -> str | None:
+    return _client_info(ctx)
 
 
 def register(mcp: MCPServer) -> None:

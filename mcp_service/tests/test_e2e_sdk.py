@@ -56,17 +56,13 @@ def _wait_port(port: int, timeout: float = 90) -> None:
 @pytest.fixture()
 def server(tmp_path):
     """拉起真实服务进程，返回端口；teardown 时终止。"""
-    # 空库（有 formal_records 表、无数据）——验"空月 ok:true 且计数为 0"
-    con = sqlite3.connect(tmp_path / "empty.db")
-    con.executescript("""
-        CREATE TABLE formal_records (
-            id INTEGER PRIMARY KEY, import_id INTEGER NOT NULL,
-            raw_record_id INTEGER NOT NULL, person_code VARCHAR(32),
-            store_id_raw TEXT NOT NULL, japan_date DATE, points INTEGER NOT NULL,
-            created_at DATETIME NOT NULL);
-    """)
-    con.commit()
-    con.close()
+    # 空库：建全量 schema（含 api_tokens，使 bootstrap Token 生效）+ formal_records 空表
+    from sqlalchemy import create_engine as _ce
+    from app.db import Base
+    import app.models  # noqa: F401
+    _eng = _ce(f"sqlite:///{tmp_path}/empty.db")
+    Base.metadata.create_all(_eng)
+    _eng.dispose()
 
     port = _free_port()
     env = dict(os.environ)
