@@ -68,3 +68,15 @@ def test_load_honours_overrides(monkeypatch):
     monkeypatch.setenv("VISIT_MCP_LOG", "/tmp/mcp-test.jsonl")
     s = config.load()
     assert (s.host, s.port, s.log_path) == ("0.0.0.0", 9999, "/tmp/mcp-test.jsonl")
+
+
+def test_stdio_mode_allows_missing_token(monkeypatch):
+    """stdio 模式（本地进程）不要求 VISIT_MCP_TOKEN，但仍要求 DATABASE_URL。"""
+    _clear(monkeypatch)
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///file:/tmp/x.db?mode=ro&uri=true")
+    s = config.load(require_token=False)
+    assert s.token == ""
+
+    monkeypatch.delenv("DATABASE_URL")
+    with pytest.raises(config.ConfigError):
+        config.load(require_token=False)

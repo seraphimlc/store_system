@@ -63,7 +63,16 @@ def build_app(settings: config.McpSettings, public_host: str | None = None):
 
 
 def main() -> int:
-    settings = config.load()                    # 必须先于任何 app.* import（坑 1）
+    # --stdio：由 WorkBuddy 直接拉起本地进程（无需 HTTP/端口/Token）
+    stdio = "--stdio" in sys.argv
+    settings = config.load(require_token=not stdio)   # 必须先于任何 app.* import（坑 1）
+
+    if stdio:
+        mcp = build_server()
+        print("[mcp] stdio 模式启动（由客户端拉起）", file=sys.stderr)
+        mcp.run(transport="stdio")
+        return 0
+
     import uvicorn
 
     app = build_app(settings)

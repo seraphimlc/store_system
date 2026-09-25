@@ -29,9 +29,10 @@ class McpSettings:
     server_name: str = "visit-settle-mcp"
 
 
-def load() -> McpSettings:
+def load(require_token: bool = True) -> McpSettings:
+    """require_token=False 用于 stdio 模式（本地进程由客户端拉起，无 HTTP 鉴权面）。"""
     token = (os.environ.get("VISIT_MCP_TOKEN") or "").strip()
-    if not token:
+    if require_token and not token:
         raise ConfigError(
             "VISIT_MCP_TOKEN 未设置或为空：拒绝启动。"
             "空凭证会让「错误凭据被拒」这条验收项静默通过。"
