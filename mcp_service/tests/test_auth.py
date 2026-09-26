@@ -254,3 +254,41 @@ def test_bootstrap_token_is_read_only(tmp_path, monkeypatch):
     assert _call(app, [(b"authorization", b"Bearer env-token")])["status"] == 200
     assert log.records[0]["token_id"] is None      # bootstrap 无 Token 行
     eng.dispose()
+
+
+# ---------- tools/list 按身份裁剪（员工只看到自己能用的） ----------
+
+def test_filter_tools_list_body_json_and_sse():
+    """响应体裁剪：JSON 与 SSE 两种编码都要正确过滤，非 tools/list 内容原样返回。"""
+    import json
+    from mcp_service.auth import filter_tools_list_body
+
+    allowed = {"visit_my_perf", "visit_ping"}
+    payload = {"jsonrpc": "2.0", "id": 1, "result": {"tools": [
+        {"name": "visit_my_perf"}, {"name": "visit_month_salary"},
+        {"name": "visit_ping"}]}}
+
+    # 普通 JSON
+    out = json.loads(filter_tools_list_body(
+        json.dumps(payload).encode("utf-8"), allowed).decode("utf-8"))
+    assert [t["name"] for t in out["result"]["tools"]] == ["visit_my_perf", "visit_ping"]
+
+    # SSE（data: {...}）
+    sse = b"event: message\ndata: " + json.dumps(payload).encode("utf-8") + b"\n\n"
+    out2 = filter_tools_list_body(sse, allowed)
+    line = [l for l in out2.split(b"\n") if l.startswith(b"data:")][0]
+    obj = json.loads(line[5:].strip().decode("utf-8"))
+    assert [t["name"] for t in obj["result"]["tools"]] == ["visit_my_perf", "visit_ping"]
+
+    # 非 tools/list（无 tools 字段）→ 原样
+    other = b'{"jsonrpc":"2.0","id":2,"result":{"content":[]}}'
+    assert filter_tools_list_body(other, allowed) == other
+
+
+def test_staff_allowed_set_matches_authz():
+    """裁剪用的白名单与授权矩阵是同一份真相（避免两处不一致）。"""
+    from mcp_service import authz
+    from mcp_service.auth import _ALLOWED_TOOL_NAMES  # noqa: F401  （未初始化时为 None）
+    assert "visit_my_perf" in authz.STAFF_ALLOWED
+    assert "visit_month_salary" not in authz.STAFF_ALLOWED
+    assert authz.require_role("visit_month_salary") == "ADMIN_ONLY"

@@ -27,6 +27,9 @@ _UNAUTHORIZED = {
 
 _BEARER = "Bearer "
 
+# 员工可用工具名（延迟从 authz 取，避免循环 import）
+_ALLOWED_TOOL_NAMES = None
+
 
 def resource_metadata_url() -> str:
     """OAuth protected-resource 元数据地址（MCP OAuth 规范 §2.1）。
@@ -47,6 +50,47 @@ def resource_metadata_url() -> str:
             pt = (os.environ.get("VISIT_MCP_PORT") or "8765").strip()
             base = f"http://{h}:{pt}"
     return f"{base}/.well-known/oauth-protected-resource"
+
+
+def filter_tools_list_body(raw: bytes, allowed: set) -> bytes:
+    """把 tools/list 响应里的工具数组按白名单裁剪（员工只看到自己能用的工具）。
+
+    为什么要改响应体：MCP 的 tools/list 在**独立的会话任务**里处理，中间件设的
+    contextvar 传不进去（实测无效），因此在 HTTP 层裁剪响应最稳妥。
+    兼容两种编码：SSE（`data: {...}`）与普通 JSON。
+    """
+    import json as _json
+
+    def _filter_obj(obj):
+        try:
+            result = obj.get("result") or {}
+            tools = result.get("tools")
+            if isinstance(tools, list):
+                result["tools"] = [t for t in tools
+                                   if isinstance(t, dict) and t.get("name") in allowed]
+                obj["result"] = result
+        except Exception:  # noqa: BLE001
+            pass
+        return obj
+
+    try:
+        if b"data:" in raw:                       # SSE
+            out = []
+            for line in raw.split(b"\n"):
+                if line.startswith(b"data:"):
+                    payload = line[5:].strip()
+                    try:
+                        obj = _json.loads(payload.decode("utf-8"))
+                        line = b"data: " + _json.dumps(
+                            _filter_obj(obj), ensure_ascii=False).encode("utf-8")
+                    except Exception:  # noqa: BLE001
+                        pass
+                out.append(line)
+            return b"\n".join(out)
+        obj = _json.loads(raw.decode("utf-8"))     # 普通 JSON
+        return _json.dumps(_filter_obj(obj), ensure_ascii=False).encode("utf-8")
+    except Exception:  # noqa: BLE001
+        return raw
 
 
 def _www_authenticate_header(resource_metadata: str | None = None) -> bytes:
@@ -137,10 +181,38 @@ class BearerAuthMiddleware:
         record["token_id"] = actor.token_id
 
         captured = {"status": 200}
+        # 员工：裁剪 tools/list 的响应（只保留其可用工具）。做法=缓冲响应体，
+        # 请求体解析出 method==tools/list 时过滤后再发出（contextvar 在 SDK 的
+        # 会话任务里传不过去，只能在 HTTP 层做）。管理员/无身份：直通。
+        from mcp_service import authz as _authz
+        global _ALLOWED_TOOL_NAMES
+        if _ALLOWED_TOOL_NAMES is None:
+            _ALLOWED_TOOL_NAMES = set(_authz.STAFF_ALLOWED)
+        need_filter = (actor is not None and getattr(actor, "role", "") != "admin")
+        buffered = {"chunks": [], "head": None}
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 captured["status"] = message["status"]
+                if need_filter:
+                    buffered["head"] = message
+                    return
+            elif message["type"] == "http.response.body" and need_filter:
+                buffered["chunks"].append(message.get("body", b""))
+                if message.get("more_body"):
+                    return
+                raw = b"".join(buffered["chunks"])
+                try:
+                    req = json.loads(b"".join(body.parts).decode("utf-8"))
+                    method = req.get("method") if isinstance(req, dict) else None
+                except Exception:  # noqa: BLE001
+                    method = None
+                if method == "tools/list":
+                    allowed = {n for n in _ALLOWED_TOOL_NAMES}
+                    raw = filter_tools_list_body(raw, allowed)
+                await send(buffered["head"])
+                await send({"type": "http.response.body", "body": raw})
+                return
             await send(message)
 
         try:
