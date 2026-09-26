@@ -10,6 +10,7 @@
 
 ```
 独立 MCP 服务进程（复用业务代码，不重写业务）
+  → **工具按"业务场景"切，不按 REST 接口切**（见 §4.6，第一版踩过的最大坑）
   → 只读工具先行（打通链路）
   → 写工具 + 闸门（危险操作要确认/预演）
   → 统一错误信封 + 工具描述（LLM 友好）
@@ -154,6 +155,74 @@ location /mcp {
     **传不进去**（实测无效）；稳妥做法是**在 HTTP 层缓冲并裁剪响应体**（兼容 SSE 与 JSON）
   - 这是**双保险**：列表不给看 + 调用时仍强制拦
 
+### 4.6 场景化设计规范（**最重要的一节**）
+
+> 血泪教训：本系统第一版把管理端接口**一个 REST 端点做成一个工具**，结果 **49 个工具**。
+> 生产审计实测：**只有 13 个被调用过**（27%）。用户原话：「40+ 个工具根本用不上那么多。
+> 而且我们也不应该一个 restful api 就做一个工具。我们要根据实际场景来。」
+> 重构后 **49 → 16**，且列表只暴露新集。
+
+#### 4.6.1 核心原则
+
+**一个工具 = 一个"用户会问的问题 / 会派的一件事"，而不是一次 API 调用。**
+
+| 粒度 | 工具名长什么样 | 结果 |
+|---|---|---|
+| ❌ 接口粒度 | `store_skip_pair`、`rebuild_preview`、`recon_adjust_state`、`file_layout` | 模型要在 49 个里选，选错率高；用户看不懂 |
+| ✅ 场景粒度 | `visit_upload`、`visit_overview`、`visit_payroll_export` | 名字即意图，参数少，描述可写"什么时候用我" |
+
+#### 4.6.2 怎么找出场景（方法，不是拍脑袋）
+
+1. **看审计数据**：`mcp_audit_log` 里**实际被调用过的工具**才是真需求（我们：13/49）
+2. **走用户工作流**：把用户的一天/一个月要办的事列出来（导入→看数→发薪→对账→导出）
+3. **按"问题类型"聚类**：同一类问题的多个端点 → 合成一个工具 + `view` 枚举
+4. **一件事拆成多个工具 = 反模式**：例如"看数据"被拆成 `month_summary`/`dashboard`/
+   `list_months`/`perf_ranking`/`person_detail` 五个；"导出"被拆成四个
+
+#### 4.6.3 设计规则（逐条）
+
+| # | 规则 | 说明 |
+|---|---|---|
+| 1 | **工具名用用户语言** | `visit_upload` 而不是 `visit_upload_recon`；内部实现细节不进名字 |
+| 2 | **同域不同视角 → `view` 枚举** | 一次调用尽量答完整，减少往返；每个取值在描述里写清"回答什么问题" |
+| 3 | **有副作用的操作 → `action` 枚举 + 闸门** | `action=merge\|split\|run` 等写值需确认语；只读 `view` 不需要 |
+| 4 | **读写分离** | 只读工具与写工具**不混在一个工具里**（注解 `readOnlyHint` 与闸门依赖它） |
+| 5 | **统一"预演"能力** | 危险/有副作用的操作提供 `dry_run` / `action=preview`：只报影响面、不落库 |
+| 6 | **互斥指引必须写** | 描述里明确"看全公司某月→A；看某个人→B；看我自己的→C"——**调用成功率的最大杠杆** |
+| 7 | **非法枚举值 → `BAD_PARAM` + 列出可选值** | 别让模型猜；报错即教学 |
+| 8 | **不要过度合并** | 一个工具塞太多 `view` 会变成"上帝工具"，模型照样选错。目标是**场景数量 ≈ 10~16**，不是"最少工具数" |
+| 9 | **默认拒绝** | 新增工具默认员工不可用（安全的失败方向），显式登记才开放 |
+
+#### 4.6.4 合并映射表（示范：本系统 49 → 16）
+
+| 场景工具 | 合并掉的接口粒度工具 |
+|---|---|
+| `visit_upload` 导入文件 | upload_file + upload_recon + finalize_file |
+| `visit_overview` 看月度概况 | month_summary + dashboard + list_months + perf_ranking |
+| `visit_person` 看某人 | month_salary + person_detail |
+| `visit_payroll` 发薪与找平 | payroll_rows + settlement_trace + payroll_update |
+| `visit_payroll_export` 导出发薪表 | export_salary + export_payroll_settle + payroll_generate + payroll_mark_paid |
+| `visit_recon` 看对账 | recon_status + recon_diff + recon_interpret + recon_adjust + adjust_state + settlement |
+| `visit_recon_export` 导出对账 | export_recon_report + export_recon_result + export_recon_diff |
+| `visit_files` 文件与任务 | file_list + file_layout + file_report + list_tasks |
+| `visit_rebuild` 重算 | rebuild_preview + rebuild_month |
+| `visit_staff` 员工管理 | staff_list + staff_set_status |
+| `visit_config` 配置 | config_get + config_set + set_per_point |
+| `visit_store` 店铺主档 | store_search + merge_pair + skip_pair + apply_all + split_entity + ai_run（6→1） |
+| `visit_verify` 数据体检 | verify_integrity |
+| 员工侧 3 个 | `visit_whoami` / `visit_my_perf`（view=month\|daily）/ `visit_my_pay`（一次给全：进度+台账+轨迹） |
+
+#### 4.6.5 实施要点（避免踩坑）
+
+- **实现方式**：新工具是**薄封装**——内部调用**已有能力函数**，**绝不重写业务逻辑**
+  （业务逻辑只有一份实现，是这类重构的底线）
+- **删除旧名 vs 兼容期**：两种都可，但**列表只暴露新集**（用户与模型立刻看到干净的场景面）；
+  兼容期只在"显式调用旧名"时生效，到期删除
+- **改动面评估**：先数清"注册工具的文件数"与"测试里引用旧工具名的处数"
+  （我们：11 个注册文件 + 约 66 处测试引用）——这决定工作量与回归风险
+- **验收必须包含**：工具数正确 / **旧名确实消失**（或仍可调用）/ 按身份裁剪生效 /
+  越权仍被拦 / 写闸门仍有效 / **关键业务数字与重构前逐项一致** / 自洽检查仍全过
+
 ---
 
 ## 5. 身份与权限
@@ -296,7 +365,8 @@ VISIT_OAUTH_REFRESH_DAYS=90
 
 1. [ ] 确定**架构**（独立进程 + 复用业务服务层 + 独立 venv/镜像）
 2. [ ] 打通**连通性**（HTTP + stdio 两种模式都试；记录协议版本与会话行为）
-3. [ ] 设计**工具清单**（只读先行 → 写工具带闸门 → 互斥指引）
+3. [ ] 设计**工具清单**：**先定场景再定工具**（§4.6）——一个工具=一个用户问题/一件事；
+       同域多视角用 `view` 枚举；读写分离；统一 `dry_run`；写互斥指引（别按 REST 端点 1:1 映射）
 4. [ ] 定**错误信封**（含 `retryable`）与**错误码表**
 5. [ ] 定**授权矩阵**（默认拒绝 + 白名单 + 员工/管理员）
 6. [ ] 实现**身份**（token 绑定人 + 状态联动 + 两阶段审计 + 自助签发页）
