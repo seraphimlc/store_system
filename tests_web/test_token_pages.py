@@ -269,11 +269,11 @@ def test_audit_page_columns_and_filters(client):
     now = datetime.utcnow()
     for i in range(3):
         db.add(McpAuditLog(user_id=uid1, token_id=1,
-                           tool="visit_month_summary",
+                           tool="visit_overview",
                            params_json='{"month":"2026-08"}',
                            ok=True, error_code=None, duration_ms=12,
                            created_at=now - timedelta(days=1)))
-    db.add(McpAuditLog(user_id=None, token_id=None, tool="visit_ping",
+    db.add(McpAuditLog(user_id=None, token_id=None, tool="visit_whoami",
                        params_json="{}", ok=False,
                        error_code="UNAUTHORIZED", duration_ms=1,
                        created_at=now - timedelta(days=2)))
@@ -281,17 +281,17 @@ def test_audit_page_columns_and_filters(client):
     db.close()
     page = client.get("/mcp-audit").text
     assert "MCP 调用审计" in page
-    assert "visit_month_summary" in page
+    assert "visit_overview" in page
     assert "UNAUTHORIZED" in page
     assert "参数摘要" in page
     # 按人过滤
     page = client.get(f"/mcp-audit?user_id={uid1}").text
-    assert "visit_month_summary" in page
-    assert "visit_ping" not in page
+    assert "visit_overview" in page
+    assert "visit_whoami" not in page
     # 按工具过滤
-    page = client.get("/mcp-audit?tool=ping").text
-    assert "visit_ping" in page
-    assert "visit_month_summary" not in page
+    page = client.get("/mcp-audit?tool=whoami").text
+    assert "visit_whoami" in page
+    assert "visit_overview" not in page
 
 
 def test_audit_pagination(client):

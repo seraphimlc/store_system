@@ -116,7 +116,7 @@ def test_preview_returns_preview_id_and_buckets(db):
     assert sum(d["raw_by_status"].values()) == d["raw_total"]   # 含 other 残差桶
     assert d["estimated_insert_rows"] == d["raw_by_status"]["valid"]
     row = db.get(McpAuditLog, d["preview_id"])
-    assert row.tool == "visit_rebuild_preview"
+    assert row.tool == "visit_rebuild"       # 场景化后 preview 归入 visit_rebuild(action='preview')
     assert "2026-09" in (row.params_json or "")     # 月份存在 params_json（无 month 列）
 
 
@@ -216,19 +216,6 @@ def test_set_per_point_warms_config_before_writing(db, monkeypatch):
     assert res["data"]["per_point"] == 260
 
 
-def test_register_defines_four_tools():
-    class _MCP:
-        def __init__(self):
-            self.names = []
-
-        def tool(self, **kw):
-            self.names.append(kw.get("name"))
-
-            def deco(fn):
-                return fn
-            return deco
-
-    m = _MCP()
-    write_tools.register(m)
-    assert set(m.names) == {"visit_finalize_file", "visit_rebuild_preview",
-                            "visit_rebuild_month", "visit_set_per_point"}
+def test_no_register_in_write_tools():
+    """场景化重构：write_tools 不再注册工具（能力函数供 scenario_ops 调用）。"""
+    assert not hasattr(write_tools, "register")

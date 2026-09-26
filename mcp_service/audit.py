@@ -14,7 +14,7 @@ from app.models import McpAuditLog
 
 # 该工具在业务内部落一行审计拿 preview_id（闸门 6 契约），
 # 审计层不重复插行，finish 时回填那一行。
-_PREVIEW_TOOL = "visit_rebuild_preview"
+_PREVIEW_TOOL = "visit_rebuild"
 
 # 敏感键（含这些子串的参数值不落库）
 _SENSITIVE_KEYS = ("token", "secret", "password", "authorization",

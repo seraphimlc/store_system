@@ -51,9 +51,9 @@ def db(tmp_path):
 # ---------- 1) 员工越权被拦住 ----------
 
 @pytest.mark.parametrize("tool", [
-    "visit_upload_file", "visit_rebuild_month", "visit_month_salary",
-    "visit_export_salary", "visit_set_per_point", "visit_staff_set_status",
-    "visit_store_merge_pair", "visit_config_set",
+    "visit_upload", "visit_rebuild", "visit_overview",
+    "visit_recon_export", "visit_config", "visit_staff",
+    "visit_store", "visit_payroll_export",
 ])
 def test_staff_forbidden_on_admin_tools(tool):
     denied = authz.enforce(tool, _staff(), {})
@@ -69,16 +69,20 @@ def test_unknown_tool_defaults_to_admin_only():
 
 
 def test_staff_allowed_tools():
-    for tool in ("visit_ping", "visit_my_perf", "visit_my_daily",
-                 "visit_my_settlement"):
+    for tool in ("visit_whoami", "visit_my_perf", "visit_my_pay"):
         assert authz.enforce(tool, _staff(), {}) is None, tool
+    # 员工调管理员工具一律 FORBIDDEN_TOOL
+    for tool in ("visit_overview", "visit_person", "visit_payroll",
+                 "visit_files", "visit_recon", "visit_verify"):
+        assert authz.enforce(tool, _staff(), {}) is not None, tool
 
 
 # ---------- 2) "我的"工具只能看本人 ----------
 
 def test_my_tool_rejects_other_person():
-    denied = authz.enforce("visit_my_perf", _staff(), {"person": "P999"})
-    assert denied is not None and denied["error"]["code"] == "FORBIDDEN_TOOL"
+    for tool in ("visit_my_perf", "visit_my_pay"):
+        denied = authz.enforce(tool, _staff(), {"person": "P999"})
+        assert denied is not None and denied["error"]["code"] == "FORBIDDEN_TOOL"
 
 
 def test_my_tool_normalizes_own_person():
@@ -88,28 +92,31 @@ def test_my_tool_normalizes_own_person():
 
 
 def test_my_tool_without_person_ok():
-    assert authz.enforce("visit_my_settlement", _staff(), {}) is None
+    assert authz.enforce("visit_my_pay", _staff(), {}) is None
 
 
 # ---------- 3) 管理员不受限 ----------
 
 def test_admin_allowed_everywhere():
-    for tool in ("visit_upload_file", "visit_rebuild_month",
-                 "visit_month_salary", "visit_my_perf", "visit_config_set"):
+    for tool in ("visit_upload", "visit_rebuild", "visit_overview",
+                 "visit_my_perf", "visit_config", "visit_store",
+                 "visit_payroll_export"):
         assert authz.enforce(tool, _admin(), {}) is None, tool
 
 
 def test_unknown_role_denied():
     a = tokens.Actor(uid=9, role="guest", scopes=[], token_id=None)
-    assert authz.enforce("visit_month_salary", a, {}) is not None
+    assert authz.enforce("visit_overview", a, {}) is not None
 
 
 # ---------- 4) 无身份：写/导出拒绝，读放行（既有行为） ----------
 
 def test_unauthenticated_write_denied_read_allowed():
-    assert authz.enforce("visit_upload_file", None, {})["error"]["code"] == "UNAUTHORIZED"
-    assert authz.enforce("visit_export_salary", None, {})["error"]["code"] == "UNAUTHORIZED"
-    assert authz.enforce("visit_ping", None, {}) is None
+    assert authz.enforce("visit_upload", None, {})["error"]["code"] == "UNAUTHORIZED"
+    assert authz.enforce("visit_recon_export", None, {})["error"]["code"] == "UNAUTHORIZED"
+    assert authz.enforce("visit_rebuild", None, {})["error"]["code"] == "UNAUTHORIZED"
+    assert authz.enforce("visit_overview", None, {}) is None
+    assert authz.enforce("visit_verify", None, {}) is None
 
 
 # ---------- 5) token 状态跟随员工状态 ----------
@@ -168,11 +175,11 @@ def test_permanent_token_has_no_expiry(db):
 # ---------- 6) 读写全记审计（含被拒绝） ----------
 
 def test_dispatch_records_success_audit(db):
-    res = authz.dispatch(db, tool="visit_ping", actor=_admin(), params={},
+    res = authz.dispatch(db, tool="visit_verify", actor=_admin(), params={},
                          client_info="t", fn=lambda d: {"ok": True, "data": {}},
                          retryable=True, fn_args=1)
     assert res["ok"] is True
-    rows = db.query(McpAuditLog).filter(McpAuditLog.tool == "visit_ping").all()
+    rows = db.query(McpAuditLog).filter(McpAuditLog.tool == "visit_verify").all()
     assert len(rows) == 1
     assert rows[0].ok is True and rows[0].user_id == 2
     assert rows[0].token_id == 2
@@ -181,12 +188,12 @@ def test_dispatch_records_success_audit(db):
 
 def test_dispatch_records_denial_audit(db):
     """被拒绝的调用也必须留痕（谁试图越权是最该记的）。"""
-    res = authz.dispatch(db, tool="visit_upload_file", actor=_staff(), params={},
+    res = authz.dispatch(db, tool="visit_upload", actor=_staff(), params={},
                          client_info="t", fn=lambda d, a: {"ok": True},
                          retryable=False, fn_args=2)
     assert res["error"]["code"] == "FORBIDDEN_TOOL"
     rows = db.query(McpAuditLog).filter(
-        McpAuditLog.tool == "visit_upload_file").all()
+        McpAuditLog.tool == "visit_upload").all()
     assert len(rows) == 1
     assert rows[0].ok is False
     assert rows[0].error_code == "FORBIDDEN_TOOL"

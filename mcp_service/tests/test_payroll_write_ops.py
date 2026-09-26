@@ -122,25 +122,11 @@ def test_config_set_rejects_bad_values(db):
     assert e.value.code == "BAD_PARAM"
 
 
-# ---------- 注册清单 ----------
+# ---------- 注册（能力层不注册工具；写工具注册在 scenario_ops） ----------
 
-def test_register_defines_six_tools():
-    class _MCP:
-        def __init__(self):
-            self.names = []
-
-        def tool(self, **kw):
-            self.names.append(kw.get("name"))
-
-            def deco(fn):
-                return fn
-            return deco
-
-    m = _MCP()
-    payroll_write_ops.register(m)
-    assert set(m.names) == {
-        "visit_recon_interpret", "visit_recon_adjust", "visit_payroll_generate",
-        "visit_payroll_update", "visit_config_set", "visit_payroll_mark_paid"}
+def test_no_register_in_payroll_write_ops():
+    """场景化重构：payroll_write_ops 不再注册工具（能力函数供 scenario_ops 调用）。"""
+    assert not hasattr(payroll_write_ops, "register")
 
 
 # ---------- 发薪标记（找平吸收额度只算未发薪的期）----------

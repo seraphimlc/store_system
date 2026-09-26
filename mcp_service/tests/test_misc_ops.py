@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""misc_ops：最后 5 个 MCP 工具（visit_file_layout / visit_product_doc /
-visit_staff_set_status / visit_store_ai_run / visit_export_recon_result）。
+"""misc_ops 能力层测试（file_layout / product_doc / staff_set_status /
+store_ai_run / export_recon_result）。
 
 临时 SQLite（Base.metadata.create_all）造数据，绝不碰真实库。
-覆盖：5 个工具正常路径 + 错误/权限/确认语/不存在 + 信封映射（INTERNAL /
-UNAUTHORIZED / FORBIDDEN_TOOL / CONFIRM_REQUIRED / NOT_FOUND / BAD_PARAM）
-+ 注册清单（5 个工具名与描述关键词）。
+覆盖：能力函数正常路径 + 错误/权限/确认语/不存在；信封层（经 scenario_ops 暴露）
+UNAUTHORIZED / FORBIDDEN_TOOL / CONFIRM_REQUIRED / NOT_FOUND / INTERNAL。
 """
 import asyncio
 import base64
@@ -22,15 +21,10 @@ from sqlalchemy.orm import sessionmaker
 from app.models import (AiRun, Base, ImportFile, ReconTask, StoreEntity,
                         StorePair, User)
 from app.services import store_master as _sm
-from mcp_service import guards, misc_ops, tokens
+from mcp_service import guards, misc_ops, scenario_ops, tokens
 
 W = tokens.Actor(uid=1, role="admin", scopes=["read", "write"], token_id=1)
 R = tokens.Actor(uid=1, role="admin", scopes=["read"], token_id=1)
-
-EXPECTED_TOOLS = {
-    "visit_file_layout", "visit_product_doc", "visit_staff_set_status",
-    "visit_store_ai_run", "visit_export_recon_result",
-}
 
 
 def fake_ctx():
@@ -116,7 +110,8 @@ def db(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def factory(tmp_path, monkeypatch):
-    """信封层测试：临时库 factory + 把 app.db.SessionLocal 重定向过去。"""
+    """信封层测试：临时库 factory + 把 app.db.SessionLocal / scenario_ops.SessionLocal
+    重定向过去。"""
     monkeypatch.setenv("VISIT_MCP_EXPORT_DIR", str(tmp_path / "exports"))
     eng = create_engine(f"sqlite:///{tmp_path}/env.db",
                         connect_args={"check_same_thread": False})
@@ -126,6 +121,7 @@ def factory(tmp_path, monkeypatch):
     _seed(s, tmp_path)
     s.close()
     monkeypatch.setattr("app.db.SessionLocal", F)
+    monkeypatch.setattr(scenario_ops, "SessionLocal", F)
     yield F
     eng.dispose()
 
@@ -164,7 +160,7 @@ def test_file_layout_not_found_envelope(db):
     got = misc_ops._call(db, lambda db: misc_ops.file_layout(db, 999))
     assert got["ok"] is False
     assert got["error"]["code"] == "NOT_FOUND"
-    assert "visit_file_list" in got["error"]["hint"]
+    assert "visit_files" in got["error"]["hint"]
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +300,7 @@ def test_store_ai_run_started(db, monkeypatch):
     d = res["data"]
     assert d["started"] is True and d["run_id"] is not None
     assert d["total_pairs"] == 1 and d["status"] == "running"
-    assert "visit_store_search" in d["hint"]
+    assert "visit_store" in d["hint"]
     run = db.get(AiRun, d["run_id"])
     assert run is not None and run.status == "running"
     assert run.total_pairs == 1 and run.created_by == 1
@@ -415,12 +411,16 @@ def test_export_recon_result_cannot_recompute(db, monkeypatch):
 # CONFIRM_REQUIRED / NOT_FOUND / ok / INTERNAL / INTERNAL 映射
 # ---------------------------------------------------------------------------
 
-def test_envelope_unauthorized_without_token():
-    got = misc_ops.visit_staff_set_status(fake_ctx(), 2, "leave",
-                                          confirm_text="确认改状态 zhangsan leave")
+def test_envelope_unauthorized_without_token(factory):
+    # 写工具：无身份 → UNAUTHORIZED
+    got = scenario_ops.visit_staff(fake_ctx(), action="set_status",
+                                   username="zhangsan", status="leave",
+                                   confirm_text="确认改状态 zhangsan leave")
     assert got["ok"] is False and got["error"]["code"] == "UNAUTHORIZED"
-    got = misc_ops.visit_store_ai_run(fake_ctx())
-    assert got["ok"] is False and got["error"]["code"] == "UNAUTHORIZED"
+    # 只读工具：无身份（stdio 风格）放行
+    got = scenario_ops.visit_files(fake_ctx(), view="layout", import_id=1)
+    assert got["ok"] is True
+    assert got["data"]["header_row"] == 2
     actor, err = misc_ops._authorize(fake_ctx())
     assert actor is None and err["ok"] is False
     assert err["error"]["code"] == "UNAUTHORIZED"
@@ -428,17 +428,17 @@ def test_envelope_unauthorized_without_token():
 
 def test_envelope_forbidden_for_read_only_token(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: R)
-    got = misc_ops.visit_staff_set_status(fake_ctx(), 2, "leave",
-                                          confirm_text="确认改状态 zhangsan leave")
-    assert got["ok"] is False and got["error"]["code"] == "FORBIDDEN_TOOL"
-    got = misc_ops.visit_store_ai_run(fake_ctx())
+    got = scenario_ops.visit_staff(fake_ctx(), action="set_status",
+                                   username="zhangsan", status="leave",
+                                   confirm_text="确认改状态 zhangsan leave")
     assert got["ok"] is False and got["error"]["code"] == "FORBIDDEN_TOOL"
 
 
 def test_envelope_staff_set_status_ok(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = misc_ops.visit_staff_set_status(fake_ctx(), 2, "leave",
-                                          confirm_text="确认改状态 zhangsan leave")
+    got = scenario_ops.visit_staff(fake_ctx(), action="set_status",
+                                   username="zhangsan", status="leave",
+                                   confirm_text="确认改状态 zhangsan leave")
     assert got["ok"] is True
     assert got["data"]["new_status"] == "leave"
     s = factory()
@@ -449,56 +449,48 @@ def test_envelope_staff_set_status_ok(factory, monkeypatch):
 
 def test_envelope_staff_set_status_confirm_required(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = misc_ops.visit_staff_set_status(fake_ctx(), 2, "leave",
-                                          confirm_text="改吧")
+    got = scenario_ops.visit_staff(fake_ctx(), action="set_status",
+                                   username="zhangsan", status="leave",
+                                   confirm_text="改吧")
     assert got["ok"] is False and got["error"]["code"] == "CONFIRM_REQUIRED"
     assert "确认改状态 zhangsan leave" in got["error"]["hint"]
 
 
+def test_envelope_staff_set_status_unknown_username(factory, monkeypatch):
+    monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    got = scenario_ops.visit_staff(fake_ctx(), action="set_status",
+                                   username="nobody", status="leave",
+                                   confirm_text="确认改状态 nobody leave")
+    assert got["ok"] is False and got["error"]["code"] == "NOT_FOUND"
+
+
 def test_envelope_write_internal_retryable(factory, monkeypatch):
-    """两个写工具 retryable=True → 意外异常必须 INTERNAL（可重试），绝不 INTERNAL_WRITE。"""
+    """写工具 retryable=True → 意外异常必须 INTERNAL（可重试），绝不 INTERNAL_WRITE。"""
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
 
     def boom(*a, **k):
         raise RuntimeError("boom-db-down")
 
     monkeypatch.setattr(guards, "require_write", boom)
-    got = misc_ops.visit_staff_set_status(fake_ctx(), 2, "leave",
-                                          confirm_text="确认改状态 zhangsan leave")
+    got = scenario_ops.visit_staff(fake_ctx(), action="set_status",
+                                   username="zhangsan", status="leave",
+                                   confirm_text="确认改状态 zhangsan leave")
     assert got["ok"] is False and got["error"]["code"] == "INTERNAL"
     assert "boom-db-down" in got["error"]["message"]
     assert "可重试" in got["error"]["hint"]
-    got = misc_ops.visit_store_ai_run(fake_ctx())
-    assert got["ok"] is False and got["error"]["code"] == "INTERNAL"
-
-
-def test_envelope_ai_run_started(factory, monkeypatch):
-    """经 _write_call：启动成功 → 后台线程 _start_bg 被调度（monkeypatch 验证）。"""
-    monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    monkeypatch.setattr("app.services.ai_batch.configured", lambda: True)
-    spawned = []
-    monkeypatch.setattr(misc_ops, "_start_bg", lambda run_id: spawned.append(run_id))
-    got = misc_ops.visit_store_ai_run(fake_ctx())
-    assert got["ok"] is True
-    d = got["data"]
-    assert d["started"] is True and d["run_id"] is not None
-    assert spawned == [d["run_id"]]
-    s = factory()
-    assert s.get(AiRun, d["run_id"]).status == "running"
-    s.close()
 
 
 def test_envelope_file_layout_ok(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = misc_ops.visit_file_layout(fake_ctx(), 1)
+    got = scenario_ops.visit_files(fake_ctx(), view="layout", import_id=1)
     assert got["ok"] is True
     assert got["data"]["header_row"] == 2
     assert got["data"]["value_map_text"]["visible"] == "YES=candidate"
 
 
-def test_envelope_export_recon_result_ok(factory, monkeypatch):
-    monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = misc_ops.visit_export_recon_result(fake_ctx(), 1)
+def test_envelope_recon_export_detail_ok(factory, monkeypatch):
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
+    got = scenario_ops.visit_recon_export(fake_ctx(), kind="detail", task_id=1)
     assert got["ok"] is True
     d = got["data"]
     assert d["filename"] == "对账结果_任务1.xlsx"
@@ -507,9 +499,9 @@ def test_envelope_export_recon_result_ok(factory, monkeypatch):
     assert Path(d["saved_path"]).exists()
 
 
-def test_envelope_export_recon_result_not_found(factory, monkeypatch):
-    monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = misc_ops.visit_export_recon_result(fake_ctx(), 999)
+def test_envelope_recon_export_detail_not_found(factory, monkeypatch):
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
+    got = scenario_ops.visit_recon_export(fake_ctx(), kind="detail", task_id=999)
     assert got["ok"] is False and got["error"]["code"] == "NOT_FOUND"
     assert "hint" in got["error"]
 
@@ -531,25 +523,8 @@ def test_call_maps_unexpected_to_internal(db):
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# 注册（能力层不注册工具；工具注册在 scenario_ops）
 # ---------------------------------------------------------------------------
 
-def test_register_exposes_five_tools():
-    from mcp.server.mcpserver import MCPServer
-    mcp = MCPServer(name="test-misc-ops", version="0")
-    misc_ops.register(mcp)
-    tools = asyncio.run(mcp.list_tools())
-    names = {t.name for t in tools}
-    assert names == EXPECTED_TOOLS
-    desc = {t.name: t.description for t in tools}
-    for name in ("visit_staff_set_status", "visit_store_ai_run"):
-        assert "需要写权限" in desc[name]
-        assert "INTERNAL" in desc[name]
-        assert "INTERNAL_WRITE" not in desc[name]     # 幂等 → 可重试，非禁重试
-    assert "确认改状态" in desc["visit_staff_set_status"]
-    assert "后台" in desc["visit_store_ai_run"]
-    assert "visit_store_search" in desc["visit_store_ai_run"]
-    assert "content_base64" in desc["visit_export_recon_result"]
-    assert "NOT_FOUND" in desc["visit_export_recon_result"]
-    assert "布局" in desc["visit_file_layout"]
-    assert "product_doc" in desc["visit_product_doc"]
+def test_no_register_in_misc_ops():
+    assert not hasattr(misc_ops, "register")

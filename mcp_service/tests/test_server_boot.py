@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """服务能组装、传输安全未被关闭、进程级启动行为正确（spec §8 T2）。
 
-- test_tools_are_registered：工具清单 = visit_ping + visit_month_summary
+- test_tools_are_registered：工具清单 = 16 个场景化工具（visit_verify / visit_overview …）
 - test_exit_nonzero_on_bad_config：空配置启动必须非零退出（spec §8 T2）
 - test_boots_and_listens：好配置必须真的监听端口（"能启动"的冒烟证据）
 """
@@ -39,10 +39,14 @@ def test_tools_are_registered(monkeypatch, tmp_path):
     monkeypatch.setenv("VISIT_MCP_LOG", str(tmp_path / "r.jsonl"))
     mcp = build_server()
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    # 必含核心工具（用包含断言而非精确相等：新增工具不必改本测试）
-    assert {"visit_ping", "visit_month_summary", "visit_month_salary",
-            "visit_upload_file"} <= names
-    assert len(names) >= 4
+    # 场景化重构后 = 16 个（规格：docs/specs-mcp-tools-scenario.md 第三节）
+    assert len(names) == 16
+    assert {"visit_verify", "visit_overview", "visit_upload", "visit_whoami",
+            "visit_my_perf", "visit_my_pay"} <= names
+    # 旧工具名已删除（不做兼容期）
+    assert "visit_ping" not in names
+    assert "visit_month_salary" not in names
+    assert "visit_upload_file" not in names
 
 
 def test_dns_rebinding_protection_is_not_disabled():

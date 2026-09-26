@@ -3,8 +3,7 @@
 
 规则：
 - **默认拒绝**：未登记的工具一律 `ADMIN_ONLY`（admin 全开；staff 一律 FORBIDDEN_TOOL）。
-- `STAFF_ALLOWED`：员工可用的只读工具（visit_ping / visit_config_get /
-  visit_product_doc / visit_my_perf / visit_my_daily / visit_my_settlement）。
+- `STAFF_ALLOWED`：员工可用的 3 个工具（visit_whoami / visit_my_perf / visit_my_pay）。
 - staff 调 admin 工具 → `FORBIDDEN_TOOL`（retryable=false，hint 说明「该操作仅管理员」），
   在进入业务前拦截 → **不产生任何副作用**。
 - “我的”工具（visit_my_*）：无 person 参数入口；若客户端显式传入 person /
@@ -21,15 +20,14 @@ import time
 
 from mcp_service import envelope
 
-# 员工可用的只读工具（规格第二节）。未登记的工具默认 admin-only。
+# 员工可用的 3 个工具（规格第三节）。未登记的工具默认 admin-only。
+# tools/list 按身份裁剪（mcp_service/auth.py）直接读本集合 → 自动跟随。
 STAFF_ALLOWED = frozenset({
-    "visit_ping", "visit_config_get", "visit_product_doc",
-    "visit_my_perf", "visit_my_daily", "visit_my_settlement",
-    "visit_whoami",
+    "visit_whoami", "visit_my_perf", "visit_my_pay",
 })
 
 # “我的”系列工具：只能看本人（服务端强制过滤，不给越权留入口）
-MY_TOOLS = frozenset({"visit_my_perf", "visit_my_daily", "visit_my_settlement"})
+MY_TOOLS = frozenset({"visit_my_perf", "visit_my_pay"})
 
 # “我的”工具里可能被客户端显式传入的 person 参数名（一律服务端校验/忽略）
 _MY_PERSON_KEYS = ("person", "person_code", "person_id")
@@ -38,17 +36,10 @@ _MY_PERSON_KEYS = ("person", "person_code", "person_id")
 # （读工具 stdio 放行是既有行为；写/导出工具历来要求身份）。
 AUTH_REQUIRED_TOOLS = frozenset({
     # 写
-    "visit_upload_file", "visit_finalize_file", "visit_rebuild_preview",
-    "visit_rebuild_month", "visit_set_per_point", "visit_upload_recon",
-    "visit_store_merge_pair", "visit_store_skip_pair",
-    "visit_store_split_entity", "visit_store_apply_all",
-    "visit_recon_interpret", "visit_recon_adjust", "visit_payroll_generate",
-    "visit_payroll_update", "visit_payroll_mark_paid", "visit_config_set",
-    "visit_staff_set_status", "visit_store_ai_run",
+    "visit_upload", "visit_payroll_export", "visit_rebuild",
+    "visit_staff", "visit_config", "visit_store",
     # 导出（现有行为：无身份 → UNAUTHORIZED）
-    "visit_export_salary", "visit_export_payroll_settle",
-    "visit_export_recon_diff", "visit_export_recon_report",
-    "visit_export_recon_result",
+    "visit_recon_export",
 })
 
 
@@ -98,8 +89,8 @@ def enforce(tool: str, actor, params: dict | None) -> dict | None:
             return None
         return _forbidden(
             "该操作仅限管理员",
-            "该操作仅管理员，普通员工无权调用；查询个人绩效请用 visit_my_perf / "
-            "visit_my_daily / visit_my_settlement")
+            "该操作仅管理员，普通员工无权调用；查询个人绩效/找平请用 "
+            "visit_my_perf / visit_my_pay / visit_whoami")
 
     # 未知角色：保守拒绝
     return _forbidden("该操作仅限管理员", "未知角色，拒绝调用")

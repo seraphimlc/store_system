@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""对账相关只读 MCP 工具（P1 二期；由父会话接线到 tools.py，本文件不修改 tools.py）。
+"""对账只读能力层（P1 二期）。
 
-工具：
-  visit_recon_status        对账任务列表 + 差异统计（差异人数 / 差异金额円）
-  visit_recon_diff          对账差异明细（人月差异 / 员工×日问题行 / 反向名单 / 对账侧汇总）
-  visit_recon_adjust_state  某月找平状态（已确认找平记录 + 偏差金额，只读展示）
+能力函数（供 scenario_ops 的 visit_recon / visit_payroll / visit_recon_export 调用）：
+  _recon_status        对账任务列表 + 差异统计（差异人数 / 差异金额円）
+  _recon_diff          对账差异明细（人月差异 / 员工×日问题行 / 反向名单 / 对账侧汇总）
+  _recon_adjust_state  某月找平状态（已确认找平记录 + 偏差金额，只读展示）
+  _recon_settlement    找平结清状态
+  _settlement_trace    找平↔薪资双向轨迹
 
 硬性只读约束：所有路径只查询，不得 db.commit()/db.flush()/db.delete()；
 不得调用任何写函数（confirm_adjust / cancel_adjust / run_task / start_task /
@@ -15,14 +17,14 @@ app/services/recon.build_report；金额一律日元（円，字段 currency=JPY
 import re
 from typing import Any
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context
 
 from app.db import SessionLocal
 from mcp_service.capability import MONTH_PATTERN
-from mcp_service.annotations import read as read_ann
 
-# 注册时经 tools.py 接线：tools.register 内调用 recon_ops.register(mcp)。
-# 本文件只实现 register；工具函数定义在模块级（便于单测直接调用与断言信封）。
+# 本文件**不注册工具**（注册统一在 scenario_ops.py）；只暴露能力函数
+#（_recon_status / _recon_diff / _recon_adjust_state / _recon_settlement /
+#  _settlement_trace / _current_task_for_month）供 visit_recon / visit_payroll 调用。
 
 
 class ReconError(RuntimeError):
@@ -91,38 +93,6 @@ def _run_read(ctx: Context, fn) -> dict[str, Any]:
             return _err("INTERNAL", repr(exc), "系统内部错误，已记录；可重试")
         return {"ok": True, "data": data}
     return _authz_read(ctx, _mapped)
-
-# ---------------- 工具函数（模块级，可直接单测） ----------------
-
-def visit_recon_status(ctx: Context,
-                       month: str | None = None) -> dict[str, Any]:
-    """对账任务列表（只读）。month 可选：YYYY-MM，只列该月任务。"""
-    return _run_read(ctx, lambda db: _recon_status(db, month))
-
-
-def visit_recon_diff(ctx: Context, task_id: int | None = None,
-                     month: str | None = None) -> dict[str, Any]:
-    """对账差异明细（只读）。task_id 与 month 二选一。"""
-    return _run_read(ctx, lambda db: _recon_diff(db, task_id=task_id,
-                                                 month=month))
-
-
-def visit_settlement_trace(ctx: Context, month: str = None,
-                           person: str = None, adjust_id: int = None,
-                           payment_id: int = None) -> dict[str, Any]:
-    return _run_read(ctx, lambda db: _settlement_trace(
-        db, month=month, person=person, adjust_id=adjust_id,
-        payment_id=payment_id))
-
-
-def visit_recon_settlement(ctx: Context, month: str) -> dict[str, Any]:
-    return _run_read(ctx, lambda db: _recon_settlement(db, month))
-
-
-def visit_recon_adjust_state(ctx: Context, month: str) -> dict[str, Any]:
-    """某月找平状态（只读）。month 必填 YYYY-MM。"""
-    return _run_read(ctx, lambda db: _recon_adjust_state(db, month))
-
 
 # ---------------- 业务实现（f(db, ...) -> dict；口径以实际代码为准） ----------------
 
@@ -240,7 +210,7 @@ def _recon_diff(db, task_id: int | None = None,
         if task is None:
             raise ReconError(
                 "NOT_FOUND", f"对账任务不存在：id={task_id}",
-                "请用 visit_recon_status 查看任务 id；"
+                "请用 visit_recon(view='status') 查看任务 id；"
                 "或改用 month 参数查该月当前对账任务")
     elif month is not None:
         task = _current_task_for_month(db, month)
@@ -445,71 +415,3 @@ def _recon_adjust_state(db, month: str) -> dict[str, Any]:
     if not rows:
         data["hint"] = f"{month} 无找平/偏差数据（合法结果，不是错误）"
     return data
-
-
-# ---------------- 注册 ----------------
-
-_DESC_STATUS = (
-    "查询巡店对账任务列表（只读）。返回每个任务的 id、对账月份、状态、创建时间、"
-    "是否「上一版」（同月重传后旧任务被标记 replaced_by）、以及差异统计：差异人数"
-    "（有差异的人员数）与差异金额（各人月差异按工资规则折算的应找平金额，円，"
-    "负=扣款/正=补款）。可选参数 month（YYYY-MM）只列该月任务；不传则列出全部。"
-    "数据来源 recon_tasks 及其差异行，仅查询不写入。"
-    "金额单位为日元（円，字段 currency=JPY）。"
-)
-
-_DESC_DIFF = (
-    "查询对账差异明细（只读）。task_id 与 month 二选一：task_id=精确对账任务；"
-    "month=该月当前版本任务（同月重传后取最新、排除上一版）。返回："
-    "① 按人的月差异（系统值 vs 对账值、差异点数、应找平金额円、是否已确认找平）；"
-    "② 按 员工×日 的问题行（系统点数 vs 对账点数、行数、差异、归属侧）；"
-    "③ 「系统有、对账文件未列出」的反向名单；"
-    "④ 对账文件侧全量点数汇总（来源 recon_data_rows）。"
-    "任务不存在返回 NOT_FOUND；该月无对账任务返回空结果（ok=True 带 hint）。"
-    "仅查询不写入、不触发对账重跑。金额单位为日元（円，字段 currency=JPY）。"
-)
-
-_DESC_ADJUST = (
-    "查询某月（YYYY-MM，必填）的薪资找平状态（只读）。"
-    "返回该月各人已确认的找平记录（来源 adjust_records：找平点数=adjust_points、"
-    "锁存单价=adjust_per_point、金额=adjust_amount 円、金额增量=amount_adj 円、"
-    "生效月=applied_to_month、原因）与偏差金额（来源 month_perf_records 的 "
-    "diff_amount 与 payroll_period_rows 的 diff_amount / adjust_amount，円；"
-    "负=扣款/正=补款）。仅查询展示，不写入、不执行找平。"
-    "金额均为日元（円，字段 currency=JPY）。"
-)
-
-
-def register(mcp: MCPServer) -> None:
-    """注册 3 个对账只读工具（父会话在 tools.py 里接线调用）。"""
-    mcp.tool(name="visit_recon_status", title="对账任务列表",
-             annotations=read_ann("对账任务列表"),
-             description=_DESC_STATUS)(visit_recon_status)
-    mcp.tool(name="visit_recon_diff", title="对账差异明细",
-             annotations=read_ann("对账差异明细"),
-             description=_DESC_DIFF)(visit_recon_diff)
-    mcp.tool(name="visit_recon_adjust_state", title="薪资找平状态",
-             annotations=read_ann("薪资找平状态"),
-             description=_DESC_ADJUST)(visit_recon_adjust_state)
-    mcp.tool(name="visit_recon_settlement", title="找平结清状态",
-             annotations=read_ann("找平结清状态"),
-             description=(
-                 "查询某结算月**找平的结清状态**：这笔对账差异扣/补到哪一步、是否已找平完毕。"
-                 "返回每人 diff_amount（原始差异）/ chain（源月及后续各月结转债务）/ "
-                 "recovered（已回收）/ remaining（还没扣补完的余额）/ "
-                 "status（settled=已结清 / in_progress=找平中）。"
-                 "**核对『某笔对账是否已找平完毕』用我**；逐笔证据（哪期扣多少、来源任务）"
-                 "见 visit_payroll_rows 的台账字段。参数：month（YYYY-MM）。只读，日元。")
-             )(visit_recon_settlement)
-    mcp.tool(name="visit_settlement_trace", title="找平薪资双向轨迹",
-             annotations=read_ann("找平薪资双向轨迹"),
-             description=(
-                 "**找平 ↔ 薪资 双向轨迹查询**（核对『谁欠谁、还了多少、从哪期扣的』用我）。"
-                 "四个过滤维度（可单用/组合，全不传=全部找平汇总）："
-                 "month=源月（如 2026-08，同时列出该月发放的冲抵）；person=工号或姓名；"
-                 "adjust_id=单笔找平（给完整轨迹：原始/已找平/剩余/是否结清 + 被哪几期回收）；"
-                 "payment_id=单笔发放（列出它冲了哪几笔找平，可能跨月多条）。"
-                 "返回 adjusts[]（找平及 recovered_by 反向明细）与 payments[]（发放及 adjusts 正向明细）"
-                 "+ summary（笔数/已结清数/原始合计/已找平合计/剩余合计）。"
-                 "只读；金额为日元（JPY）。")
-             )(visit_settlement_trace)

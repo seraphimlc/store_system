@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """数据自洽检查（命令行入口）——逻辑在 app/services/integrity.py（系统内置，
-MCP 工具 visit_verify_integrity 与它同源）。
+MCP 工具 visit_verify 与它同源）。
 
 用法（cwd=项目根）：
     DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/verify_payroll_logic.py

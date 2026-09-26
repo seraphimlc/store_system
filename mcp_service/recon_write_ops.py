@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""对账写操作：上传对账文件（支付宝结算数据等）。
+"""对账写能力层：上传对账文件（支付宝结算数据等）。
+
+能力函数 upload_recon(db, actor, ...) 供 scenario_ops 的 visit_upload（kind='recon'）调用。
 
 对账通道与巡店上传通道**不同**：
-- 巡店记录（MarsNavi STORE VISIT RECORD）→ `visit_upload_file`（判定/入正式表）
-- 对账文件（Alipay 结算数据等，逐条明细）→ 本模块 `visit_upload_recon`
+- 巡店记录（MarsNavi STORE VISIT RECORD）→ visit_upload（判定/入正式表）
+- 对账文件（Alipay 结算数据等，逐条明细）→ visit_upload（自动识别为对账通道）
   （解析 → 与系统人日统计比对 → 差异行 → 结果 Excel）
 
 复用 `app.services.recon.submit_task`（与网页 /recon 上传同一条链路）。
 """
 from typing import Any
-
-from mcp.server.mcpserver import Context, MCPServer
 
 from mcp_service import guards
 
@@ -64,7 +64,7 @@ def upload_recon(db, actor, *, month: str, filename: str | None = None,
     except Exception as exc:  # noqa: BLE001
         raise guards.GuardError(
             "INTERNAL", f"对账文件无法登记任务：{type(exc).__name__}: {exc}",
-            "请确认这是对账明细文件（含日期/店/人员列）；巡店记录请用 visit_upload_file") from exc
+            "请确认这是对账明细文件（含日期/店/人员列）；巡店记录请用 visit_upload") from exc
 
     # 复用只读工具的汇总口径（同一真相）
     status = recon_ops._recon_status(db, month)
@@ -83,55 +83,6 @@ def upload_recon(db, actor, *, month: str, filename: str | None = None,
         "is_overwrite": bool(older),     # P0-3：同月已有版本 → 覆盖（旧任务标记为上一版）
         "task": task_row,
         "currency": "JPY",
-        "note": "对账已同步完成；差异明细用 visit_recon_diff(month=...) 查询，"
-                "结果 Excel 用 visit_export_recon_diff(task_id=...) 导出",
+        "note": "对账已同步完成；差异明细用 visit_recon(view='diff', month=...) 查询，"
+                "结果 Excel 用 visit_recon_export(kind='diff', task_id=...) 导出",
     }}
-
-
-def register(mcp: MCPServer) -> None:
-    from mcp_service.tools import _write_call, _check_upload_sources
-    from mcp_service.annotations import write as write_ann
-
-    @mcp.tool(
-        name="visit_upload_recon",
-        title="上传对账文件",
-        annotations=write_ann("上传对账文件", idempotent=False),
-        description=(
-            "**DEPRECATED（已弃用）**：统一入口请用 visit_upload_file（自动识别文件类型，"
-            "对账明细可显式 kind='recon' 强制走对账通道）。本工具保留兼容、不再演进。"
-            "必须提供 path 或 content_base64 之一，不可同时提供，也不可都不提供。"
-            "上传**对账文件**（如支付宝结算数据，逐条明细含日期/店/人员）并同步完成对账："
-            "解析 → 与系统人日统计比对 → 生成差异行与结果。需要写权限 Token。"
-            "参数：month（结算月 YYYY-MM）；filename；content_base64（文件内容 base64）；"
-            "path（本机绝对路径，仅服务端开启本地路径模式时可用）。"
-            "**幂等与覆盖语义**：同月重复上传会「覆盖」上一版本（旧任务标记为上一版、"
-            "version 递增），返回 is_overwrite=true 与 replaced_previous_ids；"
-            "字节相同的文件按内容 sha256 去重，重复上传返回 DUPLICATE_FILE 不重复入库。"
-            "**错误码表**：PARSE_FAILED（文件无法解析，不可重试）；DUPLICATE_FILE（内容指纹"
-            "已存在，不可重试）；INTERNAL_WRITE（写入异常可能已部分生效，**禁止自动重试**）；"
-            "BAD_REQUEST / BAD_PARAM / BAD_MONTH（参数不合法，不可重试）；AUTH_FAILED / "
-            "UNAUTHORIZED / FORBIDDEN_TOOL（鉴权或权限不足，不可重试）。"
-        ),
-    )
-    def visit_upload_recon(
-        ctx: Context,
-        month: str,
-        filename: str | None = None,
-        content_base64: str | None = None,
-        path: str | None = None,
-    ) -> dict[str, Any]:
-        bad = _check_upload_sources(path, content_base64)
-        if bad is not None:
-            return bad
-        from mcp_service import write_ops
-
-        content = write_ops.decode_base64(content_base64) if content_base64 else None
-
-        def run(db, actor):
-            return upload_recon(db, actor, month=month, filename=filename,
-                                content=content, path=path)
-
-        return _write_call(ctx, "visit_upload_recon",
-                           {"month": month, "filename": filename, "path": path,
-                            "has_content": bool(content_base64)},
-                           run, retryable=False)

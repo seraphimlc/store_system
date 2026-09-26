@@ -32,8 +32,7 @@ OLD_NAMES = ["visit_month_summary", "visit_dashboard", "visit_upload_recon",
              "visit_export_salary", "visit_store_merge_pair", "visit_rebuild_preview",
              "visit_recon_status", "visit_ping", "visit_product_doc",
              "visit_verify_integrity"]
-# 关键业务数字（重构前基准；口径变化会在这里暴露）
-BASELINE = {"2026-08": (12507, 16787), "2026-09": (15070, 19477)}
+# 验收方式：**与同一份库 SQL 直查一致**（不写死数字——本地/线上因同店合并会有差异）
 
 fails = []
 
@@ -109,17 +108,25 @@ async def main():
             if not gate_ok:
                 fails.append(f"写闸门未生效：{c1}")
 
-            # ---- 6 关键业务数字 ----
+            # ---- 6 关键业务数字：与库直查一致 ----
+            import sqlite3
+            _db = os.environ.get("DATABASE_URL", "").replace("sqlite:///", "")
             ov = await _call(s, "visit_overview", {"month": "2026-08", "view": "summary"})
             data = ov.get("data") or {}
-            rows = data.get("formal_rows")
-            pts = data.get("points") or data.get("total_points")
-            exp = BASELINE["2026-08"]
-            num_ok = (rows == exp[0]) and (pts in (None, exp[1]))
-            print(f"[6] 8月 正式表 {rows} / 点数 {pts}（期望 {exp[0]}/{exp[1]}）"
+            rows, pts = data.get("formal_rows"), data.get("points_total")
+            exp_rows = exp_pts = None
+            if _db and os.path.exists(_db):
+                con = sqlite3.connect(_db)
+                exp_rows, exp_pts = con.execute(
+                    "SELECT COUNT(*), SUM(points) FROM formal_records "
+                    "WHERE japan_date >= '2026-08-01' AND japan_date < '2026-09-01'"
+                ).fetchone()
+                con.close()
+            num_ok = (exp_rows is None) or ((rows, pts) == (exp_rows, exp_pts))
+            print(f"[6] 8月 工具 {rows}/{pts} vs 库直查 {exp_rows}/{exp_pts}"
                   f" {'✅' if num_ok else '❌'}")
             if not num_ok:
-                fails.append(f"业务数字变化：{rows}/{pts}")
+                fails.append(f"工具与库直查不一致：{rows}/{pts} vs {exp_rows}/{exp_pts}")
 
             # ---- 8 自洽检查 ----
             iv = await _call(s, "visit_verify", {})

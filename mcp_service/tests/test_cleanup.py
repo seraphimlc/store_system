@@ -129,39 +129,52 @@ def _registered_descriptions() -> dict[str, str]:
     from mcp_service import tools as tools_mod
 
     mcp = MCPServer(name="t", version="0.0.0")
-    tools_mod.register(mcp)                   # 全量注册（含 read_ops/recon_write_ops）
+    tools_mod.register(mcp)                   # 全量注册（唯一入口 = 16 个）
     tools = asyncio.run(mcp.list_tools())
     return {t.name: (t.description or "") for t in tools}
 
 
-def test_perf_ranking_description_marks_deprecated():
+def test_registered_tools_are_16_scenario_tools():
+    """场景化重构验收：列表只有 16 个新工具，旧名一律删除（不做兼容期）。"""
     descs = _registered_descriptions()
-    d = descs["visit_perf_ranking"]
-    assert "DEPRECATED" in d
-    assert "visit_month_salary" in d          # 指向替代工具
-    assert "sort_by='points'" in d
-
-
-def test_upload_recon_description_marks_deprecated():
-    descs = _registered_descriptions()
-    d = descs["visit_upload_recon"]
-    assert "DEPRECATED" in d
-    assert "visit_upload_file" in d           # 指向统一上传入口
-    assert "kind='recon'" in d
+    assert len(descs) == 16
+    expect = {
+        "visit_whoami", "visit_my_perf", "visit_my_pay",
+        "visit_upload", "visit_overview", "visit_person", "visit_payroll",
+        "visit_payroll_export", "visit_recon", "visit_recon_export",
+        "visit_files", "visit_rebuild", "visit_staff", "visit_config",
+        "visit_store", "visit_verify",
+    }
+    assert set(descs) == expect
+    # 旧名已删（用户明确：不做兼容期）
+    for old in ("visit_ping", "visit_upload_file", "visit_month_salary",
+                "visit_month_summary", "visit_perf_ranking",
+                "visit_upload_recon", "visit_rebuild_preview",
+                "visit_rebuild_month", "visit_export_salary",
+                "visit_verify_integrity", "visit_product_doc"):
+        assert old not in descs, old
 
 
 def test_mutual_exclusion_guidance_in_descriptions():
     descs = _registered_descriptions()
     expect = {
-        "visit_month_summary": "只要汇总数字",
-        "visit_month_salary": "要看每人明细",
-        "visit_dashboard": "经营总览",
-        "visit_person_detail": "日粒度下钻",
-        "visit_payroll_rows": "发薪/找平维度",
+        "visit_overview": "公司级总览",
+        "visit_person": "某个人",
+        "visit_payroll": "薪资找平",
+        "visit_my_perf": "我自己",
+        "visit_upload": "统一上传入口",
+        "visit_recon": "对账",
     }
     for name, keyword in expect.items():
-        assert keyword in descs[name], f"{name} 描述缺少互斥指引关键词 {keyword!r}"
-        assert "什么时候用我" in descs[name], f"{name} 描述缺少「什么时候用我」首句"
+        assert keyword in descs[name], f"{name} 描述缺少关键词 {keyword!r}"
+        assert "什么时候用我" in descs[name], f"{name} 描述缺少「什么时候用我」"
+
+
+def test_upload_and_payroll_export_descriptions_mention_dry_run():
+    descs = _registered_descriptions()
+    assert "dry_run" in descs["visit_upload"]
+    assert "dry_run" in descs["visit_payroll_export"]
+    assert "未登记发放" in descs["visit_payroll_export"]
 
 
 def test_payroll_rows_exposes_paid_state(db):

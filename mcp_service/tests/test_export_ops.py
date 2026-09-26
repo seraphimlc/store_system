@@ -254,17 +254,6 @@ def test_unauthorized_envelope_without_bearer():
     assert err["ok"] is False and err["error"]["code"] == "UNAUTHORIZED"
 
 
-def test_register_defines_four_export_tools():
-    from mcp.server.mcpserver import MCPServer
-    from mcp_service import export_ops
-    mcp = MCPServer(name="t", version="0.0.1")
-    export_ops.register(mcp)
-    names = {t.name for t in mcp._tool_manager.list_tools()}
-    assert names == {
-        "visit_export_salary", "visit_export_payroll_settle",
-        "visit_export_recon_diff", "visit_export_recon_report"}
-
-
 # ---------------- 重构等价性（build_* 输出 vs 改造前路由快照） ----------------
 
 def test_build_functions_match_pre_refactor_baseline(db):

@@ -99,24 +99,25 @@ def test_sdk_roundtrip(server):
 
                 tools = await session.list_tools()
                 names = {t.name for t in tools.tools}
-                assert {"visit_ping", "visit_month_salary"} <= names
-                assert len(names) >= 4
+                # 场景化重构后 = 16 个（含 3 个员工工具）
+                assert {"visit_verify", "visit_overview", "visit_upload",
+                        "visit_whoami"} <= names
+                assert len(names) == 16
 
-                # 信封 + 凭据回显（A4 的服务端侧证据）
-                res = await session.call_tool("visit_ping", {})
+                # 信封（A4 的服务端侧证据）
+                res = await session.call_tool("visit_whoami", {})
                 sc = res.structured_content
                 assert sc is not None
                 assert sc["ok"] is True
-                assert sc["data"]["auth_header_seen"] is True
-                assert sc["data"]["client_info"] is not None
+                assert sc["data"]["role"] in ("admin", "unknown")
 
                 # 月份 pattern 出现在发布的 schema 里（spec §5.4）
                 schema = str([t.input_schema for t in tools.tools
-                              if t.name == "visit_month_summary"])
+                              if t.name == "visit_overview"])
                 assert "pattern" in schema
 
                 # 空月：ok:true 且各计数为 0 + hint（spec §5.4）
-                res2 = await session.call_tool("visit_month_summary",
+                res2 = await session.call_tool("visit_overview",
                                                {"month": "2026-09"})
                 sc2 = res2.structured_content
                 assert sc2["ok"] is True

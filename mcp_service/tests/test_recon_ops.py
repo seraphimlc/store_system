@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""对账只读 MCP 工具测试：visit_recon_status / visit_recon_diff / visit_recon_adjust_state。
+"""对账只读能力测试：visit_recon（status/diff/interpret）与 visit_payroll（adjusts）。
+
+场景化重构（49→16）后对账读路径经 scenario_ops 暴露：
+- visit_recon(view='status') → 任务列表；view='diff' → 差异明细；view='interpret' → 已有 AI 解读
+- visit_payroll(view='adjusts') → 找平状态（+结清状态）
 
 临时 SQLite（Base.metadata.create_all）造数据，绝不碰真实库。
-- 业务层函数直接传临时 session（f(db, ...) 可复用范式）；
-- 工具信封层用 monkeypatch 把 recon_ops.SessionLocal 重定向到临时库 factory，
+- 能力函数直接传临时 session（f(db, ...) 可复用范式）；
+- 信封层用 monkeypatch 把 scenario_ops.SessionLocal 重定向到临时库 factory，
   断言 ok 信封 / BAD_MONTH / NOT_FOUND / BAD_PARAM / INTERNAL / 空态 hint。
 """
 import asyncio
@@ -17,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import (AdjustRecord, Base, MonthPerfRecord,
                         PayrollPeriodRow, Person, ReconDataRow, ReconDayRow,
                         ReconResult, ReconTask, User)
-from mcp_service import recon_ops
+from mcp_service import recon_ops, scenario_ops
 
 
 def fake_ctx():
@@ -27,7 +31,7 @@ def fake_ctx():
 
 @pytest.fixture()
 def factory(tmp_path, monkeypatch):
-    """临时库 session factory；并把 recon_ops.SessionLocal 重定向过去。"""
+    """临时库 session factory；并把 scenario_ops.SessionLocal 重定向过去。"""
     # 口径确定性：清掉进程级缓存（config 的 lru_cache 与 perf 的 _CONFIG_CACHE
     # 都是全局的，跨测试模块会残留，导致断言漂移）
     from app.config import get_settings
@@ -51,7 +55,10 @@ def factory(tmp_path, monkeypatch):
                           "kind": "person_points", "version": 2,
                           "current": True},
                   summary={"kind": "person_points", "compared": 2,
-                           "diff_count": 2, "sys_only": ["P003"]}),
+                           "diff_count": 2, "sys_only": ["P003"],
+                           "ai_interpret": {"text": "差异主要来自 P001 缺巡店记录",
+                                            "model": "deepseek-v4-flash",
+                                            "at": "2026-09-30T10:00:00"}}),
         ReconTask(id=2, kind="monthly_v3", status="done", created_by=1,
                   params={"month": "2026-09", "file": "9月旧版.xlsx",
                           "kind": "person_points", "version": 1,
@@ -93,15 +100,15 @@ def factory(tmp_path, monkeypatch):
                             diff_amount=-5000, adjust_amount=-5000))
     db.commit()
     db.close()
-    monkeypatch.setattr(recon_ops, "SessionLocal", F)
+    monkeypatch.setattr(scenario_ops, "SessionLocal", F)
     yield F
     engine.dispose()
 
 
-# ---------------- visit_recon_status ----------------
+# ---------------- visit_recon view=status ----------------
 
 def test_status_lists_tasks(factory):
-    got = recon_ops.visit_recon_status(fake_ctx())
+    got = scenario_ops.visit_recon(fake_ctx(), view="status")
     assert got["ok"] is True
     data = got["data"]
     assert data["count"] == 3
@@ -125,13 +132,14 @@ def test_status_lists_tasks(factory):
 
 
 def test_status_month_filter(factory):
-    data = recon_ops.visit_recon_status(fake_ctx(), month="2026-09")["data"]
+    data = scenario_ops.visit_recon(fake_ctx(), view="status",
+                                    month="2026-09")["data"]
     assert data["count"] == 2
     assert {t["id"] for t in data["tasks"]} == {1, 2}
 
 
 def test_status_empty_month_ok_with_hint(factory):
-    got = recon_ops.visit_recon_status(fake_ctx(), month="2026-11")
+    got = scenario_ops.visit_recon(fake_ctx(), view="status", month="2026-11")
     assert got["ok"] is True
     data = got["data"]
     assert data["count"] == 0
@@ -140,22 +148,30 @@ def test_status_empty_month_ok_with_hint(factory):
 
 
 def test_status_bad_month(factory):
-    got = recon_ops.visit_recon_status(fake_ctx(), month="2026-9")
+    got = scenario_ops.visit_recon(fake_ctx(), view="status", month="2026-9")
     assert got["ok"] is False
     assert got["error"]["code"] == "BAD_MONTH"
 
 
 def test_status_fullwidth_month_rejected(factory):
     """不用 \\d：全角会放行并静默返回 0 行（capability.MONTH_PATTERN 唯一关口）。"""
-    got = recon_ops.visit_recon_status(fake_ctx(), month="２０２６-09")
+    got = scenario_ops.visit_recon(fake_ctx(), view="status", month="２０２６-09")
     assert got["ok"] is False
     assert got["error"]["code"] == "BAD_MONTH"
 
 
-# ---------------- visit_recon_diff ----------------
+def test_bad_view_rejected(factory):
+    """非法 view → BAD_PARAM + 可选值提示。"""
+    got = scenario_ops.visit_recon(fake_ctx(), view="bogus")
+    assert got["ok"] is False
+    assert got["error"]["code"] == "BAD_PARAM"
+    assert "status" in got["error"]["hint"] and "diff" in got["error"]["hint"]
+
+
+# ---------------- visit_recon view=diff ----------------
 
 def test_diff_by_task_id(factory):
-    got = recon_ops.visit_recon_diff(fake_ctx(), task_id=1)
+    got = scenario_ops.visit_recon(fake_ctx(), view="diff", task_id=1)
     assert got["ok"] is True
     data = got["data"]
     assert data["task"]["id"] == 1
@@ -186,7 +202,7 @@ def test_diff_by_task_id(factory):
 
 
 def test_diff_by_month_resolves_current_task(factory):
-    got = recon_ops.visit_recon_diff(fake_ctx(), month="2026-09")
+    got = scenario_ops.visit_recon(fake_ctx(), view="diff", month="2026-09")
     assert got["ok"] is True
     data = got["data"]
     # 旧版 task2 被 replaced_by 排除，取最新当前版 task1
@@ -195,14 +211,14 @@ def test_diff_by_month_resolves_current_task(factory):
 
 
 def test_diff_task_not_found(factory):
-    got = recon_ops.visit_recon_diff(fake_ctx(), task_id=999)
+    got = scenario_ops.visit_recon(fake_ctx(), view="diff", task_id=999)
     assert got["ok"] is False
     assert got["error"]["code"] == "NOT_FOUND"
     assert "hint" in got["error"]
 
 
 def test_diff_month_no_task_ok_with_hint(factory):
-    got = recon_ops.visit_recon_diff(fake_ctx(), month="2026-11")
+    got = scenario_ops.visit_recon(fake_ctx(), view="diff", month="2026-11")
     assert got["ok"] is True
     data = got["data"]
     assert data["task"] is None
@@ -211,21 +227,50 @@ def test_diff_month_no_task_ok_with_hint(factory):
 
 
 def test_diff_neither_param_rejected(factory):
-    got = recon_ops.visit_recon_diff(fake_ctx())
+    got = scenario_ops.visit_recon(fake_ctx(), view="diff")
     assert got["ok"] is False
     assert got["error"]["code"] == "BAD_PARAM"
 
 
 def test_diff_bad_month(factory):
-    got = recon_ops.visit_recon_diff(fake_ctx(), month="2026-13")
+    got = scenario_ops.visit_recon(fake_ctx(), view="diff", month="2026-13")
     assert got["ok"] is False
     assert got["error"]["code"] == "BAD_MONTH"
 
 
-# ---------------- visit_recon_adjust_state ----------------
+# ---------------- visit_recon view=interpret ----------------
 
-def test_adjust_state_confirmed_and_balances(factory):
-    got = recon_ops.visit_recon_adjust_state(fake_ctx(), month="2026-09")
+def test_interpret_reads_existing_ai_text(factory):
+    got = scenario_ops.visit_recon(fake_ctx(), view="interpret", task_id=1)
+    assert got["ok"] is True
+    data = got["data"]
+    assert data["task_id"] == 1
+    assert data["has_interpretation"] is True
+    assert data["interpretation"] == "差异主要来自 P001 缺巡店记录"
+    assert data["model"] == "deepseek-v4-flash"
+    assert "hint" not in data
+
+
+def test_interpret_no_text_ok_with_hint(factory):
+    got = scenario_ops.visit_recon(fake_ctx(), view="interpret", task_id=3)
+    assert got["ok"] is True
+    data = got["data"]
+    assert data["has_interpretation"] is False
+    assert data["interpretation"] is None
+    assert "hint" in data
+
+
+def test_interpret_task_not_found(factory):
+    got = scenario_ops.visit_recon(fake_ctx(), view="interpret", task_id=999)
+    assert got["ok"] is False
+    assert got["error"]["code"] == "NOT_FOUND"
+
+
+# ---------------- visit_payroll view=adjusts ----------------
+
+def test_adjusts_confirmed_and_balances(factory):
+    got = scenario_ops.visit_payroll(fake_ctx(), month="2026-09",
+                                     view="adjusts")
     assert got["ok"] is True
     data = got["data"]
     assert data["currency"] == "JPY"
@@ -253,10 +298,13 @@ def test_adjust_state_confirmed_and_balances(factory):
     assert data["summary"]["persons"] == 2
     assert data["summary"]["confirmed"] == 1
     assert data["summary"]["total_adjust_amount"] == expect_diff
+    # 结清状态一并给出（recon_settlement 并入 view='adjusts'）
+    assert "settlement" in data
 
 
-def test_adjust_state_empty_month_ok_with_hint(factory):
-    got = recon_ops.visit_recon_adjust_state(fake_ctx(), month="2026-11")
+def test_adjusts_empty_month_ok_with_hint(factory):
+    got = scenario_ops.visit_payroll(fake_ctx(), month="2026-11",
+                                     view="adjusts")
     assert got["ok"] is True
     data = got["data"]
     assert data["rows"] == []
@@ -264,16 +312,17 @@ def test_adjust_state_empty_month_ok_with_hint(factory):
     assert "hint" in data
 
 
-def test_adjust_state_bad_month(factory):
-    got = recon_ops.visit_recon_adjust_state(fake_ctx(), month="2026-9")
+def test_adjusts_bad_month(factory):
+    got = scenario_ops.visit_payroll(fake_ctx(), month="2026-9", view="adjusts")
     assert got["ok"] is False
     assert got["error"]["code"] == "BAD_MONTH"
 
 
-def test_adjust_state_missing_month_rejected(factory):
-    got = recon_ops.visit_recon_adjust_state(fake_ctx(), month="")
+def test_payroll_bad_view(factory):
+    got = scenario_ops.visit_payroll(fake_ctx(), month="2026-09", view="bogus")
     assert got["ok"] is False
-    assert got["error"]["code"] == "BAD_MONTH"
+    assert got["error"]["code"] == "BAD_PARAM"
+    assert "rows" in got["error"]["hint"]
 
 
 # ---------------- 只读守卫 / 信封 ----------------
@@ -289,10 +338,10 @@ def test_tools_are_read_only(factory):
     db = factory()
     before = counts(db)
     db.close()
-    recon_ops.visit_recon_status(fake_ctx())
-    recon_ops.visit_recon_diff(fake_ctx(), task_id=1)
-    recon_ops.visit_recon_diff(fake_ctx(), month="2026-09")
-    recon_ops.visit_recon_adjust_state(fake_ctx(), month="2026-09")
+    scenario_ops.visit_recon(fake_ctx(), view="status")
+    scenario_ops.visit_recon(fake_ctx(), view="diff", task_id=1)
+    scenario_ops.visit_recon(fake_ctx(), view="diff", month="2026-09")
+    scenario_ops.visit_payroll(fake_ctx(), month="2026-09", view="adjusts")
     db = factory()
     after = counts(db)
     db.close()
@@ -304,27 +353,10 @@ def test_unexpected_exception_maps_to_internal(factory, monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(recon_ops, "_recon_status", boom)
-    got = recon_ops.visit_recon_status(fake_ctx())
+    got = scenario_ops.visit_recon(fake_ctx(), view="status")
     assert got["ok"] is False
     assert got["error"]["code"] == "INTERNAL"
     assert "boom" in got["error"]["message"]
-
-
-def test_register_exposes_five_tools():
-    """register(mcp) 注册全部 4 个工具，且描述为中文、写明只读与日元。"""
-    from mcp.server.mcpserver import MCPServer
-    mcp = MCPServer(name="test-recon", version="0")
-    recon_ops.register(mcp)
-    tools = asyncio.run(mcp.list_tools())
-    names = {t.name for t in tools}
-    assert names == {"visit_recon_status", "visit_recon_diff",
-                     "visit_recon_adjust_state", "visit_recon_settlement",
-                     "visit_settlement_trace"}
-    desc = {t.name: t.description for t in tools}
-    for name in names:
-        assert "只读" in desc[name]
-        assert ("JPY" in desc[name]) or ("日元" in desc[name])
-    assert "month" in desc["visit_recon_adjust_state"]
 
 
 def test_settlement_trace_filters(factory):

@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-"""“我的”系列只读工具（规格：docs/specs-mcp-identity.md 第二节）。
+"""“我的”能力层（规格：docs/specs-mcp-identity.md 第二节）。
 
-- visit_my_perf(month=None)     我的月绩效（点数/1点/2点/工资；month 省略=最新有数据的月）
-- visit_my_daily(month)         我的日明细（person_daily_stats 逐日：日期/点数/店数）
-- visit_my_settlement()         我的找平状态与发放（payroll_adjusts 未结清/已结清 +
-                                 payroll_payments 各期实发与抵扣 +
-                                 payroll_settlement_links 双向明细），含 remaining 合计
+能力函数（供 scenario_ops 的 visit_whoami / visit_my_perf / visit_my_pay 调用）：
+- whoami(db, actor)                  我是谁：账号/角色/绑定人员/权限/可用能力
+- my_perf(db, person_code, month?)   月绩效（点数/1点/2点/工资；month 省略=最新有数据的月）
+- my_daily(db, person_code, month)   日明细（person_daily_stats 逐日：日期/点数/店数）
+- my_settlement(db, person_code)     找平状态与发放（payroll_adjusts 未结清/已结清 +
+                                     payroll_payments 各期实发与抵扣 +
+                                     payroll_settlement_links 双向明细），含 remaining 合计
 
 安全设计：
 - **无 person 参数**（不给越权留入口）；服务端强制按 actor.person_code 过滤，
@@ -15,15 +17,13 @@
 - 只读：本模块不得出现 db.commit()/任何写语句（审计行由统一入口负责）。
 """
 from datetime import date
-from typing import Annotated, Any
+from typing import Any
 
-from pydantic import Field
 from sqlalchemy import func
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context
 
 from mcp_service.capability import MONTH_PATTERN
-from mcp_service.annotations import read as read_ann
 from mcp_service.read_ops import BadMonth, _envelope_error
 
 
@@ -287,8 +287,8 @@ def _person_code_of(actor) -> str | None:
 def _unbound_hint() -> dict:
     return _envelope_error(
         "BAD_PARAM", "账号未绑定人员",
-        "管理员账号未绑定人员，请用公司级工具（visit_month_salary / "
-        "visit_payroll_rows 等）查询", retryable=False)
+        "管理员账号未绑定人员，请用公司级工具（visit_overview / "
+        "visit_person / visit_payroll 等）查询", retryable=False)
 
 
 def _guarded(ctx: Context, tool: str, params: dict, fn) -> dict:
@@ -305,68 +305,6 @@ def _guarded(ctx: Context, tool: str, params: dict, fn) -> dict:
     finally:
         db.close()
 
-
-def visit_my_perf(ctx: Context, month: str | None = None) -> dict[str, Any]:
-    """我的月绩效（只读；无 person 参数）。"""
-    params = {"month": month}
-
-    def run(db, actor):
-        pc = _person_code_of(actor)
-        if not pc:
-            return _unbound_hint()
-        try:
-            return {"ok": True, "data": my_perf(db, pc, month=month)}
-        except BadMonth as exc:
-            return _envelope_error("BAD_MONTH", str(exc),
-                                   "月份必须是 YYYY-MM，例如 2026-09")
-        except Exception as exc:  # noqa: BLE001
-            return _envelope_error("INTERNAL", repr(exc),
-                                   "系统内部错误，已记录；可重试")
-
-    return _guarded(ctx, "visit_my_perf", params, run)
-
-
-def visit_my_daily(ctx: Context,
-                   month: Annotated[str, Field(pattern=MONTH_PATTERN)]) -> dict[str, Any]:
-    """我的日明细（只读；无 person 参数）。"""
-    params = {"month": month}
-
-    def run(db, actor):
-        pc = _person_code_of(actor)
-        if not pc:
-            return _unbound_hint()
-        try:
-            return {"ok": True, "data": my_daily(db, pc, month=month)}
-        except BadMonth as exc:
-            return _envelope_error("BAD_MONTH", str(exc),
-                                   "月份必须是 YYYY-MM，例如 2026-09")
-        except Exception as exc:  # noqa: BLE001
-            return _envelope_error("INTERNAL", repr(exc),
-                                   "系统内部错误，已记录；可重试")
-
-    return _guarded(ctx, "visit_my_daily", params, run)
-
-
-def visit_my_settlement(ctx: Context) -> dict[str, Any]:
-    """我的找平状态与发放（只读；无参数）。"""
-    params = {}
-
-    def run(db, actor):
-        pc = _person_code_of(actor)
-        if not pc:
-            return _unbound_hint()
-        try:
-            return {"ok": True, "data": my_settlement(db, pc)}
-        except Exception as exc:  # noqa: BLE001
-            return _envelope_error("INTERNAL", repr(exc),
-                                   "系统内部错误，已记录；可重试")
-
-    return _guarded(ctx, "visit_my_settlement", params, run)
-
-
-# ---------------------------------------------------------------------------
-# 注册（父会话在 tools.py 里接线调用）
-# ---------------------------------------------------------------------------
 
 def whoami(db, actor, username: str = None) -> dict[str, Any]:
     """**我是谁**：当前调用身份（账号/角色/绑定人员/权限范围/可用能力）。
@@ -406,81 +344,3 @@ def whoami(db, actor, username: str = None) -> dict[str, Any]:
                  "查询公司级数据请用管理员账号。"),
     }
 
-
-def register(mcp: MCPServer) -> None:
-    mcp.tool(
-        name="visit_my_perf",
-        title="我的月绩效",
-        annotations=read_ann("我的月绩效"),
-        description=(
-            "查询**我自己**（当前 Token 绑定的员工账号对应的人员）的月度绩效："
-            "月汇总（有效店数/1点/2点/总点数/工资円/单价/对账偏差）与当月日统计行。"
-            "month 可选（YYYY-MM）；不传=最新有数据的月。"
-            "**只返回本人数据，无 person 参数**；金额为日元円（currency=JPY）。"
-            "管理员调用时按管理员自己绑定的人员编号过滤；未绑定人员返回 BAD_PARAM"
-            "（请用公司级工具查询）。只读。"
-        ),
-    )(visit_my_perf)
-
-    mcp.tool(
-        name="visit_my_daily",
-        title="我的日明细",
-        annotations=read_ann("我的日明细"),
-        description=(
-            "查询**我自己**在某结算月（YYYY-MM，必填）的每日明细："
-            "person_daily_stats 逐日（日期/有效店数/1点/2点/点数）+ 该月汇总"
-            "（店数/点数/工资円）。"
-            "**只返回本人数据，无 person 参数**；金额为日元円（currency=JPY）。"
-            "管理员调用时按管理员自己绑定的人员编号过滤；未绑定人员返回 BAD_PARAM"
-            "（请用公司级工具查询）。只读。"
-        ),
-    )(visit_my_daily)
-
-    mcp.tool(
-        name="visit_my_settlement",
-        title="我的找平与发放",
-        annotations=read_ann("我的找平与发放"),
-        description=(
-            "查询**我自己**（当前 Token 绑定的人员）的薪资找平状态与发放："
-            "① 找平表（payroll_adjusts：未结清/已结清，含原始金额/已找平/剩余/结清时间）；"
-            "② 发放台账（payroll_payments：各期实发金额/点数/奖金/抵扣 adjust_applied）；"
-            "③ 双向回收明细（payroll_settlement_links：每笔找平被哪几期发放冲抵、"
-            "每笔发放冲了哪几笔找平）。"
-            "含 remaining（剩余）合计与 summary。"
-            "**只返回本人数据，无 person 参数**；金额为日元円（currency=JPY）。"
-            "管理员调用时按管理员自己绑定的人员编号过滤；未绑定人员返回 BAD_PARAM"
-            "（请用公司级工具查询）。只读。"
-        ),
-    )(visit_my_settlement)
-
-
-def visit_whoami(ctx: Context) -> dict[str, Any]:
-    """**我是谁**：返回当前调用身份与权限范围（授权 + 审计走统一入口）。"""
-    from mcp_service import authz
-    from mcp_service.tools import _client_info, actor_from_ctx
-    from app.db import SessionLocal as _SL
-    actor = actor_from_ctx(ctx)
-    db = _SL()
-    try:
-        def _run(d):
-            return {"ok": True, "data": whoami(d, actor)}
-        return authz.dispatch(db, tool="visit_whoami", actor=actor, params={},
-                              client_info=_client_info(ctx), fn=_run,
-                              retryable=True, fn_args=1)
-    finally:
-        db.close()
-
-
-def register_whoami(mcp: MCPServer) -> None:
-    from mcp_service.annotations import read as read_ann
-    mcp.tool(
-        name="visit_whoami",
-        title="我是谁（身份与权限）",
-        annotations=read_ann("我是谁（身份与权限）"),
-        description=(
-            "**返回当前调用的身份与权限范围**：账号、显示名、角色（管理员/员工）、"
-            "绑定的人员编号与姓名、scope、能否写、以及**可用能力清单**。"
-            "什么时候用：用户问「我是谁」「我能做什么」「为什么查不到别人的数据」"
-            "「我有没有权限导出」时用我；也可用于在操作前确认当前身份。只读、无参数。"
-        ),
-    )(visit_whoami)

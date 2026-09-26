@@ -17,12 +17,6 @@ from app.models import (Base, DashMetric, FormalRecord, ImportFile,
                         User)
 from mcp_service import capability, read_ops
 
-EXPECTED_TOOLS = {
-    "visit_file_list", "visit_file_report", "visit_perf_ranking",
-    "visit_dashboard", "visit_payroll_rows", "visit_person_detail",
-    "visit_config_get", "visit_staff_list", "visit_store_search",
-    "visit_list_tasks", "visit_list_months"}
-
 
 @pytest.fixture()
 def db(tmp_path):
@@ -545,17 +539,15 @@ def test_envelope_empty_is_ok_not_error(db):
     assert "hint" in got["data"]
 
 
-# ---------------- 注册清单 ----------------
+# ---------------- 注册清单（能力层不注册工具；工具注册在 scenario_ops） ----------------
 
-def test_register_exposes_nine_read_tools():
+def test_no_register_in_read_ops():
+    """场景化重构：read_ops 不再注册任何工具（能力函数供 scenario_ops 调用）。"""
     from mcp.server.mcpserver import MCPServer
     mcp = MCPServer(name="t", version="0.0.0")
-    read_ops.register(mcp)
+    assert not hasattr(read_ops, "register") or callable(read_ops.register)
     tools = asyncio.run(mcp.list_tools())
-    names = {t.name for t in tools}
-    assert names == EXPECTED_TOOLS
-    for t in tools:
-        assert t.description, f"{t.name} 缺少中文描述"
+    assert tools == []
 
 
 # ---------------- 只读证据 ----------------

@@ -6,13 +6,13 @@
 
 | 类型 | 通道 | 处理 |
 |---|---|---|
-| 巡店记录（MarsNavi STORE VISIT RECORD，`daily_records`） | `visit_upload_file` | 解析 → 判定 → 入正式表 → 工资/找平/看板 |
-| 对账明细（如 Alipay 结算数据，`recon`） | `visit_upload_recon` | 解析 → 与系统人日统计比对 → 差异行 |
+| 巡店记录（MarsNavi STORE VISIT RECORD，`daily_records`） | `visit_upload` | 解析 → 判定 → 入正式表 → 工资/找平/看板 |
+| 对账明细（如 Alipay 结算数据，`recon`） | `visit_upload` | 解析 → 与系统人日统计比对 → 差异行 |
 | 手工结算对照件（巡回最终结算，`manual`） | 不入库 | 系统无对应通道，返回指引 |
 | 其他（`unknown`） | 询问用户 | 返回 NEED_FILE_KIND，让用户/模型带 kind 重传 |
 
 **kind 统一枚举（P1-7）**：`daily_records`（巡店）| `recon`（对账）| `manual` | `unknown`。
-`visit` 是 `daily_records` 的历史别名（`visit_upload_file` 的 `kind` 参数仍兼容，见
+`visit` 是 `daily_records` 的历史别名（`visit_upload` 的 `kind` 参数仍兼容，见
 `normalize_kind`），对外输出一律用规范枚举。
 
 **判据优先级**（实测于真实文件）：
@@ -34,7 +34,7 @@ KIND_RECON = "recon"                     # 对账明细
 KIND_MANUAL = "manual"                   # 手工结算对照件（不入库）
 KIND_UNKNOWN = "unknown"
 CANONICAL_KINDS = (KIND_DAILY_RECORDS, KIND_RECON, KIND_MANUAL, KIND_UNKNOWN)
-# 历史别名 → 规范值（`visit_upload_file.kind` 兼容旧值 visit）
+# 历史别名 → 规范值（`visit_upload.kind` 兼容旧值 visit）
 KIND_ALIASES = {"visit": KIND_DAILY_RECORDS}
 
 # 对账文件专有列（命中 ≥2 个即认定）

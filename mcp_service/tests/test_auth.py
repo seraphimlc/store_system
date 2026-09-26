@@ -290,5 +290,6 @@ def test_staff_allowed_set_matches_authz():
     from mcp_service import authz
     from mcp_service.auth import _ALLOWED_TOOL_NAMES  # noqa: F401  （未初始化时为 None）
     assert "visit_my_perf" in authz.STAFF_ALLOWED
-    assert "visit_month_salary" not in authz.STAFF_ALLOWED
-    assert authz.require_role("visit_month_salary") == "ADMIN_ONLY"
+    assert "visit_my_pay" in authz.STAFF_ALLOWED
+    assert "visit_overview" not in authz.STAFF_ALLOWED
+    assert authz.require_role("visit_overview") == "ADMIN_ONLY"

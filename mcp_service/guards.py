@@ -121,12 +121,12 @@ def check_preview(rec, preview_id, token_id, month: str) -> None:
     """校验 preview 归属与时效（与会话无关）。"""
     if (rec is None
             or rec.id != preview_id
-            or rec.tool != "visit_rebuild_preview"
+            or rec.tool != "visit_rebuild"
             or rec.month != month
             or rec.token_id != token_id
             or rec.created_at is None
             or _now() - rec.created_at > PREVIEW_WINDOW):
         raise GuardError(
             "PREVIEW_REQUIRED", "缺少有效的预演记录",
-            f"先调用 visit_rebuild_preview(month='{month}')，"
-            "把结果复述给用户后再用返回的 preview_id 重算")
+            f"先调用 visit_rebuild(action='preview', month='{month}')，"
+            "把结果复述给用户后再用返回的 preview_id 重算（action='run'）")

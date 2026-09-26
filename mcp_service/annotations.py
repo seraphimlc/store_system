@@ -10,7 +10,7 @@
 - idempotent_hint=True  → 相同参数重复调用无额外副作用（可安全重试）
 - open_world_hint=False → 域内闭合（只访问本系统数据，不接触外部世界）
 
-**为什么 idempotent 单独标**：`visit_upload_file` 是覆盖式写、且可能触发
+**为什么 idempotent 单独标**：`visit_upload` 是覆盖式写、且可能触发
 全链路重算，**不是**幂等（同参数重复调用仍有副作用）→ 显式标 False。
 """
 from mcp.types import ToolAnnotations
@@ -40,7 +40,7 @@ def write(title: str, *, idempotent: bool = False,
 
 
 def preview(title: str) -> ToolAnnotations:
-    """只读预演（visit_rebuild_preview）：会落一行审计拿 preview_id，
+    """只读预演（visit_rebuild action=preview）：会落一行审计拿 preview_id，
     但**不破坏任何数据** → read_only=False、destructive=False。"""
     return ToolAnnotations(
         title=title,

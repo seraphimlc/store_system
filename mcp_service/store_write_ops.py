@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-"""店铺主档写操作：合并候选对 / 标记不同店 / 拆分实体 / 整批应用推荐。
+"""店铺主档写能力层：合并候选对 / 标记不同店 / 拆分实体 / 整批应用推荐。
+
+能力函数（供 scenario_ops 的 visit_store(action=...) 调用）：
+merge_pair / skip_pair / split_entity / apply_all。
 
 与网页 /stores 工作台**同一链路**：一律复用 `app.services.store_master`
 （merge_pair / skip_pair / split_entity / apply_all_recommended），不在适配层重写业务。
 
-每个工具用 `mcp_service.tools._write_call` 做统一包装：
+每个写动作经 `mcp_service.tools._write_call` 统一包装：
 - 闸门在 guards.py（require_write / assert_confirm），不重复实现；
 - 意外异常一律 `retryable=False` → `INTERNAL_WRITE`（合并/拆分/整批**非幂等**，
   可能已部分生效，**禁止自动重试**），描述里已注明；
@@ -12,11 +15,7 @@
 """
 from typing import Any
 
-from mcp.server.mcpserver import Context, MCPServer
-
 from mcp_service import guards
-from mcp_service.tools import _write_call
-from mcp_service.annotations import write as write_ann
 
 
 def _entity_summary(e) -> dict[str, Any]:
@@ -42,7 +41,7 @@ def _pair(db, pair_id: int):
     if p is None:
         raise guards.GuardError(
             "NOT_FOUND", f"候选对不存在：{pair_id}",
-            "先调用只读工具查看候选列表 / 用 visit_store_search 检索，确认 pair_id")
+            "先调用只读工具查看候选列表 / 用 visit_store(view='search') 检索，确认 pair_id")
     return p
 
 
@@ -98,7 +97,7 @@ def merge_pair(db, actor, *, pair_id: int, keep: int, kind: str | None = None,
         raise guards.GuardError(
             "BAD_PARAM",
             f"keep 必须是候选对中的实体 id（{a.id} 或 {b.id}），收到 {keep}",
-            "keep 用于指定保留哪个规范名：用 visit_store_search 查实体 id 后传入")
+            "keep 用于指定保留哪个规范名：用 visit_store(view='search') 查实体 id 后传入")
     k = _resolve_kind(kind, p.kind)
 
     try:
@@ -160,7 +159,7 @@ def split_entity(db, actor, *, entity_id: int, confirm_text: str) -> dict[str, A
     if e is None:
         raise guards.GuardError(
             "NOT_FOUND", f"店铺实体不存在：{entity_id}",
-            "请用 visit_store_search 检索确认实体 id")
+            "请用 visit_store(view='search') 检索确认实体 id")
     old = e.master_id
 
     try:
@@ -201,124 +200,3 @@ def apply_all(db, actor, *, confirm_text: str, kind: str | None = None) -> dict[
         "hint": "批量合并会影响店铺主档与历史统计口径，建议先在网页端查看推荐列表；"
                 "误并可凭合并日志在实体检索里拆回",
     }}
-
-
-# ---------------------------------------------------------------------------
-# 工具函数（模块级，可直接单测；全部走 _write_call，retryable=False）
-# ---------------------------------------------------------------------------
-
-def visit_store_merge_pair(ctx: Context, pair_id: int, keep: int,
-                           kind: str | None = None,
-                           note: str | None = None) -> dict[str, Any]:
-    """合并一对候选店名。"""
-    def run(db, actor):
-        return merge_pair(db, actor, pair_id=pair_id, keep=keep,
-                          kind=kind, note=note)
-
-    return _write_call(ctx, "visit_store_merge_pair",
-                       {"pair_id": pair_id, "keep": keep, "kind": kind},
-                       run, retryable=False)
-
-
-def visit_store_skip_pair(ctx: Context, pair_id: int,
-                          kind: str | None = None) -> dict[str, Any]:
-    """标记一对候选为「不同店」。"""
-    def run(db, actor):
-        return skip_pair(db, actor, pair_id=pair_id, kind=kind)
-
-    return _write_call(ctx, "visit_store_skip_pair",
-                       {"pair_id": pair_id, "kind": kind},
-                       run, retryable=False)
-
-
-def visit_store_split_entity(ctx: Context, entity_id: int,
-                             confirm_text: str) -> dict[str, Any]:
-    """拆分被误合并的实体（需确认语）。"""
-    def run(db, actor):
-        return split_entity(db, actor, entity_id=entity_id,
-                            confirm_text=confirm_text)
-
-    return _write_call(ctx, "visit_store_split_entity",
-                       {"entity_id": entity_id},
-                       run, retryable=False)
-
-
-def visit_store_apply_all(ctx: Context, confirm_text: str,
-                          kind: str | None = None) -> dict[str, Any]:
-    """整批应用推荐合并（需确认语）。"""
-    def run(db, actor):
-        return apply_all(db, actor, confirm_text=confirm_text, kind=kind)
-
-    return _write_call(ctx, "visit_store_apply_all",
-                       {"kind": kind},
-                       run, retryable=False)
-
-
-# ---------------------------------------------------------------------------
-# 注册（父会话在 tools.py 里接线调用）
-# ---------------------------------------------------------------------------
-
-def register(mcp: MCPServer) -> None:
-    """注册 4 个店铺主档写工具。"""
-
-    mcp.tool(
-        name="visit_store_merge_pair",
-        title="合并候选店名",
-        annotations=write_ann("合并候选店名", idempotent=False),
-        description=(
-            "合并一对候选店名：把候选对里另一实体并入 keep 指定的主档。"
-            "参数：pair_id（候选对 id）；keep（**候选对中一个实体的 id**，"
-            "表示保留哪个规范名，可用只读工具 visit_store_search 查实体 id）；"
-            "kind 可选（exact/fuzzy，未传时按候选对自身类型）；note 可选。"
-            "闸门：需要写权限 Token；候选对不存在返回 NOT_FOUND；"
-            "keep 不是对内实体返回 BAD_PARAM。"
-            "意外失败返回 INTERNAL_WRITE（合并非幂等，可能已部分生效），"
-            "**不要自动重试**，先用只读工具核对当前状态。"
-        ),
-    )(visit_store_merge_pair)
-
-    mcp.tool(
-        name="visit_store_skip_pair",
-        title="标记不同店",
-        annotations=write_ann("标记不同店", idempotent=False),
-        description=(
-            "把一对候选店名标记为「不同店」（不再合并，也不再有提示）。"
-            "参数：pair_id（候选对 id）；kind 可选（exact/fuzzy）。"
-            "闸门：需要写权限 Token；候选对不存在返回 NOT_FOUND。"
-            "意外失败返回 INTERNAL_WRITE（写操作可能已部分生效），"
-            "**不要自动重试**，先用只读工具核对当前状态。"
-        ),
-    )(visit_store_skip_pair)
-
-    mcp.tool(
-        name="visit_store_split_entity",
-        title="拆分店铺实体",
-        annotations=write_ann("拆分店铺实体", idempotent=False),
-        description=(
-            "拆分被误合并的店铺实体：把该实体拆回自己为主档（撤销并入）。"
-            "参数：entity_id（实体 id，可用 visit_store_search 检索）；"
-            "confirm_text 必须原文：确认拆分 {entity_id}。"
-            "**拆分影响历史统计口径**，执行前请先向用户确认影响。"
-            "闸门：需要写权限 Token；确认语不匹配返回 CONFIRM_REQUIRED；"
-            "实体不存在返回 NOT_FOUND。返回拆分结果概要（原主档 → 自己）。"
-            "意外失败返回 INTERNAL_WRITE（拆分非幂等，可能已部分生效），"
-            "**不要自动重试**，先用只读工具核对当前状态。"
-        ),
-    )(visit_store_split_entity)
-
-    mcp.tool(
-        name="visit_store_apply_all",
-        title="整批应用合并",
-        annotations=write_ann("整批应用合并", idempotent=False),
-        description=(
-            "整批应用推荐合并：A 组（同名归一化全等）每组并入最早建档实体，"
-            "跨城市组自动留出待人工。参数：confirm_text 必须原文："
-            "确认批量应用合并；kind 可选（保留参数）。"
-            "闸门：需要写权限 Token；确认语不匹配返回 CONFIRM_REQUIRED。"
-            "返回：应用了几组 / 并入几店 / 留出几组。"
-            "**批量合并会影响店铺主档与历史统计口径，建议先在网页端查看推荐列表**；"
-            "误并可凭合并日志在实体检索里拆回。"
-            "意外失败返回 INTERNAL_WRITE（整批非幂等，可能已部分生效），"
-            "**不要自动重试**，先用只读工具核对当前状态。"
-        ),
-    )(visit_store_apply_all)

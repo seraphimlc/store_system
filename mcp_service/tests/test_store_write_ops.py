@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""店铺主档写工具测试：visit_store_merge_pair / visit_store_skip_pair /
-visit_store_split_entity / visit_store_apply_all。
+"""店铺主档写工具测试：visit_store(action=merge|skip|split|apply)。
 
 临时 SQLite（Base.metadata.create_all）造数据，绝不碰真实库。
 - 能力层（merge_pair / skip_pair / split_entity / apply_all）直接传临时 session
@@ -18,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, StoreEntity, StoreMergeLog, StorePair
 from app.services import store_master as _sm
-from mcp_service import guards, tokens, store_write_ops
+from mcp_service import guards, scenario_ops, store_write_ops, tokens
 
 W = tokens.Actor(uid=1, role="admin", scopes=["read", "write"], token_id=1)
 R = tokens.Actor(uid=1, role="admin", scopes=["read"], token_id=1)
@@ -242,7 +241,7 @@ def test_apply_all_confirm_required(db):
 # ---------------------------------------------------------------------------
 
 def test_envelope_unauthorized_without_token():
-    got = store_write_ops.visit_store_merge_pair(fake_ctx(), pair_id=1, keep=1)
+    got = scenario_ops.visit_store(fake_ctx(), action="merge", pair_id=1, keep=1)
     assert got["ok"] is False
     assert got["error"]["code"] == "UNAUTHORIZED"
 
@@ -250,12 +249,13 @@ def test_envelope_unauthorized_without_token():
 def test_envelope_forbidden_for_read_only_token(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: R)
     for call in (
-        lambda: store_write_ops.visit_store_merge_pair(fake_ctx(), 1, 1),
-        lambda: store_write_ops.visit_store_skip_pair(fake_ctx(), 1),
-        lambda: store_write_ops.visit_store_split_entity(
-            fake_ctx(), 2, confirm_text="确认拆分 2"),
-        lambda: store_write_ops.visit_store_apply_all(
-            fake_ctx(), confirm_text="确认批量应用合并"),
+        lambda: scenario_ops.visit_store(fake_ctx(), action="merge",
+                                         pair_id=1, keep=1),
+        lambda: scenario_ops.visit_store(fake_ctx(), action="skip", pair_id=1),
+        lambda: scenario_ops.visit_store(fake_ctx(), action="split",
+                                         entity_id=2, confirm_text="确认拆分 2"),
+        lambda: scenario_ops.visit_store(fake_ctx(), action="apply",
+                                         confirm_text="确认批量应用合并"),
     ):
         got = call()
         assert got["ok"] is False
@@ -264,7 +264,8 @@ def test_envelope_forbidden_for_read_only_token(factory, monkeypatch):
 
 def test_envelope_merge_pair_ok(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = store_write_ops.visit_store_merge_pair(fake_ctx(), 1, 1, note="信封层")
+    got = scenario_ops.visit_store(fake_ctx(), action="merge", pair_id=1,
+                                   keep=1, note="信封层")
     assert got["ok"] is True
     assert got["data"]["pair_id"] == 1
     s = factory()
@@ -275,7 +276,8 @@ def test_envelope_merge_pair_ok(factory, monkeypatch):
 
 def test_envelope_not_found(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = store_write_ops.visit_store_merge_pair(fake_ctx(), 999, 1)
+    got = scenario_ops.visit_store(fake_ctx(), action="merge",
+                                   pair_id=999, keep=1)
     assert got["ok"] is False
     assert got["error"]["code"] == "NOT_FOUND"
     assert "hint" in got["error"]
@@ -283,12 +285,23 @@ def test_envelope_not_found(factory, monkeypatch):
 
 def test_envelope_confirm_required(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
-    got = store_write_ops.visit_store_split_entity(fake_ctx(), 2, confirm_text="拆吧")
+    got = scenario_ops.visit_store(fake_ctx(), action="split", entity_id=2,
+                                   confirm_text="拆吧")
     assert got["ok"] is False
     assert got["error"]["code"] == "CONFIRM_REQUIRED"
-    got = store_write_ops.visit_store_apply_all(fake_ctx(), confirm_text="全并了吧")
+    got = scenario_ops.visit_store(fake_ctx(), action="apply",
+                                   confirm_text="全并了吧")
     assert got["ok"] is False
     assert got["error"]["code"] == "CONFIRM_REQUIRED"
+
+
+def test_bad_action_rejected(factory, monkeypatch):
+    """非法 action → BAD_PARAM + 可选值提示。"""
+    monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    got = scenario_ops.visit_store(fake_ctx(), action="bogus")
+    assert got["ok"] is False
+    assert got["error"]["code"] == "BAD_PARAM"
+    assert "merge" in got["error"]["hint"] and "split" in got["error"]["hint"]
 
 
 def test_envelope_internal_write_on_unexpected(factory, monkeypatch):
@@ -299,35 +312,22 @@ def test_envelope_internal_write_on_unexpected(factory, monkeypatch):
         raise RuntimeError("boom-db-down")
 
     monkeypatch.setattr(_sm, "merge_pair", boom)
-    got = store_write_ops.visit_store_merge_pair(fake_ctx(), 1, 1)
+    got = scenario_ops.visit_store(fake_ctx(), action="merge", pair_id=1, keep=1)
     assert got["ok"] is False
     assert got["error"]["code"] == "INTERNAL_WRITE"
     assert "boom-db-down" in got["error"]["message"]
     assert "不要自动重试" in got["error"]["hint"]
 
     monkeypatch.setattr(_sm, "apply_all_recommended", boom)
-    got = store_write_ops.visit_store_apply_all(fake_ctx(), confirm_text="确认批量应用合并")
+    got = scenario_ops.visit_store(fake_ctx(), action="apply",
+                                   confirm_text="确认批量应用合并")
     assert got["ok"] is False
     assert got["error"]["code"] == "INTERNAL_WRITE"
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# 注册（能力层不注册工具；写工具注册在 scenario_ops）
 # ---------------------------------------------------------------------------
 
-def test_register_exposes_four_tools():
-    from mcp.server.mcpserver import MCPServer
-    mcp = MCPServer(name="test-store-write", version="0")
-    store_write_ops.register(mcp)
-    tools = asyncio.run(mcp.list_tools())
-    names = {t.name for t in tools}
-    assert names == {"visit_store_merge_pair", "visit_store_skip_pair",
-                     "visit_store_split_entity", "visit_store_apply_all"}
-    desc = {t.name: t.description for t in tools}
-    for name in names:
-        assert "需要写权限" in desc[name]
-        assert "INTERNAL_WRITE" in desc[name] and "不要自动重试" in desc[name]
-    assert "确认拆分" in desc["visit_store_split_entity"]
-    assert "确认批量应用合并" in desc["visit_store_apply_all"]
-    assert "网页端" in desc["visit_store_apply_all"]
-    assert "NOT_FOUND" in desc["visit_store_merge_pair"]
+def test_no_register_in_store_write_ops():
+    assert not hasattr(store_write_ops, "register")

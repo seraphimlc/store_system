@@ -38,7 +38,7 @@ async def main():
                     print(f"❌ 文件不存在：{path}")
                     continue
                 t0 = time.time()
-                res = await s.call_tool("visit_upload_file",
+                res = await s.call_tool("visit_upload",
                                         {"filename": name, "path": path})
                 d = res.structured_content or {}
                 el = time.time() - t0

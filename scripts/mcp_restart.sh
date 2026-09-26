@@ -73,12 +73,16 @@ async def main():
             init = await s.initialize()
             tools = sorted(t.name for t in (await s.list_tools()).tools)
             print(f"  ✅ 协议 {init.protocol_version} | 工具 {len(tools)} 个")
-            need = {"visit_upload_file", "visit_month_salary", "visit_verify_integrity",
-                    "visit_settlement_trace", "visit_payroll_mark_paid"}
+            if len(tools) != 16:
+                print(f"  ❌ 期望 16 个场景化工具，实际 {len(tools)}：{tools}")
+            else:
+                print("  ✅ 场景化工具数 = 16（规格：docs/specs-mcp-tools-scenario.md 第三节）")
+            need = {"visit_upload", "visit_overview", "visit_verify",
+                    "visit_payroll", "visit_payroll_export"}
             missing = need - set(tools)
             print(f"  {'✅' if not missing else '❌'} 关键工具齐全"
                   + (f"（缺 {sorted(missing)}）" if missing else ""))
-            res = await s.call_tool("visit_verify_integrity", {})
+            res = await s.call_tool("visit_verify", {})
             d = res.structured_content.get("data", {})
             sm = d.get("summary", {})
             print(f"  {'✅' if d.get('ok') else '❌'} 数据自洽检查: 通过 {sm.get('passed')} / "

@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""P1 只读 MCP 工具能力层：11 个只读工具的聚合实现与注册（P2-10/11 新增
-visit_list_tasks / visit_list_months）。
+"""P1 只读能力层：11 个只读聚合函数（P2-10/11 新增 list_tasks / list_months）。
 
-职责边界（与 tools.py 的反向划分）：
+职责边界：
 - 本模块 = 能力层：一个业务能力一个函数 f(db, **params) -> dict，业务聚合放这里；
-- register(mcp) 只注册薄工具函数：取 actor → 独立会话 → 调能力层 → 包错误信封。
+- 场景化重构（49→16）后本文件**不再注册工具**（注册统一在 scenario_ops.py），
+  能力函数供 visit_overview / visit_person / visit_payroll / visit_files /
+  visit_recon_export / visit_staff / visit_config / visit_store / visit_verify 调用。
 业务逻辑一律复用 app.services.*（perf / period / dashboard / report / store_master），
 不重写判重/工资/找平/对账规则。
 
@@ -18,18 +19,16 @@ visit_list_tasks / visit_list_months）。
 - 数据为空返回 ok:True + 计数 0 + hint（不是错误）。
 - 金额单位为日元（円），返回里带 "currency": "JPY"。
 
-注意：本模块的 register 由父会话接入 tools.py；本模块不得修改 tools.py / server.py。
+注意：本模块**不注册工具**（注册统一在 scenario_ops.py）；只暴露能力函数与错误信封助手。
 """
 import re
 from datetime import date
-from typing import Annotated, Any
+from typing import Any
 
-from pydantic import Field
 from sqlalchemy import func
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context
 from mcp_service.capability import BadMonth, MONTH_PATTERN
-from mcp_service.annotations import read as read_ann
 
 
 class NotFound(RuntimeError):
@@ -141,7 +140,7 @@ def file_report(db, file_id: int, bucket: str | None = None) -> dict[str, Any]:
     f = db.get(ImportFile, file_id)
     if f is None:
         raise NotFound(f"文件不存在：{file_id}",
-                       "请先用 visit_file_list 确认正确的 file_id")
+                       "请先用 visit_files(view='list') 确认正确的 file_id")
 
     known = {"valid", "master_late", "from_sub", "cross_file_dup", "blank", "no_ref"}
     if bucket and bucket not in known and bucket != "appealing":
@@ -436,7 +435,7 @@ def person_detail(db, month: str, person: str) -> dict[str, Any]:
             codes = [r["code"] for r in mp if person in (r["name"] or "")]
     if not codes:
         raise NotFound(f"未找到人员：{person!r}",
-                       "请传工号（精确）或姓名（包含）；可先用 visit_staff_list 查人员编号")
+                       "请传工号（精确）或姓名（包含）；可先用 visit_staff(view='list') 查人员编号")
 
     code = codes[0]
     lo, hi = _month_range(month)
@@ -761,210 +760,3 @@ def _authz_read(ctx: Context, fn, tool: str = None) -> dict[str, Any]:
 def _invoke(ctx: Context, fn) -> dict[str, Any]:
     """只读工具统一包装：授权 + 审计 外层，内层仍走 _call 的错误信封映射。"""
     return _authz_read(ctx, lambda db: _call(db, fn))
-
-
-def register(mcp: MCPServer) -> None:
-    """注册 11 个只读工具（P2-10/11 新增 visit_list_tasks / visit_list_months）。"""
-
-    @mcp.tool(
-        name="visit_file_list",
-        title="巡店导入文件列表",
-        annotations=read_ann("巡店导入文件列表"),
-        description=(
-            "只读列出巡店导入文件：每个文件的 id、文件名、解析状态、解析行数、上传时间、"
-            "涉及结算月，以及判定分类计数（有效/同店跨日/从档/跨文件重复/空白等，"
-            "按 raw_records.clean_status 分组）与已入正式表条数（formal_rows）。"
-            "什么时候用：排查某月数据来自哪些文件、某文件是否解析成功。"
-            "关键约束：只读不改数据；month 可选（YYYY-MM），只返回涉及该月的文件。"
-        ),
-    )
-    def visit_file_list(ctx: Context, month: str | None = None) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: file_list(db, month=month))
-
-    @mcp.tool(
-        name="visit_file_report",
-        title="巡店文件判定明细",
-        annotations=read_ann("巡店文件判定明细"),
-        description=(
-            "只读查看单个巡店文件的判定明细：按 clean_status 分桶计数 + 每桶抽样若干行"
-            "（店名/日期/判定/过滤原因），以及已入正式表条数与待处理申诉数。"
-            "什么时候用：文件上传后核对判定分布、定位被过滤的记录。"
-            "关键约束：只读；bucket 可选（valid/master_late/from_sub/"
-            "cross_file_dup/blank/no_ref/appealing）；文件不存在返回 NOT_FOUND。"
-        ),
-    )
-    def visit_file_report(ctx: Context, file_id: int,
-                          bucket: str | None = None) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: file_report(db, file_id, bucket=bucket))
-
-    @mcp.tool(
-        name="visit_perf_ranking",
-        title="月度绩效排行",
-        annotations=read_ann("月度绩效排行"),
-        description=(
-            "**DEPRECATED（已弃用）**：请用 visit_month_salary(sort_by='points', limit=N) "
-            "实现同口径排行（按点数降序取前 N，字段更全）。本工具保留兼容、不再演进。"
-            "只读查询某结算月（YYYY-MM）绩效排行：按点数降序取前 N 名，含姓名、点数、"
-            "1点/2点店数、工资（日元円，currency=JPY）。"
-            "关键约束：只读；limit 默认 10、最大 100；数据来自已物化的月绩效记录"
-            "（month_perf_records），不实时重算。"
-        ),
-    )
-    def visit_perf_ranking(
-        month: Annotated[str, Field(pattern=MONTH_PATTERN)],
-        ctx: Context,
-        limit: int = 10,
-    ) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: perf_ranking(db, month, limit=limit))
-
-    @mcp.tool(
-        name="visit_dashboard",
-        title="月度看板指标",
-        annotations=read_ann("月度看板指标"),
-        description=(
-            "**什么时候用我**：要经营总览/质量/人员变动分析时用我。"
-            "只读查询某结算月（YYYY-MM）看板指标：metrics 为主结构（人数/有效店/1点2点/"
-            "总点数/总工资/2点率/人均/店均等字段全集，含 dup_total），另附质量 quality/"
-            "排行 top_staff/人员变动 new_staff·gone_staff/重复 dup_map。"
-            "优先读物化表 dash_metrics，缺失时回退实时计算。"
-            "参数 top：top_staff 条数，默认 8；top=0 表示不返回排行。"
-            "关键约束：只读；金额为日元円（currency=JPY）；空月返回 ok:True 与零值。"
-        ),
-    )
-    def visit_dashboard(month: Annotated[str, Field(pattern=MONTH_PATTERN)],
-                        ctx: Context,
-                        top: int = 8) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: dashboard_metrics(db, month, top=top))
-
-    @mcp.tool(
-        name="visit_payroll_rows",
-        title="薪资找平表",
-        annotations=read_ann("薪资找平表"),
-        description=(
-            "**什么时候用我**：发薪/找平维度（两期分期/递延），非绩效维度。"
-            "只读查询某结算月（YYYY-MM）薪资找平（分期对账偏差）表：每人两期（上半月/"
-            "下半月）点数、金额、奖金、店数快照，以及对账/上月修正/偏差/找平与递延余额"
-            "（carry）。"
-            "关键约束：只读；金额为日元円（currency=JPY）；person 可选，按工号或姓名筛选。"
-        ),
-    )
-    def visit_payroll_rows(month: Annotated[str, Field(pattern=MONTH_PATTERN)],
-                           ctx: Context,
-                           person: str | None = None) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: payroll_rows(db, month, person=person))
-
-    @mcp.tool(
-        name="visit_person_detail",
-        title="员工日明细",
-        annotations=read_ann("员工日明细"),
-        description=(
-            "**什么时候用我**：month_salary 的日粒度下钻（先看月汇总，再下钻到某人的"
-            "每日明细）。"
-            "只读查询某员工在某结算月（YYYY-MM）的日明细：person_daily_stats"
-            "（日期/点数/店数/1点2点）+ 该月汇总（有效店/点数/工资，日元円）。"
-            "关键约束：只读；person 必填，支持工号精确或姓名包含；找不到返回 NOT_FOUND。"
-        ),
-    )
-    def visit_person_detail(month: Annotated[str, Field(pattern=MONTH_PATTERN)],
-                            ctx: Context,
-                            person: str) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: person_detail(db, month, person))
-
-    @mcp.tool(
-        name="visit_config_get",
-        title="结算配置查询",
-        annotations=read_ann("结算配置查询"),
-        description=(
-            "只读查看当前生效的结算配置：每点单价（円）、奖金门槛与奖额"
-            "（每满门槛点奖奖额，可按月 schedule 覆盖）、员工可见起始月。"
-            "什么时候用：回答『现在每点多少钱/奖金怎么算』这类问题。"
-            "关键约束：只读，绝不修改配置；金额为日元円（currency=JPY）。"
-        ),
-    )
-    def visit_config_get(ctx: Context) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: config_get(db))
-
-    @mcp.tool(
-        name="visit_staff_list",
-        title="员工账号列表",
-        annotations=read_ann("员工账号列表"),
-        description=(
-            "只读列出员工账号：用户名、角色、状态（在岗/请假/停用/离职）、是否绑定人员"
-            "（person_code）、最近登录（Token 最近使用时间），可按状态筛选。"
-            "什么时候用：账号盘点、核对员工账号是否绑定人员编号。"
-            "关键约束：只读；绝不返回口令哈希；status 可选（active/leave/disabled/resigned）。"
-        ),
-    )
-    def visit_staff_list(ctx: Context, status: str | None = None) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: staff_list(db, status=status))
-
-    @mcp.tool(
-        name="visit_store_search",
-        title="店铺主档检索",
-        annotations=read_ann("店铺主档检索"),
-        description=(
-            "只读检索店铺主档：按店铺编号/名称/规范化名/城市 LIKE 模糊匹配，"
-            "返回店名、规范化名、城市、地址、是否主档等。"
-            "什么时候用：按名字/编号找店铺、核对店名写法与归属主档。"
-            "关键约束：只读；q 必填；limit 默认 20、最大 100。"
-        ),
-    )
-    def visit_store_search(ctx: Context, q: str, limit: int = 20) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: store_search(db, q, limit=limit))
-
-    @mcp.tool(
-        name="visit_list_tasks",
-        title="历史任务列表",
-        annotations=read_ann("历史任务列表"),
-        description=(
-            "只读列出历史任务（巡店导入 + 对账任务统一列表）：每条含 id/month/kind/"
-            "filename/status/version/is_previous/created_at/finished_at/"
-            "replaced_previous_ids。"
-            "kind 过滤：daily_records（巡店=导入文件）/ recon（对账=对账任务），"
-            "不传=两类都返回；month 过滤（YYYY-MM，巡店按涉及月份命中、对账按任务月份）；"
-            "status 过滤按字符串匹配。"
-            "什么时候用：回答『这个月上传过哪些文件/对账任务、当前是哪一版』。"
-            "关键约束：只读；同月重传后旧对账任务 is_previous=true 且被新任务的"
-            "replaced_previous_ids 记录。"
-        ),
-    )
-    def visit_list_tasks(ctx: Context, month: str | None = None,
-                         kind: str | None = None,
-                         status: str | None = None) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: list_tasks(db, month=month,
-                                                  kind=kind, status=status))
-
-    @mcp.tool(
-        name="visit_list_months",
-        title="有数据月份列表",
-        annotations=read_ann("有数据月份列表"),
-        description=(
-            "只读列出系统内有数据的月份（YYYY-MM）：正式表（formal_records）/ "
-            "月绩效（month_perf_records）/ 对账任务（recon_tasks）三类各计数。"
-            "什么时候用：回答『系统里有哪几个月的结算数据』『某月有没有对过账』。"
-            "关键约束：只读；空系统返回 ok:True 与空列表（合法结果，不是错误）。"
-        ),
-    )
-    def visit_list_months(ctx: Context) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: list_months(db))
-
-
-def register_integrity(mcp: MCPServer) -> None:
-    """单独注册自洽检查工具（避免与既有 register 段冲突）。"""
-    from mcp_service.annotations import read as read_ann
-
-    @mcp.tool(
-        name="visit_verify_integrity",
-        title="数据自洽检查",
-        annotations=read_ann("数据自洽检查"),
-        description=(
-            "**数据自洽检查**：核对找平表/台账/关联表/找平行四类数字是否互相印证"
-            "（8 项：找平金额=该月差异 / 已找平+剩余=原始 / 状态一致 / 关联=台账抵扣 / "
-            "关联=已找平 / 台账快照vs应发（提示，非错误）/ 抵扣来源可反查 / 递延链符号一致）。"
-            "什么时候用：怀疑数据不一致、想确认系统算得对、或上线/重算后做核对。"
-            "返回 checks[]（每项 pass/fail/info + 反例明细）与 summary（通过数/失败数/规模）。"
-            "只读、无参数。"
-        ),
-    )
-    def visit_verify_integrity(ctx: Context) -> dict[str, Any]:
-        return _invoke(ctx, lambda db: verify_integrity(db))

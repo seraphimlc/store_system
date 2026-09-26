@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""薪资写操作：对账解读 / 找平执行取消 / 薪资找平表生成 / 人工修正 / 系统配置。
+"""薪资写能力层：对账解读 / 找平执行取消 / 薪资找平表生成 / 人工修正 / 系统配置。
+
+能力函数（供 scenario_ops 的 visit_recon / visit_payroll_export / visit_config 调用）：
+  recon_interpret / recon_adjust / payroll_generate / payroll_update /
+  payroll_mark_paid / config_set。
 
 职责：只做「取 Context → 过闸门 → 调服务层 → 包错误信封」，
 闸门在 guards.py（不重复实现），业务复用 app.services.*（不重复实现）。
@@ -7,15 +11,10 @@
   retryable=True  → 意外异常 INTERNAL（可重试；工具本身幂等）
   retryable=False → INTERNAL_WRITE（**禁止自动重试**；payroll_update 的
     adjust_delta 是增量累加，重试会重复加钱——**涉钱且非幂等**）
-
-接线由父会话负责（server.py 里调 payroll_write_ops.register(mcp)）。
 """
 from typing import Any
 
-from mcp.server.mcpserver import Context, MCPServer
-
 from mcp_service import guards
-from mcp_service.annotations import write as write_ann
 
 
 def _to_int(value, name: str, *, lo: int, hi: int) -> int:
@@ -60,7 +59,7 @@ def recon_interpret(db, actor, *, task_id: int) -> dict[str, Any]:
     if t is None:
         raise guards.GuardError(
             "NOT_FOUND", f"对账任务不存在：{task_id}",
-            "先调用 visit_recon_status / visit_recon_diff 获取正确的 task_id")
+            "先调用 visit_recon(view='status') / visit_recon(view='diff') 获取正确的 task_id")
 
     res = recon.interpret_task(db, task_id)   # 可能耗时（AI timeout 600s）
     return {"ok": True, "data": {
@@ -95,7 +94,7 @@ def recon_adjust(db, actor, *, task_id: int, person_code: str,
     if t is None:
         raise guards.GuardError(
             "NOT_FOUND", f"对账任务不存在：{task_id}",
-            "先调用 visit_recon_status / visit_recon_diff 获取正确的 task_id")
+            "先调用 visit_recon(view='status') / visit_recon(view='diff') 获取正确的 task_id")
     month = (t.params or {}).get("month", "")
     if not month:
         raise guards.GuardError(
@@ -110,7 +109,7 @@ def recon_adjust(db, actor, *, task_id: int, person_code: str,
             raise guards.GuardError(
                 "NOT_FOUND", res.get("msg") or "无法确认找平",
                 "该员工在此对账任务中没有差异行；"
-                "先用 visit_recon_diff(task_id=...) 确认差异")
+                "先用 visit_recon(view='diff', task_id=...) 确认差异")
         rec = res["record"]
         return {"ok": True, "data": {
             "task_id": task_id,
@@ -226,7 +225,7 @@ def payroll_update(db, actor, *, month: str, person_code: str,
     if not res.get("ok"):
         raise guards.GuardError(
             "NOT_FOUND", res.get("msg") or "该月此员工无对账行",
-            "先调用 visit_payroll_generate(month=...) 生成该月薪资找平表")
+            "先调用 visit_payroll(month=...) 生成该月薪资找平表")
 
     row = (db.query(PayrollPeriodRow)
            .filter(PayrollPeriodRow.month == month,
@@ -244,15 +243,19 @@ def payroll_update(db, actor, *, month: str, person_code: str,
 
 
 def config_set(db, actor, *, per_point=None, bonus_group=None,
-               bonus_amount=None, confirm_text: str = None) -> dict[str, Any]:
-    """visit_config_set：保存系统配置（**涉钱**：影响所有月份工资口径）。
+               bonus_amount=None, staff_visible_from: str = None,
+               confirm_text: str = None) -> dict[str, Any]:
+    """保存系统配置（原 visit_config_set；现为 visit_config(action=set) 的能力）。
+    **涉钱**：影响所有月份工资口径。
 
     闸门：require_write → 参数校验（正整数，复用 guards.validate_per_point 思路；
-    bonus 范围与路由 sys_config_save 一致）→ 确认语 `确认修改配置`。
+    bonus 范围与路由 sys_config_save 一致；staff_visible_from 格式与路由一致）→
+    确认语 `确认修改配置`。
     复用路由 sys_config_save 逻辑：写/更新 sys_configs（全局单值，最新一条生效）
     + perf.clear_config_cache()。参数留空 = 保留当前值。
     幂等（覆盖式写入）→ retryable=True。
     """
+    import re as _re
     from app.models import SysConfig
     from app.services import perf
 
@@ -268,12 +271,21 @@ def config_set(db, actor, *, per_point=None, bonus_group=None,
     ba = _to_int(bonus_amount if bonus_amount is not None
                  else (row.bonus_amount if row else 3000),
                  "bonus_amount", lo=0, hi=1000000)
+    svf = (staff_visible_from or "").strip() if staff_visible_from is not None \
+        else (row.staff_visible_from if row else "")
+    if svf and not (len(svf) == 7 and svf[:4].isdigit()
+                    and svf[4] == "-" and svf[5:].isdigit()):
+        raise guards.GuardError(
+            "BAD_PARAM", f"员工可见起始月格式非法：{svf!r}",
+            "staff_visible_from 应为 YYYY-MM（留空=不限制），例如 2026-10")
 
     if row is None:
         db.add(SysConfig(config_month="", per_point=pp, bonus_group=bg,
-                         bonus_amount=ba, updated_by=actor.uid))
+                         bonus_amount=ba, staff_visible_from=svf,
+                         updated_by=actor.uid))
     else:
         row.per_point, row.bonus_group, row.bonus_amount = pp, bg, ba
+        row.staff_visible_from = svf
         row.updated_by = actor.uid
     db.commit()
     perf.clear_config_cache()
@@ -281,13 +293,12 @@ def config_set(db, actor, *, per_point=None, bonus_group=None,
         "per_point": pp,
         "bonus_group": bg,
         "bonus_amount": ba,
+        "staff_visible_from": svf,
         "currency": "JPY",
         "hint": "该配置为全局单值（最新一条生效），会影响所有月份工资口径；"
                 "如需按月不同请用 env 的 BONUS_*_SCHEDULE",
     }}
 
-
-# ---------- 注册 ----------
 
 def _next_month(month: str) -> str:
     y, m = int(month[:4]), int(month[5:7])
@@ -331,159 +342,3 @@ def payroll_mark_paid(db, actor, *, month: str, half, unmark: bool = False,
         "paid_halves": sorted(period.paid_halves(db, month)),
         "note": "已重算本月及下月找平：吸收额度只使用未发薪的期",
     }}
-
-
-def register(mcp: MCPServer) -> None:
-    """父会话在 server.py 里调用（与 mcp_service.tools.register 并列）。"""
-    from mcp_service.tools import _write_call
-
-    @mcp.tool(
-        name="visit_recon_interpret",
-        title="对账结果AI解读",
-        annotations=write_ann("对账结果AI解读", idempotent=True),
-        description=(
-            "用 AI 解读某对账任务的结果并写入任务 summary.ai_interpret（覆盖旧解读）。"
-            "**可能耗时**：AI 调用最长约 10 分钟（timeout 600s），期间请勿重复并发调用；"
-            "重复解读安全（幂等）。任务不存在返回 NOT_FOUND；"
-            "未配置 AI 模型时 generated=false 并给出 msg（不是错误）。"
-            "参数：task_id。需要写权限 Token。"
-        ),
-    )
-    def visit_recon_interpret(ctx: Context, task_id: int) -> dict[str, Any]:
-        def run(db, actor):
-            return recon_interpret(db, actor, task_id=task_id)
-
-        return _write_call(ctx, "visit_recon_interpret",
-                           {"task_id": task_id}, run, retryable=True)
-
-    @mcp.tool(
-        name="visit_recon_adjust",
-        title="对账差异找平",
-        annotations=write_ann("对账差异找平", idempotent=True),
-        description=(
-            "对账差异找平（**涉钱**）：action=add 确认找平（记入下月工资，正=补发/负=扣回），"
-            "action=remove 取消找平（同步撤销写入薪资找平表的金额增量）。"
-            "confirm_text 必须原文：`确认找平 {month} {person_code} {action}`"
-            "（month 为该对账任务的月份）。"
-            "幂等可安全重试：重复 add 返回已有记录、不会重复加钱；remove 无记录视为已取消。"
-            "任务不存在 NOT_FOUND；员工在该任务无差异行 NOT_FOUND。"
-            "参数：task_id、person_code、action、confirm_text。需要写权限 Token。"
-        ),
-    )
-    def visit_recon_adjust(ctx: Context, task_id: int, person_code: str,
-                           action: str,
-                           confirm_text: str = None) -> dict[str, Any]:
-        def run(db, actor):
-            return recon_adjust(db, actor, task_id=task_id,
-                                person_code=person_code, action=action,
-                                confirm_text=confirm_text)
-
-        return _write_call(ctx, "visit_recon_adjust",
-                           {"task_id": task_id, "person_code": person_code,
-                            "action": action},
-                           run, retryable=True)
-
-    @mcp.tool(
-        name="visit_payroll_generate",
-        title="生成薪资找平表",
-        annotations=write_ann("生成薪资找平表", idempotent=True),
-        description=(
-            "生成/更新某月的薪资找平表（**涉钱**）：同步该月分期对账偏差表，"
-            "并刷新看板统计。封账月份拒绝（MONTH_SEALED）；生成前强制加载系统配置"
-            "（防用错单价）。同步失败只进 data.warnings（不返回错误）。"
-            "幂等可安全重试（重新生成保留手改偏差）。"
-            "参数：month（YYYY-MM）。需要写权限 Token。"
-        ),
-    )
-    def visit_payroll_generate(ctx: Context, month: str) -> dict[str, Any]:
-        def run(db, actor):
-            return payroll_generate(db, actor, month=month)
-
-        return _write_call(ctx, "visit_payroll_generate",
-                           {"month": month}, run, retryable=True)
-
-    @mcp.tool(
-        name="visit_payroll_update",
-        title="人工修正找平金额",
-        annotations=write_ann("人工修正找平金额", idempotent=False),
-        description=(
-            "人工修正某人某月的两期金额与找平增量（**涉钱**，会影响发薪与递延："
-            "两期实发与下月结转）。confirm_text 必须原文：`确认修正 {month} {person_code}`。"
-            "half1_amount/half2_amount 直接赋值，adjust_delta 为**增量累加**。"
-            "**非幂等**：意外失败返回 INTERNAL_WRITE，**不要自动重试**，"
-            "先用只读工具核对当前状态。该月该员工无找平行 NOT_FOUND。"
-            "参数：month、person_code、half1_amount、half2_amount、adjust_delta、"
-            "confirm_text。需要写权限 Token。"
-        ),
-    )
-    def visit_payroll_update(ctx: Context, month: str, person_code: str,
-                             half1_amount: int | None = None,
-                             half2_amount: int | None = None,
-                             adjust_delta: int | None = None,
-                             confirm_text: str = None) -> dict[str, Any]:
-        def run(db, actor):
-            return payroll_update(db, actor, month=month,
-                                  person_code=person_code,
-                                  half1_amount=half1_amount,
-                                  half2_amount=half2_amount,
-                                  adjust_delta=adjust_delta,
-                                  confirm_text=confirm_text)
-
-        return _write_call(ctx, "visit_payroll_update",
-                           {"month": month, "person_code": person_code,
-                            "half1_amount": half1_amount,
-                            "half2_amount": half2_amount,
-                            "adjust_delta": adjust_delta},
-                           run, retryable=False)
-
-    @mcp.tool(
-        name="visit_payroll_mark_paid",
-        title="标记发薪",
-        annotations=write_ann("标记发薪", idempotent=True),
-        description=(
-            "标记/取消「某结算月的某期（上半月/下半月）已实际发薪」。"
-            "**发薪后请及时标记**：找平的「上月结转」只能从未发薪的期里扣/补，"
-            "已发薪的期改不了；不标记会让系统误以为结转已处理而漏扣。"
-            "标记后系统自动重算本月与下月的找平。**写入发放台账（含金额快照）**，"
-            "台账是历史事实、不会被后续重算改写。参数：month（YYYY-MM）；"
-            "half（1=上半月，2=下半月）；person_code（可选，留空=该期全部人，"
-            "整期发薪用）；unmark（true=取消登记/更正）。需要写权限。"
-        ),
-    )
-    def visit_payroll_mark_paid(ctx: Context, month: str, half: int,
-                                unmark: bool = False,
-                                person_code: str = None) -> dict[str, Any]:
-        return _write_call(ctx, "visit_payroll_mark_paid",
-                           {"month": month, "half": half, "unmark": unmark,
-                            "person_code": person_code},
-                           lambda db, actor: payroll_mark_paid(
-                               db, actor, month=month, half=half, unmark=unmark,
-                               person_code=person_code),
-                           retryable=True)
-
-    @mcp.tool(
-        name="visit_config_set",
-        title="保存系统配置",
-        annotations=write_ann("保存系统配置", idempotent=True),
-        description=(
-            "保存系统配置（**涉钱**）：每点单价 per_point（円/点）、奖金门槛 "
-            "bonus_group（点）、奖额 bonus_amount（円）。confirm_text 必须原文："
-            "`确认修改配置`。**该配置为全局单值（最新一条生效），会影响所有月份工资口径；"
-            "如需按月不同请用 env 的 BONUS_*_SCHEDULE**。参数留空表示保留当前值。"
-            "幂等可安全重试（覆盖式写入）。需要写权限 Token。"
-        ),
-    )
-    def visit_config_set(ctx: Context, per_point: int | None = None,
-                         bonus_group: int | None = None,
-                         bonus_amount: int | None = None,
-                         confirm_text: str = None) -> dict[str, Any]:
-        def run(db, actor):
-            return config_set(db, actor, per_point=per_point,
-                              bonus_group=bonus_group,
-                              bonus_amount=bonus_amount,
-                              confirm_text=confirm_text)
-
-        return _write_call(ctx, "visit_config_set",
-                           {"per_point": per_point, "bonus_group": bonus_group,
-                            "bonus_amount": bonus_amount},
-                           run, retryable=True)

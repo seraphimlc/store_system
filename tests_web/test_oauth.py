@@ -614,11 +614,12 @@ def test_e2e_oauth_token_calls_mcp_tool(e2e_env, tmp_path):
         _wait_port(port)
 
         # 验收 1：管理员 token 调 MCP 读工具成功
-        r, body = _mcp_call(port, at_admin, "visit_ping", {})
+        r, body = _mcp_call(port, at_admin, "visit_whoami", {})
         assert r.status_code == 200, r.text[:300]
         assert body["result"]["structuredContent"]["ok"] is True
-        # 走两阶段审计的工具（visit_month_summary 经 authz.dispatch）
-        r2, body2 = _mcp_call(port, at_admin, "visit_month_summary",
+        assert body["result"]["structuredContent"]["data"]["role"] == "admin"
+        # 走两阶段审计的工具（visit_overview 经 authz.dispatch）
+        r2, body2 = _mcp_call(port, at_admin, "visit_overview",
                               {"month": "2026-09"})
         assert r2.status_code == 200, r2.text[:300]
         assert body2["result"]["structuredContent"]["ok"] is True
@@ -628,14 +629,14 @@ def test_e2e_oauth_token_calls_mcp_tool(e2e_env, tmp_path):
         S = sessionmaker(bind=eng, expire_on_commit=False)
         s = S()
         alog = s.query(McpAuditLog).filter(
-            McpAuditLog.tool == "visit_month_summary").one()
+            McpAuditLog.tool == "visit_overview").one()
         assert alog.user_id == _uid("admin")
         assert alog.token_id is not None
         assert alog.ok is True
         s.close()
 
         # 验收 6：员工（只读）调写工具 → FORBIDDEN_TOOL（授权矩阵拦截）
-        rw, body_w = _mcp_call(port, at_staff, "visit_upload_file", {})
+        rw, body_w = _mcp_call(port, at_staff, "visit_upload", {})
         err = body_w["result"]["structuredContent"]["error"]
         assert err["code"] == "FORBIDDEN_TOOL"
 
@@ -645,7 +646,7 @@ def test_e2e_oauth_token_calls_mcp_tool(e2e_env, tmp_path):
         u.status = "leave"
         s.commit()
         s.close()
-        r_leave, _ = _mcp_call(port, at_staff, "visit_ping", {})
+        r_leave, _ = _mcp_call(port, at_staff, "visit_whoami", {})
         assert r_leave.status_code == 401
         hdr = r_leave.headers.get("www-authenticate", "")
         assert hdr.startswith("Bearer resource_metadata=")

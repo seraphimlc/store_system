@@ -1,26 +1,20 @@
 # -*- coding: utf-8 -*-
-"""P1 写工具注册：visit_finalize_file / visit_rebuild_preview /
-visit_rebuild_month / visit_set_per_point。
+"""P1 写能力层：finalize_file / rebuild_preview / rebuild_month / set_per_point。
 
 设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md §6。
-本文件只做「取 Context → 过闸门 → 调服务层 → 包错误信封」：
-闸门在 guards.py（不重复实现），业务复用 app.services.*（不重复实现）。
-每个工具用 mcp_service.tools._write_call 做统一包装以获得正确信封
-（retryable=True → 意外异常 INTERNAL；retryable=False → INTERNAL_WRITE）。
-
-接线由父会话负责（server.py 里调 write_tools.register(mcp)）。
+场景化重构（49→16）后本文件**不再注册工具**（注册统一在 scenario_ops.py）：
+- rebuild 经 visit_rebuild(action='preview'|'run') 暴露；
+- finalize 的能力（出正式表）已并入 visit_upload 的自动链路；
+- set_per_point 的能力已并入 visit_config(action=set) 的 per_point 参数。
+本文件只保留能力函数：f(db, actor, ...) → 完整信封或抛 GuardError。
+业务复用 app.services.*（不重写判重/工资/找平/对账规则）。
 """
 import json
 from datetime import date as _date
 from datetime import timedelta
 from typing import Any
 
-from mcp.server.mcpserver import Context, MCPServer
-
 from mcp_service import guards
-from mcp_service.tools import _write_call
-from mcp_service.annotations import write as write_ann
-from mcp_service.annotations import preview as preview_ann
 
 
 # ---------- 适配层 ----------
@@ -70,7 +64,7 @@ def _sub_ids() -> set:
 # ---------- 能力函数（每个工具一个；返回完整信封或抛 GuardError）----------
 
 def finalize_file(db, actor, *, file_id: int) -> dict[str, Any]:
-    """visit_finalize_file：出正式表。原子先删后插，幂等可安全重试。
+    """出正式表（原 visit_finalize_file；现为 visit_upload 自动链路的能力）。原子先删后插，幂等可安全重试。
 
     封账月份集合 = 该文件 raw 月份 ∪ 该文件 FormalRecord 月份
     （write_ops._file_months 现成实现；并集保证「raw 已清理、formal 保留」
@@ -85,7 +79,7 @@ def finalize_file(db, actor, *, file_id: int) -> dict[str, Any]:
     if db.get(ImportFile, file_id) is None:
         raise guards.GuardError(
             "NOT_FOUND", f"文件不存在：{file_id}",
-            "先调用 visit_file_list(month=...) 获取正确 id")
+            "先调用 visit_files(view='list', month=...) 获取正确 id")
 
     pend = db.query(AppealRecord).filter(
         AppealRecord.import_id == file_id,
@@ -119,7 +113,7 @@ def finalize_file(db, actor, *, file_id: int) -> dict[str, Any]:
 
 
 def rebuild_preview(db, actor, *, month: str) -> dict[str, Any]:
-    """visit_rebuild_preview：只读估算，**不调 rebuild_month**。
+    """visit_rebuild(action='preview')：只读估算，**不调 rebuild_month**。
 
     一致性（构造上成立）：
       raw_total == Σ(raw_by_status 各桶含 other)；
@@ -175,7 +169,7 @@ def rebuild_preview(db, actor, *, month: str) -> dict[str, Any]:
     persons = sorted({rr.submitter_code for rr in raws if rr.submitter_code})
 
     # —— 先写一行审计拿 preview_id（ok=None；两阶段回填由审计中间件负责）——
-    row = McpAuditLog(tool="visit_rebuild_preview",
+    row = McpAuditLog(tool="visit_rebuild",
                       params_json=json.dumps({"month": month},
                                              ensure_ascii=False),
                       token_id=actor.token_id, user_id=actor.uid, ok=None)
@@ -204,7 +198,7 @@ def rebuild_preview(db, actor, *, month: str) -> dict[str, Any]:
 
 def rebuild_month(db, actor, *, month: str, preview_id: int,
                   confirm_text: str) -> dict[str, Any]:
-    """visit_rebuild_month：月度重算（前置 preview + 确认语，全部与会话无关）。
+    """visit_rebuild(action='run')：月度重算（前置 preview + 确认语，全部与会话无关）。
 
     闸门顺序：require_write → validate_month → assert_confirm →
     check_preview（同一 token_id/同月/30 分钟窗）→ assert_has_source →
@@ -263,7 +257,7 @@ def rebuild_month(db, actor, *, month: str, preview_id: int,
 
 def set_per_point(db, actor, *, month: str, per_point,
                   confirm_text: str) -> dict[str, Any]:
-    """visit_set_per_point：改单价（幂等可重试；先 ensure_config_warmed 防写错钱）。"""
+    """改单价（原 visit_set_per_point；现为 visit_config(action=set) 的能力）。幂等可重试；先 ensure_config_warmed 防写错钱。"""
     from app.services import perf
 
     guards.require_write(actor)
@@ -281,87 +275,3 @@ def set_per_point(db, actor, *, month: str, per_point,
         "hint": "只重算目标月，M+1 递延结转会陈旧，如需对齐请对下月重跑或人工核对",
     }}
 
-
-# ---------- 注册 ----------
-
-def register(mcp: MCPServer) -> None:
-    """父会话在 server.py 里调用（与 mcp_service.tools.register 并列）。"""
-
-    @mcp.tool(
-        name="visit_finalize_file",
-        title="出正式表",
-        annotations=write_ann("出正式表", idempotent=True),
-        description=(
-            "把某个已上传文件的判定结果写入正式表（自动完成工资/找平/看板刷新）。"
-            "幂等，可安全重试。文件涉及封账月份（raw 月份 ∪ 正式表月份任一命中）"
-            "会被拒绝 MONTH_SEALED；文件不存在 NOT_FOUND；存在未决申诉 PENDING_APPEALS。"
-            "参数：file_id（文件 ID，可用只读工具查询）。需要写权限 Token。"
-        ),
-    )
-    def visit_finalize_file(ctx: Context, file_id: int) -> dict[str, Any]:
-        def run(db, actor):
-            return finalize_file(db, actor, file_id=file_id)
-
-        return _write_call(ctx, "visit_finalize_file",
-                           {"file_id": file_id}, run, retryable=True)
-
-    @mcp.tool(
-        name="visit_rebuild_preview",
-        title="月度重算预演",
-        annotations=preview_ann("月度重算预演"),
-        description=(
-            "月度重算前的只读预演：估算该月正式表现状、raw 判定分布与点数影响面，"
-            "并生成 preview_id（30 分钟有效）。重算前必须先调用本工具，"
-            "把影响面（当前行数/点数 → 预计）复述给用户后再用返回的 preview_id 重算。"
-            "参数：month（YYYY-MM）。只读，无需写权限。"
-        ),
-    )
-    def visit_rebuild_preview(ctx: Context, month: str) -> dict[str, Any]:
-        def run(db, actor):
-            return rebuild_preview(db, actor, month=month)
-
-        return _write_call(ctx, "visit_rebuild_preview",
-                           {"month": month}, run, retryable=True)
-
-    @mcp.tool(
-        name="visit_rebuild_month",
-        title="月度重算重建",
-        annotations=write_ann("月度重算重建", idempotent=False),
-        description=(
-            "按结算月重算并重建正式表（重判 + 保护申诉成果 + 重建）。"
-            "必须先调 visit_rebuild_preview 拿 preview_id，并把确认语原文填入 "
-            "confirm_text（确认重算 {month}）。成功后自动补找平表/看板同步；"
-            "意外失败返回 INTERNAL_WRITE（重算可能已部分生效），**不要自动重试**，"
-            "先用只读工具核对。需要写权限 Token。"
-        ),
-    )
-    def visit_rebuild_month(ctx: Context, month: str, preview_id: int,
-                            confirm_text: str) -> dict[str, Any]:
-        def run(db, actor):
-            return rebuild_month(db, actor, month=month, preview_id=preview_id,
-                                 confirm_text=confirm_text)
-
-        return _write_call(ctx, "visit_rebuild_month",
-                           {"month": month, "preview_id": preview_id},
-                           run, retryable=False)
-
-    @mcp.tool(
-        name="visit_set_per_point",
-        title="设置点数单价",
-        annotations=write_ann("设置点数单价", idempotent=True),
-        description=(
-            "设置某结算月的点数单价（円/点）并重算该月工资与找平表。"
-            "confirm_text 必须原文：确认改单价 {month} {per_point}。"
-            "只重算目标月，M+1 递延结转会陈旧，如需对齐请对下月重跑或人工核对。"
-            "需要写权限 Token。"
-        ),
-    )
-    def visit_set_per_point(ctx: Context, month: str, per_point: int,
-                            confirm_text: str) -> dict[str, Any]:
-        def run(db, actor):
-            return set_per_point(db, actor, month=month, per_point=per_point,
-                                 confirm_text=confirm_text)
-
-        return _write_call(ctx, "visit_set_per_point",
-                           {"month": month, "per_point": per_point},
-                           run, retryable=True)

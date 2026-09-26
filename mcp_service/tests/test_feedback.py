@@ -145,17 +145,22 @@ def test_upload_dry_run_writes_nothing(db, monkeypatch):
 def test_tools_have_annotations():
     import asyncio
     from mcp.server.mcpserver import MCPServer
-    from mcp_service import read_ops, recon_ops
+    from mcp_service import scenario_ops
 
     mcp = MCPServer(name="t", version="0.0.0")
-    read_ops.register(mcp)
-    recon_ops.register(mcp)
+    scenario_ops.register(mcp)
     tools = asyncio.run(mcp.list_tools())
     by = {t.name: t for t in tools}
-    for name in ("visit_dashboard", "visit_file_list"):
+    assert len(by) == 16
+    # 只读工具：readOnlyHint=True；写工具：readOnlyHint=False
+    for name in ("visit_overview", "visit_files", "visit_verify",
+                 "visit_my_perf", "visit_whoami", "visit_recon_export"):
         assert by[name].annotations is not None, name
         assert by[name].annotations.read_only_hint is True, name
         assert by[name].annotations.title, name
+    for name in ("visit_upload", "visit_payroll_export", "visit_rebuild",
+                 "visit_staff", "visit_config", "visit_store"):
+        assert by[name].annotations.read_only_hint is False, name
 
 
 # ---------- P1-7 kind 一致性 ----------

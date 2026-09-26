@@ -19,9 +19,11 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 ```
 - 账号：`admin/demo123`；员工 `demo123`。**heredoc `python3 <<EOF` 偶发静默失败 → 一律写 scripts/*.py 文件执行**。
 - AI：本地 .env（AI_API_KEY/AI_BASE_URL/AI_MODEL=deepseek-v4-flash）；线上 deploy/.env。ai_chat.chat 自动重试 2 次。
-- **MCP 服务（WorkBuddy 接入）**：独立进程 `mcp_service/`，**49 个工具（含写类，走闸门；按身份裁剪列表）**、
+- **MCP 服务（WorkBuddy 接入）**：独立进程 `mcp_service/`，**16 个场景化工具（员工 3 个 / 管理员 13 个，
+  含写类走闸门；按身份裁剪列表）**；旧工具名已删（2026-09-26 重构，规格 `docs/specs-mcp-tools-scenario.md`，
+  注册唯一入口 `mcp_service/scenario_ops.py`，能力函数仍在 `*_ops.py`），
   **不动主 venv（3.9.6）**；**改完代码必须重启**：`scripts/mcp_restart.sh`（一条命令：重启 + 等就绪 +
-  验证工具清单 + 跑数据自洽检查）；依赖 `requirements-mcp.txt`（`mcp==2.2.0` 需 Python ≥3.10，生产 3.11 可用）。启动前 **DATABASE_URL 必须显式设置**（`app/config.py` 的 `get_settings()` 带 @lru_cache，`app.db` import 时固化缓存，不设会静默连到空库）。设计/计划见 `docs/索引.md §1.5`。
+  验证工具清单（=16）+ 跑数据自洽检查）；依赖 `requirements-mcp.txt`（`mcp==2.2.0` 需 Python ≥3.10，生产 3.11 可用）。启动前 **DATABASE_URL 必须显式设置**（`app/config.py` 的 `get_settings()` 带 @lru_cache，`app.db` import 时固化缓存，不设会静默连到空库）。设计/计划见 `docs/索引.md §1.5`。
 - **MCP OAuth（SSO，2026-09-26）**：`/.well-known/oauth-*` + `/oauth/*` 挂在 web 应用
   （`app/routers/oauth_r.py` + `app/services/oauth.py`）；员工点「连接」→ 浏览器登录 → 自动授权，
   换出的 access token 即 `api_tokens` 一行（授权矩阵/审计/状态联动全继承）。`mcp_service/auth.py`
@@ -88,7 +90,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **薪资四表**：`payroll_period_rows`（应发，会重算）/ `payroll_payments`（实发台账，不可改写，
   **导出发薪表即登记**）/ `payroll_adjusts`（找平进度：原始/已找平/剩余/结清时间）/
   `payroll_settlement_links`（发放↔找平 多对多，双向可查）。
-- **数据自洽检查**：MCP `visit_verify_integrity` 或 `scripts/verify_payroll_logic.py`（同源，8 项互证；
+- **数据自洽检查**：MCP `visit_verify` 或 `scripts/verify_payroll_logic.py`（同源，8 项互证；
   A6 是"计划变更提示"非错误）。基准数字必须与线上逐人一致（`scripts/compare_with_prod.py`）。
 - MySQL TEXT 默认值需 `sa.text("('')")`；唯一键含 TEXT 列用 VARCHAR(255)。
 - store_entities 自引用外键中间态需按 dialect 禁用触发器/FK 检查。

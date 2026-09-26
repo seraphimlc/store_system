@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""最后一批 5 个 MCP 工具（task p1-mcpify-final-gaps）。
+"""杂项能力层（task p1-mcpify-final-gaps；能力函数供 scenario_ops 调用）。
 
-工具（register 由父会话在 tools.py 里接线；本文件不修改 tools.py / server.py）：
-  visit_file_layout(file_id)          只读：文件解析布局（表头行 / 列映射 /
+能力函数：
+  file_layout(db, file_id)            只读：文件解析布局（表头行 / 列映射 /
                                       visible·deploy 值映射 / 点数规则）＋解析诊断
-  visit_product_doc()                 只读：系统产品说明原文（app/product_doc.md）
-  visit_staff_set_status(...)         写：员工账号状态（复用 accounts_r.staff_set_status
+  product_doc(db)                     只读：系统产品说明原文（app/product_doc.md）
+  staff_set_status(db, actor, ...)    写：员工账号状态（复用 accounts_r.staff_set_status
                                       口径，含 is_active 联动；确认语）
-  visit_store_ai_run()                写：启动 B 组 AI 批处理（复用 stores_r.ai_run
+  store_ai_run(db, actor)             写：启动 B 组 AI 批处理（复用 stores_r.ai_run
                                       口径；后台线程执行，已有 running 拒绝）
-  visit_export_recon_result(task_id)  只读导出：对账任务原始产物（task.params.result_path
+  export_recon_result(db, task_id)    只读导出：对账任务原始产物（task.params.result_path
                                       落盘 xlsx；缺失时按 /recon/result 路由逻辑现算）
 
 口径对齐：
@@ -19,8 +19,6 @@
   （可安全重试）→ retryable=True → 意外异常 INTERNAL（可重试）。
 - 错误码沿用 guards.GuardError.code 词表：UNAUTHORIZED / FORBIDDEN_TOOL /
   BAD_PARAM / CONFIRM_REQUIRED / NOT_FOUND / INTERNAL / INTERNAL_WRITE。
-- 每调用独立 SessionLocal() + finally: db.close()（visit_product_doc 不涉及
-  数据库，不开会话，只解析 actor 供审计）。
 
 测试：mcp_service/tests/test_misc_ops.py（临时 SQLite fixture，绝不碰本地库）。
 """
@@ -29,13 +27,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context
 
 from mcp_service import guards
 from mcp_service.export_ops import _authorize, _ok_data
-from mcp_service.tools import _write_call
-from mcp_service.annotations import read as read_ann
-from mcp_service.annotations import write as write_ann
 
 _DOC_PATH = Path(__file__).resolve().parent.parent / "app" / "product_doc.md"
 _DOC_CHAR_LIMIT = 8000
@@ -125,7 +120,7 @@ def file_layout(db, file_id: int) -> dict[str, Any]:
     f = db.get(ImportFile, file_id)
     if f is None:
         raise MiscError("NOT_FOUND", f"文件不存在：{file_id}",
-                        "请先用 visit_file_list 确认正确的 file_id")
+                        "请先用 visit_files(view='list') 确认正确的 file_id")
     layout = f.layout or {}
     vm = layout.get("value_map") or {}
     data = {
@@ -152,7 +147,7 @@ def file_layout(db, file_id: int) -> dict[str, Any]:
     }
     if not layout:
         data["hint"] = ("该文件暂无解析布局（尚未解析或解析失败）；可先用 "
-                        "visit_file_report 看判定结果，或在网页 "
+                        "visit_files(view='report') 看判定结果，或在网页 "
                         f"/files/{f.id}/layout 人工纠正列映射后重新解析")
     return data
 
@@ -185,7 +180,7 @@ def staff_set_status(db, actor, *, user_id: int, new_status: str,
     target = db.get(User, user_id)
     if target is None or target.role != "staff":
         raise guards.GuardError("NOT_FOUND", f"员工不存在：user_id={user_id}",
-                                "请先用 visit_staff_list 确认正确的员工 user_id")
+                                "请先用 visit_staff(view='list') 确认正确的员工用户名")
     if new_status not in _STATUS_ALLOW:
         raise guards.GuardError("BAD_PARAM", f"未知状态：{new_status!r}",
                                 "可选状态：" + "、".join(sorted(_STATUS_ALLOW)))
@@ -232,7 +227,7 @@ def store_ai_run(db, actor) -> dict[str, Any]:
         raise guards.GuardError(
             "BAD_PARAM", "已有 AI 批处理在运行，拒绝重复启动",
             "请稍候刷新：等正在运行的批处理 status 变为 done 后再启动；"
-            "可用 visit_store_search 或网页 /stores?kind=fuzzy 观察进度")
+            "可用 visit_store(view='search') 或网页 /stores?kind=fuzzy 观察进度")
     n = db.query(StorePair).filter(StorePair.kind == "fuzzy",
                                    StorePair.status == "pending").count()
     if n == 0:
@@ -246,7 +241,7 @@ def store_ai_run(db, actor) -> dict[str, Any]:
     return {"ok": True, "data": {
         "started": True, "run_id": run.id, "total_pairs": n,
         "status": "running",
-        "hint": "AI 批处理已在后台启动（通常几分钟）；可用 visit_store_search "
+        "hint": "AI 批处理已在后台启动（通常几分钟）；可用 visit_store(view='search') "
                 "观察主档结果，网页 /stores?kind=fuzzy 可看进度",
     }}
 
@@ -271,7 +266,7 @@ def export_recon_result(db, task_id: int,
     t = db.get(ReconTask, task_id)
     if t is None:
         raise MiscError("NOT_FOUND", f"对账任务不存在：task_id={task_id}",
-                        "请先用对账查询工具（visit_recon_status 等）确认 task_id")
+                        "请先用对账查询工具（visit_recon(view='status') 等）确认 task_id")
     if t.status not in ("done", "parsed"):
         raise MiscError("NOT_FOUND",
                         f"任务尚未完成（status={t.status}），暂无可下载产物",
@@ -302,157 +297,3 @@ def export_recon_result(db, task_id: int,
 # ---------------------------------------------------------------------------
 # 工具函数（模块级，可直接单测；写工具走 _write_call）
 # ---------------------------------------------------------------------------
-
-def visit_file_layout(ctx: Context, file_id: int) -> dict[str, Any]:
-    """查看某文件的解析布局（只读）。"""
-    from app.db import SessionLocal
-    from mcp_service.tools import actor_from_ctx
-
-    _actor = actor_from_ctx(ctx)          # 解析身份
-    _deny = _authz_deny(_actor)           # 授权矩阵校验（员工不得读公司级数据）
-    if _deny is not None:
-        return _deny
-    db = SessionLocal()
-    try:
-        return _call(db, lambda db: file_layout(db, file_id))
-    finally:
-        db.close()
-
-
-def visit_product_doc(ctx: Context) -> dict[str, Any]:
-    """返回系统产品说明原文（只读；不涉及数据库，不开会话）。"""
-    from mcp_service.tools import actor_from_ctx
-
-    _actor = actor_from_ctx(ctx)          # 只读 + 无 DB：仅解析身份
-    _deny = _authz_deny(_actor)
-    if _deny is not None:
-        return _deny
-    return _call(None, lambda _db: product_doc(None))
-
-
-def visit_staff_set_status(ctx: Context, user_id: int, new_status: str,
-                           confirm_text: str | None = None) -> dict[str, Any]:
-    """修改员工账号状态（写；幂等可重试）。"""
-    def run(db, actor):
-        return staff_set_status(db, actor, user_id=user_id,
-                                new_status=new_status, confirm_text=confirm_text)
-
-    return _write_call(ctx, "visit_staff_set_status",
-                       {"user_id": user_id, "new_status": new_status},
-                       run, retryable=True)
-
-
-def visit_store_ai_run(ctx: Context) -> dict[str, Any]:
-    """启动 B 组 AI 批处理（写；后台任务，幂等可重试）。"""
-    def run(db, actor):
-        res = store_ai_run(db, actor)
-        if res.get("ok") and res["data"].get("started"):
-            _start_bg(res["data"]["run_id"])
-        return res
-
-    return _write_call(ctx, "visit_store_ai_run", {}, run, retryable=True)
-
-
-def visit_export_recon_result(ctx: Context, task_id: int) -> dict[str, Any]:
-    """下载对账任务原始产物（只读导出）。"""
-    from app.db import SessionLocal
-    from app.models import User
-
-    actor, err = _authorize(ctx)
-    if err is not None:
-        return err
-    db = SessionLocal()
-    try:
-        author = ""
-        if actor is not None and actor.uid is not None:
-            u = db.get(User, actor.uid)
-            author = u.display_name if u is not None else ""
-        return _call(db, lambda db: export_recon_result(
-            db, task_id, author_name=author))
-    finally:
-        db.close()
-
-
-# ---------------------------------------------------------------------------
-# 注册（父会话在 tools.py 里接线调用）
-# ---------------------------------------------------------------------------
-
-def register(mcp: MCPServer) -> None:
-    """注册 5 个工具（task p1-mcpify-final-gaps；由父会话接入 tools.py）。"""
-
-    mcp.tool(
-        name="visit_file_layout",
-        title="文件解析布局",
-        annotations=read_ann("文件解析布局"),
-        description=(
-            "只读查看某巡店文件的**解析布局**：表头行（header_row）、列映射"
-            "（cols：店铺ID/店名/巡店时间/提交人/有效/投放/记录编号各列）、"
-            "visible·deploy 值映射（value_map，含网页同口径文本）、点数规则"
-            "（point_rules，含网页同口径文本），以及解析诊断（parsed_sheets/"
-            "ignored_sheets/warnings/errors）。"
-            "什么时候用：排查『文件解析失败 / 列识别不对 / 点数规则异常』。"
-            "关键约束：只读不改数据；文件不存在返回 NOT_FOUND。"
-        ),
-    )(visit_file_layout)
-
-    mcp.tool(
-        name="visit_product_doc",
-        title="产品说明文档",
-        annotations=read_ann("产品说明文档"),
-        description=(
-            "只读返回系统产品说明原文（app/product_doc.md，纯 Markdown 文本）："
-            "系统怎么用、判重与点数规则、工资与奖金规则、每月流程等。"
-            "什么时候用：回答『系统怎么用 / 规则是什么 / 每月流程』类问题，"
-            "或需要引用产品说明原文时。"
-            "长文档截断到 8000 字符并在 data.truncated 注明；需要全文可查看网页 /product/raw。"
-        ),
-    )(visit_product_doc)
-
-    mcp.tool(
-        name="visit_staff_set_status",
-        title="员工状态修改",
-        annotations=write_ann("员工状态修改", idempotent=True),
-        description=(
-            "修改员工账号状态（写）：active 在岗 / leave 请假 / disabled 停用 / "
-            "resigned 离职；停用/离职联动 is_active=False（禁登录），数据永不删除。"
-            "参数：user_id（员工账号 id，可用 visit_staff_list 查）；new_status"
-            "（四个合法值之一，否则 BAD_PARAM）；confirm_text 必须原文："
-            "确认改状态 {username} {new_status}（username 为系统里该账号的用户名，"
-            "便于人工确认对象；不匹配返回 CONFIRM_REQUIRED，hint 会给出准确原文）。"
-            "闸门：需要写权限 Token；员工不存在（或非 staff 账号）返回 NOT_FOUND。"
-            "返回：user_id、username、new_status、is_active。"
-            "幂等可重试：意外失败返回 INTERNAL（可安全重试）。"
-        ),
-    )(visit_staff_set_status)
-
-    mcp.tool(
-        name="visit_store_ai_run",
-        title="启动AI批处理",
-        annotations=write_ann("启动AI批处理", idempotent=False),
-        description=(
-            "启动店铺主档 **B 组 AI 批处理**（写；后台任务，通常几分钟）。"
-            "复用网页 /stores/ai-run 口径：无待处理候选 → started=False + hint；"
-            "已有 status=running 的 AiRun 时**拒绝重复启动**（BAD_PARAM + 提示）。"
-            "闸门：需要写权限 Token。"
-            "返回：已启动（started=True + run_id）或未启动原因。"
-            "**后台执行，可用 visit_store_search 观察结果**，网页 /stores?kind=fuzzy 可看进度。"
-            "幂等可重试：意外失败返回 INTERNAL（可安全重试）。"
-        ),
-    )(visit_store_ai_run)
-
-    mcp.tool(
-        name="visit_export_recon_result",
-        title="对账产物下载",
-        annotations=read_ann("对账产物下载"),
-        description=(
-            "**DEPRECATED（当前流程不需要，保留兼容）**：对账原始产物下载非发薪流程必需；如需请告知维护方恢复。发薪请用 visit_export_salary。\n"
-            "下载某对账任务（task_id）的**原始产物文件** xlsx：优先返回 "
-            "task.params.result_path 落盘的产物；不存在则按网页 /recon/result "
-            "路由逻辑现算生成。"
-            "返回结构（与 visit_export_* 一致）：filename、size、content_base64"
-            "（解码保存为 filename 即得 Excel）、saved_path（服务端落盘绝对路径）、"
-            "source_path（原始产物路径，若存在）、hint。"
-            "只读；任务不存在、任务未完成（status 非 done/parsed）返回 NOT_FOUND；"
-            "产物缺失且无法现算 → NOT_FOUND + hint。"
-        ),
-    )(visit_export_recon_result)

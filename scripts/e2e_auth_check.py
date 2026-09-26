@@ -105,14 +105,16 @@ async def _run():
 
             # 2) 越权：管理员工具
             print("\n[2] 员工调管理员工具（应全部 FORBIDDEN_TOOL）")
-            for tool, args in (("visit_month_salary", {"month": "2026-08"}),
-                               ("visit_month_summary", {"month": "2026-08"}),
-                               ("visit_dashboard", {"month": "2026-08"}),
-                               ("visit_list_tasks", {}),
-                               ("visit_export_salary", {"month": "2026-08"}),
-                               ("visit_upload_file", {"filename": "x.xlsx"}),
-                               ("visit_config_set", {"per_point": 260,
-                                                     "confirm_text": "确认修改配置"})):
+            for tool, args in (("visit_overview", {"month": "2026-08"}),
+                               ("visit_person", {"person": "P001",
+                                                 "month": "2026-08"}),
+                               ("visit_files", {"view": "tasks"}),
+                               ("visit_recon_export", {"month": "2026-08"}),
+                               ("visit_upload", {"filename": "x.xlsx"}),
+                               ("visit_config", {"action": "set",
+                                                 "per_point": 260,
+                                                 "confirm_text":
+                                                     "确认修改配置"})):
                 d = await call(s, tool, args)
                 code = (d.get("error") or {}).get("code")
                 good = d.get("ok") is False and code == "FORBIDDEN_TOOL"
@@ -142,7 +144,7 @@ async def _run():
 
     # 5) 审计留痕
     print("\n[5] 审计留痕（被拒绝的调用也要有）")
-    for tool in ("visit_month_salary", "visit_upload_file"):
+    for tool in ("visit_overview", "visit_upload"):
         rows = audit_rows(tool)
         denied = [r for r in rows if r[1] == "FORBIDDEN_TOOL"]
         print(f"    {'✅' if denied else '❌'} {tool}: {len(rows)} 行，其中被拒 "
