@@ -60,6 +60,21 @@ def _resolve_kind(kind: str | None, pair_kind: str) -> str:
 # 能力函数（f(db, actor, ...) → 完整信封或抛 GuardError；可直接单测）
 # ---------------------------------------------------------------------------
 
+def _recompute_months(db, actor, month_hint=None) -> list:
+    """主档变更后自动重算受影响月份（best-effort，失败返回 []）。"""
+    try:
+        from app.services import store_master
+        res = store_master.recompute_affected_months(
+            db, month_hint=month_hint, user_id=getattr(actor, "uid", None))
+        return res.get("months", []) if isinstance(res, dict) else []
+    except Exception:  # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return []
+
+
 def merge_pair(db, actor, *, pair_id: int, keep: int, kind: str | None = None,
                note: str | None = None) -> dict[str, Any]:
     """visit_store_merge_pair：把候选对里另一实体并入 keep 主档。
@@ -105,7 +120,8 @@ def merge_pair(db, actor, *, pair_id: int, keep: int, kind: str | None = None,
         "merged_entity_id": other.id,
         "merged_store_id": other.store_id_raw,
         "affected_entities": 1,
-        "note": "该对已合并，不再显示为候选；用 visit_store_search 可查主档归属",
+        "recomputed_months": _recompute_months(db, actor),
+        "note": "该对已合并，不再显示为候选；已自动重算受影响月份（见 recomputed_months）",
     }}
 
 
@@ -160,7 +176,8 @@ def split_entity(db, actor, *, entity_id: int, confirm_text: str) -> dict[str, A
         "from_master": old,
         "to_master": e.id,
         "affected_entities": 1,
-        "note": "已拆回自己为主档；拆分影响历史统计口径，请人工核对相关月数据",
+        "recomputed_months": _recompute_months(db, actor),
+        "note": "已拆回自己为主档；受影响月份已自动重算（见 recomputed_months）",
     }}
 
 
@@ -178,6 +195,7 @@ def apply_all(db, actor, *, confirm_text: str, kind: str | None = None) -> dict[
 
     return {"ok": True, "data": {
         "groups_applied": res.get("groups", 0),
+        "recomputed_months": _recompute_months(db, actor),
         "entities_merged": res.get("merged_entities", 0),
         "groups_left_manual": res.get("left_groups", 0),
         "hint": "批量合并会影响店铺主档与历史统计口径，建议先在网页端查看推荐列表；"

@@ -12,6 +12,8 @@ import pytest
 
 import app.db as appdb
 from app.auth import hash_password
+from datetime import date
+
 from app.models import (FormalRecord, ImportFile, PayrollPeriodRow, RawRecord,
                         StoreEntity, StoreMergeLog, StorePair, User)
 from app.services.importer import parse_file, upload_and_store
@@ -346,4 +348,54 @@ def test_auto_finalize_best_effort_never_breaks_upload(client, tmp_path, monkeyp
     res = flow.auto_finalize_pipeline(db, imp.id, admin.id)
     assert res["ok"] is True
     assert db.query(FormalRecord).count() == 1
+    db.close()
+
+
+def test_manual_merge_triggers_recompute(client):
+    """**手动**合并（/stores 路由）也要自动重算受影响月——不必再人工 rebuild。"""
+    from app.routers import stores_r
+    _seed_admin(client)
+    db = appdb.SessionLocal()
+    admin = db.query(User).first()
+    # 造两个同 norm 实体 + 各一条 raw/formal（合并后应并成 1 行）
+    from app.models import (FormalRecord, ImportFile, RawRecord, StoreEntity,
+                            StorePair)
+    db.add(ImportFile(id=901, file_name="m.xlsx", file_sha256="m", file_size=1,
+                      stored_path="/tmp/m.xlsx", uploaded_by=admin.id,
+                      status="parsed", parsed_sheets=[], ignored_sheets=[],
+                      warnings=[], errors=[]))
+    # master_id 非空：先占位再回填自指（主档 = master_id 指向自己）
+    e1 = StoreEntity(store_id_raw="M1", name_local="ざくろ 銀座店",
+                     name_norm="ざくろ銀座店", master_id=1)
+    e2 = StoreEntity(store_id_raw="M2", name_local="ざくろ銀座店",
+                     name_norm="ざくろ銀座店", master_id=1)
+    db.add_all([e1, e2]); db.flush()
+    e1.master_id = e1.id; e2.master_id = e2.id; db.flush()
+    for i, e in enumerate((e1, e2), start=1):
+        rr = RawRecord(import_id=901, sheet_name="s", excel_row=i,
+                       store_id_raw=e.store_id_raw,
+                       store_name_local_raw=e.name_local,
+                       store_name_en_raw="", modified_raw="2026-08-05 10:00:00",
+                       submitter_raw="甲(111)", submitter_code="111",
+                       record_id_raw=f"R{i}", visible_raw="YES",
+                       deploy_raw="YES", original_row=[],
+                       clean_status="valid", confirm_state="auto_approved")
+        db.add(rr); db.flush()
+        db.add(FormalRecord(import_id=901, raw_record_id=rr.id, person_code="111",
+                            store_id_raw=e.store_id_raw,
+                            japan_date=date(2026, 8, 5), points=1))
+    p = StorePair(entity_a=e1.id, entity_b=e2.id, kind="exact")
+    db.add(p); db.commit()
+    assert db.query(FormalRecord).filter(
+        FormalRecord.japan_date == date(2026, 8, 5)).count() == 2
+
+    months = stores_r._recompute_after_master_change(db, admin.id)
+    assert months, "应返回重算过的月份"
+    # 手动合并（merge_pair 语义）后重算 → 同店两写法并成 1 行
+    from app.services import store_master
+    store_master.merge_pair(db, p.id, e2.id, admin.id, basis="manual")
+    months2 = stores_r._recompute_after_master_change(db, admin.id)
+    assert "2026-08" in months2
+    assert db.query(FormalRecord).filter(
+        FormalRecord.japan_date == date(2026, 8, 5)).count() == 1
     db.close()
