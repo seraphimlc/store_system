@@ -268,6 +268,20 @@ def recompute_affected_months(db, month_hint=None, user_id=None) -> dict:
             months = keep
     except Exception:  # noqa: BLE001
         pass
+    # **已发薪月份不重算**（用户口径 2026-09-25：工资已发出去，历史口径不能被改写）。
+    # 判定依据：该月台账（payroll_payments）已有登记 = 已导出发薪表 = 已按表发放。
+    # 效果：店铺合并照做（未来判重受益），但**已发月份的正式表/工资保持原样**；
+    # 未发月份照常重算（去重生效）。这正是"以后不再出该问题、又不改历史"的落点。
+    try:
+        from app.models import PayrollPayment
+        _paid = {r[0] for r in db.query(PayrollPayment.month).distinct().all()}
+        if _paid:
+            keep = [m for m in months if m not in _paid]
+            for _m in set(months) - set(keep):
+                warnings.append(f"{_m}: 已发薪（台账有登记），跳过重算以免改写已发口径")
+            months = keep
+    except Exception:  # noqa: BLE001
+        pass
     results = {}
     for m in months:
         m_res = {}
