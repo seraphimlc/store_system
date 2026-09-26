@@ -481,6 +481,60 @@ class McpAuditLog(Base):
     created_at = Column(DateTime, nullable=False, default=_now)
 
 
+class OAuthClient(Base):
+    """MCP OAuth 动态注册客户端（specs-mcp-oauth.md §三）。
+
+    `client_secret_hash` 为 NULL = 公共客户端（PKCE 强制，WorkBuddy 即此类）；
+    库内只存哈希，明文只在注册响应中出现一次。
+    """
+    __tablename__ = "oauth_clients"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(64), unique=True, nullable=False, index=True)
+    client_secret_hash = Column(String(64), nullable=True)
+    client_name = Column(String(128), nullable=False, default="")
+    redirect_uris = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    last_used_at = Column(DateTime, nullable=True)
+
+
+class OAuthCode(Base):
+    """授权码（5 分钟有效，一次性）。
+
+    `access_token_id`：该 code 换出的 access token 行 id —— code 被重放时据此
+    吊销已换出的 token（specs-mcp-oauth.md §五.2 / 验收 4）。
+    """
+    __tablename__ = "oauth_codes"
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), unique=True, nullable=False, index=True)
+    client_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    redirect_uri = Column(String(512), nullable=False)
+    code_challenge = Column(String(128), nullable=False)
+    code_challenge_method = Column(String(16), nullable=False, default="S256")
+    scope = Column(String(64), nullable=False, default="read")
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    access_token_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class OAuthRefreshToken(Base):
+    """Refresh token（90 天，每次刷新轮换：旧的置 revoked_at）。"""
+    __tablename__ = "oauth_refresh_tokens"
+
+    id = Column(Integer, primary_key=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    client_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    scope = Column(String(64), nullable=False, default="read")
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    last_used_at = Column(DateTime, nullable=True)
+
+
 class SealedMonth(Base):
     """封账月份：表内月份一律禁止写入（闸门 3）。spec §7。"""
     __tablename__ = "sealed_months"

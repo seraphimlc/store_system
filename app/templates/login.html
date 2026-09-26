@@ -16,6 +16,7 @@
   <h1>{{ t('巡店结算系统') }}</h1>
   <div class="sub">{{ t('巡店数据导入 · 去重清洗 · 点数结算') }}</div>
   {% if error %}<div class="err">{{ t(error) }}</div>{% endif %}
+  <input type="hidden" name="next" value="{{ next }}">
   <label for="username">{{ t('用户名') }}</label>
   <input id="username" name="username" autocomplete="username" required>
   <label for="password">{{ t('密码') }}</label>

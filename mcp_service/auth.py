@@ -28,6 +28,26 @@ _UNAUTHORIZED = {
 _BEARER = "Bearer "
 
 
+def resource_metadata_url() -> str:
+    """OAuth protected-resource 元数据地址（MCP OAuth 规范 §2.1）。
+
+    issuer 取 `VISIT_OAUTH_ISSUER`，缺省由 `VISIT_MCP_PUBLIC_HOST` 推导；
+    客户端收到 401 后据此自动发起授权（WorkBuddy 支持）。
+    """
+    import os
+    issuer = (os.environ.get("VISIT_OAUTH_ISSUER") or "").strip().rstrip("/")
+    if not issuer:
+        host = (os.environ.get("VISIT_MCP_PUBLIC_HOST") or "").strip()
+        issuer = f"https://{host}" if host else "http://localhost"
+    return f"{issuer}/.well-known/oauth-protected-resource"
+
+
+def _www_authenticate_header(resource_metadata: str | None = None) -> bytes:
+    """`WWW-Authenticate: Bearer resource_metadata="<url>"`（RFC 6750 + MCP OAuth）。"""
+    url = resource_metadata or resource_metadata_url()
+    return f'Bearer resource_metadata="{url}"'.encode("utf-8")
+
+
 class _BodyCapture:
     """缓存请求体用于 body_digest；只记摘要，原文不进日志（spec §5.6）。"""
 
@@ -127,7 +147,7 @@ class BearerAuthMiddleware:
             "headers": [
                 (b"content-type", b"application/json; charset=utf-8"),
                 (b"content-length", str(len(body)).encode()),
-                (b"www-authenticate", b"Bearer"),
+                (b"www-authenticate", _www_authenticate_header()),
             ],
         })
         await send({"type": "http.response.body", "body": body})

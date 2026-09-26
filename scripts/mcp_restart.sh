@@ -30,6 +30,7 @@ cd "$ROOT"
 VISIT_MCP_TOKEN="${VISIT_MCP_TOKEN:-visit-test-rw-2026}" \
 VISIT_MCP_READ_TOKEN="${VISIT_MCP_READ_TOKEN:-visit-test-ro-2026}" \
 VISIT_MCP_ALLOW_LOCAL_PATH="${VISIT_MCP_ALLOW_LOCAL_PATH:-1}" \
+VISIT_OAUTH_ISSUER="${VISIT_OAUTH_ISSUER:-http://127.0.0.1:8000}" \
   nohup mcp_service/run.sh >> "$LOG" 2>&1 &
 echo $! > "$PIDFILE"
 echo "  已启动 PID $(cat "$PIDFILE")"

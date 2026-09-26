@@ -103,8 +103,25 @@ def test_missing_bearer_returns_401():
     log = Recorder()
     r = _call(_mw(_ok_app, log), [(b"host", b"127.0.0.1:8765")])
     assert r["status"] == 401
-    assert (b"www-authenticate", b"Bearer") in r["headers"]
+    # MCP OAuth：WWW-Authenticate 必须带 resource_metadata（客户端据此发起授权）
+    hdr = dict((k.decode(), v.decode())
+               for k, v in r["headers"]).get("www-authenticate", "")
+    assert hdr.startswith("Bearer resource_metadata=")
+    assert hdr.endswith("/.well-known/oauth-protected-resource\"")
     assert json.loads(r["body"])["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_401_header_resource_metadata_url(monkeypatch):
+    """resource_metadata 由 VISIT_OAUTH_ISSUER / VISIT_MCP_PUBLIC_HOST 推导。"""
+    from mcp_service.auth import resource_metadata_url
+    monkeypatch.setenv("VISIT_OAUTH_ISSUER", "https://store.example.com")
+    monkeypatch.delenv("VISIT_MCP_PUBLIC_HOST", raising=False)
+    assert resource_metadata_url() == \
+        "https://store.example.com/.well-known/oauth-protected-resource"
+    monkeypatch.delenv("VISIT_OAUTH_ISSUER", raising=False)
+    monkeypatch.setenv("VISIT_MCP_PUBLIC_HOST", "mcp.example.com")
+    assert resource_metadata_url() == \
+        "https://mcp.example.com/.well-known/oauth-protected-resource"
 
 
 def test_wrong_bearer_returns_401():

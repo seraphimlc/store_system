@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ t('授权请求') }} · {{ t('巡店结算系统') }}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+<div class="login-card">
+  <h1>{{ t('授权请求') }}</h1>
+  <p class="sub">{{ t('巡店数据导入 · 去重清洗 · 点数结算') }}</p>
+  <p>{{ t('客户端') }}：<strong>{{ client.client_name or client.client_id }}</strong></p>
+  <p>{{ t('申请权限') }}：<strong>{{ scope_display }}</strong></p>
+  <p>{{ t('授权后，该客户端将使用你的账号身份访问巡店系统数据。') }}</p>
+  <form method="post" action="/oauth/authorize">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="response_type" value="{{ response_type }}">
+    <input type="hidden" name="client_id" value="{{ client_id }}">
+    <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <input type="hidden" name="state" value="{{ state }}">
+    <input type="hidden" name="code_challenge" value="{{ challenge }}">
+    <input type="hidden" name="code_challenge_method" value="S256">
+    <button class="btn" type="submit" name="decision" value="approve">{{ t('同意并授权') }}</button>
+    <button class="btn ghost" type="submit" name="decision" value="deny" style="margin-top:.6rem">{{ t('拒绝') }}</button>
+  </form>
+</div>
+</body>
+</html>
