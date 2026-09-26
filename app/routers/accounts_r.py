@@ -72,7 +72,8 @@ def my_password_submit(request: Request, old_password: str = Form(...),
 @router.get("/staff-admin", response_class=HTMLResponse)
 def staff_admin_page(request: Request, user: Optional[User] = Depends(require_login),
                      db: Session = Depends(get_db), msg: str = "",
-                     status: str = ""):
+                     status: str = "", new_token: str = "",
+                     new_token_name: str = "", new_token_uid: str = ""):
     if user is None:
         return _denied()
     if user.role != "admin":
@@ -81,6 +82,10 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
     if status in STATUS_ALLOW:
         q = q.filter(User.status == status)
     staff = q.order_by(User.id).all()
+    # 每名员工的 MCP Token（代发/吊销/状态联动提示）
+    from app.services import mcp_tokens as _mt
+    tokens_by_user = {u.id: [_mt.decorate(r, u)
+                             for r in _mt.list_for_user(db, u.id)] for u in staff}
     return templates.TemplateResponse("staff_admin.html", {
         "request": request, "current_user": user, "staff": staff,
         "msg": msg, "status": status,
@@ -88,7 +93,10 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
         "langs": {"": "自动", "zh": "中文", "ja": "日本語"},
         "counts": {s: db.query(User).filter(User.role == "staff",
                                            User.status == s).count()
-                   for s in STATUS_LABELS}})
+                   for s in STATUS_LABELS},
+        "tokens_by_user": tokens_by_user,
+        "new_token": new_token, "new_token_name": new_token_name,
+        "new_token_uid": new_token_uid})
 
 
 @router.post("/staff-admin/{uid}/lang")
@@ -132,8 +140,13 @@ def staff_set_status(uid: int, request: Request, new_status: str = Form(...),
     # 停用/离职 → 禁登录；在岗/请假 → 可登录（数据永不删除）
     target.is_active = new_status in ("active", "leave")
     db.commit()
+    # token 状态与员工状态联动：仅 status=='active' 且 is_active 时 token 有效
+    if new_status != "active":
+        note = f"，其 token 已随之失效"
+    else:
+        note = f"，其 token 已恢复有效（未吊销/未过期）"
     return RedirectResponse(f"/staff-admin?msg=已更新 {target.username} 为「{STATUS_LABELS[new_status]}」"
-                            f"&status={new_status}", status_code=303)
+                            f"{note}&status={new_status}", status_code=303)
 
 
 @router.post("/staff-admin/{uid}/reset")

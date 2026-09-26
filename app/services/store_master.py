@@ -256,6 +256,18 @@ def recompute_affected_months(db, month_hint=None, user_id=None) -> dict:
     from app.services import period as _period
     from app.services import dashboard as _dash
     warnings = []
+    # 封账月份不重算（与 MCP 闸门同口径：sealed_months 表内月份禁止写入）；
+    # 自动化尊重封账，跳过并记 warning（手动 /month/rebuild 行为不受影响）。
+    try:
+        from app.models import SealedMonth
+        _sealed = {r[0] for r in db.query(SealedMonth.month).all()}
+        if _sealed:
+            keep = [m for m in months if m not in _sealed]
+            for _m in set(months) - set(keep):
+                warnings.append(f"{_m}: 已封账，跳过重算")
+            months = keep
+    except Exception:  # noqa: BLE001
+        pass
     results = {}
     for m in months:
         m_res = {}

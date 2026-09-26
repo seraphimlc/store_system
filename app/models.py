@@ -460,6 +460,8 @@ class ApiToken(Base):
     created_at = Column(DateTime, nullable=False, default=_now)
     last_used_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
+    # 有效期：默认签发 90 天；管理员可签永久（NULL=永久）。spec §三
+    expires_at = Column(DateTime, nullable=True)
 
 
 class McpAuditLog(Base):

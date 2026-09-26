@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ t('我的 Token') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('我的 Token') }}</h1>
+  <span class="sub">{{ t('MCP Token 自助签发：绑定你的身份，供 WorkBuddy 连接器使用。') }}</span></div>
+
+{% if issued and new_token %}
+<div class="card" style="border-color:var(--ok)">
+  <b style="color:var(--ok)">{{ t('新 Token 已生成（只显示一次）') }}</b>
+  <div class="msg warn" style="margin:.3rem 0">{{ t('请立即复制到 WorkBuddy 连接器；关闭后无法再查看。') }}</div>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <code id="new-token" style="background:#f5f7fb;border:1px dashed var(--line);padding:.3rem .6rem;word-break:break-all">{{ new_token }}</code>
+    <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('new-token').innerText);this.textContent='{{ t('已复制') }}'">{{ t('复制') }}</button>
+  </div>
+  {% if new_token_name %}<div class="hint" style="margin-top:.3rem">{{ t('名称') }}：{{ new_token_name }}</div>{% endif %}
+</div>
+<script>history.replaceState(null, '', '/my/token');</script>
+{% endif %}
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:0 0 .5rem">{{ t('生成新的 MCP Token') }}</h2>
+  <form method="post" action="/my/token/issue"
+        style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input name="name" placeholder="{{ t('Token 名称') }}" maxlength="128"
+           style="padding:.3rem .5rem">
+    <select name="scope" style="padding:.3rem .4rem">
+      <option value="read">{{ t('只读') }}</option>
+      <option value="read,write">{{ t('读写') }}</option>
+    </select>
+    <select name="days" style="padding:.3rem .4rem">
+      <option value="90">{{ t('90 天') }}</option>
+      {% if is_admin %}<option value="">{{ t('永久') }}</option>{% endif %}
+    </select>
+    <button class="btn" type="submit">{{ t('生成 Token') }}</button>
+  </form>
+  <div class="hint" style="margin-top:.4rem">{{ t('仅管理员可签发永久 Token；员工 Token 默认 90 天。') }}</div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:0 0 .5rem">{{ t('我的 Token 列表') }}</h2>
+  {% if not tokens %}<p class="empty">{{ t('尚未生成任何 Token') }}</p>
+  {% else %}
+  <div class="tbl-wrap"><table class="grid-tbl">
+    <tr><th>{{ t('前缀') }}</th><th>{{ t('名称') }}</th><th>{{ t('权限') }}</th><th>{{ t('有效期至') }}</th><th>{{ t('创建时间') }}</th><th>{{ t('最后使用') }}</th><th>{{ t('状态') }}</th><th>{{ t('操作') }}</th></tr>
+    {% for tk in tokens %}
+    <tr>
+      <td><code>{{ tk.row.token_prefix }}…</code></td>
+      <td>{{ tk.row.name or '—' }}</td>
+      <td>{% if tk.row.scopes == 'read' %}{{ t('只读') }}{% else %}{{ t('读写') }}{% endif %}</td>
+      <td>{% if tk.row.expires_at %}{{ tk.row.expires_at.strftime('%Y-%m-%d') }}{% else %}{{ t('永久') }}{% endif %}</td>
+      <td>{{ tk.row.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{% if tk.row.last_used_at %}{{ tk.row.last_used_at.strftime('%Y-%m-%d %H:%M') }}{% else %}{{ t('从未使用') }}{% endif %}</td>
+      <td><span class="{{ tk.pill }}">{{ t(tk.label) }}</span></td>
+      <td>
+        {% if tk.row.revoked_at is none %}
+        <form method="post" action="/my/token/{{ tk.row.id }}/revoke" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <button class="btn danger" style="padding:.15rem .6rem" type="submit"
+                  onclick="return confirm('{{ t('确认吊销该 Token？吊销后立即失效，不可恢复。') }}')">{{ t('吊销') }}</button>
+        </form>
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+</div>
+{% endblock %}

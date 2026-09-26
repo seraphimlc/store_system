@@ -9,7 +9,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
     from app.routers import (auth_r, files_r, perf_r,
-                        stores_r, accounts_r, info_r, settle_r)
+                        stores_r, accounts_r, info_r, settle_r, tokens_r)
     app.include_router(auth_r.router)
     app.include_router(files_r.router)
     app.include_router(perf_r.router)
@@ -17,6 +17,7 @@ def create_app() -> FastAPI:
     app.include_router(accounts_r.router)
     app.include_router(info_r.router)
     app.include_router(settle_r.router)
+    app.include_router(tokens_r.router)
 
     # 多语言：模板全局函数已在 app/templating.get_templates() 统一注册（t/LANG_NAMES/lang_url）
 
@@ -28,7 +29,7 @@ def create_app() -> FastAPI:
 
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
-                     "/my/appeal", "/my/perf")
+                     "/my/appeal", "/my/perf", "/my/token")
 
     from fastapi.responses import RedirectResponse as _RR
 

@@ -78,30 +78,47 @@ def _check_upload_sources(path: str | None,
 
 
 def _write_call(ctx: Context, tool: str, params: dict, fn, *, retryable: bool):
-    """写工具统一包装：actor → 闸门/业务 → 错误信封。
+    """写工具统一包装：actor → 授权拦截 → 审计 → 闸门/业务 → 错误信封。
 
     retryable=True（finalize/set_per_point：原子或幂等）→ 意外异常用 INTERNAL（可重试）
     retryable=False（rebuild：流程中间提交）→ INTERNAL_WRITE（**禁止自动重试**）
+    授权拒绝（FORBIDDEN_TOOL / UNAUTHORIZED）在进入业务前拦截 → 无副作用。
     """
-    from mcp_service import guards
+    from mcp_service import authz, guards
 
     actor = actor_from_ctx(ctx)
-    if actor is None:
-        return _envelope_error("UNAUTHORIZED", "未认证",
-                               "请在 WorkBuddy 连接器设置中重新填写 Access Token")
     from app.db import SessionLocal
     db = SessionLocal()
     try:
-        return fn(db, actor)
-    except guards.GuardError as exc:
-        return _envelope_error(exc.code, exc.message, exc.hint)
-    except Exception as exc:  # noqa: BLE001
-        if retryable:
-            return _envelope_error("INTERNAL", repr(exc),
-                                   "系统内部错误，已记录；可重试")
-        return _envelope_error(
-            "INTERNAL_WRITE", repr(exc),
-            "该操作可能已部分生效，**不要自动重试**；先用只读工具核对当前状态")
+        def _mapped(db, actor):
+            try:
+                return fn(db, actor)
+            except guards.GuardError as exc:
+                return _envelope_error(exc.code, exc.message, exc.hint)
+
+        return authz.dispatch(db, tool=tool, actor=actor, params=params,
+                              client_info=_client_info(ctx),
+                              fn=_mapped, retryable=retryable, fn_args=2)
+    finally:
+        db.close()
+
+
+def _guarded(ctx: Context, tool: str, params: dict, fn, *,
+             retryable: bool = True) -> dict[str, Any]:
+    """直连只读工具的统一入口：授权拦截 + 两阶段审计 + 执行 fn(db)。
+
+    fn 返回完整信封（自身负责业务异常映射）；供 visit_ping / visit_month_salary /
+    visit_month_summary 等直接注册的工具使用。
+    """
+    from mcp_service import authz
+
+    actor = actor_from_ctx(ctx)
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        return authz.dispatch(db, tool=tool, actor=actor, params=params,
+                              client_info=_client_info(ctx),
+                              fn=fn, retryable=retryable, fn_args=1)
     finally:
         db.close()
 
@@ -132,9 +149,9 @@ def client_info_of(ctx: Context) -> str | None:
 
 def register(mcp: MCPServer) -> None:
     # 各批次模块自带 register（避免同文件并发改动）；此处统一接线
-    from mcp_service import (export_ops, misc_ops, payroll_write_ops, read_ops,
-                             recon_ops, recon_write_ops, store_write_ops,
-                             write_tools)
+    from mcp_service import (export_ops, misc_ops, my_ops, payroll_write_ops,
+                             read_ops, recon_ops, recon_write_ops,
+                             store_write_ops, write_tools)
     read_ops.register(mcp)
     read_ops.register_integrity(mcp)
     recon_ops.register(mcp)
@@ -144,6 +161,7 @@ def register(mcp: MCPServer) -> None:
     store_write_ops.register(mcp)
     payroll_write_ops.register(mcp)
     misc_ops.register(mcp)
+    my_ops.register(mcp)
 
     @mcp.tool(
         name="visit_ping",
