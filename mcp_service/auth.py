@@ -62,6 +62,7 @@ def filter_tools_list_body(raw: bytes, allowed: set) -> bytes:
     import json as _json
 
     def _filter_obj(obj):
+        """返回 (是否改过, obj)。非 tools/list 响应不改（保持原字节，避免无谓改写）。"""
         try:
             result = obj.get("result") or {}
             tools = result.get("tools")
@@ -69,9 +70,10 @@ def filter_tools_list_body(raw: bytes, allowed: set) -> bytes:
                 result["tools"] = [t for t in tools
                                    if isinstance(t, dict) and t.get("name") in allowed]
                 obj["result"] = result
+                return True, obj
         except Exception:  # noqa: BLE001
             pass
-        return obj
+        return False, obj
 
     try:
         if b"data:" in raw:                       # SSE
@@ -81,14 +83,19 @@ def filter_tools_list_body(raw: bytes, allowed: set) -> bytes:
                     payload = line[5:].strip()
                     try:
                         obj = _json.loads(payload.decode("utf-8"))
-                        line = b"data: " + _json.dumps(
-                            _filter_obj(obj), ensure_ascii=False).encode("utf-8")
+                        changed, obj = _filter_obj(obj)
+                        if changed:
+                            line = b"data: " + _json.dumps(
+                                obj, ensure_ascii=False).encode("utf-8")
                     except Exception:  # noqa: BLE001
                         pass
                 out.append(line)
             return b"\n".join(out)
         obj = _json.loads(raw.decode("utf-8"))     # 普通 JSON
-        return _json.dumps(_filter_obj(obj), ensure_ascii=False).encode("utf-8")
+        changed, obj = _filter_obj(obj)
+        if not changed:
+            return raw                             # 未改动 → 原字节返回
+        return _json.dumps(obj, ensure_ascii=False).encode("utf-8")
     except Exception:  # noqa: BLE001
         return raw
 
