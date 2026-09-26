@@ -179,13 +179,32 @@ def _redirect_with(redirect_uri: str, **params):
 
 def _consent_page(request, db, client, redirect_uri, scope, state, challenge,
                   p):
-    """授权确认页：展示客户端名 + 申请 scope（规格 §五.6）；带 CSRF。"""
-    scope_display = "只读（read）" if scope == "read" else "读写（read, write）"
+    """授权确认页：展示客户端名 + **按角色的权限范围** + 账号身份（规格 §五.6）；带 CSRF。"""
+    user = getattr(request.state, "user", None)
+    role = getattr(user, "role", "") or "staff"
+    if role == "admin":
+        scope_display = "管理员权限（读写）"
+        capabilities = [
+            "查看公司级数据（月度汇总/薪资明细/看板/对账/找平）",
+            "上传巡店与对账文件、入正式表、月度重算",
+            "修改单价与系统配置、店铺主档合并/拆分",
+            "导出发薪表、找平表、对账报表",
+        ]
+    else:
+        scope_display = "只读（仅本人数据）"
+        capabilities = [
+            "查看**本人**绩效与日明细",
+            "查看**本人**的找平与已发工资",
+            "不能查看他人或公司级数据，不能修改任何数据",
+        ]
     return templates.TemplateResponse("oauth_consent.html", {
-        "request": request, "current_user": getattr(request.state, "user", None),
+        "request": request, "current_user": user,
         "csrf": getattr(request.state, "csrf", ""),
         "client": oauth.client_info(client),
         "scope": scope, "scope_display": scope_display,
+        "capabilities": capabilities,
+        "account_name": getattr(user, "username", ""),
+        "role_label": "管理员" if role == "admin" else "员工",
         "redirect_uri": redirect_uri, "state": state,
         "challenge": challenge, "response_type": p.get("response_type", "code"),
         "client_id": client.client_id,

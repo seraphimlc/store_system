@@ -137,7 +137,7 @@ def _approve(client, params):
     fields = _consent_hidden(page.text)
     assert fields.get("csrf_token"), "确认页必须带 CSRF"
     assert "WorkBuddy 测试" in page.text          # 展示客户端名（§五.6）
-    assert "申请权限" in page.text                # 展示 scope
+    assert "权限范围" in page.text                # 展示 scope
     fields["decision"] = "approve"
     r = client.post("/oauth/authorize", data=fields, follow_redirects=False)
     assert r.status_code == 302, r.text

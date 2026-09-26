@@ -57,7 +57,9 @@ def _authz_deny(actor):
     """按授权矩阵校验当前工具（工具名取自调用者函数名）；拒绝返回信封，放行返回 None。"""
     import inspect as _inspect
     from mcp_service import authz
-    return authz.enforce(_inspect.stack()[2].function, actor, {})
+    tool = next((f.function for f in _inspect.stack()
+                 if f.function.startswith("visit_")), "unknown")
+    return authz.enforce(tool, actor, {})
 
 
 def _envelope_error(code: str, message: str, hint: str, **extra) -> dict[str, Any]:

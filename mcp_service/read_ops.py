@@ -746,7 +746,8 @@ def _authz_read(ctx: Context, fn, tool: str = None) -> dict[str, Any]:
     from mcp_service import authz
     from mcp_service.tools import _client_info, actor_from_ctx
 
-    tool = tool or _inspect.stack()[1].function
+    tool = tool or next((f.function for f in _inspect.stack()
+                         if f.function.startswith("visit_")), "unknown")
     actor = actor_from_ctx(ctx)
     db = SessionLocal()          # 模块级（测试会 monkeypatch 它，故不能局部 import）
     try:

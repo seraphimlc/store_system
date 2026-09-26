@@ -147,7 +147,9 @@ def _authorize(ctx):
         return None, _t._envelope_error(
             "UNAUTHORIZED", "未认证",
             "请在 WorkBuddy 连接器设置中重新填写 Access Token")
-    denied = authz.enforce(_inspect.stack()[1].function, actor, {})
+    tool = next((f.function for f in _inspect.stack()
+                 if f.function.startswith("visit_")), "unknown")
+    denied = authz.enforce(tool, actor, {})
     if denied is not None:
         return None, denied
     return actor, None
