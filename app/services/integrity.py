@@ -27,7 +27,10 @@ from app.models import (FormalRecord, PayrollAdjust, PayrollPayment,
 
 
 def _month_range(m: str) -> tuple[str, str]:
-    return f"{m}-01", f"{m}-32"
+    """月份区间 [首日, 下月首日)。**不要用 "月份-32"**：SQLite 能过、PG 直接报错。"""
+    y, mo = int(m[:4]), int(m[5:7])
+    nxt = f"{y + 1}-01-01" if mo == 12 else f"{y}-{mo + 1:02d}-01"
+    return f"{m}-01", nxt
 
 
 def check_all(db: Session) -> dict[str, Any]:

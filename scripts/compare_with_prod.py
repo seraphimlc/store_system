@@ -37,6 +37,13 @@ if len(sys.argv) < 4:
 perf_f, period_f, formal_f = sys.argv[1:4]
 db = appdb.SessionLocal()
 
+def _month_bounds(m: str) -> tuple[str, str]:
+    """月份区间 [首日, 下月首日)：PG 安全（不要用 "月份-32" 这种 SQLite 技巧）。"""
+    y, mo = int(m[:4]), int(m[5:7])
+    nxt = f"{y + 1}-01-01" if mo == 12 else f"{y}-{mo + 1:02d}-01"
+    return f"{m}-01", nxt
+
+
 
 def load(path):
     rows = []
@@ -55,7 +62,7 @@ for m in sorted({str(r.japan_date)[:7] for r in db.query(FormalRecord).all()
                  if r.japan_date}):
     rows = db.query(FormalRecord).filter(
         FormalRecord.japan_date >= f"{m}-01",
-        FormalRecord.japan_date < f"{m}-32").all()
+        FormalRecord.japan_date < _month_bounds(m)[1]).all()
     local_formal[m] = (len(rows), sum(r.points or 0 for r in rows))
 for m in sorted(set(prod_formal) | set(local_formal)):
     p = prod_formal.get(m, ("-", "-"))

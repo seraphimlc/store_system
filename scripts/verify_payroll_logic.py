@@ -18,6 +18,13 @@ from app.services import integrity
 db = appdb.SessionLocal()
 fails = []
 
+def _month_bounds(m: str) -> tuple[str, str]:
+    """月份区间 [首日, 下月首日)：PG 安全（不要用 "月份-32" 这种 SQLite 技巧）。"""
+    y, mo = int(m[:4]), int(m[5:7])
+    nxt = f"{y + 1}-01-01" if mo == 12 else f"{y}-{mo + 1:02d}-01"
+    return f"{m}-01", nxt
+
+
 
 def check(name, bad, extra=""):
     ok = not bad
@@ -33,10 +40,10 @@ print("=== 数据概览 ===")
 for m in res["summary"]["months_with_data"]:
     n = db.query(FormalRecord).filter(
         FormalRecord.japan_date >= f"{m}-01",
-        FormalRecord.japan_date < f"{m}-32").count()
+        FormalRecord.japan_date < _month_bounds(m)[1]).count()
     pts = sum(r.points or 0 for r in db.query(FormalRecord).filter(
         FormalRecord.japan_date >= f"{m}-01",
-        FormalRecord.japan_date < f"{m}-32").all())
+        FormalRecord.japan_date < _month_bounds(m)[1]).all())
     perf = db.query(MonthPerfRecord).filter(MonthPerfRecord.month == m).all()
     print(f"  {m}: 正式表 {n} 行 / {pts} 点 | 月绩效 {len(perf)} 人 / "
           f"{sum(p.salary or 0 for p in perf):,} 円")

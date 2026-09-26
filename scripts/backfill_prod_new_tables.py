@@ -54,7 +54,13 @@ def main():
         for m in months:
             rows = db.query(PayrollPeriodRow).filter_by(month=m).all()
             diff = sum(r.diff_amount or 0 for r in rows)
-            print(f"  {m}: {len(rows)} 人 | 差异合计 {diff:,}")
+            has_recon = period.month_has_recon(db, m)
+            note = ("" if has_recon else
+                    "  ← **无对账**：将按当前规则归零（旧规则遗留值不写入新表）")
+            print(f"  {m}: {len(rows)} 人 | 线上差异合计 {diff:,}{note}")
+            if not has_recon:
+                n = sum(1 for r in rows if (r.diff_amount or 0) != 0)
+                print(f"       （将修正 {n} 行差异为 0 → 找平表该月 0 笔）")
         for m, seq in PAID_INSTALLMENTS:
             rows = db.query(PayrollPeriodRow).filter_by(month=m).all()
             amt = sum((r.half1_amount if seq == 1 else r.half2_amount) or 0
