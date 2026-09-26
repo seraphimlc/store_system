@@ -69,6 +69,21 @@ def _latest_month(db, person_code: str) -> str | None:
     return str(day)[:7] if day is not None else None
 
 
+def _visible_from(db) -> str:
+    """员工可见起始月（与网页 /my/perf 同源：perf.staff_visible_from；空=不限制）。"""
+    from app.services import perf
+    return (perf.staff_visible_from(db) or "").strip()
+
+
+def _month_blocked(db, month: str) -> str | None:
+    """该月是否对员工隐藏；隐藏则返回提示语（空=可见）。"""
+    vf = _visible_from(db)
+    if vf and month < vf:
+        return (f"该月（{month}）未对员工开放：员工端当前可见起始月为 {vf}。"
+                f"如需查看请选择 {vf} 及之后的月份。")
+    return None
+
+
 def my_perf(db, person_code: str, month: str | None = None) -> dict[str, Any]:
     """我的月绩效：月汇总（记录数/1点/2点/点数/工资/单价/对账偏差）+ 该月日统计行。"""
     from app.models import MonthPerfRecord, PersonDailyStat
@@ -77,6 +92,16 @@ def my_perf(db, person_code: str, month: str | None = None) -> dict[str, Any]:
     month = (month or "").strip() or None
     if month is None:
         month = _latest_month(db, person_code)
+        # 未指定月份时，若最新月对员工隐藏 → 回退到可见起始月之后的最新月
+        vf = _visible_from(db)
+        if month and vf and month < vf:
+            month = vf
+    if month:
+        blocked = _month_blocked(db, month)
+        if blocked:
+            return {"month": month, "person_code": person_code, "name": name,
+                    "summary": None, "daily": [], "currency": "JPY",
+                    "hint": blocked}
     if not month:
         return {"month": None, "person_code": person_code, "name": name,
                 "summary": None, "daily": [], "currency": "JPY",
@@ -130,6 +155,11 @@ def my_daily(db, person_code: str, month: str) -> dict[str, Any]:
     from app.models import MonthPerfRecord, PersonDailyStat
 
     _validate_month(month)
+    blocked = _month_blocked(db, month)
+    if blocked:
+        return {"month": month, "person_code": person_code,
+                "name": _names(db).get(person_code, person_code),
+                "daily": [], "summary": None, "currency": "JPY", "hint": blocked}
     name = _names(db).get(person_code, person_code)
     lo, hi = _month_range(month)
     stats = db.query(PersonDailyStat).filter(
@@ -338,6 +368,45 @@ def visit_my_settlement(ctx: Context) -> dict[str, Any]:
 # 注册（父会话在 tools.py 里接线调用）
 # ---------------------------------------------------------------------------
 
+def whoami(db, actor, username: str = None) -> dict[str, Any]:
+    """**我是谁**：当前调用身份（账号/角色/绑定人员/权限范围/可用能力）。
+
+    用途：用户问"我是谁""我能做什么""为什么不能查别人"时用我。
+    """
+    from app.models import Person, User
+    u = db.get(User, actor.uid) if actor and actor.uid else None
+    pc = getattr(actor, "person_code", None) or (u.person_code if u else None)
+    person = db.query(Person).filter_by(code=pc).first() if pc else None
+    role = (getattr(actor, "role", "") or (u.role if u else "")) or "unknown"
+    is_admin = role == "admin"
+    scopes = list(getattr(actor, "scopes", []) or [])
+    return {
+        "username": (u.username if u else None) or username,
+        "display_name": (u.display_name if u else "") or "",
+        "role": role,
+        "role_label": "管理员" if is_admin else "员工",
+        "person_code": pc,
+        "person_name": (person.display_name if person else None),
+        "scopes": scopes,
+        "can_write": "write" in scopes,
+        "capabilities": (
+            ["查看公司级数据（月度汇总/薪资明细/看板/对账/找平）",
+             "上传巡店与对账文件、入正式表、月度重算",
+             "修改单价与系统配置、店铺主档合并/拆分",
+             "导出发薪表、找平表、对账报表"]
+            if is_admin else
+            ["查看**本人**绩效与日明细",
+             "查看**本人**的找平与已发工资",
+             "不能查看他人或公司级数据，不能修改任何数据"]
+        ),
+        "currency": "JPY",
+        "hint": ("管理员身份：可用全部工具。"
+                 if is_admin else
+                 "员工身份：仅可使用『我的』系列工具（我的绩效/我的日明细/我的找平与发放）；"
+                 "查询公司级数据请用管理员账号。"),
+    }
+
+
 def register(mcp: MCPServer) -> None:
     mcp.tool(
         name="visit_my_perf",
@@ -383,3 +452,35 @@ def register(mcp: MCPServer) -> None:
             "（请用公司级工具查询）。只读。"
         ),
     )(visit_my_settlement)
+
+
+def visit_whoami(ctx: Context) -> dict[str, Any]:
+    """**我是谁**：返回当前调用身份与权限范围（授权 + 审计走统一入口）。"""
+    from mcp_service import authz
+    from mcp_service.tools import _client_info, actor_from_ctx
+    from app.db import SessionLocal as _SL
+    actor = actor_from_ctx(ctx)
+    db = _SL()
+    try:
+        def _run(d):
+            return {"ok": True, "data": whoami(d, actor)}
+        return authz.dispatch(db, tool="visit_whoami", actor=actor, params={},
+                              client_info=_client_info(ctx), fn=_run,
+                              retryable=True, fn_args=1)
+    finally:
+        db.close()
+
+
+def register_whoami(mcp: MCPServer) -> None:
+    from mcp_service.annotations import read as read_ann
+    mcp.tool(
+        name="visit_whoami",
+        title="我是谁（身份与权限）",
+        annotations=read_ann("我是谁（身份与权限）"),
+        description=(
+            "**返回当前调用的身份与权限范围**：账号、显示名、角色（管理员/员工）、"
+            "绑定的人员编号与姓名、scope、能否写、以及**可用能力清单**。"
+            "什么时候用：用户问「我是谁」「我能做什么」「为什么查不到别人的数据」"
+            "「我有没有权限导出」时用我；也可用于在操作前确认当前身份。只读、无参数。"
+        ),
+    )(visit_whoami)

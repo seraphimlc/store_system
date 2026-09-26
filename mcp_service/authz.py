@@ -25,6 +25,7 @@ from mcp_service import envelope
 STAFF_ALLOWED = frozenset({
     "visit_ping", "visit_config_get", "visit_product_doc",
     "visit_my_perf", "visit_my_daily", "visit_my_settlement",
+    "visit_whoami",
 })
 
 # “我的”系列工具：只能看本人（服务端强制过滤，不给越权留入口）

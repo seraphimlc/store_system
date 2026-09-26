@@ -162,6 +162,7 @@ def register(mcp: MCPServer) -> None:
     payroll_write_ops.register(mcp)
     misc_ops.register(mcp)
     my_ops.register(mcp)
+    my_ops.register_whoami(mcp)
 
     @mcp.tool(
         name="visit_ping",
