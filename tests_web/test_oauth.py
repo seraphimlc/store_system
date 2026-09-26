@@ -660,3 +660,31 @@ def test_e2e_oauth_token_calls_mcp_tool(e2e_env, tmp_path):
             out = proc.stdout.read().decode("utf-8", "replace")
             if "TRACE" in os.environ.get("OAUTH_E2E_DEBUG", ""):
                 print("=== MCP SERVER OUTPUT ===\n" + out[:4000])
+
+def test_authorize_blocked_when_user_not_working(client):
+    """账号非在岗（请假/停用/离职）不得授权。
+
+    为什么必须拦：MCP 每次调用都校验 `status == "active"`（请假即失效），
+    若授权环节放行，用户会以为授权成功、实际所有工具都不可用。
+    """
+    from app.models import User
+    _seed()
+    cid = _register(client)
+    _login(client, "emp1")
+    db = _db()
+    u = db.query(User).filter(User.username == "emp1").one()
+    u.status = "leave"
+    db.commit()
+    db.close()
+    try:
+        _, challenge = _pkce()
+        r = client.get("/oauth/authorize", params=_authz_params(
+            cid, scope="read", challenge=challenge), follow_redirects=False)
+        assert r.status_code == 403
+        assert "请假" in r.text
+    finally:
+        db = _db()
+        u = db.query(User).filter(User.username == "emp1").one()
+        u.status = "active"
+        db.commit()
+        db.close()

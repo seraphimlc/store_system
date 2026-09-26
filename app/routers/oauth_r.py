@@ -41,6 +41,28 @@ def _error_response(error: str, status: int = 400):
     return JSONResponse({"error": error}, status_code=status)
 
 
+_STATUS_LABEL = {"leave": "请假", "disabled": "停用", "resigned": "离职"}
+
+
+def _require_working(user):
+    """授权前校验账号处于**在岗**状态（请假/停用/离职不得授权）。
+
+    为什么：MCP 每次调用都校验 `status == "active"`（请假即失效），若这里放行，
+    用户会以为授权成功、实际所有工具都不可用——必须在授权环节就明确拒绝。
+    """
+    if user is None:
+        return None
+    st = (user.status or "active")
+    if st == "active" and getattr(user, "is_active", True):
+        return None
+    label = _STATUS_LABEL.get(st, st)
+    return HTMLResponse(
+        f"<h3>无法授权</h3><p>账号 <b>{user.username}</b> 当前为「{label}」状态，"
+        f"不能授权 WorkBuddy 访问。</p>"
+        f"<p>如需使用，请联系管理员将账号状态改为「在岗」后重试。</p>",
+        status_code=403)
+
+
 # ---------- 发现（RFC 9728 / RFC 8414） ----------
 
 @router.get("/.well-known/oauth-protected-resource")
@@ -144,6 +166,9 @@ def oauth_authorize_page(request: Request,
             next_url += "?" + request.url.query
         return RedirectResponse(f"/login?next={quote(next_url, safe='')}",
                                 status_code=302)
+    denied = _require_working(user)
+    if denied is not None:
+        return denied
     return _consent_page(request, db, client, redirect_uri, scope, state,
                          challenge, p)
 
@@ -158,6 +183,9 @@ async def oauth_authorize_submit(request: Request,
         return RedirectResponse("/login", status_code=302)
     if not csrf_ok(request, form.get("csrf_token") or ""):
         return HTMLResponse("CSRF 校验失败", status_code=400)
+    denied = _require_working(user)          # 非在岗（请假/停用/离职）不得授权
+    if denied is not None:
+        return denied
     p = {k: v for k, v in form.items()}
     try:
         client, redirect_uri, scope, state, challenge = _validate_authorize(
