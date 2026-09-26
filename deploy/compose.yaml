@@ -34,6 +34,30 @@ services:
       db:
         condition: service_healthy
 
+  # MCP 服务（WorkBuddy 接入）：与 web 同镜像、独立进程；仅本机端口，由系统 Nginx 反代
+  mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    user: "0:0"
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://store_settle:${DB_PASSWORD}@db:5432/store_settle
+      VISIT_MCP_HOST: 0.0.0.0
+      VISIT_MCP_PORT: "8765"
+      VISIT_MCP_PUBLIC_HOST: store.visitworld.me   # 反代域名（Host 校验白名单）
+      VISIT_MCP_STATIC_TOKENS: "0"                 # 生产只用库内 token（用户自助签发）
+      VISIT_MCP_TOKEN: ${MCP_BOOTSTRAP_TOKEN}      # 占位（静态 token 已关；仅满足启动校验）
+    command: ["/entrypoint-mcp.sh"]
+    ports:
+      - "127.0.0.1:3661:8765"   # 仅本机，由系统 Nginx 反代 /mcp
+    volumes:
+      - store_uploads:/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   store_pgdata:
   store_uploads:

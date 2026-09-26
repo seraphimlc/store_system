@@ -75,8 +75,10 @@ def main() -> int:
 
     import uvicorn
 
-    app = build_app(settings)
+    app = build_app(settings, public_host=settings.public_host)
     print(f"[mcp] listening on http://{settings.host}:{settings.port}/mcp")
+    if settings.public_host:
+        print(f"[mcp] 反代域名白名单: {settings.public_host}（Host 校验通过）")
     print(f"[mcp] DATABASE_URL = {settings.database_url}")
     print(f"[mcp] log = {settings.log_path}")
     uvicorn.run(app, host=settings.host, port=settings.port,

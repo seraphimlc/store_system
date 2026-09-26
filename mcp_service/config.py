@@ -26,6 +26,7 @@ class McpSettings:
     port: int
     database_url: str
     log_path: str
+    public_host: str | None = None
     server_name: str = "visit-settle-mcp"
 
 
@@ -55,5 +56,6 @@ def load(require_token: bool = True) -> McpSettings:
     log_path = (os.environ.get("VISIT_MCP_LOG") or "").strip() or str(
         REPO_ROOT / "mcp_service" / "logs" / "requests.jsonl"
     )
-    return McpSettings(token=token, host=host, port=port,
+    public_host = (os.environ.get("VISIT_MCP_PUBLIC_HOST") or "").strip() or None
+    return McpSettings(token=token, host=host, port=port, public_host=public_host,
                        database_url=database_url, log_path=log_path)
