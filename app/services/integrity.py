@@ -123,6 +123,14 @@ def check_all(db: Session) -> dict[str, Any]:
            and ((r.diff_amount or 0) > 0) != ((r.prev_adjust_amount or 0) > 0)]
     add("A8", "递延链符号一致", bad)
 
+    # A9 应发表「调整列」与「差异列」一致（历史遗留列防双源）
+    # 为什么要有：这两列曾被两套逻辑写（重算=diff、旧规则=全额扣），
+    # 实测 9 月出现 diff=0 而 adjust=-5,173,750 的分叉，且该列被页面/报表消费。
+    bad = [f"{r.month} {r.person_code}: diff {r.diff_amount} vs 调整列 {r.adjust_amount}"
+           for r in db.query(PayrollPeriodRow).all()
+           if (r.diff_amount or 0) != (r.adjust_amount or 0)]
+    add("A9", "应发表调整列 == 差异列（防双源）", bad)
+
     fails = [c for c in checks if c["status"] == "fail"]
     infos = [c for c in checks if c["status"] == "info"]
     months = sorted({str(r.japan_date)[:7] for r in db.query(FormalRecord).all()

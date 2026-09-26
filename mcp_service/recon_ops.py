@@ -261,6 +261,20 @@ def _recon_diff(db, task_id: int | None = None,
     adj = {a.person_code: a for a in db.query(AdjustRecord).filter(
         AdjustRecord.source_task_id == task.id).all()}
 
+    # 当前系统侧点数（现算，用于与任务快照对比；快照可能因后续重算而过期）
+    from sqlalchemy import func
+    from app.models import FormalRecord
+    cur_pts: dict[str, int] = {}
+    if m:
+        y, mo = int(m[:4]), int(m[5:7])
+        nxt = f"{y + 1}-01-01" if mo == 12 else f"{y}-{mo + 1:02d}-01"
+        for pc, pts in db.query(FormalRecord.person_code,
+                                func.sum(FormalRecord.points)).filter(
+                FormalRecord.japan_date >= f"{m}-01",
+                FormalRecord.japan_date < nxt).group_by(
+                FormalRecord.person_code).all():
+            cur_pts[pc] = int(pts or 0)
+
     person_diffs = []
     for r in db.query(ReconResult).filter(
             ReconResult.task_id == task.id).order_by(
@@ -274,6 +288,14 @@ def _recon_diff(db, task_id: int | None = None,
             "diff": r.diff or 0,
             "adjust_amount": _adjust_amount_jpy(
                 db, r.system_value or 0, r.report_value or 0, m),
+            # 当前系统侧（现算）：与快照不同说明任务创建后又重算过正式表
+            "system_value_current": cur_pts.get(r.submitter_code),
+            "snapshot_stale": (cur_pts.get(r.submitter_code) is not None
+                               and (r.system_value or 0)
+                               != cur_pts.get(r.submitter_code)),
+            "adjust_amount_current": _adjust_amount_jpy(
+                db, cur_pts.get(r.submitter_code, r.system_value or 0),
+                r.report_value or 0, m),
             "adjusted": adj.get(r.submitter_code) is not None,
             "note": r.note or "",
         })
@@ -327,6 +349,25 @@ def _recon_diff(db, task_id: int | None = None,
         "report_totals": report_totals,
         "currency": "JPY",
     }
+    # 快照 vs 当前 的合计对比（分叉一眼可见）
+    stale = [d for d in person_diffs if d.get("snapshot_stale")]
+    snap_total = sum(d["adjust_amount"] or 0 for d in person_diffs)
+    cur_total = sum(d["adjust_amount_current"] or 0 for d in person_diffs)
+    data["amount_scope"] = {
+        "snapshot_total": snap_total,          # 任务创建时的系统侧口径
+        "current_total": cur_total,            # 现算系统侧口径（与找平表/工资一致）
+        "stale_persons": [{"person_code": d["person_code"], "name": d["name"],
+                           "snapshot_points": d["system_value"],
+                           "current_points": d["system_value_current"]}
+                          for d in stale],
+        "note": ("snapshot=任务创建时的系统侧快照（审计留痕）；"
+                 "current=按当前正式表现算（与找平表/工资口径一致）。"
+                 "两者不同说明任务创建后又重算过正式表。"),
+    }
+    if stale:
+        data["hint"] = (f"注意：{len(stale)} 人的系统侧快照已过期（任务创建后正式表被重算）"
+                        f"→ 找平金额按快照为 {snap_total:,}，按当前为 {cur_total:,}；"
+                        f"**以 current_total 为准**（与找平表一致）。")
     if not person_diffs and not day_diffs and not system_only:
         data["hint"] = "该任务无差异行（两侧一致，合法结果，不是错误）"
     return data

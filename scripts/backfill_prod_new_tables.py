@@ -94,6 +94,9 @@ def main():
         for r in rows:
             if (r.diff_amount or 0) != 0:
                 r.diff_amount = 0
+            # 遗留列同步（该列被页面/报表消费；不同步会出现"双源"分叉）
+            if (r.adjust_amount or 0) != (r.diff_amount or 0):
+                r.adjust_amount = r.diff_amount
         if n:
             db.commit()
             print("  %s: **无对账** → 差异归零（修正 %d 行，旧规则遗留）" % (m, n))
