@@ -72,6 +72,31 @@ def main():
     print("  paid_marks:", db.query(PayrollPaidMark).delete())
     db.commit()
 
+    # ---- 1.5) **按当前规则修正差异**：无对账月份 → 差异归零 ----
+    # 为什么必须做：线上 payroll_period_rows.diff_amount 里可能有**旧规则**留下的值
+    # （旧规则"无对账 = 全额扣" → 差异 = −整月工资；实测线上 2026-09 为 −5,173,750）。
+    # 若照抄进找平表，会给每个人造出巨额假欠款，并从未发工资里扣。
+    # 当前规则：该月**无当前对账任务** → 差异 = 0（页面标「待对账」）。
+    print("\n=== 1.5) 按当前规则修正差异（无对账 → 0）===")
+    fixed = 0
+    for m in months:
+        if period.month_has_recon(db, m):
+            print("  %s: 有对账任务 → 保留线上差异值" % m)
+            continue
+        rows = db.query(PayrollPeriodRow).filter_by(month=m).all()
+        n = sum(1 for r in rows if (r.diff_amount or 0) != 0)
+        for r in rows:
+            if (r.diff_amount or 0) != 0:
+                r.diff_amount = 0
+        if n:
+            db.commit()
+            print("  %s: **无对账** → 差异归零（修正 %d 行，旧规则遗留）" % (m, n))
+        else:
+            print("  %s: 无对账 → 差异本已为 0" % m)
+        fixed += n
+    if fixed:
+        print("  （共修正 %d 行；回退方式：从发布前备份恢复 payroll_period_rows.diff_amount）" % fixed)
+
     # ---- 2) 找平表：按各月差异逐人生成 ----
     print("\n=== 2) 生成找平表（payroll_adjusts）===")
     total_adj = 0
