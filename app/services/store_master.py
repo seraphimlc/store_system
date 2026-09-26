@@ -268,17 +268,23 @@ def recompute_affected_months(db, month_hint=None, user_id=None) -> dict:
             months = keep
     except Exception:  # noqa: BLE001
         pass
-    # **已发薪月份不重算**（用户口径 2026-09-25：工资已发出去，历史口径不能被改写）。
-    # 判定依据：该月台账（payroll_payments）已有登记 = 已导出发薪表 = 已按表发放。
-    # 效果：店铺合并照做（未来判重受益），但**已发月份的正式表/工资保持原样**；
-    # 未发月份照常重算（去重生效）。这正是"以后不再出该问题、又不改历史"的落点。
+    # **已发完的月份不重算**（用户口径：工资已发出去，历史口径不能被改写）。
+    # 判定依据（关键）：该月**两期都已发**（台账同时有 seq1 与 seq2）才算"发完"。
+    # 为什么不能只看"有台账"：一个月分两次发薪，且**下半月数据晚于上半月产出**——
+    # 若上半月一发就冻结整月，下周导入下半月数据时该月重算会被跳过、新数据永远进不来
+    # （实测线上 9 月只发了上半月，正处于这种在途状态）。
+    # 效果：已发完的月份（如 8 月两期已发）保护不变；在途月份照常重算（新数据可落地）。
     try:
         from app.models import PayrollPayment
-        _paid = {r[0] for r in db.query(PayrollPayment.month).distinct().all()}
-        if _paid:
-            keep = [m for m in months if m not in _paid]
+        _by_month = {}
+        for m, sq in db.query(PayrollPayment.month,
+                              PayrollPayment.seq).distinct().all():
+            _by_month.setdefault(m, set()).add(sq)
+        _done = {m for m, sqs in _by_month.items() if {1, 2} <= sqs}
+        if _done:
+            keep = [m for m in months if m not in _done]
             for _m in set(months) - set(keep):
-                warnings.append(f"{_m}: 已发薪（台账有登记），跳过重算以免改写已发口径")
+                warnings.append(f"{_m}: 两期均已发薪，跳过重算以免改写已发口径")
             months = keep
     except Exception:  # noqa: BLE001
         pass
