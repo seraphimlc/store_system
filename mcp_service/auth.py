@@ -35,11 +35,18 @@ def resource_metadata_url() -> str:
     客户端收到 401 后据此自动发起授权（WorkBuddy 支持）。
     """
     import os
-    issuer = (os.environ.get("VISIT_OAUTH_ISSUER") or "").strip().rstrip("/")
-    if not issuer:
+    # **必须是 MCP 服务自己的地址**（RFC 9728：资源自带元数据；客户端会按 origin 校验
+    # resource 与它连接的 URL 是否同源——实测跨 origin 会导致"点连接没反应"）。
+    base = (os.environ.get("VISIT_OAUTH_RESOURCE") or "").strip().rstrip("/")
+    if not base:
         host = (os.environ.get("VISIT_MCP_PUBLIC_HOST") or "").strip()
-        issuer = f"https://{host}" if host else "http://localhost"
-    return f"{issuer}/.well-known/oauth-protected-resource"
+        if host:
+            base = f"https://{host}"
+        else:
+            h = (os.environ.get("VISIT_MCP_HOST") or "127.0.0.1").strip()
+            pt = (os.environ.get("VISIT_MCP_PORT") or "8765").strip()
+            base = f"http://{h}:{pt}"
+    return f"{base}/.well-known/oauth-protected-resource"
 
 
 def _www_authenticate_header(resource_metadata: str | None = None) -> bytes:
@@ -87,6 +94,13 @@ class BearerAuthMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # **发现端点必须公开**：OAuth 客户端先取元数据才知道怎么认证；
+        # 若这里也要求 Token，客户端会拿到 401 而无法开始授权流程（实测表现：点连接没反应）。
+        path = scope.get("path", "")
+        if path.startswith("/.well-known/"):
             await self.app(scope, receive, send)
             return
 

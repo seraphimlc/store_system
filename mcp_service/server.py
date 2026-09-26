@@ -58,6 +58,28 @@ def build_app(settings: config.McpSettings, public_host: str | None = None):
         stateless_http=False,                     # P0 默认有状态；生产多副本再启用
         transport_security=transport_security_settings(public_host),
     )
+    # RFC 9728：受保护资源（MCP 服务）在自己的 origin 上提供元数据，
+    # 声明授权服务器在别处（web 应用）。避免客户端跨 origin 取元数据时校验失败。
+    from starlette.responses import JSONResponse
+
+    async def _protected_resource(request):
+        import os
+        iss = (os.environ.get("VISIT_OAUTH_ISSUER") or "").strip().rstrip("/")
+        if not iss:
+            host = (os.environ.get("VISIT_MCP_PUBLIC_HOST") or "").strip()
+            iss = f"https://{host}" if host else "http://localhost"
+        base = (os.environ.get("VISIT_OAUTH_RESOURCE") or "").strip().rstrip("/")
+        if not base:
+            base = f"http://{settings.host}:{settings.port}"
+        return JSONResponse({
+            "resource": base,
+            "authorization_servers": [iss],
+            "scopes_supported": ["read", "write"],
+            "bearer_methods_supported": ["header"],
+        })
+
+    app.add_route("/.well-known/oauth-protected-resource", _protected_resource)
+
     log = RequestLogger(settings.log_path)
     return BearerAuthMiddleware(app, log=log, bootstrap_token=settings.token)
 

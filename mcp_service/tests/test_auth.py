@@ -112,17 +112,29 @@ def test_missing_bearer_returns_401():
 
 
 def test_401_header_resource_metadata_url(monkeypatch):
-    """resource_metadata 由 VISIT_OAUTH_ISSUER / VISIT_MCP_PUBLIC_HOST 推导。"""
-    from mcp_service.auth import resource_metadata_url
-    monkeypatch.setenv("VISIT_OAUTH_ISSUER", "https://store.example.com")
-    monkeypatch.delenv("VISIT_MCP_PUBLIC_HOST", raising=False)
-    assert resource_metadata_url() == \
-        "https://store.example.com/.well-known/oauth-protected-resource"
-    monkeypatch.delenv("VISIT_OAUTH_ISSUER", raising=False)
-    monkeypatch.setenv("VISIT_MCP_PUBLIC_HOST", "mcp.example.com")
-    assert resource_metadata_url() == \
-        "https://mcp.example.com/.well-known/oauth-protected-resource"
+    """resource_metadata 指向 **MCP 服务自己的 origin**（RFC 9728）。
 
+    为什么不能用 issuer（web 地址）：WorkBuddy 的 SDK 会把元数据里的 `resource`
+    与它连接的 MCP URL 按 origin 精确比对，跨 origin（端口不同）会静默放弃——
+    实测表现为"点连接没反应"。
+    """
+    from mcp_service.auth import resource_metadata_url
+    monkeypatch.setenv("VISIT_OAUTH_RESOURCE", "http://127.0.0.1:8765")
+    monkeypatch.setenv("VISIT_MCP_PUBLIC_HOST", "store.visitworld.me")
+    assert resource_metadata_url() == \
+        "http://127.0.0.1:8765/.well-known/oauth-protected-resource"
+
+    # 未设 VISIT_OAUTH_RESOURCE → 由 VISIT_MCP_PUBLIC_HOST 推导（生产）
+    monkeypatch.delenv("VISIT_OAUTH_RESOURCE", raising=False)
+    assert resource_metadata_url() == \
+        "https://store.visitworld.me/.well-known/oauth-protected-resource"
+
+    # 都没有 → 本地默认 host:port
+    monkeypatch.delenv("VISIT_MCP_PUBLIC_HOST", raising=False)
+    monkeypatch.setenv("VISIT_MCP_HOST", "127.0.0.1")
+    monkeypatch.setenv("VISIT_MCP_PORT", "8765")
+    assert resource_metadata_url() == \
+        "http://127.0.0.1:8765/.well-known/oauth-protected-resource"
 
 def test_wrong_bearer_returns_401():
     log = Recorder()
