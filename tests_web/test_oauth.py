@@ -623,7 +623,6 @@ def test_e2e_oauth_token_calls_mcp_tool(e2e_env, tmp_path):
 
         # 验收 9：审计有 user_id（与 /my/token 签发无差别）
         from sqlalchemy.orm import sessionmaker
-        from app.db import Base
         S = sessionmaker(bind=eng, expire_on_commit=False)
         s = S()
         alog = s.query(McpAuditLog).filter(
