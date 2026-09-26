@@ -76,6 +76,9 @@ class Settings:
     # 0 关闭（authorize/token 返回 404，/my/token 自助签发不受影响）
     visit_oauth_issuer: str = field(
         default_factory=lambda: os.environ.get("VISIT_OAUTH_ISSUER", ""))
+    # 受保护资源标识（MCP 服务地址，须与客户端连接的 URL 同源；空=回退 issuer）
+    visit_oauth_resource: str = field(
+        default_factory=lambda: os.environ.get("VISIT_OAUTH_RESOURCE", ""))
     visit_oauth_enabled: bool = field(
         default_factory=lambda: os.environ.get("VISIT_OAUTH_ENABLED", "1") != "0")
     visit_oauth_access_hours: int = field(

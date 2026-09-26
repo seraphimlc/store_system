@@ -28,6 +28,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://store_settle:${DB_PASSWORD}@db:5432/store_settle
       # MCP OAuth：对外 issuer（发现端点 + 授权回调一致；与公网域名一致）
       VISIT_OAUTH_ISSUER: https://store.visitworld.me
+      VISIT_OAUTH_RESOURCE: https://store.visitworld.me   # 受保护资源=MCP 地址（须与客户端 URL 同源）
       VISIT_MCP_PUBLIC_HOST: store.visitworld.me
     ports:
       - "127.0.0.1:3660:8000"   # 仅本机，由系统 Nginx 反代
@@ -50,7 +51,8 @@ services:
       VISIT_MCP_HOST: 0.0.0.0
       VISIT_MCP_PORT: "8765"
       VISIT_MCP_PUBLIC_HOST: store.visitworld.me   # 反代域名（Host 校验白名单）
-      VISIT_OAUTH_ISSUER: https://store.visitworld.me  # 401 resource_metadata 用
+      VISIT_OAUTH_ISSUER: https://store.visitworld.me
+      VISIT_OAUTH_RESOURCE: https://store.visitworld.me   # 受保护资源=MCP 地址（须与客户端 URL 同源）  # 401 resource_metadata 用
       VISIT_MCP_STATIC_TOKENS: "0"                 # 生产只用库内 token（用户自助签发）
       VISIT_MCP_TOKEN: ${MCP_BOOTSTRAP_TOKEN}      # 占位（静态 token 已关；仅满足启动校验）
     command: ["/entrypoint-mcp.sh"]

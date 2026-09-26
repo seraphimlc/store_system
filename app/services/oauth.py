@@ -50,6 +50,21 @@ def _now() -> datetime:
 
 # ---------- 配置 ----------
 
+def resource() -> str:
+    """**受保护资源的标识**（MCP 服务地址，RFC 9728 的 resource）。
+
+    必须与客户端连接的 MCP URL **同源**（WorkBuddy 的 SDK 用 origin 精确比对：
+    端口不同即拒绝 → 表现为"点连接没反应"）。故不能复用 issuer（issuer 是 web 的
+    授权服务器地址）。缺省回退 issuer。
+    """
+    import os
+    s = get_settings()
+    val = (getattr(s, "visit_oauth_resource", "") or "").strip()
+    if not val:
+        val = (os.environ.get("VISIT_OAUTH_RESOURCE") or "").strip()
+    return (val.rstrip("/") if val else issuer())
+
+
 def issuer() -> str:
     """对外 issuer：`VISIT_OAUTH_ISSUER`，缺省取 `VISIT_MCP_PUBLIC_HOST` 的 https 地址。"""
     s = get_settings()

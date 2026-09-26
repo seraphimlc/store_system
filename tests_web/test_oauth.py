@@ -388,9 +388,11 @@ def test_discovery_documents(client):
     pr = client.get("/.well-known/oauth-protected-resource")
     assert pr.status_code == 200
     body = pr.json()
+    # resource 必须与客户端连接的 MCP URL 同源（WorkBuddy SDK 按 origin 精确比对）；
+    # 本 fixture 未设 VISIT_OAUTH_RESOURCE → 回退 issuer
     assert body["resource"] == "https://oauth.test"
     assert body["authorization_servers"] == ["https://oauth.test"]
-    assert body["scopes_supported"] == ["read", "read,write"]
+    assert body["scopes_supported"] == ["read", "write"]
 
     as_ = client.get("/.well-known/oauth-authorization-server")
     assert as_.status_code == 200

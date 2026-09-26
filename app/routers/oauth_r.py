@@ -47,9 +47,10 @@ def _error_response(error: str, status: int = 400):
 def oauth_protected_resource():
     iss = oauth.issuer()
     return {
-        "resource": iss,
+        "resource": oauth.resource(),
         "authorization_servers": [iss],
-        "scopes_supported": ["read", "read,write"],
+        "scopes_supported": ["read", "write"],
+        "bearer_methods_supported": ["header"],
     }
 
 
@@ -65,7 +66,7 @@ def oauth_authorization_server():
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
         "token_endpoint_auth_methods_supported": ["none"],
-        "scopes_supported": ["read", "read,write"],
+        "scopes_supported": ["read", "write"],
     }
 
 
