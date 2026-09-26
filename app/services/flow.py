@@ -700,17 +700,17 @@ def auto_finalize_pipeline(db, fid: int, user_id: int = None) -> dict:
     except Exception:  # noqa: BLE001  best-effort：候选对失败不影响上传
         pass
     res["auto_merged_groups"] = 0
-    # **默认关闭**（`STORE_AUTO_MERGE_EXACT=1` 才开）：exact 全量自动合并会**改变历史口径**——
-    # 实测 433 组全并后 8 月 12507→12382 行，而线上只并了 4 组（手工处理）。
-    # 口径以线上为准 → 默认只**生成候选对**（无数据影响），合并交人工/AI 决定。
+    # **默认开启**（`STORE_AUTO_MERGE_EXACT=0` 可关）：同店两种写法（空格/全角等）
+    # 归一化后 name_norm 相同 → 程序必同 → 自动合并，避免"同一家店各算一次、静默多算点数"。
+    # 用户明确要求（2026-09-25）：要合并，且做成系统能力，以后不再出现该问题。
     import os as _os
-    if _os.environ.get("STORE_AUTO_MERGE_EXACT") == "1":
+    if _os.environ.get("STORE_AUTO_MERGE_EXACT", "1") != "0":
         try:
             res["auto_merged_groups"] = _sm.auto_merge_exact(db, user_id)
         except Exception:  # noqa: BLE001  best-effort
             pass
     else:
-        res["auto_merge_skipped"] = "STORE_AUTO_MERGE_EXACT!=1（默认不自动合并，保线上口径）"
+        res["auto_merge_skipped"] = "STORE_AUTO_MERGE_EXACT=0（显式关闭自动合并）"
     if res["auto_merged_groups"]:
         # 本次有合并 → 重算受影响月份（rebuild + 找平 + 看板，内部各自 best-effort）
         try:
