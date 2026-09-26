@@ -3,9 +3,6 @@
     "visit-settle": {
       "type": "streamableHttp",
       "url": "${VISIT_BASE_URL}/mcp",
-      "headers": {
-        "Authorization": "Bearer ${VISIT_TOKEN}"
-      },
       "timeout": 300000
     }
   }
