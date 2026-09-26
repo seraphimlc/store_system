@@ -225,14 +225,15 @@ def register(mcp: MCPServer) -> None:
         kind: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        bad = _check_upload_sources(path, content_base64)
-        if bad is not None:
-            return bad
         from mcp_service import write_ops
 
-        content = write_ops.decode_base64(content_base64) if content_base64 else None
-
         def run(db, actor):
+            # **授权在参数校验之前**（dispatch 内先 enforce）：未授权调用者不得探测参数
+            bad = _check_upload_sources(path, content_base64)
+            if bad is not None:
+                return bad
+            content = (write_ops.decode_base64(content_base64)
+                       if content_base64 else None)
             return write_ops.upload_file(db, actor, filename=filename,
                                          content=content, path=path,
                                          month=month, kind=kind,
@@ -270,23 +271,31 @@ def register(mcp: MCPServer) -> None:
         limit: int = 0,
     ) -> dict[str, Any]:
         from app.db import SessionLocal
-        from mcp_service import capability
+        from mcp_service import authz, capability
 
+        actor = actor_from_ctx(ctx)
         db = SessionLocal()
+
+        def _run(d):
+            try:
+                return {"ok": True, "data": capability.month_salary(
+                    d, month, person=person, sort_by=sort_by, limit=limit)}
+            except capability.BadMonth as exc:
+                return _envelope_error("BAD_MONTH", str(exc),
+                                       "月份必须是 YYYY-MM，例如 2026-09")
+            except capability.BadParam as exc:
+                return _envelope_error("BAD_PARAM", str(exc), exc.hint or "")
+            except Exception as exc:  # noqa: BLE001
+                return _envelope_error("INTERNAL", repr(exc),
+                                       "系统内部错误，已记录；可重试")
         try:
-            data = capability.month_salary(db, month, person=person,
-                                            sort_by=sort_by, limit=limit)
-        except capability.BadMonth as exc:
-            return _envelope_error("BAD_MONTH", str(exc),
-                                   "月份必须是 YYYY-MM，例如 2026-09")
-        except capability.BadParam as exc:
-            return _envelope_error("BAD_PARAM", str(exc), exc.hint or "")
-        except Exception as exc:  # noqa: BLE001
-            return _envelope_error("INTERNAL", repr(exc),
-                                   "系统内部错误，已记录；可重试")
+            return authz.dispatch(
+                db, tool="visit_month_salary", actor=actor,
+                params={"month": month, "person": person},
+                client_info=_client_info(ctx), fn=_run,
+                retryable=True, fn_args=1)
         finally:
             db.close()
-        return {"ok": True, "data": data}
 
     @mcp.tool(
         name="visit_month_summary",
@@ -305,18 +314,27 @@ def register(mcp: MCPServer) -> None:
         ctx: Context,
     ) -> dict[str, Any]:
         from app.db import SessionLocal
+        from mcp_service import authz
 
+        actor = actor_from_ctx(ctx)
         db = SessionLocal()
+
+        def _run(d):
+            try:
+                data = _month_summary_capability(d, month)
+            except Exception as exc:  # noqa: BLE001  spec §5.5 只读工具 -> INTERNAL
+                return _envelope_error(
+                    "INTERNAL", repr(exc), "系统内部错误，已记录；可重试")
+            if data["formal_rows"] == 0:
+                data["hint"] = "该月正式表无数据（合法结果，不是错误）"
+            return {"ok": True, "data": data}
         try:
-            data = _month_summary_capability(db, month)
-        except Exception as exc:  # noqa: BLE001  spec §5.5 只读工具 -> INTERNAL
-            return _envelope_error(
-                "INTERNAL", repr(exc), "系统内部错误，已记录；可重试")
+            return authz.dispatch(
+                db, tool="visit_month_summary", actor=actor,
+                params={"month": month}, client_info=_client_info(ctx),
+                fn=_run, retryable=True, fn_args=1)
         finally:
             db.close()
-        if data["formal_rows"] == 0:
-            data["hint"] = "该月正式表无数据（合法结果，不是错误）"
-        return {"ok": True, "data": data}
 
 
 def _month_summary_capability(db, month: str) -> dict[str, Any]:

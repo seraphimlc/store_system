@@ -53,6 +53,13 @@ class MiscError(RuntimeError):
         self.code, self.message, self.hint = code, message, hint
 
 
+def _authz_deny(actor):
+    """按授权矩阵校验当前工具（工具名取自调用者函数名）；拒绝返回信封，放行返回 None。"""
+    import inspect as _inspect
+    from mcp_service import authz
+    return authz.enforce(_inspect.stack()[2].function, actor, {})
+
+
 def _envelope_error(code: str, message: str, hint: str, **extra) -> dict[str, Any]:
     """统一失败信封（含 retryable；码表见 mcp_service/envelope.py）。"""
     from mcp_service import envelope
@@ -299,7 +306,10 @@ def visit_file_layout(ctx: Context, file_id: int) -> dict[str, Any]:
     from app.db import SessionLocal
     from mcp_service.tools import actor_from_ctx
 
-    actor_from_ctx(ctx)          # 解析并确认调用方身份（只读工具无写闸门）
+    _actor = actor_from_ctx(ctx)          # 解析身份
+    _deny = _authz_deny(_actor)           # 授权矩阵校验（员工不得读公司级数据）
+    if _deny is not None:
+        return _deny
     db = SessionLocal()
     try:
         return _call(db, lambda db: file_layout(db, file_id))
@@ -311,7 +321,10 @@ def visit_product_doc(ctx: Context) -> dict[str, Any]:
     """返回系统产品说明原文（只读；不涉及数据库，不开会话）。"""
     from mcp_service.tools import actor_from_ctx
 
-    actor_from_ctx(ctx)          # 只读 + 无 DB：仅解析身份供审计
+    _actor = actor_from_ctx(ctx)          # 只读 + 无 DB：仅解析身份
+    _deny = _authz_deny(_actor)
+    if _deny is not None:
+        return _deny
     return _call(None, lambda _db: product_doc(None))
 
 

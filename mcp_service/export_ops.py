@@ -134,13 +134,22 @@ def _run_export(db, kind: str, **params) -> dict:
 
 
 def _authorize(ctx):
-    """取 actor；无有效凭据 → (None, UNAUTHORIZED 信封)。只读工具不要求 write scope。"""
+    """取 actor + **授权矩阵校验**；拒绝 → (None, 拒绝信封)。
+
+    只读工具不要求 write scope，但**同样受角色约束**（员工不得导出公司级文件）。
+    工具名取自调用者函数名（注册函数均为 visit_*）。
+    """
+    import inspect as _inspect
+    from mcp_service import authz
     from mcp_service import tools as _t
     actor = _t.actor_from_ctx(ctx)
     if actor is None:
         return None, _t._envelope_error(
             "UNAUTHORIZED", "未认证",
             "请在 WorkBuddy 连接器设置中重新填写 Access Token")
+    denied = authz.enforce(_inspect.stack()[1].function, actor, {})
+    if denied is not None:
+        return None, denied
     return actor, None
 
 

@@ -276,11 +276,9 @@ def _guarded(ctx: Context, tool: str, params: dict, fn) -> dict:
         db.close()
 
 
-def visit_my_perf(ctx: Context, month: str | None = None,
-                  **extra) -> dict[str, Any]:
+def visit_my_perf(ctx: Context, month: str | None = None) -> dict[str, Any]:
     """我的月绩效（只读；无 person 参数）。"""
     params = {"month": month}
-    params.update(extra)          # 防御：客户端若偷塞 person 类参数，授权层会拦
 
     def run(db, actor):
         pc = _person_code_of(actor)
@@ -299,11 +297,9 @@ def visit_my_perf(ctx: Context, month: str | None = None,
 
 
 def visit_my_daily(ctx: Context,
-                   month: Annotated[str, Field(pattern=MONTH_PATTERN)],
-                   **extra) -> dict[str, Any]:
+                   month: Annotated[str, Field(pattern=MONTH_PATTERN)]) -> dict[str, Any]:
     """我的日明细（只读；无 person 参数）。"""
     params = {"month": month}
-    params.update(extra)
 
     def run(db, actor):
         pc = _person_code_of(actor)
@@ -321,9 +317,9 @@ def visit_my_daily(ctx: Context,
     return _guarded(ctx, "visit_my_daily", params, run)
 
 
-def visit_my_settlement(ctx: Context, **extra) -> dict[str, Any]:
+def visit_my_settlement(ctx: Context) -> dict[str, Any]:
     """我的找平状态与发放（只读；无参数）。"""
-    params = dict(extra)
+    params = {}
 
     def run(db, actor):
         pc = _person_code_of(actor)

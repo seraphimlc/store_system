@@ -21,7 +21,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   sleep 1
 else
   # 兜底：按端口找
-  OLD=$(lsof -ti:"$PORT" 2>/dev/null | head -1)
+  OLD=$(lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
   if [ -n "${OLD:-}" ]; then kill "$OLD" && echo "  已停止占用 $PORT 的 PID $OLD"; sleep 1; fi
 fi
 
@@ -36,7 +36,7 @@ echo "  已启动 PID $(cat "$PIDFILE")"
 
 echo "[3/4] 等待端口就绪"
 for i in $(seq 1 40); do
-  if lsof -ti:"$PORT" >/dev/null 2>&1; then echo "  端口 $PORT 就绪（${i}s）"; break; fi
+  if lsof -ti:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo "  端口 $PORT 就绪（${i}s）"; break; fi
   sleep 1
   if [ "$i" = "40" ]; then echo "  ❌ 超时未就绪，见 $LOG"; exit 1; fi
 done

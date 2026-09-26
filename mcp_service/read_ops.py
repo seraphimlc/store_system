@@ -733,17 +733,33 @@ def _call(db, fn) -> dict[str, Any]:
                                "系统内部错误，已记录；可重试")
 
 
-def _invoke(ctx: Context, fn) -> dict[str, Any]:
-    """只读工具统一包装：取 actor（鉴权已在 HTTP 中间件层完成）→ 独立会话 → 能力层 → 信封。"""
-    from mcp_service.tools import actor_from_ctx
+from app.db import SessionLocal  # noqa: E402
 
-    actor_from_ctx(ctx)   # 解析并确认调用方身份（供审计；只读工具无写闸门）
-    from app.db import SessionLocal
-    db = SessionLocal()
+
+def _authz_read(ctx: Context, fn, tool: str = None) -> dict[str, Any]:
+    """**读工具统一包装**：授权拦截 → 两阶段审计 → 能力层 → 信封。
+
+    为什么必须有：只读工具同样受授权矩阵约束（员工不得读公司级数据），
+    且每次调用都要留痕（含被拒绝的调用）。工具名取自调用者函数名。
+    """
+    import inspect as _inspect
+    from mcp_service import authz
+    from mcp_service.tools import _client_info, actor_from_ctx
+
+    tool = tool or _inspect.stack()[1].function
+    actor = actor_from_ctx(ctx)
+    db = SessionLocal()          # 模块级（测试会 monkeypatch 它，故不能局部 import）
     try:
-        return _call(db, fn)
+        return authz.dispatch(db, tool=tool, actor=actor, params={},
+                              client_info=_client_info(ctx),
+                              fn=lambda d: fn(d), retryable=True, fn_args=1)
     finally:
         db.close()
+
+
+def _invoke(ctx: Context, fn) -> dict[str, Any]:
+    """只读工具统一包装：授权 + 审计 外层，内层仍走 _call 的错误信封映射。"""
+    return _authz_read(ctx, lambda db: _call(db, fn))
 
 
 def register(mcp: MCPServer) -> None:

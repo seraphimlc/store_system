@@ -58,28 +58,38 @@ def _err(code: str, message: str, hint: str, **extra) -> dict[str, Any]:
     return envelope.error(code, message, hint, **extra)
 
 
-def _run_read(ctx: Context, fn) -> dict[str, Any]:
-    """只读工具统一包装：经 ctx 取 actor → 业务 → 错误信封。
+def _authz_read(ctx: Context, fn, tool: str = None) -> dict[str, Any]:
+    """**读工具统一包装**：授权拦截 → 两阶段审计 → 能力层 → 信封。
 
-    - 读工具不因 actor 为 None 拒绝（stdio 模式无鉴权头；HTTP 模式由中间件拦 401）。
-    - ReconError → 对应错误码；其余意外异常 → INTERNAL（spec §5.5）。
-    - 每调用独立 SessionLocal()，finally 关闭。
+    为什么必须有：只读工具同样受授权矩阵约束（员工不得读公司级数据），
+    且每次调用都要留痕（含被拒绝的调用）。工具名取自调用者函数名。
     """
-    from mcp_service.tools import actor_from_ctx  # 延迟 import，避免父会话接线形成环
-    actor = actor_from_ctx(ctx)  # noqa: F841  规范要求经 ctx 取 actor（预留审计接线）
-    db = None
-    try:
-        db = SessionLocal()
-        data = fn(db)
-    except ReconError as exc:
-        return _err(exc.code, exc.message, exc.hint)
-    except Exception as exc:  # noqa: BLE001  只读工具意外异常 -> INTERNAL（可重试）
-        return _err("INTERNAL", repr(exc), "系统内部错误，已记录；可重试")
-    finally:
-        if db is not None:
-            db.close()
-    return {"ok": True, "data": data}
+    import inspect as _inspect
+    from mcp_service import authz
+    from mcp_service.tools import _client_info, actor_from_ctx
 
+    tool = tool or _inspect.stack()[1].function
+    actor = actor_from_ctx(ctx)
+    db = SessionLocal()          # 模块级（测试会 monkeypatch 它，故不能局部 import）
+    try:
+        return authz.dispatch(db, tool=tool, actor=actor, params={},
+                              client_info=_client_info(ctx),
+                              fn=lambda d: fn(d), retryable=True, fn_args=1)
+    finally:
+        db.close()
+
+
+def _run_read(ctx: Context, fn) -> dict[str, Any]:
+    """对账读工具统一包装：授权 + 审计 外层；内层保留 ReconError → 错误码映射。"""
+    def _mapped(db):
+        try:
+            data = fn(db)
+        except ReconError as exc:
+            return _err(exc.code, exc.message, exc.hint)
+        except Exception as exc:  # noqa: BLE001
+            return _err("INTERNAL", repr(exc), "系统内部错误，已记录；可重试")
+        return {"ok": True, "data": data}
+    return _authz_read(ctx, _mapped)
 
 # ---------------- 工具函数（模块级，可直接单测） ----------------
 
