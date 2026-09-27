@@ -72,6 +72,19 @@ class Settings:
     staff_visible_from: str = field(
         default_factory=lambda: os.environ.get(
             "STAFF_VISIBLE_FROM", "2026-10"))
+    # MCP OAuth（SSO）：对外 issuer（默认取 VISIT_MCP_PUBLIC_HOST 的 https 地址）；
+    # 0 关闭（authorize/token 返回 404，/my/token 自助签发不受影响）
+    visit_oauth_issuer: str = field(
+        default_factory=lambda: os.environ.get("VISIT_OAUTH_ISSUER", ""))
+    # 受保护资源标识（MCP 服务地址，须与客户端连接的 URL 同源；空=回退 issuer）
+    visit_oauth_resource: str = field(
+        default_factory=lambda: os.environ.get("VISIT_OAUTH_RESOURCE", ""))
+    visit_oauth_enabled: bool = field(
+        default_factory=lambda: os.environ.get("VISIT_OAUTH_ENABLED", "1") != "0")
+    visit_oauth_access_hours: int = field(
+        default_factory=lambda: _env_int("VISIT_OAUTH_ACCESS_HOURS", 24))
+    visit_oauth_refresh_days: int = field(
+        default_factory=lambda: _env_int("VISIT_OAUTH_REFRESH_DAYS", 90))
 
 
 @lru_cache(maxsize=1)

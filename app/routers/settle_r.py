@@ -486,118 +486,26 @@ def perf_export(request: Request, user: Optional[User] =
     """导出发薪表 Excel（按期：上半月/下半月 + 日明细）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import perf
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
     months = sorted({(str(r.japan_date or ""))[:7]
                      for r in db.query(FormalRecord).all()
                      if r.japan_date})
     if month not in months:
         month = months[-1] if months else ""
-    rows = perf.month_perf(db, month)
-    daily = perf.daily_perf(db, month)
-    summary = perf.company_summary(db, month)
-    from app.services import dashboard as _DD
-    dup_map = (_DD.month_payloads(db, month).get("dup_map")
-               if month else {}) or (perf.month_dup_map(db, month)
-                                     if month else {})
-    dup_total = sum(dup_map.values())
-    from app.services import period as _payroll
-    adj = _payroll.carry_map(db, month) if month else {}
-    adj_map = {k: v[0] for k, v in adj.items()}
-    adj_amt_map = {k: v[1] for k, v in adj.items()}
-    adj_total = sum(adj_map.values())
-    adj_amt_total = sum(adj_amt_map.values())
-
-    bold = Font(bold=True)
-    wb = Workbook()
-    ws1 = wb.active
-    # 两期发薪：half1=上半月(20日发)，half2=下半月(次月5日发)
-    if period not in ("half1", "half2"):
-        period = "half1"
-    payroll_rows = _payroll.period_rows(db, month) if month else []
-    half_map = {r["code"]: (r["half1"], r["half1_amt"], r["half1_bonus"],
-                            r["half2"], r["half2_amt"], r["half2_bonus"])
-                for r in payroll_rows}
-    half_stats = (_payroll.half_stats_map(db, month) if month else {})
-    is_h1 = period == "half1"
-    ws1.title = ("上半月发薪1-15" if is_h1 else "下半月发薪16-月末") + (
-        f"·{month}" if month else "")
-    ws1.append(["员工编号", "姓名", "该期点数", "有效店数", "点数(1点/2点)",
-                "2点成功率", "奖金(円)", "总金额(円)",
-                "找平金额(円)", "应该付金额(円)"])
-    for c in range(1, 11):
-        ws1.cell(1, c).font = bold
-    t_pay = 0
-    for r in rows:
-        hf = half_map.get(r["code"], (0, 0, 0, 0, 0, 0))
-        hs = half_stats.get(r["code"], {"h1": (0, 0, 0),
-                                        "h2": (0, 0, 0)})
-        if is_h1:
-            hpts, hamt, hbonus = hf[0], hf[1], hf[2]
-            st = hs["h1"]
-        else:
-            hpts, hamt, hbonus = hf[3], hf[4], hf[5]
-            st = hs["h2"]
-        hp1, hp2 = st[1], st[2]
-        hrate = (hp2 / (hp1 + hp2)) if (hp1 + hp2) else 0.0
-        carry = adj_amt_map.get(r["code"], 0) if is_h1 else 0
-        t_pay += hamt + carry
-        ws1.append([r["code"], r["name"], hpts, st[0],
-                    f"{hp1} / {hp2}", round(hrate, 4),
-                    hbonus, hamt, carry, hamt + carry])
-    ws1.append([])
-    ws1.append(["合计", "", "", summary["records"],
-                f"{summary['p1']} / {summary['p2']}",
-                round(summary["rate37"], 4), "",
-                sum(h[1 if is_h1 else 4] for h in half_map.values()),
-                (adj_amt_total if is_h1 else 0), t_pay])
-    for c in range(1, 11):
-        ws1.cell(ws1.max_row, c).font = bold
-    # 每人一个 sheet：该员工本期内所有有效巡店记录（逐条，便于对账）
-    from datetime import date as _d
-    y, m0 = int(month[:4]), int(month[5:7])
-    if is_h1:
-        lo, hi = _d(y, m0, 1), _d(y, m0, 16)      # 上半月 1~15（含15号）
-    else:
-        lo, hi = _d(y, m0, 16), _d(y + 1, 1, 1) if m0 == 12 else _d(y, m0 + 1, 1)
-    _PERS = {p.code: p.display_name for p in db.query(Person).all()}
-    by_person = {}
-    for f, rr in (db.query(FormalRecord, RawRecord)
-                  .join(RawRecord, FormalRecord.raw_record_id == RawRecord.id)
-                  .filter(FormalRecord.japan_date >= lo,
-                          FormalRecord.japan_date < hi).all()):
-        by_person.setdefault(f.person_code, []).append(
-            (f.japan_date, rr.store_name_local_raw or "",
-             rr.modified_raw or "", rr.visible_raw or "",
-             rr.deploy_raw or "", f.points or 0))
-    _names = {}
-    for code in sorted(by_person):
-        nm = _PERS.get(code, code) or code
-        sname = f"{nm}({code})"[:31]
-        _names[code] = nm
-        ws = wb.create_sheet(sname)
-        ws.append(["日期", "店铺名", "巡店时间", "S1(审核状态)", "投放",
-                   "点数", "员工编号"])
-        for c in range(1, 8):
-            ws.cell(1, c).font = bold
-        for rec in sorted(by_person[code], key=lambda x: (x[0], x[2])):
-            ws.append([str(rec[0]), rec[1], rec[2], rec[3], rec[4],
-                       rec[5], code])
-    for ws in wb.worksheets:
-        for col in ws.columns:
-            width = max(len(str(c.value or "")) for c in col) + 2
-            ws.column_dimensions[col[0].column_letter].width = width
-
+    from app.services import report
+    data, fname = report.build_payroll_workbook(db, month, period)
+    # 导出 = 发放事实：系统无发薪反馈，导出后离线按表发放 → 该期金额快照入台账
+    if month:
+        try:
+            from app.services import period as _payroll
+            half = 1 if period == "half1" else 2
+            _payroll.register_exported_half(db, month, half, paid_by=user.id)
+        except Exception:  # noqa: BLE001  登记失败不影响下载
+            db.rollback()
     from fastapi.responses import StreamingResponse
     import io
-    bio = io.BytesIO()
-    wb.save(bio)
-    bio.seek(0)
+    bio = io.BytesIO(data)
     from urllib.parse import quote
-    po = "上半月" if period == "half1" else "下半月"
     ascii_name = "wage_%s_%s.xlsx" % (month or "all", period)
-    fname = "发薪表_%s_%s.xlsx" % (po, month or "all")
     cd = "attachment; filename=" + ascii_name + "; filename*=UTF-8''" + quote(fname)
     return StreamingResponse(
         bio,
@@ -769,59 +677,16 @@ def recon_export(request: Request, task_id: int = 0,
     """导出对账差异 Excel：差异明细 + 反向名单（系统有而对账文件无）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.models import Person, ReconResult, ReconTask
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-    cur = db.get(ReconTask, task_id) if task_id else None
-    if cur is None:
+    from app.services import report
+    res = report.build_recon_diff_workbook(db, task_id)
+    if res is None:
         raise HTTPException(404, "对账任务不存在")
-    rows = (db.query(ReconResult).filter(ReconResult.task_id == task_id)
-            .order_by(ReconResult.submitter_code).all())
-    summary = cur.summary or {}
-    bold = Font(bold=True)
-    wb = Workbook()
-    # Sheet1 差异明细
-    ws = wb.active
-    ws.title = "差异明细"
-    ws.append(["月份", (cur.params or {}).get("month", ""),
-               "文件", (cur.params or {}).get("file", "")])
-    ws.append(["比对人数", summary.get("compared", 0),
-               "差异条数", summary.get("diff_count", 0)])
-    ws.append([])
-    if not rows:
-        ws.append(["无差异：两侧点数一致"])
-    else:
-        ws.append(["人员", "编号", "系统点数", "对账点数", "差异(系统-对账)"])
-        for c in range(1, 6):
-            ws.cell(ws.max_row, c).font = bold
-        for r in rows:
-            ws.append([r.note.replace(" 点数差异", "") if r.note else "",
-                       r.submitter_code, r.system_value, r.report_value,
-                       r.diff])
-    # Sheet2 反向名单
-    ws2 = wb.create_sheet("系统有而对账文件无")
-    so = summary.get("sys_only") or []
-    if not so:
-        ws2.append(["无（对账文件已覆盖系统全部有记录员工）"])
-    else:
-        ws2.append(["编号", "姓名"])
-        ws2.cell(1, 1).font = bold
-        ws2.cell(1, 2).font = bold
-        persons = {p.code: p.display_name for p in db.query(Person).all()}
-        for c in so:
-            ws2.append([c, persons.get(c, c)])
-    for wsx in (ws, ws2):
-        for col in wsx.columns:
-            w = max(len(str(c.value or "")) for c in col) + 2
-            wsx.column_dimensions[col[0].column_letter].width = min(w, 40)
+    data, fname = res
     from fastapi.responses import StreamingResponse
     import io
-    bio = io.BytesIO()
-    wb.save(bio)
-    bio.seek(0)
+    bio = io.BytesIO(data)
     from urllib.parse import quote
     ascii_name = f"recon_diff_{task_id}.xlsx"
-    fname = f"对账差异_任务{task_id}.xlsx"
     cd = "attachment; filename=" + ascii_name + "; filename*=UTF-8''" + quote(fname)
     return StreamingResponse(
         bio,
@@ -837,18 +702,16 @@ def recon_report(request: Request, task_id: int = 0,
     """一键生成《月度对账报告.xlsx》（摘要+差异+反向名单+找平留痕）。"""
     if user is None or user.role != "admin":
         return _denied()
-    from app.services import recon
-    wb = recon.build_report(db, task_id, user.display_name)
-    if wb is None:
+    from app.services import report
+    res = report.build_recon_report_workbook(db, task_id, user.display_name)
+    if res is None:
         raise HTTPException(404, "对账任务不存在")
+    data, fname = res
     from fastapi.responses import StreamingResponse
     import io
-    bio = io.BytesIO()
-    wb.save(bio)
-    bio.seek(0)
+    bio = io.BytesIO(data)
     from urllib.parse import quote
     ascii_name = f"recon_report_{task_id}.xlsx"
-    fname = f"月度对账报告_任务{task_id}.xlsx"
     cd = "attachment; filename=" + ascii_name + "; filename*=UTF-8''" + quote(fname)
     return StreamingResponse(
         bio,
@@ -969,6 +832,7 @@ def payroll_settle_page(request: Request, user: Optional[User] =
         "request": request, "current_user": user, "month": month,
         "months": months, "rows": rows, "total": total, "staff": staff,
         "bonus_g": bonus_g, "bonus_a": bonus_a,
+        "recon_pending": bool(month) and not _payroll.month_has_recon(db, month),
         "page_state": page_state})
 
 
@@ -1043,36 +907,12 @@ def payroll_settle_export(request: Request,
                           db: Session = Depends(get_db), month: str = ""):
     if user is None or user.role != "admin":
         return _denied()
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
+    from app.services import report
+    data, fname = report.build_payroll_settle_workbook(db, month)
     from fastapi.responses import StreamingResponse
-    from app.services import period as _payroll
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "月度分期对账偏差"
-    ws.append(["月份", "员工编号", "员工姓名", "上半月点数", "上半月金额(円)",
-               "下半月点数", "下半月金额(円)", "奖金(円)", "分期已发(円)",
-               "对账点数", "对账金额(円)", "上月修正(点)", "上月修正金额(円)",
-               "对账偏差(点,参考)", "对账偏差金额(円,参考)",
-               "找平(点)", "找平金额(円)"])
-    for c in range(1, 18):
-        ws.cell(1, c).font = Font(bold=True)
-    for r in _payroll.period_rows(db, month):
-        ws.append([month, r["code"], r["name"], r["half1"], r["half1_amt"],
-                   r["half2"], r["half2_amt"],
-                   r["half1_bonus"] + r["half2_bonus"],
-                   r["half1_amt"] + r["half2_amt"],
-                   r["settle"], r["settle_amt"], r["prev"], r["prev_amt"],
-                   r["diff"], r["diff_amt"], r["adj"], r["adj_amt"]])
-    ws.append([])
-    ws.append(["说明：对账偏差=系统参考值(自动刷新)；找平=人工实际执行值(默认0，"
-               "金额=点×该月单价)；上月修正=上月找平递延。"])
     import io as _io
-    buf = _io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    fn = f"payroll_settle_{month}.xlsx"
+    buf = _io.BytesIO(data)
     return StreamingResponse(
         buf, media_type=("application/vnd.openxmlformats-officedocument"
                          ".spreadsheetml.sheet"),
-        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})

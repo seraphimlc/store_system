@@ -440,3 +440,227 @@ class MonthPerfRecord(Base):
     rate37 = Column(Float, nullable=False, default=0.0)
     pass37 = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=_now)
+
+
+# ---------------------------------------------------------------------------
+# P1（WorkBuddy 接入）：Token / 审计 / 封账 / 重算快照
+# 设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md
+# ---------------------------------------------------------------------------
+
+class ApiToken(Base):
+    """MCP Access Token（绑定到人，可吊销）。spec §5.1。"""
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False, default="")
+    token_prefix = Column(String(16), nullable=False, unique=True, index=True)
+    token_hash = Column(String(64), nullable=False)          # sha256 十六进制
+    scopes = Column(String(64), nullable=False, default="read")   # read / read,write
+    created_at = Column(DateTime, nullable=False, default=_now)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    # 有效期：默认签发 90 天；管理员可签永久（NULL=永久）。spec §三
+    expires_at = Column(DateTime, nullable=True)
+
+
+class McpAuditLog(Base):
+    """MCP 调用审计（两阶段写入：先插行 ok=NULL，返回前回填）。spec §8。"""
+    __tablename__ = "mcp_audit_log"
+
+    id = Column(Integer, primary_key=True)
+    token_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, nullable=True)
+    tool = Column(String(64), nullable=True)
+    params_json = Column(Text, nullable=True)                # 脱敏，不含 Token 明文
+    ok = Column(Boolean, nullable=True)                      # 执行中为 NULL
+    error_code = Column(String(32), nullable=True)
+    detail = Column(Text, nullable=True)
+    client_info = Column(String(255), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class OAuthClient(Base):
+    """MCP OAuth 动态注册客户端（specs-mcp-oauth.md §三）。
+
+    `client_secret_hash` 为 NULL = 公共客户端（PKCE 强制，WorkBuddy 即此类）；
+    库内只存哈希，明文只在注册响应中出现一次。
+    """
+    __tablename__ = "oauth_clients"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(64), unique=True, nullable=False, index=True)
+    client_secret_hash = Column(String(64), nullable=True)
+    client_name = Column(String(128), nullable=False, default="")
+    redirect_uris = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    last_used_at = Column(DateTime, nullable=True)
+
+
+class OAuthCode(Base):
+    """授权码（5 分钟有效，一次性）。
+
+    `access_token_id`：该 code 换出的 access token 行 id —— code 被重放时据此
+    吊销已换出的 token（specs-mcp-oauth.md §五.2 / 验收 4）。
+    """
+    __tablename__ = "oauth_codes"
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), unique=True, nullable=False, index=True)
+    client_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    redirect_uri = Column(String(512), nullable=False)
+    code_challenge = Column(String(128), nullable=False)
+    code_challenge_method = Column(String(16), nullable=False, default="S256")
+    scope = Column(String(64), nullable=False, default="read")
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    access_token_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class OAuthRefreshToken(Base):
+    """Refresh token（90 天，每次刷新轮换：旧的置 revoked_at）。"""
+    __tablename__ = "oauth_refresh_tokens"
+
+    id = Column(Integer, primary_key=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    client_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    scope = Column(String(64), nullable=False, default="read")
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    last_used_at = Column(DateTime, nullable=True)
+
+
+class SealedMonth(Base):
+    """封账月份：表内月份一律禁止写入（闸门 3）。spec §7。"""
+    __tablename__ = "sealed_months"
+
+    month = Column(String(7), primary_key=True)              # YYYY-MM
+    note = Column(String(255), nullable=True)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class RebuildSnapshot(Base):
+    """重算前正式表全量快照（只能回灌正式表，非整月可逆）。spec §9 改动 B。"""
+    __tablename__ = "rebuild_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)
+    audit_id = Column(Integer, nullable=True)                # 不加 FK：HTML 路径无审计行
+    payload_json = Column(Text, nullable=False)
+    row_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PayrollPaidMark(Base):
+    """发薪标记：某月某期（上半月/下半月）是否已实际发薪。
+
+    为什么需要：找平的「上月结转」要在本月两期工资里扣/补，但**已发薪的期改不了**。
+    系统没有发薪动作（只导出发薪表、线下发），所以必须由管理员显式标记；
+    `period.sync_period_table` 只把**未标记的期**算作可吸收额度，
+    否则会出现「上半月已发、下半月为 0 → 结转被判定已吸收，实际漏扣」。
+    """
+    __tablename__ = "payroll_paid_marks"
+    __table_args__ = (UniqueConstraint("month", "half", name="uq_paid_mark"),)
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)     # YYYY-MM
+    half = Column(Integer, nullable=False)                    # 1=上半月 2=下半月
+    marked_by = Column(Integer, nullable=True)
+    marked_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PayrollPayment(Base):
+    """**发放台账（不可变历史事实）**：某月某人第 seq 期实际发了多少。
+
+    为什么要独立成表：`payroll_period_rows` 是**计算结果**（会随数据/对账/规则重算），
+    而"已经发了 375,000"是**历史事实**，不能再被重算改写。两者混在一张表里会导致：
+    8月对账晚上传 → 9月整行重算 → 已发的上半月数字也被改；且吸收逻辑不知道哪期已发
+    → 高估吸收能力 → **漏扣**（实测 -59,000 被误判为已吸收）。
+
+    - seq 不固定：一月发 2 次就 seq=1,2；发 3 次就 1,2,3（不写死两期）
+    - amount 是**发放时快照**，之后重算不影响它
+    - adjust_applied 记该期实际抵扣/补发的找平额（负=扣）
+    """
+    __tablename__ = "payroll_payments"
+    __table_args__ = (UniqueConstraint("month", "person_code", "seq",
+                                       name="uq_payment_inst"),)
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String(7), nullable=False, index=True)      # 归属结算月 YYYY-MM
+    person_code = Column(String(32), nullable=False, index=True)
+    seq = Column(Integer, nullable=False)                      # 第几期（1,2,3…）
+    points = Column(Integer, nullable=False, default=0)        # 该期点数（快照）
+    amount = Column(Integer, nullable=False, default=0)        # 实发金额 円（快照）
+    bonus = Column(Integer, nullable=False, default=0)         # 其中奖金 円
+    adjust_applied = Column(Integer, nullable=False, default=0)  # 该期实际抵扣/补发 円
+    note = Column(String(255), nullable=True)
+    paid_at = Column(DateTime, nullable=False, default=_now)
+    paid_by = Column(Integer, nullable=True)
+    # ---- 找平抵扣溯源（否则只有一个金额 = 空穴来风，出 bug 没法查）----
+    adjust_source_type = Column(String(12), nullable=True)     # carry | diff
+    adjust_source_month = Column(String(7), nullable=True)     # 产生结转的月份（上月）
+    adjust_source_row_id = Column(Integer, nullable=True)      # 上月 payroll_period_rows.id
+    adjust_source_task_id = Column(Integer, nullable=True)     # 上月当前对账任务 id（可空）
+    adjust_leftover = Column(Integer, nullable=True)           # 扣完后仍需递延的金额（负）
+
+
+class PayrollAdjust(Base):
+    """**找平表**：一行 = 一笔找平（某月差异 × 某人），进度是**存下来的事实**。
+
+    为什么独立成表（用户要求）：
+    - 找平进度（已找平/剩余/是否结清）应是可直接查询的一等数据，
+      而不是每次查询靠找平链（prev_adjust_amount）反推；
+    - 多月差异交错时链条反推会失真（旧实现只能给"近似回收额"）；
+    - 可记录"结清时间/结清于哪一期"，便于对账与 bug 排查；
+    - 这张表就是找平的账：谁欠谁、欠多少、还了多少、何时还清。
+
+    约定：
+    - adjust_amount：原始找平金额（负=应扣/正=应补，含奖金口径）
+    - settled_amount：已找平金额（逐步累加，与 adjust_amount 同号）
+    - remaining：剩余（= adjust_amount − settled_amount；0 = 已结清）
+    - 回收顺序：**FIFO**（先欠的先还），一笔发放吸收的金额优先冲最早的未结清找平
+    """
+    __tablename__ = "payroll_adjusts"
+    __table_args__ = (UniqueConstraint("source_month", "person_code",
+                                       name="uq_adjust_person"),)
+
+    id = Column(Integer, primary_key=True)
+    source_month = Column(String(7), nullable=False, index=True)   # 产生差异的月份
+    person_code = Column(String(32), nullable=False, index=True)
+    source_task_id = Column(Integer, nullable=True)                # 对账任务 id
+    source_row_id = Column(Integer, nullable=True)                 # 该月找平行 id
+    adjust_amount = Column(Integer, nullable=False, default=0)     # 原始找平金额
+    settled_amount = Column(Integer, nullable=False, default=0)    # 已找平
+    remaining = Column(Integer, nullable=False, default=0)         # 剩余
+    status = Column(String(12), nullable=False, default="in_progress")
+    settled_at = Column(DateTime, nullable=True)                   # 结清时间
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class PayrollSettlementLink(Base):
+    """**找平回收明细**：发放（payroll_payments）↔ 找平（payroll_adjusts）多对多。
+
+    用户要求双向可查：
+    - 一笔薪资（某月某期）→ 冲了哪几笔找平（FIFO 可能同时冲多个月）
+    - 一笔找平 → 被哪几期薪资回收的（可能跨多期/多月）
+    单一来源字段（payroll_payments.adjust_source_*）只能表达一对一，故独立成表。
+    """
+    __tablename__ = "payroll_settlement_links"
+    __table_args__ = (UniqueConstraint("adjust_id", "payment_id",
+                                       name="uq_link_adjust_payment"),)
+
+    id = Column(Integer, primary_key=True)
+    adjust_id = Column(Integer, ForeignKey("payroll_adjusts.id"),
+                       nullable=False, index=True)      # 哪笔找平
+    payment_id = Column(Integer, ForeignKey("payroll_payments.id"),
+                        nullable=False, index=True)     # 哪笔发放冲的
+    month = Column(String(7), nullable=False, index=True)   # 发放月
+    person_code = Column(String(32), nullable=False, index=True)
+    amount = Column(Integer, nullable=False, default=0)     # 本次冲抵（负=扣回）
+    created_at = Column(DateTime, nullable=False, default=_now)

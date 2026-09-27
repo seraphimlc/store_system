@@ -13,6 +13,24 @@ from app.routers.auth_r import csrf_ok, require_login
 from app.services import ai_batch, store_master
 
 router = APIRouter()
+
+
+def _recompute_after_master_change(db, user_id, month_hint=None):
+    """主档变更后**自动重算受影响月份**（人工合并/拆分不必再手动 rebuild）。
+
+    返回处理过的月份列表（失败返回 []，best-effort 不影响主流程）。
+    """
+    try:
+        from app.services import store_master as _sm
+        res = _sm.recompute_affected_months(db, month_hint=month_hint,
+                                            user_id=user_id)
+        return res.get("months", []) if isinstance(res, dict) else []
+    except Exception:  # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return []
 templates = get_templates()
 
 
@@ -70,7 +88,10 @@ def merge_group(request: Request, name_norm: str = Form(...),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     n = store_master.merge_name_group(db, name_norm, keep, user.id, note=note)
-    return RedirectResponse(f"/stores?kind=exact&msg=已并入 {n} 个实体", status_code=303)
+    months = _recompute_after_master_change(db, user.id)
+    tail = f"，已重算 {'、'.join(months)}" if months else ""
+    return RedirectResponse(f"/stores?kind=exact&msg=已并入 {n} 个实体{tail}",
+                            status_code=303)
 
 
 @router.post("/stores/groups/skip")
@@ -95,6 +116,7 @@ def apply_all(request: Request, csrf_token: str = Form(...),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     res = store_master.apply_all_recommended(db, user.id)
+    months = _recompute_after_master_change(db, user.id)
     msg = (f"整批完成：处理 {res['groups']} 组、并入 {res['merged_entities']} 个实体；"
            f"跨城市留出 {res['left_groups']} 组待人工")
     return RedirectResponse(f"/stores?kind=exact&msg={msg}", status_code=303)
@@ -157,7 +179,10 @@ def merge_pair(pid: int, request: Request, keep: int = Form(...),
     store_master.merge_pair(db, pid, keep, user.id,
                             basis="program_exact" if kind == "exact" else "manual",
                             note=note)
-    return RedirectResponse(f"/stores?kind={kind}&msg=已并入，该对不再显示", status_code=303)
+    months = _recompute_after_master_change(db, user.id)
+    tail = f"，已重算 {'、'.join(months)}" if months else ""
+    return RedirectResponse(f"/stores?kind={kind}&msg=已并入，该对不再显示{tail}",
+                            status_code=303)
 
 
 @router.post("/stores/pairs/{pid}/skip")
@@ -181,4 +206,6 @@ def split_entity(eid: int, request: Request, csrf_token: str = Form(...),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     store_master.split_entity(db, eid, user.id)
-    return RedirectResponse(f"/stores/entities?q={eid}", status_code=303)
+    months = _recompute_after_master_change(db, user.id)
+    tail = f"&msg=已重算 {'、'.join(months)}" if months else ""
+    return RedirectResponse(f"/stores/entities?q={eid}{tail}", status_code=303)

@@ -1,0 +1,401 @@
+# -*- coding: utf-8 -*-
+"""对账/找平/配置写工具的闸门与信封（spec §7）。
+
+A9 交付了模块但未带测试（子代理上下文耗尽），此文件补齐关键闸门覆盖。
+"""
+from datetime import datetime
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.models import Base, ReconTask, SealedMonth
+from mcp_service import guards, payroll_write_ops, tokens
+
+W = tokens.Actor(uid=1, role="admin", scopes=["read", "write"], token_id=1)
+R = tokens.Actor(uid=1, role="admin", scopes=["read"], token_id=1)
+
+
+@pytest.fixture()
+def db(tmp_path):
+    eng = create_engine(f"sqlite:///{tmp_path}/p.db",
+                        connect_args={"check_same_thread": False})
+    Base.metadata.create_all(eng)
+    S = sessionmaker(bind=eng, expire_on_commit=False)
+    s = S()
+    s.add(SealedMonth(month="2026-08", note="8月封账"))
+    s.add(ReconTask(id=1, kind="monthly_v3", status="done", created_by=1,
+                    params={"month": "2026-09", "kind": "daily_records",
+                            "version": 1, "current": True},
+                    summary={}, created_at=datetime.utcnow()))
+    s.commit()
+    yield s
+    s.close()
+    eng.dispose()
+
+
+# ---------- 权限：5 个工具全部要求写权限 ----------
+
+def test_all_require_write_scope(db):
+    for call in (
+        lambda: payroll_write_ops.recon_interpret(db, R, task_id=1),
+        lambda: payroll_write_ops.recon_adjust(db, R, task_id=1,
+                                               person_code="P001",
+                                               action="add"),
+        lambda: payroll_write_ops.payroll_generate(db, R, month="2026-09"),
+        lambda: payroll_write_ops.payroll_update(db, R, month="2026-09",
+                                                 person_code="P001",
+                                                 half1_amount=100),
+        lambda: payroll_write_ops.config_set(db, R, per_point=250),
+    ):
+        with pytest.raises(guards.GuardError) as e:
+            call()
+        assert e.value.code == "FORBIDDEN_TOOL"
+
+
+# ---------- 对账：AI 解读 / 找平执行 ----------
+
+def test_recon_interpret_not_found(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.recon_interpret(db, W, task_id=999)
+    assert e.value.code == "NOT_FOUND"
+
+
+def test_recon_adjust_rejects_bad_action(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.recon_adjust(db, W, task_id=1, person_code="P001",
+                                       action="bogus")
+    assert e.value.code == "BAD_PARAM"
+
+
+def test_recon_adjust_requires_confirm_with_month(db):
+    """确认语含任务月份与人员与动作（涉钱）。"""
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.recon_adjust(db, W, task_id=1, person_code="P001",
+                                       action="add", confirm_text="随便")
+    assert e.value.code == "CONFIRM_REQUIRED"
+    assert "2026-09" in e.value.hint and "P001" in e.value.hint
+
+
+# ---------- 找平表：生成 / 人工修正 ----------
+
+def test_payroll_generate_validates_month(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_generate(db, W, month="2026-9")
+    assert e.value.code == "BAD_MONTH"
+
+
+def test_payroll_generate_refuses_sealed_month(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_generate(db, W, month="2026-08")
+    assert e.value.code == "MONTH_SEALED"
+
+
+def test_payroll_update_requires_confirm(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_update(db, W, month="2026-09",
+                                         person_code="P001",
+                                         half1_amount=100, confirm_text="改吧")
+    assert e.value.code == "CONFIRM_REQUIRED"
+
+
+def test_payroll_update_refuses_sealed_month(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_update(db, W, month="2026-08",
+                                         person_code="P001", half1_amount=100,
+                                         confirm_text="确认修正 2026-08 P001")
+    assert e.value.code == "MONTH_SEALED"
+
+
+# ---------- 配置：全局单值，影响所有月份 ----------
+
+def test_config_set_requires_confirm(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.config_set(db, W, per_point=260, confirm_text="改")
+    assert e.value.code == "CONFIRM_REQUIRED"
+
+
+def test_config_set_rejects_bad_values(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.config_set(db, W, per_point=0,
+                                     confirm_text="确认修改配置")
+    assert e.value.code == "BAD_PARAM"
+
+
+# ---------- 注册（能力层不注册工具；写工具注册在 scenario_ops） ----------
+
+def test_no_register_in_payroll_write_ops():
+    """场景化重构：payroll_write_ops 不再注册工具（能力函数供 scenario_ops 调用）。"""
+    assert not hasattr(payroll_write_ops, "register")
+
+
+# ---------- 发薪标记（找平吸收额度只算未发薪的期）----------
+
+def test_mark_paid_requires_write(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_mark_paid(db, R, month="2026-09", half=1)
+    assert e.value.code == "FORBIDDEN_TOOL"
+
+
+def test_mark_paid_rejects_bad_half(db):
+    with pytest.raises(guards.GuardError) as e:
+        payroll_write_ops.payroll_mark_paid(db, W, month="2026-09", half=3)
+    assert e.value.code == "BAD_PARAM"
+
+
+def test_mark_paid_then_unmark(db):
+    res = payroll_write_ops.payroll_mark_paid(db, W, month="2026-09", half=1)
+    assert res["ok"] is True and res["data"]["paid_halves"] == [1]
+    res2 = payroll_write_ops.payroll_mark_paid(db, W, month="2026-09", half=1,
+                                               unmark=True)
+    assert res2["data"]["paid_halves"] == []
+
+
+def test_paid_mark_reduces_absorption_capacity(db):
+    """已发薪的期不计入可吸收额度 → 上月结转未被吸收的部分递延下月。"""
+    from datetime import date
+    from app.models import (FormalRecord, ImportFile, PayrollPeriodRow,
+                            PersonDailyStat, Person)
+    from app.services import period
+
+    db.add(Person(code="P001", display_name="甲"))
+    db.add(ImportFile(id=9, file_name="f.xlsx", file_sha256="y", file_size=1,
+                      stored_path="/tmp/y.xlsx", uploaded_by=1, status="parsed",
+                      parsed_sheets=[], ignored_sheets=[], warnings=[], errors=[]))
+    # 上月(2026-08)结转：-59000 円
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-59000, prev_adjust_amount=-59000,
+                            adjust_amount=0, adjust_points=0, diff_points=-200))
+    # 本月(2026-09)：上半月 375000 已发、下半月 0
+    db.add(FormalRecord(import_id=9, raw_record_id=1, person_code="P001",
+                        store_id_raw="0101", japan_date=date(2026, 9, 3),
+                        points=1))
+    db.add(PersonDailyStat(person_code="P001", ref_date=date(2026, 9, 3),
+                           records=1, p1=1, p2=0, points=1))
+    db.commit()
+
+    period.mark_paid(db, "2026-09", 1)          # 上半月已发
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    row = db.query(PayrollPeriodRow).filter_by(month="2026-09",
+                                               person_code="P001").first()
+    # 上半月已发 → 可吸收额度=下半月(0) → 结转 -59000 未被吸收 → 递延进下月结转
+    assert row.prev_adjust_amount == row.diff_amount - 59000
+
+
+# ---------- 发放台账（方案 C 第一步：计算与实发分离）----------
+
+def test_record_payment_snapshots_amount(db):
+    """台账记录的是**发放时快照**，后续重算不改写它。"""
+    from datetime import date
+    from app.models import (FormalRecord, ImportFile, PayrollPayment,
+                            PayrollPeriodRow, Person, PersonDailyStat)
+    from app.services import period
+
+    db.add(Person(code="P001", display_name="甲"))
+    db.add(ImportFile(id=9, file_name="f.xlsx", file_sha256="y", file_size=1,
+                      stored_path="/tmp/y.xlsx", uploaded_by=1, status="parsed",
+                      parsed_sheets=[], ignored_sheets=[], warnings=[], errors=[]))
+    db.add(FormalRecord(import_id=9, raw_record_id=1, person_code="P001",
+                        store_id_raw="0101", japan_date=date(2026, 9, 3), points=1))
+    db.add(PersonDailyStat(person_code="P001", ref_date=date(2026, 9, 3),
+                           records=1, p1=1, p2=0, points=1))
+    db.commit()
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+
+    assert period.record_payment(db, "2026-09", "P001", 1, paid_by=1) is True
+    row = db.query(PayrollPayment).filter_by(month="2026-09",
+                                             person_code="P001").first()
+    snapshot = row.amount
+    assert snapshot == 250          # 1 点 × 250 円（发放时快照）
+    # 再登记同一期 → 不覆盖（事实不可重写）
+    assert period.record_payment(db, "2026-09", "P001", 1) is False
+    assert db.query(PayrollPayment).filter_by(month="2026-09",
+                                              person_code="P001").count() == 1
+    # 重算后台账金额不变
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    assert db.query(PayrollPayment).filter_by(
+        month="2026-09", person_code="P001").first().amount == snapshot
+
+
+def test_paid_seqs_reads_ledger(db):
+    from app.services import period
+    from app.models import PayrollPayment
+    assert period.paid_seqs(db, "2026-09") == set()
+    db.add(PayrollPayment(month="2026-09", person_code="P001", seq=1,
+                          points=10, amount=2500))
+    db.commit()
+    assert period.paid_seqs(db, "2026-09") == {1}
+
+
+def test_unmark_removes_ledger_rows(db):
+    from app.services import period
+    from app.models import PayrollPayment, PayrollPeriodRow
+    db.add(PayrollPeriodRow(month="2026-09", person_code="P001",
+                            half1_amount=1000, half1_points=4))
+    db.commit()
+    n = period.mark_paid(db, "2026-09", 1, marked_by=1)
+    assert n == 1
+    assert db.query(PayrollPayment).count() == 1
+    removed = period.mark_paid(db, "2026-09", 1, unmark=True)
+    assert removed == 1 and db.query(PayrollPayment).count() == 0
+
+
+# ---------- 找平抵扣溯源（adjust_applied 必须指向来源记录）----------
+
+def test_payment_adjust_trace_points_to_source(db):
+    """抵扣金额带来源：type=carry + 上月找平行 id + 对账任务 id，且剩余递延自洽。"""
+    from datetime import date
+    from app.models import (FormalRecord, ImportFile, PayrollPayment,
+                            PayrollPeriodRow, Person, PersonDailyStat,
+                            ReconTask)
+    from app.services import period
+
+    db.add(Person(code="P001", display_name="甲"))
+    db.add(ImportFile(id=9, file_name="f.xlsx", file_sha256="y", file_size=1,
+                      stored_path="/tmp/y.xlsx", uploaded_by=1, status="parsed",
+                      parsed_sheets=[], ignored_sheets=[], warnings=[], errors=[]))
+    db.add(FormalRecord(import_id=9, raw_record_id=1, person_code="P001",
+                        store_id_raw="0101", japan_date=date(2026, 9, 20), points=20))
+    db.add(PersonDailyStat(person_code="P001", ref_date=date(2026, 9, 20),
+                           records=1, p1=20, p2=0, points=20))
+    # 8月：对账任务 + 找平结转 -10000
+    db.add(ReconTask(id=88, kind="monthly_v3", status="done", created_by=1,
+                     params={"month": "2026-08", "kind": "daily_records",
+                             "version": 1, "current": True}, summary={}))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, diff_points=-40,
+                            prev_adjust_amount=-10000))
+    db.commit()
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    r9 = db.query(PayrollPeriodRow).filter_by(month="2026-09",
+                                              person_code="P001").first()
+    # 9月上半月先发（对账未到 → 无抵扣），下半月发 → 吸收结转
+    period.record_payment(db, "2026-09", "P001", 1, amount=0)
+    period.record_payment(db, "2026-09", "P001", 2, amount=r9.half2_amount,
+                          points=20)
+    db.commit()
+    p2 = db.query(PayrollPayment).filter_by(month="2026-09", person_code="P001",
+                                            seq=2).first()
+    assert p2.adjust_applied < 0                      # 有抵扣
+    assert p2.adjust_source_type == "carry"
+    assert p2.adjust_source_month == "2026-08"
+    assert p2.adjust_source_row_id is not None       # 指向 8 月找平行
+    assert p2.adjust_source_task_id == 88            # 指向 8 月对账任务
+    # 自洽：抵扣 + 剩余递延 == 结转总额
+    assert p2.adjust_applied + (p2.adjust_leftover or 0) == -10000
+
+
+# ---------- 找平表（进度为存储事实，FIFO 回收）----------
+
+def test_adjust_table_tracks_progress_fifo(db):
+    """找平行记录 原始/已找平/剩余/状态/结清时间；回收按 FIFO 冲最早未结清。"""
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    from app.services import period
+
+    # 两笔找平：7月 -3000（更早）、8月 -10000
+    db.add(PayrollPeriodRow(month="2026-07", person_code="P001",
+                            diff_amount=-3000, prev_adjust_amount=-3000))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, prev_adjust_amount=-10000))
+    db.commit()
+    period.sync_adjusts(db, "2026-07")
+    period.sync_adjusts(db, "2026-08")
+    rows = db.query(PayrollAdjust).filter_by(person_code="P001").order_by(
+        PayrollAdjust.source_month).all()
+    assert [r.adjust_amount for r in rows] == [-3000, -10000]
+    assert all(r.status == "in_progress" for r in rows)
+
+    # 回收 5000 → FIFO：先冲 7月 3000（结清），再冲 8月 2000
+    period.allocate_settlement(db, "P001", -5000)
+    db.commit()
+    a7, a8 = rows
+    db.refresh(a7); db.refresh(a8)
+    assert a7.settled_amount == -3000 and a7.remaining == 0
+    assert a7.status == "settled" and a7.settled_at is not None
+    assert a8.settled_amount == -2000 and a8.remaining == -8000
+    assert a8.status == "in_progress"
+
+    # settlement_status 读表（不再链条推导）
+    st = period.settlement_status(db, "2026-08")
+    row = next(x for x in st["rows"] if x["person_code"] == "P001")
+    assert row["source"] == "payroll_adjusts"
+    assert row["remaining"] == -8000
+
+
+# ---------- 双向可查：发放 ↔ 找平 多对多 ----------
+
+def test_links_both_directions(db):
+    """一笔发放可冲多笔找平（FIFO 跨月）；一笔找平可查被哪几期回收。"""
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    from app.services import period
+
+    db.add(PayrollPeriodRow(month="2026-07", person_code="P001",
+                            diff_amount=-3000, prev_adjust_amount=-3000))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-10000, prev_adjust_amount=-13000))
+    db.commit()
+    period.sync_adjusts(db, "2026-07")
+    period.sync_adjusts(db, "2026-08")
+    a7 = db.query(PayrollAdjust).filter_by(source_month="2026-07").first()
+    a8 = db.query(PayrollAdjust).filter_by(source_month="2026-08").first()
+
+    # 一笔发放吸收 5000 → FIFO：7月 3000 + 8月 2000
+    period.record_payment(db, "2026-09", "P001", 2, amount=5000, points=20)
+    from app.models import PayrollPayment
+    pay = db.query(PayrollPayment).filter_by(month="2026-09",
+                                             person_code="P001").first()
+
+    # 正向：发放 → 找平（两条）
+    fwd = period.payment_adjust_links(db, pay.id)
+    assert len(fwd) == 2
+    assert [x["source_month"] for x in fwd] == ["2026-07", "2026-08"]
+    assert [x["amount"] for x in fwd] == [-3000, -2000]
+
+    # 反向：找平 → 发放
+    rev7 = period.adjust_payment_links(db, a7.id)
+    assert len(rev7) == 1 and rev7[0]["payment_id"] == pay.id
+    assert rev7[0]["amount"] == -3000 and rev7[0]["seq"] == 2
+    assert a7.status == "settled"
+
+    # settlement_status 行内含 recovered_by
+    st = period.settlement_status(db, "2026-08")
+    row = next(x for x in st["rows"] if x["person_code"] == "P001")
+    assert row["adjust_id"] == a8.id
+    assert row["recovered_by"][0]["amount"] == -2000
+
+
+def test_carry_survives_skipped_month(db):
+    """某月无工资行时，找平债务不能丢（结转以找平表为准，而非上月行）。"""
+    from app.models import PayrollAdjust, PayrollPeriodRow
+    from app.services import period
+
+    db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
+                            diff_amount=-6500, prev_adjust_amount=-6500))
+    db.commit()
+    period.sync_adjusts(db, "2026-08")
+    a = db.query(PayrollAdjust).filter_by(person_code="P001").first()
+    assert a.remaining == -6500
+
+    # 9月：该人**没有**工资行（无数据）→ 债务应留在找平表
+    period.sync_period_table(db, "2026-09")
+    db.commit()
+    assert db.query(PayrollPeriodRow).filter_by(
+        month="2026-09", person_code="P001").first() is None
+    assert a.remaining == -6500          # 债务未丢
+
+    # 10月：该人回来了（有 10000 工资）→ 应吸收 6500
+    db.add(PayrollPeriodRow(month="2026-10", person_code="P001",
+                            half1_points=40, half1_amount=10000,
+                            half1_bonus=0, half2_amount=0, half2_bonus=0,
+                            updated_at=__import__("datetime").datetime.utcnow()))
+    db.commit()
+    period.sync_period_table(db, "2026-10")
+    db.commit()
+    r10 = db.query(PayrollPeriodRow).filter_by(month="2026-10",
+                                               person_code="P001").first()
+    # 10月上半月 10000 ≥ 6500 → 全额吸收 → 结转 0
+    assert r10.prev_adjust_amount == 0

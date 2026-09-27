@@ -1,0 +1,116 @@
+# -*- coding: utf-8 -*-
+"""WorkBuddy MCP 服务入口（独立进程，streamable HTTP）。
+
+启动方式（cwd 由 WorkBuddy 客户端决定，故必须自举 sys.path，见计划坑 2）：
+    VISIT_MCP_TOKEN=... DATABASE_URL=... python mcp_service/server.py
+
+退出码：配置不合法 -> 2（spec §8 T2 的"空配置启动非零退出"）。
+"""
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from mcp.server.mcpserver import MCPServer            # noqa: E402  (坑 3)
+from mcp.server.transport_security import (           # noqa: E402
+    TransportSecuritySettings,
+)
+
+from mcp_service import config                        # noqa: E402
+from mcp_service.auth import BearerAuthMiddleware      # noqa: E402
+from mcp_service.reqlog import RequestLogger          # noqa: E402
+
+
+def transport_security_settings(public_host: str | None = None) -> TransportSecuritySettings:
+    """保留 DNS-rebinding 保护 + 显式白名单（spec §5.6）。
+
+    SDK 行为：allowed_hosts 支持 "host:*" 通配端口；缺失 Origin 放行。
+    意外 Origin 是本地连通的典型静默失败源——它会被记录进日志（Task 2）。
+    """
+    hosts = ["127.0.0.1:*", "localhost:*"]
+    if public_host:
+        hosts.append(f"{public_host}:*")
+        hosts.append(public_host)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=[],
+    )
+
+
+def build_server() -> MCPServer:
+    """构造 MCPServer 并注册工具。
+
+    必须由 build_app 在 config.load() 之后调用（config 校验先于任何 app.* import）。
+    """
+    from mcp_service import tools  # 延迟 import：tools 依赖 app.* 的能力层
+    mcp = MCPServer(name="visit-settle-mcp", version="0.1.0")
+    tools.register(mcp)
+    return mcp
+
+
+def build_app(settings: config.McpSettings, public_host: str | None = None):
+    mcp = build_server()
+    app = mcp.streamable_http_app(
+        streamable_http_path="/mcp",
+        stateless_http=False,                     # P0 默认有状态；生产多副本再启用
+        transport_security=transport_security_settings(public_host),
+    )
+    # RFC 9728：受保护资源（MCP 服务）在自己的 origin 上提供元数据，
+    # 声明授权服务器在别处（web 应用）。避免客户端跨 origin 取元数据时校验失败。
+    from starlette.responses import JSONResponse
+
+    async def _protected_resource(request):
+        import os
+        iss = (os.environ.get("VISIT_OAUTH_ISSUER") or "").strip().rstrip("/")
+        if not iss:
+            host = (os.environ.get("VISIT_MCP_PUBLIC_HOST") or "").strip()
+            iss = f"https://{host}" if host else "http://localhost"
+        base = (os.environ.get("VISIT_OAUTH_RESOURCE") or "").strip().rstrip("/")
+        if not base:
+            base = f"http://{settings.host}:{settings.port}"
+        return JSONResponse({
+            "resource": base,
+            "authorization_servers": [iss],
+            "scopes_supported": ["read", "write"],
+            "bearer_methods_supported": ["header"],
+        })
+
+    app.add_route("/.well-known/oauth-protected-resource", _protected_resource)
+
+    log = RequestLogger(settings.log_path)
+    return BearerAuthMiddleware(app, log=log, bootstrap_token=settings.token)
+
+
+def main() -> int:
+    # --stdio：由 WorkBuddy 直接拉起本地进程（无需 HTTP/端口/Token）
+    stdio = "--stdio" in sys.argv
+    settings = config.load(require_token=not stdio)   # 必须先于任何 app.* import（坑 1）
+
+    if stdio:
+        mcp = build_server()
+        print("[mcp] stdio 模式启动（由客户端拉起）", file=sys.stderr)
+        mcp.run(transport="stdio")
+        return 0
+
+    import uvicorn
+
+    app = build_app(settings, public_host=settings.public_host)
+    print(f"[mcp] listening on http://{settings.host}:{settings.port}/mcp")
+    if settings.public_host:
+        print(f"[mcp] 反代域名白名单: {settings.public_host}（Host 校验通过）")
+    print(f"[mcp] DATABASE_URL = {settings.database_url}")
+    print(f"[mcp] log = {settings.log_path}")
+    uvicorn.run(app, host=settings.host, port=settings.port,
+                log_level="info", access_log=False)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except config.ConfigError as exc:
+        print(f"[mcp] 启动被拒绝：{exc}", file=sys.stderr)
+        raise SystemExit(2)

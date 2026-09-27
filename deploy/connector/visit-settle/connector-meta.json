@@ -1,0 +1,9 @@
+{
+  "name": "visit-settle",
+  "display_name": "巡店结算",
+  "description": "巡店结算系统：上传巡店/对账文件、查询绩效与薪资、找平与发放核对、导出发薪表。按登录用户身份授权（员工只见本人数据）。",
+  "auth_mode": "oauth",
+  "auth_note": "无需在连接器里填写 Token。连接时客户端会自动发起 OAuth 授权（浏览器登录巡店系统账号），凭据由客户端安全保存并按用户隔离。",
+  "icon": "icon.svg",
+  "version": "0.2.0"
+}

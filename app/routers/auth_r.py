@@ -2,7 +2,7 @@
 """登录/登出/仪表盘 路由。登录 POST 豁免 CSRF；其余页面见各 chunk。"""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.templating import get_templates
 from sqlalchemy import select
@@ -15,6 +15,20 @@ from app.models import ImportFile, User
 
 router = APIRouter()
 templates = get_templates()
+
+
+def _safe_next(next_url: str) -> str:
+    """登录回跳白名单：仅允许站内相对路径（拒绝 //、空白、外部 URL）。
+
+    OAuth 授权流程（/oauth/authorize?...）经 `/login?next=` 回跳（规格 §五.7）。
+    """
+    n = (next_url or "").strip()
+    if not n or n.startswith("//") or "\\" in n \
+            or any(ch.isspace() for ch in n):
+        return "/"
+    if not n.startswith("/"):
+        return "/"
+    return n
 
 
 def _set_session(response, uid: int):
@@ -46,27 +60,32 @@ def csrf_ok(request: Request, posted: str) -> bool:
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
+def login_page(request: Request, next: str = Query("")):
     if read_session_token(request.cookies.get(SESSION_COOKIE)):
-        return RedirectResponse("/", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+        return RedirectResponse(_safe_next(next), status_code=302)
+    return templates.TemplateResponse("login.html",
+                                      {"request": request, "error": None,
+                                       "next": next})
 
 
 @router.post("/login")
 def login_submit(username: str = Form(...), password: str = Form(...),
+                 next: str = Form(""),
                  request: Request = None, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.username == username)).scalars().first()
     if user is None or not verify_password(password, user.password_hash):
         return templates.TemplateResponse("login.html",
                                           {"request": request,
-                                           "error": "用户名或密码错误"},
+                                           "error": "用户名或密码错误",
+                                           "next": next},
                                           status_code=401)
     if not user.can_login:
         return templates.TemplateResponse("login.html",
                                           {"request": request,
-                                           "error": "该账号当前不可登录（停用/离职），请联系管理员"},
+                                           "error": "该账号当前不可登录（停用/离职），请联系管理员",
+                                           "next": next},
                                           status_code=401)
-    resp = RedirectResponse("/", status_code=302)
+    resp = RedirectResponse(_safe_next(next), status_code=302)
     _set_session(resp, user.id)
     return resp
 

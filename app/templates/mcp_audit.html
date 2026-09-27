@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ t('MCP 审计') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('MCP 调用审计') }}</h1>
+  <span class="sub">{{ t('WorkBuddy 调用记录：每次调用（含被拒绝）一条，两阶段写入先记 ok=NULL 再回填。') }}</span></div>
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/mcp-audit"
+        style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <label>{{ t('按人') }}
+      <select name="user_id" style="padding:.2rem .4rem">
+        <option value="">{{ t('全部人员') }}</option>
+        {% for u in users %}
+        <option value="{{ u.id }}" {% if f_user_id == u.id|string %}selected{% endif %}>{{ u.username }}（{{ u.display_name }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>{{ t('工具') }} <input name="tool" value="{{ f_tool }}" placeholder="visit_..."
+           style="padding:.2rem .4rem"></label>
+    <label>{{ t('从') }} <input type="date" name="from" value="{{ f_from }}"
+           style="padding:.2rem .4rem"></label>
+    <label>{{ t('到') }} <input type="date" name="to" value="{{ f_to }}"
+           style="padding:.2rem .4rem"></label>
+    <button class="btn" style="padding:.2rem .7rem" type="submit">{{ t('过滤') }}</button>
+  </form>
+</div>
+
+<div class="card">
+  <p class="hint" style="margin:0 0 .4rem">{{ t('共') }} {{ total }} {{ t('条') }}</p>
+  {% if not rows %}<p class="empty">{{ t('暂无审计记录') }}</p>
+  {% else %}
+  <div class="tbl-wrap"><table class="grid-tbl">
+    <tr><th>{{ t('时间') }}</th><th>{{ t('人') }}</th><th>{{ t('工具') }}</th><th>{{ t('结果') }}</th><th class="num">{{ t('耗时(ms)') }}</th><th>{{ t('参数摘要') }}</th></tr>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>{% set u = user_map.get(row.user_id) %}{% if u %}{{ u.username }}{% else %}—{% endif %}</td>
+      <td><code>{{ row.tool or '—' }}</code></td>
+      <td>{% if row.ok is true %}<span class="pill ok">{{ t('ok') }}</span>
+          {% elif row.ok is false %}<span class="pill err">{{ row.error_code or 'ERROR' }}</span>
+          {% else %}<span class="pill run">{{ t('进行中') }}</span>{% endif %}</td>
+      <td class="num">{% if row.duration_ms is not none %}{{ row.duration_ms }}{% else %}—{% endif %}</td>
+      <td class="hint" style="max-width:340px;word-break:break-all">{{ (row.params_json or '—')[:120] }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+  {% if pages > 1 %}
+  <p class="hint">{{ t('第') }}{{ page }}/{{ pages }} {{ t('页') }}
+    {% if page > 1 %}<a href="?page={{ page-1 }}&user_id={{ f_user_id }}&tool={{ f_tool }}&from={{ f_from }}&to={{ f_to }}">{{ t('上一页') }}</a>{% endif %}
+    {% if page < pages %}<a href="?page={{ page+1 }}&user_id={{ f_user_id }}&tool={{ f_tool }}&from={{ f_from }}&to={{ f_to }}">{{ t('下一页') }}</a>{% endif %}
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

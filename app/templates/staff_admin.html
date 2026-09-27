@@ -4,6 +4,18 @@
 <div class="page-title"><h1>{{ t('员工管理') }}</h1>
   <span class="sub">{{ t('员工账号随数据导入自动开通：文件里出现新的人员编号即自动开户（登录名按姓名自动生成）。这里只做改状态、设置语言与重置口令；员工永不删除——离职也只改状态，历史与核算数据完整保留。') }}</span></div>
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if new_token %}
+<div class="card" style="border-color:var(--ok)">
+  <b style="color:var(--ok)">{{ t('新 Token 已生成（只显示一次）') }}</b>
+  <div class="msg warn" style="margin:.3rem 0">{{ t('请立即复制到 WorkBuddy 连接器；关闭后无法再查看。') }}</div>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <code id="new-token" style="background:#f5f7fb;border:1px dashed var(--line);padding:.3rem .6rem;word-break:break-all">{{ new_token }}</code>
+    <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('new-token').innerText);this.textContent='{{ t('已复制') }}'">{{ t('复制') }}</button>
+  </div>
+  {% if new_token_name %}<div class="hint" style="margin-top:.3rem">{{ t('名称') }}：{{ new_token_name }}</div>{% endif %}
+</div>
+<script>history.replaceState(null, '', '/staff-admin');</script>
+{% endif %}
 <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">
   <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin">{{ t('全部') }} {{ counts.values()|sum }}</a>
   {% for s, label in labels.items() %}
@@ -21,7 +33,7 @@
   </form>
 </div>
 <div class="tbl-wrap"><table class="grid-tbl">
-  <tr><th>{{ t('登录名') }}</th><th>{{ t('员工姓名') }}</th><th>{{ t('人员编号') }}</th><th>{{ t('状态') }}</th><th>{{ t('界面语言') }}</th><th>{{ t('操作') }}</th></tr>
+  <tr><th>{{ t('登录名') }}</th><th>{{ t('员工姓名') }}</th><th>{{ t('人员编号') }}</th><th>{{ t('状态') }}</th><th>{{ t('界面语言') }}</th><th>{{ t('操作') }}</th><th>{{ t('MCP Token') }}</th></tr>
   {% for u in staff %}
   <tr>
     <td>{{ u.username }}</td>
@@ -59,8 +71,49 @@
         <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('重置口令') }}</button>
       </form>
     </td>
+    <td>
+      {% set toks = tokens_by_user.get(u.id, []) %}
+      <details {% if toks %}open{% endif %}>
+        <summary class="hint">{{ toks|length }} {{ t('个') }}</summary>
+        {% if u.status != 'active' or not u.is_active %}
+        <div class="msg warn" style="margin:.2rem 0;font-size:.85rem">{{ t('该员工 token 已随之失效（仅「在岗」且账号启用时 token 有效）。') }}</div>
+        {% endif %}
+        {% for tk in toks %}
+        <div style="border-top:1px dashed var(--line);padding:.3rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <code>{{ tk.row.token_prefix }}…</code>
+          <span class="hint">{{ tk.row.scopes }}</span>
+          <span class="{{ tk.pill }}">{{ t(tk.label) }}</span>
+          {% if tk.row.last_used_at %}<span class="hint">{{ tk.row.last_used_at.strftime('%Y-%m-%d %H:%M') }}</span>{% else %}<span class="hint">{{ t('从未使用') }}</span>{% endif %}
+          {% if tk.row.revoked_at is none %}
+          <form method="post" action="/staff-admin/{{ u.id }}/tokens/{{ tk.row.id }}/revoke" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <button class="btn danger" style="padding:.1rem .5rem" type="submit"
+                    onclick="return confirm('{{ t('确认吊销该 Token？吊销后立即失效，不可恢复。') }}')">{{ t('吊销') }}</button>
+          </form>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="hint">{{ t('暂无 Token') }}</div>
+        {% endfor %}
+        <form method="post" action="/staff-admin/{{ u.id }}/tokens/issue"
+              style="display:flex;gap:.3rem;align-items:center;flex-wrap:wrap;margin-top:.4rem">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input name="name" placeholder="{{ t('Token 名称') }}" maxlength="128"
+                 style="width:120px;padding:.2rem .4rem">
+          <select name="scope" style="padding:.2rem .3rem">
+            <option value="read">{{ t('只读') }}</option>
+            <option value="read,write">{{ t('读写') }}</option>
+          </select>
+          <select name="days" style="padding:.2rem .3rem">
+            <option value="90">{{ t('90 天') }}</option>
+            <option value="">{{ t('永久') }}</option>
+          </select>
+          <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('代发') }}</button>
+        </form>
+      </details>
+    </td>
   </tr>
-  {% else %}<tr><td colspan="6" class="empty">{{ t('没有符合条件的员工') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7" class="empty">{{ t('没有符合条件的员工') }}</td></tr>{% endfor %}
 </table></div>
 <div class="card" style="margin-top:.8rem">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('状态说明') }}</h2>

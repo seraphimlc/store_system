@@ -16,6 +16,27 @@ from openpyxl import load_workbook as _xlsx_load
 from store_settle.models import ParsedRow
 from store_settle.rules import YES_NO_BLANK, parse_modified_jst, parse_submitter
 
+def json_safe(value):
+    """把 Excel 单元格值转成可写入 JSON 列的类型。
+
+    openpyxl 对日期/时间单元格返回 datetime/date/time 对象，直接塞进
+    `raw_records.original_row`（JSON 列）会在入库时报
+    "Object of type datetime is not JSON serializable" —— 整份文件上传失败。
+    这里统一转成 ISO 字符串（Decimal→float、bytes→str），其余原样返回。
+    """
+    import datetime as _dt
+    from decimal import Decimal
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return value.isoformat(sep=" ") if isinstance(value, _dt.datetime) else value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 _TEMPLATE = "STORE_TASK_EXCEL_SHEET"
 _DEPLOY_ALIASES = ("Deploy New A+POSM", "NEW A+ POSM")
 # Visible 语义列：8 月用 "A+ POSM Visible"(YES/NO/空)；9 月起部分文件用 "Review status"
@@ -285,7 +306,7 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
             submitter_code=submitter_code,
             record_id_raw=cell_raw(row, opt_cols["Record ID"]),
             visible_raw=vis_raw, deploy_raw=dep_raw,
-            original_row=list(row)[:ncols],
+            original_row=[json_safe(v) for v in list(row)[:ncols]],
         )
         res.rows.append(pr)
 

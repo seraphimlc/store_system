@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "visit-settle": {
+      "type": "streamableHttp",
+      "url": "${VISIT_BASE_URL}/mcp",
+      "timeout": 300000
+    }
+  }
+}
