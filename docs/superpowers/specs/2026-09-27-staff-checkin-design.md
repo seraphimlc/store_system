@@ -5,6 +5,8 @@
 > 相关文档：`docs/谷歌地图API申请流程.md`、`docs/阿里云OSS开通清单.md`。
 > 评审修订要点（v2）：对齐键统一为「主档实体 id」且两侧都走 head-master 解析；`unaligned` 判定前移；
 > 点数取值范围与"不校验"的边界写清；补 `purged_at`/配置项/接口契约/删除级联/分页/阶段划分。
+> 评审修订要点（v3，第二轮）：**主档链会变** → 存值读出来必须重解析 head（§5.1/§7/§8）；对比预过滤遇同名多主档
+> 同样不绑（§8.2）；补 `PhotoPurged`、照片 `created_at` 索引、管理端取图路由、`lru_cache` 测试陷阱、无瓦片可用。
 
 ## 1. 目标与原则
 
@@ -125,7 +127,9 @@ ORM 类名：`Checkin`（`staff_checkins`）/ `CheckinPhoto`（`staff_checkin_ph
 索引：`(person_code, ref_date)`、`(ref_date)`、`(store_master_id)`。
 **不做唯一约束**（允许同人同日同店重复，页面只软提示）——轻管控原则。
 
-> **对齐键的语义（v1 写错过，务必按此实现）**：`store_entities.master_id` 是 **Integer 实体 id**（NOT NULL、自指）；`store_entities.master_store_id` 是 **String，存的是主档的 `store_id_raw`**（从档冗余字段）。两者不可混用。本设计**统一用「head master 的实体 id」作对齐键**，`master_store_id` 不参与对比。
+> **对齐键的语义（v1 写错过，务必按此实现）**：`store_entities.master_id` 是 **Integer 实体 id**（NOT NULL、自指）；`store_entities.master_store_id` 是 **String，存的是主档的 `store_id_raw`**（从档冗余字段）。两者不可混用。本设计**统一用「head master 的实体 id」作对齐键**，`master_store_id` 不参与对比（实测有 7 行合并后仍是自己的 raw，**不要用它**）。
+>
+> **主档链会变**：上传入表时的 `auto_merge_exact` 会持续合并主档（实测库内已有 444 条 `store_merge_logs`）。因此**任何"存下来的主档 id"都可能已不是当前 head**——`staff_checkins.store_master_id`、`checkin_stores.store_master_id` 在读出来用于对比或搜索时（§7 层①、§8 的 C 侧），**必须再跑一次 `head_master_id()`**（按实体 id 缓存）。打卡侧对主链**只读不回写**。
 
 ### 5.2 `staff_checkin_photos` 照片
 
@@ -139,7 +143,7 @@ ORM 类名：`Checkin`（`staff_checkins`）/ `CheckinPhoto`（`staff_checkin_ph
 | `sha256` | String(64) NOT NULL default "" | 内容摘要（去重/取证预留） |
 | `captured_live` | Boolean NOT NULL default True | 是否摄像头直拍（false=设备降级为相册选择） |
 | `purged_at` | DateTime | 过期清理留痕（非空＝对象已删，库里保留记录） |
-| `created_at` | DateTime NOT NULL | **GC 保留期以本字段为准**（不是 `ref_date`，也不是打卡提交时间） |
+| `created_at` | DateTime NOT NULL, **Index** | **GC 保留期以本字段为准**（不是 `ref_date`，也不是打卡提交时间）；建索引让 24 个月清理的扫描便宜 |
 
 **一张打卡 1..N 张照片，服务端强制 ≥1**（0 张直接 400）。
 
@@ -211,6 +215,8 @@ class LocalStorage(StorageBackend)     # 根目录 = settings.upload_dir / "chec
 class AliyunOssStorage(StorageBackend) # oss2，**延迟导入**（未装/未配不得影响启动）
 def get_storage() -> StorageBackend    # 由 settings.checkin_storage 决定（local|oss）
 
+class PhotoPurged(Exception):          # 对象已被 GC 删除（purged_at 非空）→ 路由层转 410
+
 class CheckinPhotoStore:               # 业务封装
     def save(self, ck, orig_bytes, thumb_bytes, captured_live) -> CheckinPhoto
     def read(self, photo, thumb=False) -> bytes      # purged → raise PhotoPurged
@@ -241,7 +247,7 @@ class CheckinPhotoStore:               # 业务封装
 
 | 层 | 条件 | 结果 |
 |---|---|---|
-| ① 点位簿命中 | `checkin_stores.name_norm` 全等 | 直接沿用该点位已存的 `store_entity_id / store_master_id`（`method=point_hit`） |
+| ① 点位簿命中 | `checkin_stores.name_norm` 全等 | 沿用该点位已存的 `store_entity_id`，主档 id 取 `head_master_id(该点位 store_master_id)`（**点位簿的值可能因后续合并而 stale，必须重解析**）（`method=point_hit`） |
 | ② 主档全等 | `store_entities.name_norm` 全等，且该名字组内**恰好一个 head master** | 绑定之（`method=name_exact`） |
 | ②′ 同名歧义 | 该名字组内 head master **多于一个**（实测 430 组） | **不绑定**（`method=ambiguous`），对比时归入 `unaligned` |
 | ③ 模糊 | `difflib.SequenceMatcher`，候选 = SQL 子串检索 top-30 | `int(ratio()*100) ≥ VISIT_CHECKIN_MATCH_THRESHOLD`（默认 92）→ 取排序第一（`method=name_fuzzy`）；低于阈值 → 不绑定（`method=none`） |
@@ -255,14 +261,18 @@ class CheckinPhotoStore:               # 业务封装
 **对齐键 = head master 实体 id**，两侧用**同一条解析规则**：
 
 - F 侧：`formal_records.store_id_raw` → `store_entities.store_id_raw` 命中实体 → `head_master_id()`。
-- C 侧：`staff_checkins.store_master_id`（建卡时已解析到 head master）。
+- C 侧：`staff_checkins.store_master_id` → **读取时再跑一次 `head_master_id()`**（建卡时解析过一次，但此后主档可能被 `auto_merge_exact` 合并，存值会 stale；按实体 id 缓存避免重复走链）。
+- `F` 侧的「当月」定义：`formal_records.japan_date ∈ [月初, 下月初)`（`formal_records` 无 month 列，且 `japan_date` 可空——**空日期的行不属于任何月份**，被自然排除）。
 - 必须这样，否则同一家店的从档/多写法（空格、全角）会各算一家——即 8 月多算 4 条点数那个老坑。
 - **不做 `store_id_raw` 兜底**：若某条 F 的 `store_id_raw` 在 `store_entities` 中查不到（实测 29755 条中 0 条），该行计入 `summary.data_gap` 并在页面上提示，**不静默合并**。
 
 **算法（逐人逐月，顺序不可调换）**
 
 1. 取 `F`（该人该月正式记录）与 `C`（该人该月打卡，**排除 `voided`**）。
-2. **未对齐预过滤**（必须在第 5 步之前）：对 `store_master_id` 为空的 `C`，尝试与同人同月的 `F` 做「打卡店名 norm == 实体 name_norm」全等匹配 → 命中则视为已对齐（`align_method=name_eq`）；不命中 → `unaligned`，**移出后续步骤**。
+2. **未对齐预过滤**（必须在第 5 步之前）：对 `store_master_id` 为空的 `C`，尝试与同人同月的 `F` 做「打卡店名 norm == 实体 name_norm」全等匹配：
+   - **恰好命中一个 head master** → 视为已对齐（`align_method=name_eq`）；
+   - **命中多个 head master**（实测 942 组重名、430 组含多个 head master）或未命中 → **不绑定**，归入 `unaligned`，**移出后续步骤**。
+   （与 §7 ②′ 同一原则：歧义一律不绑，宁可标出来也不猜。）
 3. **同日同主档配对**：
    - C 侧先按 `(ref_date, master_key)` 聚合（同人同日同店多次打卡 → 点数取**合计**，行内列出全部 `checkin_id`）；
    - F 侧同键多条同样取**合计**；
@@ -313,6 +323,7 @@ class CheckinPhotoStore:               # 业务封装
 1. **定位**：进页面请求 `navigator.geolocation.getCurrentPosition`（`enableHighAccuracy: true`，8s 超时）。
    成功 → 地图落 pin + 显示 `±Xm`；pin **可拖拽**、**可点击地图落点**（拖/点后显示「已手动校正」）。
    失败/被拒 → 地图退到该员工最近一次打卡坐标（无则东京默认视图），提示「未取到定位，可在地图上手动选点」，**不阻塞提交**。
+   **地图瓦片加载不出来（离线/内网/CDN 不可达）时，点击落点与拖拽仍必须可用**——降级渲染不得依赖瓦片，底图失败只影响观感。
 2. **店名**：输入 ≥2 字符、300ms 防抖 → **先请求本地** `/my/checkin/search`；
    本地无结果且存在 `mapsKey` → 调 Google Places（Autocomplete + Place Details 取 `place_id/地址/坐标`）→ 选中回填店名/地址/place_id/坐标 + 「用这个位置校正地图」按钮。
    也支持**完全不搜、直接手输店名**。
@@ -345,6 +356,7 @@ class CheckinPhotoStore:               # 业务封装
 | `GET /checkins` | 列表：月 / 人 / 仅补录 筛选，`page`/`per`(默认 50) 分页；列 日期·员工·店名·点数·坐标·缩略图·提交时刻·补录·作废；动作 作废/恢复 |
 | `POST /checkins/{id}/void` | 作废（reason，留痕）→ 303 重定向（沿用现有表单风格） |
 | `POST /checkins/{id}/unvoid` | 恢复 |
+| `GET /checkins/photo/{pid}` | 鉴权取图（管理员，`?thumb=1`；`purged_at` 非空 → 410） |
 | `GET /checkins/compare` | 对比清单（月 / 人筛选，五类差异 + 汇总卡，分页） |
 | `GET /checkins/export?kind=list\|compare` | Excel 导出（openpyxl，复用现有 `StreamingResponse` 写法） |
 
@@ -375,7 +387,7 @@ class CheckinPhotoStore:               # 业务封装
 10. **SQLite/PG 双兼容**：Text 默认值用 `sa.text("('')")`；`lat/lng` 用 `Float`（PG→double precision）。
 11. **CSRF**：multipart/fetch 提交同样需要 `csrf_token`（复用 `csrf_ok`）。
 12. **地图 JS 只在有 key 时加载**：无 key 时不得请求任何谷歌域；Leaflet 降级也按需动态注入（避免无谓的 CDN 依赖）。
-13. **测试隔离**：单测必须把 `UPLOAD_DIR` 指向 `tmp_path`，否则 `LocalStorage` 会把图片写进仓库 `./data/uploads`。
+13. **测试隔离**：单测必须把 `UPLOAD_DIR` 指向 `tmp_path`，否则 `LocalStorage` 会把图片写进仓库 `./data/uploads`。注意 `get_settings()` 带 `@lru_cache`，**必须在首次取 Settings 之前设置环境变量**（或先 `get_settings.cache_clear()`），否则改了 env 也不生效。
 
 ## 14. 测试策略
 
@@ -389,7 +401,7 @@ class CheckinPhotoStore:               # 业务封装
 | 照片 | 伪造扩展名（内容非图片）被 magic bytes 拒绝；超大被拒；`thumbs` 数量不匹配 → 400 |
 | 鉴权 | 本人可取图；他人 403；管理员可取图；未登录跳登录；`purged_at` 非空 → 410 |
 | 越权 | 员工访问 `/checkins`、`/checkins/compare` 被拦（中间件 + 路由双层） |
-| 对齐 | 点位簿命中；主档全等（组内唯一主档）；**同名多主档 → 不绑定（ambiguous）且未写 `store_entities`**；模糊 ≥ 阈值自动绑；低于阈值不绑；链式主档解析到 head |
+| 对齐 | 点位簿命中；主档全等（组内唯一主档）；**同名多主档 → 不绑定（ambiguous）且未写 `store_entities`**；模糊 ≥ 阈值自动绑；低于阈值不绑；链式主档解析到 head；**先建打卡 → 再合并主档 → 对比仍能配对成功（stale 值读时重解析）** |
 | 搜索 | 本地搜索命中点位簿与主档；空/无结果返回空数组 |
 | 对比 | 五类差异各自可构造并断言（**含 `unaligned` 非零**）；`voided` 打卡被排除；±1 天归入 `date_only`；同人同日同店重复打卡按合计比对；一致率计算（`matched_cnt=0` → `—`） |
 | 删除 | 删除打卡后其照片行与存储对象一并消失（无孤儿） |
@@ -423,6 +435,7 @@ class CheckinPhotoStore:               # 业务封装
 | 24 个月保留依赖宿主 cron | 脚本故障 → 无限累积 | OSS 侧生命周期 900 天兜底（客户文档已给）；GC 孤儿扫描可兜应用层删除失败 |
 | 定位精度差（室内/地下） | 坐标不可用 | 只作留痕与展示，**不参与任何准入判断**；可拖拽/点选校正 |
 | 打卡表增长（~15k 行/月） | 列表页变慢 | 列表与对比均分页；索引已覆盖 `(person_code, ref_date)` 与 `(ref_date)` |
+| **主档持续合并**（实测 444 条合并日志） | 打卡存的主档 id 会 stale → 明明同一家店却报成"两边都没有" | 读时统一重解析到 head（§5.1/§8）；测试覆盖"先打卡后合并"场景 |
 
 **未验证假设**（实现后用真实数据检验）：①打卡店名与文件店名归一化后的全等率；②±1 天窗口是否够（跨零点打卡占比）；③真实打卡点数与正式表点数的一致率；④`unaligned` 的实际占比。
 
