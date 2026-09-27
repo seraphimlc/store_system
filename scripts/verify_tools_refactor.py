@@ -89,11 +89,30 @@ async def main():
     print(f"    管理员: {', '.join(n.replace('visit_', '') for n in admin_tools)}")
     print(f"    员工:   {', '.join(n.replace('visit_', '') for n in staff_tools)}")
 
-    # ---- 3 旧名确实消失 ----
+    # ---- 3 旧名确实消失（列表 + 实际可调用性双重确认）----
     leftover = [n for n in OLD_NAMES if n in admin_tools]
-    print(f"[3] 旧工具名残留 {len(leftover)} 个 {'✅' if not leftover else '❌ ' + str(leftover)}")
+    print(f"[3a] 旧工具名残留 {len(leftover)} 个 "
+          f"{'✅' if not leftover else '❌ ' + str(leftover)}")
     if leftover:
         fails.append(f"旧工具名仍在列表：{leftover}")
+    # 注意：MCP 客户端对"未知工具"返回 is_error=True（**不抛异常**），
+    # 所以必须看 is_error，不能用 try/except 判断（否则误报"仍可调用"）。
+    callable_old = []
+    async with streamable_http_client(URL, http_client=create_mcp_http_client(
+            headers={"Authorization": f"Bearer {tok_a}"}, timeout=30)) as (r, w):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            for n in OLD_NAMES[:4]:
+                try:
+                    res = await s.call_tool(n, {"month": "2026-08"})
+                    if not res.is_error:
+                        callable_old.append(n)
+                except Exception:      # noqa: BLE001  部分实现会抛异常，同样算"不可用"
+                    pass
+    print(f"[3b] 旧工具名仍可调用 {len(callable_old)} 个 "
+          f"{'✅' if not callable_old else '❌ ' + str(callable_old)}")
+    if callable_old:
+        fails.append(f"旧工具名仍可调用：{callable_old}")
 
     # ---- 5 写闸门（无确认语应被拒）----
     async with streamable_http_client(URL, http_client=create_mcp_http_client(
