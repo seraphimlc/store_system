@@ -50,6 +50,18 @@
 3. 确认 Bucket 读写权限为「私有」
 4. 交付渠道：**不要微信/邮件明文**，用密码管理器或一次性链接
 
+### 7. 我方配置方式（对应环境变量）
+
+| 环境变量 | 值来源 |
+|---|---|
+| `VISIT_CHECKIN_STORAGE` | `oss`（本地开发用 `local`，**生产只用 `oss`**） |
+| `VISIT_OSS_ENDPOINT` | 例 `oss-ap-northeast-1.aliyuncs.com` |
+| `VISIT_OSS_BUCKET` | 客户创建的 bucket 名 |
+| `VISIT_OSS_AK` / `VISIT_OSS_SK` | RAM 子账号 AccessKey |
+| `VISIT_OSS_PREFIX` | 默认 `checkins/` |
+
+配在线上 `deploy/.env`，**不进代码库**；改完重启 web 容器即生效。相关开关：`VISIT_CHECKIN_RETENTION_MONTHS`（默认 24）、`VISIT_CHECKIN_MAX_PHOTOS` / `VISIT_CHECKIN_MAX_PHOTO_MB`（默认 5 / 5）。
+
 ---
 
 ## 二、日本語手順書（お客様にお渡しする版）
