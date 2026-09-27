@@ -24,7 +24,7 @@
 |---|---|---|
 | D1 | 打卡粒度 | 一人 × 一店 × 一次，含定位、店名、点数、门头照 |
 | D2 | 不参与薪资 | 不动现有表；仅新增 3 张打卡表 |
-| D3 | 对比做到"逐店自动对齐" | 打卡时即尝试对齐店铺主档；后台生成差异清单（分类见 §8，共五类） |
+| D3 | 对比做到"逐店自动对齐" | 打卡时即尝试对齐店铺主档；差异清单由**服务端按请求计算**（`GET /checkins/compare`，无后台定时任务；分类见 §8，共五类） |
 | D4 | 真实性约束 = 轻约束 + 全留痕 | 不做防作弊；**必须拍照**；补录只记不判 |
 | D5 | 地图 | Google Maps（Maps JavaScript API + Places API (New)），**客户自行申请 key**；本地优先 + 谷歌兜底 |
 | D6 | 纠错规则 | 当天（JST）可自助编辑/删除；跨天只能新增补录；管理员可作废（留痕） |
@@ -196,7 +196,9 @@ def match_store(db, name_raw) -> MatchResult       # 三层对齐（§7）
 def search_local(db, q, limit=20) -> list[dict]    # 点位簿优先 → 主档；给前端候选
 def list_checkins(db, *, person_code=None, month=None, date=None, only_backfill=False,
                   include_voided=False, page=1, per=50) -> dict   # {"rows": [...], "total": n, "page": p}
-def touch_point(db, *, name_raw, place_id="", address="", lat=None, lng=None) -> CheckinPoint
+def touch_point(db, *, name_raw, place_id="", address="", lat=None, lng=None,
+                store_entity_id=None, store_master_id=None) -> CheckinPoint
+    # 对齐结果由 create_checkin 传入并落进点位簿（点位簿必须带对齐信息，见 §5.3/§7 ①）
 ```
 
 ### 6.2 `app/services/checkin_compare.py`
@@ -222,6 +224,8 @@ class CheckinPhotoStore:               # 业务封装
     def read(self, photo, thumb=False) -> bytes      # purged → raise PhotoPurged
     def delete(self, photo) -> None
     # 键规范：checkins/YYYY/MM/{person_code}/{uuid}.jpg 与 .../{uuid}_thumb.jpg（YYYY/MM 取 ref_date）
+    # rel_path 存**完整对象键**（已含 oss_prefix）；AliyunOssStorage 不再额外拼 prefix；
+    # LocalStorage 根目录 = settings.upload_dir，直接用同一 rel_path —— 避免出现 checkins/checkins/
 ```
 
 ### 6.4 配置项（`app/config.py` 追加，沿用 `_env_int` / `os.environ.get` 风格）
@@ -247,7 +251,7 @@ class CheckinPhotoStore:               # 业务封装
 
 | 层 | 条件 | 结果 |
 |---|---|---|
-| ① 点位簿命中 | `checkin_stores.name_norm` 全等 | 沿用该点位已存的 `store_entity_id`，主档 id 取 `head_master_id(该点位 store_master_id)`（**点位簿的值可能因后续合并而 stale，必须重解析**）（`method=point_hit`） |
+| ① 点位簿命中 | `checkin_stores.name_norm` 全等**且该点位已有 `store_master_id`**（为空说明当初没对上 → **继续走 ②/③**，不得拿 `None` 去调 `head_master_id`） | 沿用该点位已存的 `store_entity_id`，主档 id 取 `head_master_id(该点位 store_master_id)`（**点位簿的值可能因后续合并而 stale，必须重解析**）（`method=point_hit`） |
 | ② 主档全等 | `store_entities.name_norm` 全等，且该名字组内**恰好一个 head master** | 绑定之（`method=name_exact`） |
 | ②′ 同名歧义 | 该名字组内 head master **多于一个**（实测 430 组） | **不绑定**（`method=ambiguous`），对比时归入 `unaligned` |
 | ③ 模糊 | `difflib.SequenceMatcher`，候选 = SQL 子串检索 top-30 | `int(ratio()*100) ≥ VISIT_CHECKIN_MATCH_THRESHOLD`（默认 92）→ 取排序第一（`method=name_fuzzy`）；低于阈值 → 不绑定（`method=none`） |
@@ -360,6 +364,7 @@ class CheckinPhotoStore:               # 业务封装
 | `GET /checkins/compare` | 对比清单（月 / 人筛选，五类差异 + 汇总卡，分页） |
 | `GET /checkins/export?kind=list\|compare` | Excel 导出（openpyxl，复用现有 `StreamingResponse` 写法） |
 
+- **管理端列表用 `include_voided=True`**（页面提供「含作废」筛选，作废行置灰展示、可在原位恢复）；§14 里"默认列表不含作废"指的是**员工端与默认筛选**。
 - 对比清单**纯只读**：无任何写动作（作废只在列表页）。
 - 导出照片列给**登录后可点开的链接**（本站鉴权路由），不放 OSS 直链。
 - 权限：中间件 + 路由 `role != admin` 双层（沿用现有约定）。
@@ -386,7 +391,7 @@ class CheckinPhotoStore:               # 业务封装
 9. **迁移 head**：`down_revision = "f7e8d9c0b1a2"`（当前唯一 head）。
 10. **SQLite/PG 双兼容**：Text 默认值用 `sa.text("('')")`；`lat/lng` 用 `Float`（PG→double precision）。
 11. **CSRF**：multipart/fetch 提交同样需要 `csrf_token`（复用 `csrf_ok`）。
-12. **地图 JS 只在有 key 时加载**：无 key 时不得请求任何谷歌域；Leaflet 降级也按需动态注入（避免无谓的 CDN 依赖）。
+12. **地图 JS 只在有 key 时加载**：无 key 时不得请求任何谷歌域。降级显示**可选**：能加载瓦片就用 Leaflet/OSM（按需动态注入），加载不到就退化为**无底图的裸 pin 选点器**（点击/拖拽落点 + 坐标文本）——两种降级都必须满足 §9.1 与 §15.2。
 13. **测试隔离**：单测必须把 `UPLOAD_DIR` 指向 `tmp_path`，否则 `LocalStorage` 会把图片写进仓库 `./data/uploads`。注意 `get_settings()` 带 `@lru_cache`，**必须在首次取 Settings 之前设置环境变量**（或先 `get_settings.cache_clear()`），否则改了 env 也不生效。
 
 ## 14. 测试策略
