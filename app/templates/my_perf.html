@@ -36,18 +36,7 @@
 <div class="card">
   <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem">
     <h2 style="font-size:1rem;margin:0">{{ month }} {{ t('每日明细') }}</h2>
-    <form method="get" action="/my/perf" style="display:flex;gap:.5rem;align-items:center">
-      <input type="hidden" name="month" value="{{ month }}">
-      <label>{{ t('日期') }}
-        <select name="date" onchange="this.form.submit()">
-          <option value="">{{ t('全部日期') }}</option>
-          {% for d in dates %}
-          <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <noscript><button class="btn" style="padding:.2rem .6rem" type="submit">{{ t('查看') }}</button></noscript>
-    </form>
+    <span class="hint">{{ t('当月全部逐日列出') }}</span>
   </div>
   {% if not daily %}<p class="empty">{{ t('本月暂无逐日数据') }}</p>
   {% else %}
@@ -64,6 +53,15 @@
       <td class="num"><b>{{ d.points }}</b></td>
     </tr>
     {% endfor %}
+    {% if daily_totals %}
+    <tr class="totals">
+      <td>{{ t('合计') }}（{{ daily|length }} {{ t('天') }}）</td>
+      <td class="num">{{ daily_totals.records }}</td>
+      <td class="num">{{ daily_totals.p1 }}</td>
+      <td class="num">{{ daily_totals.p2 }}</td>
+      <td class="num">{{ daily_totals.points }}</td>
+    </tr>
+    {% endif %}
   </table></div>
   {% endif %}
 </div>

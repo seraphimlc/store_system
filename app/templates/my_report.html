@@ -41,31 +41,58 @@
 
 {% if chart and chart.series.show %}
 <div class="card" data-testid="trend-card" style="margin-top:1.2rem">
-  <h2 style="font-size:1.05rem;margin:.1rem 0 .3rem">{{ t('自报趋势') }}
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .5rem">{{ t('自报趋势') }}
     <span class="hint">（{{ chart.series.start }} ～ {{ chart.series.end }} ·
       {{ t('已填报') }} {{ chart.series.filled }} {{ t('天') }} ·
       {{ t('合计') }} {{ chart.series.total }}）</span></h2>
+  <div style="display:flex;gap:.9rem;align-items:center;flex-wrap:wrap;margin-bottom:.2rem;font-size:.82rem">
+    <span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2f5bea;vertical-align:middle"></i>
+      {{ t('1点店铺数') }}</span>
+    <span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e8862a;vertical-align:middle"></i>
+      {{ t('2点店铺数') }}</span>
+    <span class="hint">{{ t('虚线=今天；缺填报的日子曲线断开') }}</span>
+  </div>
   <svg viewBox="0 0 {{ chart.geo.width }} {{ chart.geo.height }}"
        style="width:100%;height:auto;display:block" data-testid="trend-svg"
-       role="img" aria-label="{{ t('最近 30 天自报趋势') }}">
-    <line x1="{{ chart.geo.pad_x }}" y1="{{ chart.geo.grid }}"
-          x2="{{ chart.geo.width - chart.geo.pad_x }}" y2="{{ chart.geo.grid }}"
-          stroke="var(--line)" stroke-width="1"></line>
-    <line x1="{{ chart.geo.pad_x }}" y1="{{ chart.geo.base }}"
-          x2="{{ chart.geo.width - chart.geo.pad_x }}" y2="{{ chart.geo.base }}"
-          stroke="var(--line)" stroke-width="1"></line>
-    {% for pts in chart.geo.segments_p1 %}
-    <polyline points="{{ pts }}" fill="none" stroke="#2f5bea" stroke-width="2"
-              stroke-linejoin="round" stroke-linecap="round"></polyline>{% endfor %}
-    {% for pts in chart.geo.segments_p2 %}
-    <polyline points="{{ pts }}" fill="none" stroke="#e08a00" stroke-width="2"
-              stroke-linejoin="round" stroke-linecap="round"></polyline>{% endfor %}
-    {% for d in chart.geo.dots_p1 %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.2" fill="#2f5bea"></circle>{% endfor %}
-    {% for d in chart.geo.dots_p2 %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.2" fill="#e08a00"></circle>{% endfor %}
+       role="img" aria-label="{{ t('自报趋势') }}">
+    <defs>
+      <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#2f5bea" stop-opacity="0.22"/>
+        <stop offset="100%" stop-color="#2f5bea" stop-opacity="0.02"/>
+      </linearGradient>
+      <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#e8862a" stop-opacity="0.20"/>
+        <stop offset="100%" stop-color="#e8862a" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    {% for tk in chart.geo.ticks %}
+    <line x1="{{ chart.geo.pad_l }}" y1="{{ tk.y }}"
+          x2="{{ chart.geo.width - chart.geo.pad_r }}" y2="{{ tk.y }}"
+          stroke="{% if tk.v == 0 %}var(--line){% else %}#eef1f7{% endif %}" stroke-width="1"></line>
+    <text x="{{ chart.geo.pad_l - 5 }}" y="{{ tk.y + 3.5 }}" text-anchor="end"
+          font-size="9.5" fill="#8a93a8">{{ tk.v }}</text>
+    {% endfor %}
+    {% for pts in chart.geo.areas_p1 %}<path d="{{ pts }}" fill="url(#g1)" stroke="none"></path>{% endfor %}
+    {% for pts in chart.geo.areas_p2 %}<path d="{{ pts }}" fill="url(#g2)" stroke="none"></path>{% endfor %}
+    <line x1="{{ chart.geo.today_x }}" y1="{{ chart.geo.pad_t }}"
+          x2="{{ chart.geo.today_x }}" y2="{{ chart.geo.base_y }}"
+          stroke="#b9c2d6" stroke-width="1" stroke-dasharray="3 3"></line>
+    {% for pts in chart.geo.paths_p2 %}
+    <path d="{{ pts }}" fill="none" stroke="#e8862a" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round"></path>{% endfor %}
+    {% for pts in chart.geo.paths_p1 %}
+    <path d="{{ pts }}" fill="none" stroke="#2f5bea" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round"></path>{% endfor %}
+    {% for d in chart.geo.dots_p2 %}
+    <circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.6" fill="#fff" stroke="#e8862a" stroke-width="1.8">
+      <title>{{ d.date }} · {{ t('2点店铺数') }} {{ d.v }}</title></circle>{% endfor %}
+    {% for d in chart.geo.dots_p1 %}
+    <circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.6" fill="#fff" stroke="#2f5bea" stroke-width="1.8">
+      <title>{{ d.date }} · {{ t('1点店铺数') }} {{ d.v }}</title></circle>{% endfor %}
+    {% for tk in chart.geo.x_ticks %}
+    <text x="{{ tk.x }}" y="{{ chart.geo.height - 8 }}" text-anchor="middle"
+          font-size="9.5" fill="#8a93a8">{{ tk.label }}</text>{% endfor %}
   </svg>
-  <div class="hint" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem">
-    <span><b style="color:#2f5bea">━</b> {{ t('1点店铺数') }}　<b style="color:#e08a00">━</b> {{ t('2点店铺数') }}　{{ t('纵轴上限') }} {{ chart.geo.max }}</span>
-  </div>
 </div>
 {% elif chart and chart.series.filled > 0 %}
 <div class="hint" style="margin-top:1.2rem" data-testid="trend-hint">
@@ -87,10 +114,12 @@
   <tr><th>{{ t('日期') }}</th><th>{{ t('星期') }}</th><th>{{ t('状态') }}</th><th>{{ t('担当区域') }}</th>
       <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th></tr>
   {% for r in view.days %}
-  <tr {% if r.empty %}style="color:var(--muted);background:#fbfcfe"{% endif %}>
+  <tr {% if r.future %}style="color:#aab;background:#fcfcfe"{% elif r.empty %}style="color:var(--muted);background:#fbfcfe"{% endif %}>
     <td>{{ r.date }}</td>
     <td class="hint">{{ t(wd_labels[r.wd]) }}</td>
-    <td>{% if r.empty %}<span class="pill err">{{ t('未填报') }}</span>{% else %}<span class="pill ok">{{ t('已填报') }}</span>{% endif %}</td>
+    <td>{% if r.future %}<span class="pill">{{ t('未到') }}</span>
+        {% elif r.empty %}<span class="pill err">{{ t('未填报') }}</span>
+        {% else %}<span class="pill ok">{{ t('已填报') }}</span>{% endif %}</td>
     <td>{{ r.area or '—' }}</td>
     <td class="num">{{ r.p1 if not r.empty else '—' }}</td>
     <td class="num">{{ r.p2 if not r.empty else '—' }}</td>

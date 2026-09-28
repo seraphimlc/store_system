@@ -264,6 +264,46 @@ def latest_done(db, start=None, end=None):
     return q.order_by(StaffReportAnalysis.id.desc()).first()
 
 
+def file_coverage(db):
+    """已导入文件在正式表里的日期覆盖范围 (min, max)；没有任何正式记录 → (None, None)。
+
+    这是"离线数据"的边界：区间超出它就没有系统侧数字可比。
+    """
+    from sqlalchemy import func
+
+    from app.models import FormalRecord
+    row = (db.query(func.min(FormalRecord.japan_date),
+                    func.max(FormalRecord.japan_date)).first())
+    return (row[0], row[1]) if row and row[0] and row[1] else (None, None)
+
+
+def available_periods(db, *, limit: int = 12) -> list:
+    """**员工端可看的核对区间**：同一区间只取最新一份，且**整段落在已导入文件的覆盖范围内**。
+
+    核对结果依赖**文件导入**（离线数据）：没有文件覆盖的区间不列出来——
+    否则会出现"整段都是自报有/系统无"的假区间（用户 2026-09-28 明确）。
+    例：文件只到 9/16，则"9/16 ~ 9/30"这种跨出覆盖范围的区间不上架。
+    """
+    cov_start, cov_end = file_coverage(db)
+    rows = (db.query(StaffReportAnalysis)
+            .filter(StaffReportAnalysis.status == "done")
+            .order_by(StaffReportAnalysis.id.desc()).all())
+    seen, out = set(), []
+    for a in rows:
+        key = (a.period_start, a.period_end)
+        if key in seen:                       # 同区间重复生成过 → 只留最新一份
+            continue
+        seen.add(key)
+        if cov_start is None:
+            continue                          # 一条正式记录都没有 → 没有可核对区间
+        if a.period_start < cov_start or a.period_end > cov_end:
+            continue                          # 跨出文件覆盖范围 → 不列（没有离线数据可比）
+        out.append(a)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def latest_for(db, start, end):
     """该区间最近一条报告（任意状态，用于页面展示进度/失败）。"""
     return (db.query(StaffReportAnalysis)

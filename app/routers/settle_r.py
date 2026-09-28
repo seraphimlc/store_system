@@ -55,9 +55,8 @@ def finalize_file(fid: int, request: Request,
 @router.get("/my/perf", response_class=HTMLResponse)
 def my_perf(request: Request,
             user: Optional[User] = Depends(require_login),
-            db: Session = Depends(get_db), month: str = "",
-            date: str = ""):
-    """员工看自己当月的绩效：日明细（日期可选）+ 月汇总（只含正式表有效店）。"""
+            db: Session = Depends(get_db), month: str = ""):
+    """员工看自己当月的绩效：**当月全部逐日明细**（不再按日期筛选）+ 月汇总。"""
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
     from app.services import perf
@@ -76,14 +75,17 @@ def my_perf(request: Request,
         return templates.TemplateResponse("my_perf.html", {
             "request": request, "current_user": user, "month": "",
             "months": months, "daily": [], "summary": None,
-            "date": "", "dates": []})
-    daily = [d for d in perf.daily_perf(db, month)
-             if d["code"] == code]
-    dates = sorted({str(d["date"]) for d in daily})
-    if not date or date not in dates:
-        date = dates[-1] if dates else ""
-    if date:
-        daily = [d for d in daily if str(d["date"]) == date]
+            "daily_totals": None})
+    # 当月全部逐日明细（升序），不做日期筛选
+    daily = sorted((d for d in perf.daily_perf(db, month) if d["code"] == code),
+                   key=lambda x: str(x["date"]))
+    daily_totals = None
+    if daily:
+        daily_totals = {
+            "records": sum(int(d.get("records") or 0) for d in daily),
+            "p1": sum(int(d.get("p1") or 0) for d in daily),
+            "p2": sum(int(d.get("p2") or 0) for d in daily),
+            "points": sum(int(d.get("points") or 0) for d in daily)}
     me = next((m for m in perf.month_perf(db, month)
                if m["code"] == code), None)
     summary = None
@@ -98,7 +100,7 @@ def my_perf(request: Request,
     return templates.TemplateResponse("my_perf.html", {
         "request": request, "current_user": user, "month": month,
         "months": months, "daily": daily, "summary": summary,
-        "date": date, "dates": dates})
+        "daily_totals": daily_totals})
 
 
 # ---------------- V3 绩效 / 工资 ----------------

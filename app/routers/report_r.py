@@ -145,9 +145,7 @@ def my_report_feedback(request: Request,
     from app.i18n import CURRENT_LANG
     from app.models import StaffReportAnalysis
     from app.services import daily_report, report_ai
-    done = (db.query(StaffReportAnalysis)
-            .filter(StaffReportAnalysis.status == "done")
-            .order_by(StaffReportAnalysis.id.desc()).limit(24).all())
+    done = report_ai.available_periods(db)          # 去重 + 只列有文件覆盖的区间
     analysis = None
     if aid:
         analysis = db.get(StaffReportAnalysis, aid)
@@ -244,6 +242,11 @@ def staff_reports_compare(request: Request,
     from app.i18n import CURRENT_LANG
     from app.services import report_ai
     analysis = report_ai.latest_for(db, s, e)
+    cov_start, cov_end = report_ai.file_coverage(db)
+    coverage_warn = ""
+    if cov_end and e > cov_end:
+        coverage_warn = ("该区间的结束日（%s）超出已导入文件的覆盖范围（最后一天 %s），"
+                         "多出的天数系统侧没有数据" % (e, cov_end))
     report = {}
     if analysis is not None and (analysis.payload or {}).get("by_lang"):
         by = analysis.payload["by_lang"]
@@ -254,6 +257,7 @@ def staff_reports_compare(request: Request,
         "staff_opts": _staff_options(db), "msg": msg, "err": err,
         "analysis": analysis, "report": report,
         "ai_enabled": report_ai.report_ai_enabled(),
+        "coverage_warn": coverage_warn, "cov_end": cov_end,
     })
 
 

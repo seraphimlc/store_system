@@ -288,7 +288,8 @@ def test_month_days_leaves_gap_rows(client):
                                 p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
     db.commit()
     v = daily_report.month_days(db, "P1", today.strftime("%Y-%m"), today=today)
-    assert v["visible_days"] == today.day            # 1 号到今天
+    assert v["visible_days"] == 30                   # 整月（2026-09 有 30 天）
+    assert sum(1 for d in v["days"] if d["future"]) == 30 - today.day  # 未来日子标未到
     assert v["days"][0]["date"] == first and v["days"][0]["empty"] is False
     assert v["filled"] == len([d for d in v["days"] if not d["empty"]]) == 2
     empty = [d for d in v["days"] if d["empty"]]
@@ -357,24 +358,60 @@ def test_chart_series_window_and_threshold(client):
     assert s2["filled"] == 3 and s2["show"] is True
 
 
+def _series(days):
+    if not days:
+        return {"days": [], "filled": 0, "start": None, "end": None, "p1": 0,
+                "p2": 0, "total": 0, "max": 0, "min_filled": 3, "show": False}
+    return {"days": days, "filled": sum(1 for d in days if d["filled"]),
+            "start": days[0]["date"], "end": days[-1]["date"],
+            "p1": 0, "p2": 0, "total": 0,
+            "max": max([d["p1"] for d in days] + [d["p2"] for d in days] or [0]),
+            "min_filled": 3, "show": True}
+
+
 def test_chart_geometry_breaks_on_gap(client):
-    """缺数据的日子让曲线断开（分段），点只画在有数据的日子。"""
+    """缺数据的日子让曲线断开（分段），点只画在有数据的日子；两条曲线独立。"""
     from datetime import date
     from app.services import daily_report
-    s = {"days": [{"date": date(2026, 9, 1), "filled": True, "p1": 1, "p2": 0, "total": 1},
-                  {"date": date(2026, 9, 2), "filled": True, "p1": 3, "p2": 0, "total": 3},
-                  {"date": date(2026, 9, 3), "filled": False, "p1": 0, "p2": 0, "total": 0},
-                  {"date": date(2026, 9, 4), "filled": True, "p1": 2, "p2": 0, "total": 2},
-                  {"date": date(2026, 9, 5), "filled": True, "p1": 4, "p2": 0, "total": 4}],
-         "filled": 4, "start": date(2026, 9, 1), "end": date(2026, 9, 5),
-         "p1": 10, "p2": 0, "total": 10, "max": 4, "min_filled": 3, "show": True}
+    s = _series([{"date": date(2026, 9, 1), "filled": True, "p1": 1, "p2": 0, "total": 1},
+                 {"date": date(2026, 9, 2), "filled": True, "p1": 3, "p2": 0, "total": 3},
+                 {"date": date(2026, 9, 3), "filled": False, "p1": 0, "p2": 0, "total": 0},
+                 {"date": date(2026, 9, 4), "filled": True, "p1": 2, "p2": 0, "total": 2},
+                 {"date": date(2026, 9, 5), "filled": True, "p1": 4, "p2": 0, "total": 4}])
     g = daily_report.chart_geometry(s, width=320, height=120)
-    assert len(g["segments_p1"]) == 2                     # 3 号断开 → 两段
-    assert len(g["dots_p1"]) == 4                         # 只有 4 天有数据
-    assert g["max"] == 4
-    # 最大值贴在顶部（y = pad_y）
-    top = min(float(d["y"]) for d in g["dots_p1"])
-    assert abs(top - g["pad_y"]) < 0.01
+    assert len(g["paths_p1"]) == 2 and len(g["areas_p1"]) == 2   # 3 号断开 → 两段
+    assert len(g["dots_p1"]) == 4                                 # 只有 4 天有数据
+    assert all(" C" in p for p in g["paths_p1"])                  # 平滑曲线（贝塞尔）
+    assert g["dots_p1"][0]["date"] == "2026-09-01"                # 悬停提示带日期
+
+
+def test_chart_geometry_axes(client):
+    """坐标轴：纵轴好看的上限 + 3 条刻度；横轴最多 4 个 MM-DD 标签；今天虚线。"""
+    from datetime import date, timedelta
+    from app.services import daily_report
+    d0 = date(2026, 9, 20)
+    days = [{"date": d0 + timedelta(days=i), "filled": True, "p1": i + 1,
+             "p2": 0, "total": i + 1} for i in range(9)]      # 最大 9 → 上限抬到 10
+    g = daily_report.chart_geometry(_series(days))
+    assert g["top"] == 10 and [tk["v"] for tk in g["ticks"]] == [10, 5, 0]
+    assert g["ticks"][0]["y"] == g["top_y"] and g["ticks"][-1]["y"] == g["base_y"]
+    assert 2 <= len(g["x_ticks"]) <= 4
+    assert g["x_ticks"][0]["label"] == "09-20" and g["x_ticks"][-1]["label"] == "09-28"
+    assert g["today_x"] == g["x_ticks"][-1]["x"]
+    # 数据最大值 9 → 落在 y(9)，刻度上限 10 的线在它上方
+    y9 = g["pad_t"] + g["plot_h"] * (1 - 9 / g["top"])
+    assert abs(min(float(d["y"]) for d in g["dots_p1"]) - y9) < 0.3
+    assert min(float(d["y"]) for d in g["dots_p1"]) > g["top_y"]
+
+
+def test_chart_geometry_empty_and_single_point(client):
+    """空数据 → empty；只有一天 → 只画点、不画线。"""
+    from datetime import date
+    from app.services import daily_report
+    assert daily_report.chart_geometry(_series([]))["empty"] is True
+    g = daily_report.chart_geometry(_series(
+        [{"date": date(2026, 9, 1), "filled": True, "p1": 2, "p2": 1, "total": 3}]))
+    assert g["paths_p1"] == [] and len(g["dots_p1"]) == 1
 
 
 def test_my_report_page_chart_visibility(client):
@@ -397,7 +434,9 @@ def test_my_report_page_chart_visibility(client):
     db.commit()
     html2 = client.get("/my/report").text
     assert 'data-testid="trend-svg"' in html2
-    assert "polyline" in html2
+    assert "<path" in html2 and 'stroke="#2f5bea"' in html2      # 平滑曲线 + 面积填充
+    assert "url(#g1)" in html2                                    # 渐变面积
+    assert "<title>" in html2                                     # 节点悬停数值
 
 
 # ---------- Chunk 4：对比与准确率 ----------
@@ -610,6 +649,25 @@ def _no_thread(monkeypatch):
     monkeypatch.setattr(report_ai.threading, "Thread", _T)
 
 
+def _seed_coverage(db, *dates, tag="cov"):
+    """造"已导入文件的覆盖范围"（正式记录）——区间可用性以它为准。"""
+    from app.models import FormalRecord, ImportFile, RawRecord
+    imp = ImportFile(file_name="t.xlsx", file_sha256="sha-" + tag, file_size=1,
+                     stored_path="/tmp/t.xlsx", uploaded_by=1, status="parsed")
+    db.add(imp)
+    db.commit()
+    for i, d in enumerate(dates):
+        raw = RawRecord(import_id=imp.id, sheet_name="s", excel_row=2 + i,
+                        store_id_raw="S%d" % (i + 1), submitter_raw="甲(1)",
+                        submitter_code="1")
+        db.add(raw)
+        db.commit()
+        db.add(FormalRecord(import_id=imp.id, raw_record_id=raw.id, person_code="1",
+                            store_id_raw=raw.store_id_raw, japan_date=d, points=1))
+    db.commit()
+    return imp
+
+
 def _seed_compare_data(db):
     from datetime import date
     if db.get(Person, "P1") is None:
@@ -745,6 +803,7 @@ def test_feedback_page_only_shows_own_data(client, monkeypatch):
     _seed_compare_data(db)
     _mock_ai(monkeypatch)
     _no_thread(monkeypatch)
+    _seed_coverage(db, date(2026, 9, 16), date(2026, 9, 17), tag="fb")
     a, _ = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
     report_ai.run_analysis(a.id)
     _seed_staff(client, person_code="P1", username="emp1", name="甲")
@@ -818,3 +877,29 @@ def test_chart_series_autofit_long_history(client):
     assert (s2["start"], s2["span_days"], s2["filled"]) == (
         s["start"], s["span_days"], s["filled"])
     assert s2["total"] == s["total"]                       # 40 天前那条不计
+
+
+def test_available_periods_dedupe_and_file_coverage(client):
+    """区间列表：同区间只留最新一份；没有文件覆盖（系统侧无数据）的区间不列。"""
+    from datetime import date
+    from app.models import StaffReportAnalysis
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_coverage(db, date(2026, 9, 16), date(2026, 9, 17))   # 覆盖 9/16~9/17
+    # 同区间两份（模拟重新生成过）+ 一份没有文件覆盖的区间（10 月）
+    db.add(StaffReportAnalysis(period_start=date(2026, 9, 16), period_end=date(2026, 9, 17),
+                               status="done", summary={}, payload={"by_lang": {"zh": {}}}))
+    db.add(StaffReportAnalysis(period_start=date(2026, 9, 16), period_end=date(2026, 9, 17),
+                               status="done", summary={}, payload={"by_lang": {"zh": {}}}))
+    # 跨出文件覆盖范围（9/16 之后）的区间 → 也不该列
+    db.add(StaffReportAnalysis(period_start=date(2026, 9, 16), period_end=date(2026, 9, 30),
+                               status="done", summary={}, payload={"by_lang": {"zh": {}}}))
+    db.add(StaffReportAnalysis(period_start=date(2026, 10, 1), period_end=date(2026, 10, 15),
+                               status="done", summary={}, payload={"by_lang": {"zh": {}}}))
+    # 失败的不算
+    db.add(StaffReportAnalysis(period_start=date(2026, 9, 16), period_end=date(2026, 9, 17),
+                               status="failed", summary={}, payload={}))
+    db.commit()
+    ps = report_ai.available_periods(db)
+    assert len(ps) == 1                                     # 去重 + 只留覆盖范围内的区间
+    assert (ps[0].period_start, ps[0].period_end) == (date(2026, 9, 16), date(2026, 9, 17))

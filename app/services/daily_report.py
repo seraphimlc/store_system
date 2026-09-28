@@ -137,38 +137,101 @@ def chart_series(db, person_code: str, *, days: int = CHART_DAYS,
             "show": filled >= CHART_MIN_FILLED}
 
 
-def chart_geometry(series: dict, *, width: int = 320, height: int = 120,
-                   pad_x: int = 10, pad_y: int = 12) -> dict:
-    """把序列转成 SVG 几何：两条线各自分段（**缺数据处断开**）+ 每个有数据日的点。"""
+_Y_STEPS = (2, 4, 6, 8, 10, 12, 16, 20, 24, 30, 40, 50, 60, 80,
+            100, 150, 200, 300, 500, 1000)
+
+
+def _nice_ceiling(v: int) -> int:
+    """把最大值抬到"好看的整数刻度上限"（例：7→8、9→10、30→30）。"""
+    v = max(1, int(v or 0))
+    for c in _Y_STEPS:
+        if c >= v:
+            return c
+    return v
+
+
+def _smooth(pts, tension: float = 0.32):
+    """把折线点转成平滑曲线路径（Cardinal 样条 → 三次贝塞尔），控制点夹在绘图区内。"""
+    if len(pts) < 2:
+        return ""
+    d = "M%.1f,%.1f" % pts[0]
+    for i in range(len(pts) - 1):
+        p0 = pts[i - 1] if i > 0 else pts[i]
+        p1, p2 = pts[i], pts[i + 1]
+        p3 = pts[i + 2] if i + 2 < len(pts) else p2
+        c1 = (p1[0] + (p2[0] - p0[0]) * tension / 2,
+              p1[1] + (p2[1] - p0[1]) * tension / 2)
+        c2 = (p2[0] - (p3[0] - p1[0]) * tension / 2,
+              p2[1] - (p3[1] - p1[1]) * tension / 2)
+        d += " C%.1f,%.1f %.1f,%.1f %.1f,%.1f" % (c1[0], c1[1], c2[0], c2[1],
+                                                  p2[0], p2[1])
+    return d
+
+
+def chart_geometry(series: dict, *, width: int = 360, height: int = 176,
+                   pad_l: int = 30, pad_r: int = 12, pad_t: int = 14,
+                   pad_b: int = 26) -> dict:
+    """把序列转成 SVG 几何（供模板直接渲染）：
+
+    - 纵轴：好看的上限 + 3 条刻度线（0 / 中 / 顶）与数值标签
+    - 横轴：最多 4 个日期标签（MM-DD）
+    - 两条曲线：**按连续段**平滑连线（缺数据处断开）+ 段内面积填充
+    - 每个有数据的日子一个圆点（`<title>` 里带数值，鼠标悬停可见）
+    - "今天"竖虚线
+    """
     days = series["days"]
     n = len(days)
-    mx = max(1, series["max"] or 1)
-    step = (width - 2 * pad_x) / max(n - 1, 1)
-    span = height - 2 * pad_y
+    if not n:
+        return {"width": width, "height": height, "empty": True}
+    top = _nice_ceiling(series["max"])
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    step_x = plot_w / max(n - 1, 1)
 
-    def xy(i, v):
-        return (pad_x + i * step, height - pad_y - (v / mx) * span)
+    def x_of(i):
+        return pad_l + i * step_x
 
-    out = {"width": width, "height": height, "pad_x": pad_x, "pad_y": pad_y,
-           "max": mx, "grid": pad_y, "base": height - pad_y,
-           "x_first": str(days[0]["date"]) if days else "",
-           "x_last": str(days[-1]["date"]) if days else ""}
+    def y_of(v):
+        return pad_t + plot_h - (min(max(v, 0), top) / top) * plot_h
+
+    geo = {"width": width, "height": height, "empty": False,
+           "pad_l": pad_l, "pad_r": pad_r, "pad_t": pad_t, "pad_b": pad_b,
+           "plot_w": plot_w, "plot_h": plot_h, "top": top,
+           "top_y": round(y_of(top), 1),
+           "mid_y": round(y_of(top / 2), 1), "mid_v": top // 2,
+           "base_y": round(y_of(0), 1), "span_days": n,
+           "today_x": round(x_of(n - 1), 1),
+           "ticks": [{"y": round(y_of(top), 1), "v": top},
+                     {"y": round(y_of(top / 2), 1), "v": top // 2},
+                     {"y": round(y_of(0), 1), "v": 0}],
+           "x_ticks": []}
+    idxs = sorted({0, n // 3, (2 * n) // 3, n - 1})
+    for i in idxs:
+        geo["x_ticks"].append({"x": round(x_of(i), 1),
+                               "label": str(days[i]["date"])[5:]})
     for key in ("p1", "p2"):
-        segs, dots, cur = [], [], []
+        paths, areas, dots = [], [], []
+        run = []
         for i, d in enumerate(days):
             if d["filled"]:
-                x, y = xy(i, d[key])
-                cur.append("%.1f,%.1f" % (x, y))
-                dots.append({"x": "%.1f" % x, "y": "%.1f" % y, "v": d[key]})
+                run.append((round(x_of(i), 1), round(y_of(d[key]), 1)))
+                dots.append({"x": round(x_of(i), 1), "y": round(y_of(d[key]), 1),
+                             "v": d[key], "date": str(d["date"])})
             else:
-                if len(cur) > 1:
-                    segs.append(" ".join(cur))
-                cur = []
-        if len(cur) > 1:
-            segs.append(" ".join(cur))
-        out["segments_" + key] = segs
-        out["dots_" + key] = dots
-    return out
+                if run:
+                    paths.append(_smooth(run))
+                    areas.append(_smooth(run) + " L%.1f,%.1f L%.1f,%.1f Z"
+                                 % (run[-1][0], geo["base_y"], run[0][0],
+                                    geo["base_y"]))
+                run = []
+        if run:
+            paths.append(_smooth(run))
+            areas.append(_smooth(run) + " L%.1f,%.1f L%.1f,%.1f Z"
+                         % (run[-1][0], geo["base_y"], run[0][0], geo["base_y"]))
+        geo["paths_" + key] = [p for p in paths if p]
+        geo["areas_" + key] = [a for a in areas if a]
+        geo["dots_" + key] = dots
+    return geo
 
 
 def month_days(db, person_code: str, month: str = "", *,
@@ -176,8 +239,8 @@ def month_days(db, person_code: str, month: str = "", *,
     """**本月逐日视图**：1 号到「今天或月末」，**缺填报的日子留空行**。
 
     员工要能看到"哪天没有数据"，所以这里不做"只列有记录的天"。
-    返回：{month, days:[{date, wd, empty, area, p1, p2, total}], filled,
-          visible_days, p1, p2, total}
+    返回：{month, days:[{date, wd, empty, future, area, p1, p2, total}], filled,
+          visible_days(整月天数), p1, p2, total}
     """
     today = today or jst_today()
     if not month:
@@ -185,26 +248,30 @@ def month_days(db, person_code: str, month: str = "", *,
     y, m = (int(x) for x in month.split("-"))
     start = date(y, m, 1)
     nxt = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
-    last_visible = min(nxt - timedelta(days=1), today)
-    rows = {}
-    if last_visible >= start:
-        rows = {r.report_date: r for r in db.query(StaffDailyReport).filter(
-            StaffDailyReport.person_code == person_code,
-            StaffDailyReport.report_date >= start,
-            StaffDailyReport.report_date <= last_visible).all()}
+    month_end = nxt - timedelta(days=1)
+    if start > today:
+        # 未开始的月份：不列一屏"未到"，直接空态
+        return {"month": month, "days": [], "filled": 0, "visible_days": 0,
+                "p1": 0, "p2": 0, "total": 0}
+    rows = {r.report_date: r for r in db.query(StaffDailyReport).filter(
+        StaffDailyReport.person_code == person_code,
+        StaffDailyReport.report_date >= start,
+        StaffDailyReport.report_date <= month_end).all()}
     days, filled = [], 0
     d = start
-    while d <= last_visible:
+    while d <= month_end:                     # **整月**列出：未来日子标 future（未到）
         r = rows.get(d)
+        future = d > today
         if r is not None:
             filled += 1
             days.append({"date": d, "wd": d.weekday(), "empty": False,
-                         "area": r.area or "", "p1": r.p1_cnt, "p2": r.p2_cnt,
-                         "total": r.total_cnt, "submitted_at": r.submitted_at})
+                         "future": future, "area": r.area or "", "p1": r.p1_cnt,
+                         "p2": r.p2_cnt, "total": r.total_cnt,
+                         "submitted_at": r.submitted_at})
         else:
             days.append({"date": d, "wd": d.weekday(), "empty": True,
-                         "area": "", "p1": 0, "p2": 0, "total": 0,
-                         "submitted_at": None})
+                         "future": future, "area": "", "p1": 0, "p2": 0,
+                         "total": 0, "submitted_at": None})
         d += timedelta(days=1)
     return {"month": month, "days": days, "filled": filled,
             "visible_days": len(days),
