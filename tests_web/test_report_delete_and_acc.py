@@ -297,3 +297,36 @@ def test_fingerprint_detects_moved_days(client):
                           {"person_code": "P1", "date": date(2026, 9, 2),
                            "kind": "both", "sys_total": 5, "rep_total": 5, "dt": 0}])
     assert report_ai.data_fingerprint(a) != report_ai.data_fingerprint(b)
+
+
+# ---------- 我的绩效：默认月份 = 最近有数据的月份 ----------
+
+def test_my_perf_defaults_to_latest_month(client):
+    """默认月份取**最近**有数据的月份（原先取了 months[-1]，即最老的月份）。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    _user(client, "emp1", "P1", "甲", role="staff")
+    for d, mo in ((date(2026, 7, 10), "2026-07"), (date(2026, 8, 10), "2026-08"),
+                  (date(2026, 9, 10), "2026-09")):
+        db.add(PersonDailyStat(person_code="P1", ref_date=d, records=3, p1=3,
+                               p2=0, points=3))
+    db.commit()
+    from app.models import MonthPerfRecord
+    for mo in ("2026-07", "2026-08", "2026-09"):      # 月绩效物化行（逐日明细在同一分支渲染）
+        db.add(MonthPerfRecord(month=mo, person_code="P1", records=3, p1=3,
+                               p2=0, points=3, salary=750))
+    db.commit()
+    db.close()
+    _login(client, "emp1")
+    from unittest import mock
+    from app.services import perf
+    with mock.patch.object(perf, "staff_visible_from", lambda db: ""):
+        html = client.get("/my/perf").text
+    assert "每日明细" in html
+    assert "2026-09-10" in html                  # 默认 = 最近月份（9 月）的逐日明细
+    assert "2026-08-10" not in html              # 不是 8 月
+    # 显式指定月份仍然可用
+    with mock.patch.object(perf, "staff_visible_from", lambda db: ""):
+        html8 = client.get("/my/perf?month=2026-08").text
+    assert "2026-08-10" in html8
+    db.close()

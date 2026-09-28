@@ -63,13 +63,14 @@ def my_perf(request: Request,
         return _denied()
     from app.services import perf
     code = user.person_code
-    months = perf.person_months(db, code)          # 物化表取月份（不拉正式表全表）
+    months = perf.person_months(db, code)          # 物化表取月份（倒序：最近的在前）
     # 员工可见起始月：员工端只显示该月及之后（管理员不受影响）
     svf = perf.staff_visible_from(db)
     if svf:
         months = [m for m in months if m >= svf]
     if month not in months:
-        month = months[-1] if months else ""
+        # 默认 = **最近有数据的月份**（months 是倒序 → [0]）
+        month = months[0] if months else ""
     if not month:
         # 无可显示月份（无记录或被起始月全部隐藏）：直接空态，不读全量数据
         return templates.TemplateResponse("my_perf.html", {
