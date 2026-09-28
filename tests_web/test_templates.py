@@ -71,11 +71,13 @@ def test_base_staff_bottom_tabs():
     staff = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"), request=_req())
     assert 'class="tabbar"' in staff and 'has-tabbar' in staff
-    assert 'data-testid="tab-perf"' in staff and 'data-testid="tab-report"' in staff
+    for tid in ("tab-perf", "tab-report", "tab-feedback"):
+        assert 'data-testid="%s"' % tid in staff
     assert 'href="/my/perf"' in staff and 'href="/my/report"' in staff
-    # 顶栏不再重复这两项（只保留次要项）
+    assert 'href="/my/report/feedback"' in staff
+    # 顶栏不再重复这三项
     assert staff.count('>我的绩效<') == 1 and staff.count('>每日填报<') == 1
-    assert "我的核对结果" in staff
+    assert staff.count('>核对结果<') == 1
     assert "我的 Token" not in staff          # 员工端 token 自助页已删除（2026-09-28）
     admin = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="管理员", role="admin"), request=_req())
@@ -87,16 +89,17 @@ def test_base_staff_tab_marks_active():
     class _URL:
         def __init__(self, path):
             self.path = path
-    for path, on_testid in (("/my/perf", "tab-perf"), ("/my/report", "tab-report")):
+    for path, on_testid in (("/my/perf", "tab-perf"), ("/my/report", "tab-report"),
+                            ("/my/report/feedback", "tab-feedback")):
         req = _req()
         req.url = _URL(path)
         html = _env().get_template("base.html").render(
             current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
         i = html.index('data-testid="%s"' % on_testid)
-        assert 'class="tab on"' in html[i - 40:i], path
-    # 核对页属于次要项 → 填报 Tab 不高亮
+        assert 'class="tab on"' in html[max(0, i - 90):i], path
+    # 核对页 → 填报 Tab 不能同时高亮（两个 Tab 互斥）
     req = _req()
     req.url = _URL("/my/report/feedback")
     html = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
-    assert 'class="tab on"' not in html
+    assert html.count('class="tab on"') == 1

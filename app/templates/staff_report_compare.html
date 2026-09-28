@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t('填报与对比') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>{{ t('自报 vs 系统（对比）') }}</h1>
-  <span class="sub">{{ t('系统侧 = 上传文件跑出的结果（只读）；自报侧 = 员工每日填报。所有数字由程序计算：Δ = 系统 − 自报（正=少报，负=多报）；准确率 = 1 − Σ|Δ| ÷ Σ系统（用绝对值之和，不抵消）；漏填报不计入准确率，单独看「应填未填」。') }}</span></div>
+<div class="page-title"><h1>{{ t('自报 vs 系统（对比）') }}</h1></div>
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
 {% if coverage_warn %}<div class="msg warn">{{ t(coverage_warn) }}</div>{% endif %}
@@ -63,7 +62,7 @@
   {% set qs = [] %}
   {% for code, blk in report.per_person.items() %}{% for q in blk.questions %}{% set _ = qs.append({'name': blk.name, 'code': code, 'q': q}) %}{% endfor %}{% endfor %}
   {% if qs %}
-  <details open><summary><b>{{ t('建议核实清单') }}</b>（{{ qs|length }}）<span class="hint">— {{ t('仅管理员可见，不展示给员工') }}</span></summary>
+  <details open><summary><b>{{ t('建议核实清单') }}</b>（{{ qs|length }}）</summary>
     <ul style="margin:.4rem 0 0;padding-left:1.2rem;line-height:1.9">
       {% for x in qs %}<li><b>{{ x.name }}</b>（{{ x.code }}）：{{ x.q }}</li>{% endfor %}
     </ul>
@@ -74,14 +73,12 @@
     <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
     <input type="hidden" name="person_code" value="{{ person_code }}">
     <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
-    <span class="hint">{{ t('同一份数据会直接复用已有报告，不会重复生成。') }}</span>
   </form>
   {% endif %}
 </div>
 {% elif ai_enabled %}
 <div class="card" style="margin-bottom:1rem">
   <b>{{ t('AI 分析报告') }}</b>
-  <div class="hint" style="margin:.3rem 0 .5rem">{{ t('数字已由程序算好；点下面按钮让模型据此写一份评语（谁报得准、谁偏差大、建议核实什么）。') }}</div>
   <form method="post" action="/staff-reports/compare/analyze">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">

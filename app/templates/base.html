@@ -16,7 +16,6 @@
           :aria-expanded="menu ? 'true' : 'false'">☰</button>
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
   {% if current_user.role == 'staff' %}
-  <a class="nav" href="/my/report/feedback"><b>{{ t('我的核对结果') }}</b></a>
   {% else %}
   <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
   <a class="nav" href="/files"><b>{{ t('文件上传') }}</b></a>
@@ -61,6 +60,11 @@
      href="/my/report" data-testid="tab-report">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
     <span>{{ t('每日填报') }}</span>
+  </a>
+  <a class="tab {% if _p.startswith('/my/report/feedback') %}on{% endif %}"
+     href="/my/report/feedback" data-testid="tab-feedback">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+    <span>{{ t('核对结果') }}</span>
   </a>
 </nav>
 {% endif %}

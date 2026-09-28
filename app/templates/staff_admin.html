@@ -18,17 +18,17 @@
 {% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
 <div class="card" style="margin-bottom:.8rem;padding:.6rem .8rem">
-  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('新建员工（新员工还没出现在文件里时用）') }}</h2>
+  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('新建员工') }}</h2>
   <form method="post" action="/staff-admin/create" id="ns-form"
         style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('员工编号（文件里的编号，必填）') }}
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('员工编号') }}
       <input name="code" id="ns-code" required maxlength="32" style="width:210px;padding:.25rem .4rem"></label>
     <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('姓名') }}
       <input name="name" id="ns-name" required maxlength="64" style="width:150px;padding:.25rem .4rem"></label>
-    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('登录名（可留空，姓名填好后自动生成）') }}
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('登录名') }}
       <input name="username" id="ns-username" maxlength="64" style="width:180px;padding:.25rem .4rem"></label>
-    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('初始口令（留空用系统默认）') }}
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('初始口令') }}
       <input name="password" maxlength="64" style="width:170px;padding:.25rem .4rem"></label>
     <button class="btn ghost" type="button" id="ns-gen">{{ t('AI 生成登录名') }}</button>
     <button class="btn" type="submit">{{ t('创建') }}</button>
@@ -169,7 +169,6 @@
     <li><b>{{ t('请假') }}</b>：{{ t('可登录、可照常确认与报问题（账号保留，回来不用重建）。') }}</li>
     <li><b>{{ t('停用') }}</b>：{{ t('暂时不能登录（如账号风险/长期未用），随时可改回。') }}</li>
     <li><b>{{ t('离职') }}</b>：{{ t('不能登录，但账号与历史数据、结算记录永久保留，供查账。') }}</li>
-    <li>{{ t('新员工还没出现在文件里时，可用上方「新建员工」按编号先开户；编号就是绑定键，文件到达后自动接上。') }}</li>
     <li>{{ t('员工账号也会随导入自动开通：导入数据文件时发现') }}<b>{{ t('新的人员编号') }}</b>{{ t('，系统自动开户——登录名按姓名自动生成（拼音），初始口令为系统默认，员工') }}<b>{{ t('首次登录必须先改成自己的密码') }}</b>{{ t('。') }}</li>
     <li>{{ t('员工忘口令时，管理员在此「重置口令」（框留空即系统默认初始口令），重置后员工同样须首登改密。') }}</li>
     <li>{{ t('系统不提供删除员工——删人会让历史核算对不上。') }}</li>

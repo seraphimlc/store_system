@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t('填报与对比') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>{{ t('员工每日填报') }}</h1>
-  <span class="sub">{{ t('员工每天自报的担当区域与 1 点 / 2 点店铺数。数据只用于与文件结果对比，不参与工资计算。') }}</span></div>
+<div class="page-title"><h1>{{ t('员工每日填报') }}</h1></div>
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
 

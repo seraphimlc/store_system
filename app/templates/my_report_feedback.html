@@ -1,11 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ t('我的核对结果') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>{{ t('我的核对结果') }}</h1>
-  <span class="sub">{{ t('把你每天报的数字，和文件核到的数字比一比：哪天报得准、哪天差了多少。') }}</span></div>
+<div class="page-title"><h1>{{ t('我的核对结果') }}</h1></div>
 
 {% if not analysis %}
-<div class="card"><div class="empty">{{ t('本期数据还在核对中。管理员上传文件并生成对比后，这里会显示你的核对结果。') }}</div></div>
+<div class="card"><div class="empty">{{ t('本期数据还在核对中') }}</div></div>
 {% else %}
 <div class="card" style="margin-bottom:.8rem">
   <form method="get" action="/my/report/feedback" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
@@ -20,7 +19,7 @@
 </div>
 
 {% if mine and mine.days_filled == 0 %}
-<div class="msg warn">{{ t('这个区间你没有填报记录（系统侧核到') }} {{ mine.days_system }} {{ t('天），所以没有可核对的内容。填报之后再看这里，就能看到哪几天报得准。') }}</div>
+<div class="msg warn">{{ t('本区间没有你的填报记录') }}</div>
 {% endif %}
 
 {% if mine %}
@@ -62,6 +61,5 @@
   </tr>
   {% else %}<tr><td colspan="5" class="empty">{{ t('这个���间没有你的记录') }}</td></tr>{% endfor %}
 </table></div>
-<div class="hint" style="margin-top:.6rem">{{ t('Δ = 系统核到 − 你报的：正数=少报，负数=多报。漏填报不计入准确率，单独看「应填未填」。') }}</div>
 {% endif %}
 {% endblock %}
