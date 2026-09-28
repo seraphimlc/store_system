@@ -173,3 +173,102 @@ def test_ensure_persons_backfills_first_seen(client):
     p = db.get(Person, "2188240600000011")
     assert p.first_seen_import_id == imp.id
     assert p.display_name == "手工甲"
+
+
+# ---------- Chunk 3：员工端每日填报 ----------
+
+def _seed_staff(client, person_code="P1", username="emp1", name="甲"):
+    from app.auth import hash_password
+    from app.models import User
+    db = appdb.SessionLocal()
+    if db.get(Person, person_code) is None:
+        db.add(Person(code=person_code, display_name=name))
+    if db.query(User).filter(User.username == username).first() is None:
+        db.add(User(username=username, password_hash=hash_password("pw123456"),
+                    display_name=name, role="staff", person_code=person_code,
+                    is_active=True, status="active", must_change_password=False))
+    db.commit()
+    db.close()
+
+
+def _login_staff(client, username="emp1"):
+    from app.auth import SESSION_COOKIE, read_session_token
+    client.post("/login", data={"username": username, "password": "pw123456"},
+                follow_redirects=False)
+    return read_session_token(client.cookies.get(SESSION_COOKIE))["csrf"]
+
+
+def test_jst_today_is_japan_time(client):
+    """业务日按 JST（+09:00）。"""
+    from datetime import datetime, timedelta, timezone
+    from app.services import daily_report
+    assert daily_report.jst_today() == datetime.now(timezone(timedelta(hours=9))).date()
+
+
+def test_submit_report_service(client):
+    """提交：合计自动算；重复 → AlreadySubmitted；非法数字/超范围 → ValueError。"""
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    _seed_staff(client)
+    from app.models import User
+    u = db.query(User).filter(User.username == "emp1").one()
+    row = daily_report.submit_report(db, u, area=" 渋谷 ", p1_cnt="3", p2_cnt="2")
+    assert (row.area, row.p1_cnt, row.p2_cnt, row.total_cnt) == ("渋谷", 3, 2, 5)
+    assert row.report_date == daily_report.jst_today()
+    with pytest.raises(daily_report.AlreadySubmitted):
+        daily_report.submit_report(db, u, area="x", p1_cnt=1, p2_cnt=1)
+    for bad in ("abc", "-1", "1.5", "1000"):
+        with pytest.raises(ValueError):
+            daily_report.to_count(bad, "1点店铺数")
+    assert daily_report.to_count("", "1点店铺数") == 0
+    assert daily_report.to_count("999", "x") == 999
+
+
+def test_my_report_page_and_submit_route(client):
+    """页面可访问；提交 303 落库；重复提交提示；已填报后页面只读展示。"""
+    from app.services import daily_report
+    _seed_staff(client)
+    csrf = _login_staff(client)
+    page = client.get("/my/report")
+    assert page.status_code == 200
+    assert daily_report.jst_today().isoformat() in page.text
+    r = client.post("/my/report", data={
+        "csrf_token": csrf, "area": "渋谷", "p1_cnt": "4", "p2_cnt": "1"},
+        follow_redirects=False)
+    assert r.status_code == 303 and "msg=" in r.headers["location"]
+    db = appdb.SessionLocal()
+    row = db.query(StaffDailyReport).one()
+    assert (row.area, row.p1_cnt, row.p2_cnt, row.total_cnt) == ("渋谷", 4, 1, 5)
+    # 重复提交 → err，且不新增行
+    r2 = client.post("/my/report", data={
+        "csrf_token": csrf, "area": "渋谷", "p1_cnt": "9", "p2_cnt": "9"},
+        follow_redirects=False)
+    assert r2.status_code == 303 and "err=" in r2.headers["location"]
+    assert db.query(StaffDailyReport).count() == 1
+    # 已填报 → 页面显示只读结果与提示
+    page2 = client.get("/my/report").text
+    assert "今天已经填报过了" in page2
+    assert "提交填报" not in page2
+
+
+def test_my_report_requires_csrf_and_staff(client):
+    """无 CSRF → 400；管理员访问员工填报页被拒。"""
+    from app.auth import hash_password
+    from app.models import User
+    _seed_staff(client)
+    csrf = _login_staff(client)
+    r = client.post("/my/report", data={"csrf_token": "", "area": "x",
+                                        "p1_cnt": "1", "p2_cnt": "0"},
+                    follow_redirects=False)
+    assert r.status_code == 400
+    client.get("/logout")
+    db = appdb.SessionLocal()
+    if db.query(User).filter(User.username == "admin").first() is None:
+        db.add(User(username="admin", password_hash=hash_password("pw123456"),
+                    display_name="管理员", role="admin", is_active=True))
+        db.commit()
+    db.close()
+    client.post("/login", data={"username": "admin", "password": "pw123456"},
+                follow_redirects=False)
+    r2 = client.get("/my/report", follow_redirects=False)
+    assert r2.status_code in (302, 307)

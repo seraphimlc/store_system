@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ t('每日填报') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('每日填报') }}</h1>
+  <span class="sub">{{ t('每天提交一次：今天在哪个担当区域、跑了多少家 1 点 / 2 点店铺。数据只用于与文件结果对比，不参与工资计算。') }}</span></div>
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+<div class="card" data-testid="today-card">
+  <h2 style="font-size:1rem;margin:.1rem 0 .6rem">{{ t('今日填报') }} · {{ today }}</h2>
+  {% if existing %}
+  <div class="stat-grid" style="margin-bottom:.5rem">
+    <div class="stat-card okk"><p class="k">{{ t('1点店铺数') }}</p><p class="v">{{ existing.p1_cnt }}</p></div>
+    <div class="stat-card okk"><p class="k">{{ t('2点店铺数') }}</p><p class="v">{{ existing.p2_cnt }}</p></div>
+    <div class="stat-card hl"><p class="k">{{ t('合计') }}</p><p class="v">{{ existing.total_cnt }}</p></div>
+  </div>
+  <div class="hint">{{ t('担当区域') }}：{{ existing.area or '—' }}{% if existing_jst %}　·　{{ t('提交时间') }} {{ existing_jst }}{% endif %}</div>
+  <div class="msg warn" style="margin-top:.6rem">{{ t('今天已经填报过了（一天一次）') }}</div>
+  {% else %}
+  <form method="post" action="/my/report" x-data="{ p1: '0', p2: '0' }">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <div class="form-grid">
+      <label class="fld">{{ t('担当区域') }}
+        <input type="text" name="area" id="area" maxlength="64" autocomplete="off"
+               placeholder="{{ t('例：渋谷・新宿') }}"></label>
+      <label class="fld">{{ t('1点店铺数') }}
+        <input type="text" name="p1_cnt" id="p1_cnt" inputmode="numeric" pattern="[0-9]*"
+               value="0" x-model="p1" autocomplete="off" data-testid="p1"></label>
+      <label class="fld">{{ t('2点店铺数') }}
+        <input type="text" name="p2_cnt" id="p2_cnt" inputmode="numeric" pattern="[0-9]*"
+               value="0" x-model="p2" autocomplete="off" data-testid="p2"></label>
+    </div>
+    <div class="form-actions">
+      <span class="hint">{{ t('合计') }}：<b class="big-num"
+        x-text="(parseInt(p1 || 0, 10) || 0) + (parseInt(p2 || 0, 10) || 0)"></b></span>
+      <button class="btn" type="submit" data-testid="submit-report">{{ t('提交填报') }}</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="page-title" style="margin-top:1.2rem">
+  <h1 style="font-size:1.05rem;margin:0">{{ t('我的填报历史') }}</h1>
+  <div class="actions">
+    <form method="get" action="/my/report">
+      <select name="month" onchange="this.form.submit()">
+        {% for m in months %}<option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>{% endfor %}
+        {% if not months %}<option value="{{ today.strftime('%Y-%m') }}">{{ today.strftime('%Y-%m') }}</option>{% endif %}
+      </select>
+    </form>
+  </div>
+</div>
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="my-reports">
+  <tr><th>{{ t('日期') }}</th><th>{{ t('担当区域') }}</th><th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th></tr>
+  {% for r in rows %}
+  <tr><td>{{ r.date }}</td><td>{{ r.area or '—' }}</td>
+      <td class="num">{{ r.p1 }}</td><td class="num">{{ r.p2 }}</td><td class="num">{{ r.total }}</td></tr>
+  {% else %}<tr><td colspan="5" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

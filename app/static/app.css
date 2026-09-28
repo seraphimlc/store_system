@@ -211,3 +211,19 @@ details { font-size: .85rem; color: var(--muted); }
   table.grid-tbl th, table.grid-tbl td { padding: .5rem .55rem; }
   .upload-zone { align-items: stretch; }
 }
+
+/* ---------- 表单网格（H5 自适应：窄屏单列，触控友好） ---------- */
+.form-grid { display: grid; gap: .7rem .9rem; margin-bottom: .7rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.form-grid .fld { display: flex; flex-direction: column; gap: .25rem;
+  font-size: .88rem; color: #333c52; }
+.form-grid .fld input, .form-grid .fld select { width: 100%; box-sizing: border-box; }
+input[type=number] { border: 1px solid var(--line); border-radius: 7px;
+  padding: .45rem .6rem; font-size: .92rem; background: #fff; color: var(--ink); }
+.form-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .form-grid .fld input, .form-grid .fld select { padding: .6rem .7rem; font-size: 1rem; }
+  .form-actions .btn { width: 100%; text-align: center; padding: .7rem; }
+}
+.big-num { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }

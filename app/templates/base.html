@@ -17,6 +17,7 @@
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
   {% if current_user.role == 'staff' %}
   <a class="nav" href="/my/perf"><b>{{ t('我的绩效') }}</b></a>
+  <a class="nav" href="/my/report"><b>{{ t('每日填报') }}</b></a>
   <a class="nav" href="/my/token"><b>{{ t('我的 Token') }}</b></a>
   {% else %}
   <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
@@ -28,6 +29,7 @@
   <span class="nav disabled">｜</span>
   <a class="nav" href="/stores">{{ t('店铺主档') }}</a>
   <a class="nav" href="/staff-admin">{{ t('员工管理') }}</a>
+  <a class="nav" href="/staff-reports">{{ t('填报与对比') }}</a>
   <a class="nav" href="/mcp-audit">{{ t('MCP 审计') }}</a>
   <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
   {% endif %}
