@@ -345,9 +345,11 @@ def test_chart_series_window_and_threshold(client):
                                 p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
     db.commit()
     s = daily_report.chart_series(db, "P1", today=today)
-    assert len(s["days"]) == 30 and s["start"] == today - timedelta(days=29)
+    # 横轴自适应：右端=今天，左端取"第一个有数据的日子"与"今天-6"中更早者（最少铺开 7 天）
+    assert s["start"] == today - timedelta(days=6) and s["span_days"] == 7
+    assert s["window_days"] == 30                         # 上限仍是 30 天
     assert s["filled"] == 2 and s["show"] is False        # 少于 3 天 → 不给图
-    assert s["total"] == 6                                # 窗口外那条不计
+    assert s["total"] == 6                                # 第 31 天那条不计（超上限）
     db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=2),
                             area="x", p1_cnt=1, p2_cnt=1, total_cnt=2))
     db.commit()
@@ -790,3 +792,29 @@ def test_analyze_and_retry_routes_admin_only(client, monkeypatch):
                      data={"csrf_token": "x", "start": "2026-09-16", "end": "2026-09-17"},
                      follow_redirects=False)
     assert r2.status_code in (302, 307)
+
+
+def test_chart_series_autofit_long_history(client):
+    """有 30 天以上历史时：整段 30 天都画（左端顶到上限），不会无限回溯。"""
+    from datetime import date, timedelta
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    today = date(2026, 9, 28)
+    for off in range(0, 45, 3):                    # 45 天里每 3 天一条
+        d = today - timedelta(days=off)
+        db.add(StaffDailyReport(person_code="P9", report_date=d, area="x",
+                                p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    s = daily_report.chart_series(db, "P9", today=today)
+    # 数据最早在 27 天前 → 左端就从那天起（28 天铺满图宽）
+    assert s["start"] == today - timedelta(days=27)
+    assert s["span_days"] == 28 and s["filled"] == 10
+    assert s["show"] is True
+    # 超出 30 天上限的数据：既不显示、也不影响横轴（查询阶段就过滤掉）
+    db.add(StaffDailyReport(person_code="P9", report_date=today - timedelta(days=40),
+                            area="x", p1_cnt=9, p2_cnt=9, total_cnt=18))
+    db.commit()
+    s2 = daily_report.chart_series(db, "P9", today=today)
+    assert (s2["start"], s2["span_days"], s2["filled"]) == (
+        s["start"], s["span_days"], s["filled"])
+    assert s2["total"] == s["total"]                       # 40 天前那条不计

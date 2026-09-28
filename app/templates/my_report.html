@@ -41,8 +41,9 @@
 
 {% if chart and chart.series.show %}
 <div class="card" data-testid="trend-card" style="margin-top:1.2rem">
-  <h2 style="font-size:1.05rem;margin:.1rem 0 .3rem">{{ t('最近 30 天自报趋势') }}
-    <span class="hint">（{{ t('已填报') }} {{ chart.series.filled }} {{ t('天') }} ·
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .3rem">{{ t('自报趋势') }}
+    <span class="hint">（{{ chart.series.start }} ～ {{ chart.series.end }} ·
+      {{ t('已填报') }} {{ chart.series.filled }} {{ t('天') }} ·
       {{ t('合计') }} {{ chart.series.total }}）</span></h2>
   <svg viewBox="0 0 {{ chart.geo.width }} {{ chart.geo.height }}"
        style="width:100%;height:auto;display:block" data-testid="trend-svg"
@@ -64,7 +65,6 @@
   </svg>
   <div class="hint" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem">
     <span><b style="color:#2f5bea">━</b> {{ t('1点店铺数') }}　<b style="color:#e08a00">━</b> {{ t('2点店铺数') }}　{{ t('纵轴上限') }} {{ chart.geo.max }}</span>
-    <span>{{ chart.series.start }} ～ {{ chart.series.end }}</span>
   </div>
 </div>
 {% elif chart and chart.series.filled > 0 %}

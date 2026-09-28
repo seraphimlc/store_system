@@ -97,20 +97,28 @@ def my_reports(db, person_code: str, *, month: str = "", limit: int = 60) -> lis
 
 CHART_DAYS = 30          # 趋势窗口
 CHART_MIN_FILLED = 3     # 少于这么多天就不给图（规格：太少了不给）
+CHART_MIN_SPAN = 7       # 横轴最少铺开的天数（数据太少时避免一条陡线）
 
 
 def chart_series(db, person_code: str, *, days: int = CHART_DAYS,
-                 today=None) -> dict:
+                 today=None, min_span: int = CHART_MIN_SPAN) -> dict:
     """最近 N 天（含今天）的自报序列：缺的天标 filled=False。
 
-    `show` = 是否值得画（已填报天数 >= CHART_MIN_FILLED）。
+    **横轴自适应**：固定 30 天会把"刚开始填报的人"全挤到右边，所以窗口右端固定为今天、
+    左端取「第一个有填报的日子」与「今天-(min_span-1)」中更早者，且不超过 N 天上限。
+    这样稀疏数据也能铺满图宽；中间的缺口仍然断开显示。
     """
     today = today or jst_today()
-    start = today - timedelta(days=days - 1)
+    hard_start = today - timedelta(days=days - 1)
     rows = {r.report_date: r for r in db.query(StaffDailyReport).filter(
         StaffDailyReport.person_code == person_code,
-        StaffDailyReport.report_date >= start,
+        StaffDailyReport.report_date >= hard_start,
         StaffDailyReport.report_date <= today).all()}
+    if rows:
+        start = min(min(rows), today - timedelta(days=min_span - 1))
+        start = max(start, hard_start)
+    else:
+        start = max(today - timedelta(days=min_span - 1), hard_start)
     pts, d = [], start
     while d <= today:
         r = rows.get(d)
@@ -121,6 +129,7 @@ def chart_series(db, person_code: str, *, days: int = CHART_DAYS,
     filled = sum(1 for x in pts if x["filled"])
     vals = [x[k] for x in pts for k in ("p1", "p2")]
     return {"days": pts, "filled": filled, "start": start, "end": today,
+            "span_days": len(pts), "window_days": days,
             "p1": sum(x["p1"] for x in pts), "p2": sum(x["p2"] for x in pts),
             "total": sum(x["total"] for x in pts),
             "max": max(vals) if vals else 0,
