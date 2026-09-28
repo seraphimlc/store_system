@@ -48,3 +48,6 @@ mcp_service/logs/
 
 # 本地 MCP 服务进程号（本机运行产物，不入库）
 .mcp_service.pid
+
+# 临时抓取的页面（调试用，勿提交）
+/*.html
