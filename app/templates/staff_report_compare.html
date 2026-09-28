@@ -42,10 +42,62 @@
   <div class="stat-card"><p class="k">{{ t('涉及员工') }}</p><p class="v">{{ res.summary.persons }}</p></div>
 </div>
 
+{% if analysis %}
+<div class="card" data-testid="report-card" style="margin-bottom:1rem">
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .4rem">{{ t('AI 分析报告') }}
+    <span class="hint">{{ analysis.period_start }} ～ {{ analysis.period_end }} ·
+      {{ t('状态') }} {{ analysis.status }} ·
+      {{ t('模型') }} {{ analysis.ai_model or '—' }} ·
+      {{ t('消耗 token') }} {{ analysis.ai_tokens }}</span></h2>
+  {% if analysis.status in ('pending', 'running') %}
+  <div class="msg warn">{{ t('报告生成中（可稍后刷新本页）') }}</div>
+  {% elif analysis.status == 'failed' %}
+  <div class="msg err">{{ t('AI 评语生成失败（下面的对比数字不受影响）：') }}{{ analysis.ai_error }}</div>
+  <form method="post" action="/staff-reports/analysis/{{ analysis.id }}/retry" style="margin-top:.4rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+    <button class="btn" type="submit">{{ t('重新生成') }}</button>
+  </form>
+  {% elif report %}
+  <p style="margin:.2rem 0 .5rem">{{ report.overall_comment }}</p>
+  {% if report.accuracy_notes %}<div class="hint" style="margin-bottom:.6rem">{{ report.accuracy_notes }}</div>{% endif %}
+  {% set qs = [] %}
+  {% for code, blk in report.per_person.items() %}{% for q in blk.questions %}{% set _ = qs.append({'name': blk.name, 'code': code, 'q': q}) %}{% endfor %}{% endfor %}
+  {% if qs %}
+  <details open><summary><b>{{ t('建议核实清单') }}</b>（{{ qs|length }}）<span class="hint">— {{ t('仅管理员可见，不展示给员工') }}</span></summary>
+    <ul style="margin:.4rem 0 0;padding-left:1.2rem;line-height:1.9">
+      {% for x in qs %}<li><b>{{ x.name }}</b>（{{ x.code }}）：{{ x.q }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  <form method="post" action="/staff-reports/compare/analyze" style="margin-top:.6rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+    <input type="hidden" name="person_code" value="{{ person_code }}">
+    <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
+    <span class="hint">{{ t('同一份数据会直接复用已有报告，不重复消耗 token。') }}</span>
+  </form>
+  {% endif %}
+</div>
+{% elif ai_enabled %}
+<div class="card" style="margin-bottom:1rem">
+  <b>{{ t('AI 分析报告') }}</b>
+  <div class="hint" style="margin:.3rem 0 .5rem">{{ t('数字已由程序算好；点下面按钮让模型据此写一份评语（谁报得准、谁偏差大、建议核实什么）。') }}</div>
+  <form method="post" action="/staff-reports/compare/analyze">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+    <input type="hidden" name="person_code" value="{{ person_code }}">
+    <button class="btn" type="submit" data-testid="gen-report">{{ t('生成 AI 分析报告') }}</button>
+  </form>
+</div>
+{% else %}
+<div class="msg warn">{{ t('AI 报告已关闭（VISIT_REPORT_AI=0）：对比数字照常可用。') }}</div>
+{% endif %}
+
 <div class="tbl-wrap" style="margin-bottom:1rem"><table class="grid-tbl" data-testid="compare-persons">
   <tr><th>{{ t('员工') }}</th><th>{{ t('系统合计') }}</th><th>{{ t('自报合计') }}</th>
       <th>Δ{{ t('合计') }}</th><th>Δ{{ t('1点店铺数') }}</th><th>Δ{{ t('2点店铺数') }}</th>
-      <th>{{ t('准确率') }}</th><th>{{ t('已报天数') }}</th><th>{{ t('应填未填') }}</th></tr>
+      <th>{{ t('准确率') }}</th><th>{{ t('已报天数') }}</th><th>{{ t('应填未填') }}</th><th>{{ t('AI 评语') }}</th></tr>
   {% for p in res.persons %}
   <tr>
     <td>{{ p.name }}<div class="hint">{{ p.person_code }}</div></td>
@@ -57,8 +109,9 @@
     <td class="num">{% if p.acc is none %}—{% else %}<b style="color:{% if p.acc >= 0.95 %}var(--ok){% elif p.acc >= 0.8 %}var(--warn){% else %}var(--err){% endif %}">{{ (p.acc * 100) | round(1) }}%</b>{% endif %}</td>
     <td class="num">{{ p.days_filled }} / {{ p.days_system }}</td>
     <td class="num">{% if p.gaps %}<span class="pill err">{{ p.gaps }}</span>{% else %}0{% endif %}</td>
+    <td style="white-space:normal;max-width:340px">{% set blk = (report.per_person or {}).get(p.person_code) %}{% if blk %}{{ blk.comment }}{% if blk.off_days %}<div class="hint">{% for o in blk.off_days %}· {{ o.date }} {{ o.note }}　{% endfor %}</div>{% endif %}{% else %}<span class="hint">—</span>{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="9" class="empty">{{ t('该区间没有可对比的数据（先上传并判定文件）') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="10" class="empty">{{ t('该区间没有可对比的数据（先上传并判定文件）') }}</td></tr>{% endfor %}
 </table></div>
 
 <div class="page-title"><h1 style="font-size:1.05rem;margin:0">{{ t('逐日明细') }}</h1>

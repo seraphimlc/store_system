@@ -84,6 +84,92 @@ def my_report_submit(request: Request,
                                 status_code=303)
 
 
+# ---------------- AI 分析报告（规格 §8） ----------------
+
+@router.post("/staff-reports/compare/analyze")
+def staff_reports_analyze(request: Request, start: str = Form(""),
+                          end: str = Form(""), person_code: str = Form(""),
+                          sort: str = Form("acc"),
+                          csrf_token: str = Form(""),
+                          user: Optional[User] = Depends(require_login),
+                          db: Session = Depends(get_db)):
+    """生成区间分析报告（异步）：数字由程序算，模型只写评语。"""
+    from urllib.parse import quote as _q
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import report_ai
+    s, e = _resolved_period(db, start, end)
+    _, m = report_ai.start_analysis(db, user, s, e)
+    q = "start=%s&end=%s&person_code=%s&sort=%s" % (s, e, person_code, sort)
+    return RedirectResponse("/staff-reports/compare?" + q + "&msg=" + _q(m),
+                            status_code=303)
+
+
+@router.post("/staff-reports/analysis/{aid}/retry")
+def staff_reports_analysis_retry(aid: int, request: Request,
+                                 start: str = Form(""), end: str = Form(""),
+                                 person_code: str = Form(""),
+                                 csrf_token: str = Form(""),
+                                 user: Optional[User] = Depends(require_login),
+                                 db: Session = Depends(get_db)):
+    from urllib.parse import quote as _q
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import report_ai
+    _, m = report_ai.retry(db, aid)
+    s, e = _resolved_period(db, start, end)
+    q = "start=%s&end=%s&person_code=%s" % (s, e, person_code)
+    return RedirectResponse("/staff-reports/compare?" + q + "&msg=" + _q(m),
+                            status_code=303)
+
+
+# ---------------- 员工端：我的核对结果（只看自己） ----------------
+
+@router.get("/my/report/feedback", response_class=HTMLResponse)
+def my_report_feedback(request: Request,
+                       user: Optional[User] = Depends(require_login),
+                       db: Session = Depends(get_db), aid: int = 0):
+    """员工端：我在某个区间报得准不准（逐日偏差 + 我的评语）。
+
+    **只返回本人段落**：`report_ai.person_block()` 已剔除管理端的追问清单，
+    且这里从不把整份 payload 交给模板（避免越权看到他人评语）。
+    """
+    if user is None or user.role != "staff" or not user.person_code:
+        return _denied()
+    from app.i18n import CURRENT_LANG
+    from app.models import StaffReportAnalysis
+    from app.services import daily_report, report_ai
+    done = (db.query(StaffReportAnalysis)
+            .filter(StaffReportAnalysis.status == "done")
+            .order_by(StaffReportAnalysis.id.desc()).limit(24).all())
+    analysis = None
+    if aid:
+        analysis = db.get(StaffReportAnalysis, aid)
+        if analysis is not None and analysis.status != "done":
+            analysis = None
+    if analysis is None and done:
+        analysis = done[0]
+    res, mine, block = None, None, {}
+    if analysis is not None:
+        res = daily_report.compare(db, analysis.period_start, analysis.period_end,
+                                   user.person_code)
+        mine = res["persons"][0] if res["persons"] else None
+        block = report_ai.person_block(analysis, user.person_code)
+    lang = CURRENT_LANG.get()
+    my_report = block.get(lang) or (next(iter(block.values())) if block else {})
+    return templates.TemplateResponse("my_report_feedback.html", {
+        "request": request, "current_user": user, "analysis": analysis,
+        "periods": done, "aid": aid, "res": res, "mine": mine,
+        "report": my_report, "lang": lang,
+    })
+
+
 # ---------------- 管理端：填报列表 + 对比 + 导出（规格 §9） ----------------
 
 def _admin_guard(user):
@@ -155,10 +241,19 @@ def staff_reports_compare(request: Request,
     s, e = _resolved_period(db, start, end)
     res = daily_report.compare(db, s, e, person_code, sort=sort)
     daily = [r for r in res["daily"] if not kind or r["kind"] == kind]
+    from app.i18n import CURRENT_LANG
+    from app.services import report_ai
+    analysis = report_ai.latest_for(db, s, e)
+    report = {}
+    if analysis is not None and (analysis.payload or {}).get("by_lang"):
+        by = analysis.payload["by_lang"]
+        report = by.get(CURRENT_LANG.get()) or next(iter(by.values()))
     return templates.TemplateResponse("staff_report_compare.html", {
         "request": request, "current_user": user, "res": res, "daily": daily,
         "start": s, "end": e, "person_code": person_code, "sort": sort, "kind": kind,
         "staff_opts": _staff_options(db), "msg": msg, "err": err,
+        "analysis": analysis, "report": report,
+        "ai_enabled": report_ai.report_ai_enabled(),
     })
 
 

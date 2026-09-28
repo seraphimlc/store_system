@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ t('我的核对结果') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('我的核对结果') }}</h1>
+  <span class="sub">{{ t('把你每天报的数字，和文件核到的数字比一比：哪天报得准、哪天差了多少。') }}</span></div>
+
+{% if not analysis %}
+<div class="card"><div class="empty">{{ t('本期数据还在核对中。管理员上传文件并生成对比后，这里会显示你的核对结果。') }}</div></div>
+{% else %}
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/my/report/feedback" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <b style="font-size:.95rem">{{ t('区间') }}</b>
+    <select name="aid" onchange="this.form.submit()">
+      {% for a in periods %}
+      <option value="{{ a.id }}" {% if analysis and a.id == analysis.id %}selected{% endif %}>
+        {{ a.period_start }} ～ {{ a.period_end }}</option>
+      {% endfor %}
+    </select>
+    <span class="hint">{{ t('只看得到你自己的数据') }}</span>
+  </form>
+</div>
+
+{% if mine %}
+<div class="stat-grid" style="margin-bottom:.8rem">
+  <div class="stat-card {% if mine.acc is none %}hl{% elif mine.acc >= 0.95 %}okk{% elif mine.acc >= 0.8 %}warnk{% else %}errk{% endif %}">
+    <p class="k">{{ t('我的准确率') }}</p>
+    <p class="v">{% if mine.acc is none %}—{% else %}{{ (mine.acc * 100) | round(1) }}%{% endif %}</p></div>
+  <div class="stat-card"><p class="k">{{ t('系统核到') }}</p><p class="v">{{ mine.sys_total }}<small>（{{ t('1点') }} {{ mine.sys_p1 }} / {{ t('2点') }} {{ mine.sys_p2 }}）</small></p></div>
+  <div class="stat-card"><p class="k">{{ t('我报的') }}</p><p class="v">{{ mine.rep_total }}<small>（{{ t('1点') }} {{ mine.rep_p1 }} / {{ t('2点') }} {{ mine.rep_p2 }}）</small></p></div>
+  <div class="stat-card"><p class="k">Δ{{ t('合计') }}</p>
+    <p class="v" style="color:{% if mine.d_total > 0 %}var(--warn){% elif mine.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % mine.d_total }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('已报天数') }}</p><p class="v">{{ mine.days_filled }}<small> / {{ mine.days_system }}</small></p></div>
+  <div class="stat-card {% if mine.gaps %}warnk{% endif %}"><p class="k">{{ t('应填未填') }}</p><p class="v">{{ mine.gaps }}</p></div>
+</div>
+{% endif %}
+
+{% if report and report.comment %}
+<div class="card" style="margin-bottom:.8rem" data-testid="my-comment">
+  <b>{{ t('我的评语') }}</b>
+  <p style="margin:.4rem 0 0">{{ report.comment }}</p>
+  {% if report.off_days %}
+  <div class="hint" style="margin-top:.4rem">{% for o in report.off_days %}· {{ o.date }}：{{ o.note }}　{% endfor %}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="my-compare-daily">
+  <tr><th>{{ t('日期') }}</th><th>{{ t('状态') }}</th><th>{{ t('系统') }}（1/2）</th>
+      <th>{{ t('我报的') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+  {% for r in res.daily %}
+  <tr {% if r.kind != 'both' %}style="background:#fbfcfe"{% endif %}>
+    <td>{{ r.date }}</td>
+    <td>{% if r.kind == 'both' %}<span class="pill ok">{{ t('两侧都有') }}</span>
+        {% elif r.kind == 'missing_report' %}<span class="pill warn">{{ t('系统有 / 未报') }}</span>
+        {% else %}<span class="pill err">{{ t('自报有 / 系统无') }}</span>{% endif %}</td>
+    <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
+    <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
+    <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="empty">{{ t('这个���间没有你的记录') }}</td></tr>{% endfor %}
+</table></div>
+<div class="hint" style="margin-top:.6rem">{{ t('Δ = 系统核到 − 你报的：正数=少报，负数=多报。漏填报不计入准确率，单独看「应填未填」。') }}</div>
+{% endif %}
+{% endblock %}

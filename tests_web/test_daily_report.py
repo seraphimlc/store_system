@@ -571,3 +571,222 @@ def test_export_xlsx_both_kinds(client):
     wb2 = load_workbook(_io.BytesIO(r2.content))
     assert wb2.sheetnames[:3] == ["对比(按人)", "对比(逐日)", "汇总"]
     assert "准确率%" in [c.value for c in wb2["对比(按人)"][1]]
+
+
+# ---------- Chunk 5：AI 分析报告（全程 mock，不连外网） ----------
+
+_VALID_JSON = ('{"overall_comment":"整体一致性一般","accuracy_notes":"��差集中在少数人",'
+               '"per_person":{"P1":{"comment":"16 号完全一致","off_days":'
+               '[{"date":"2026-09-17","delta":3,"note":"少报 3 家"}],'
+               '"questions":["17 号是否漏记"]},'
+               '"P2":{"comment":"另一个人","off_days":[],"questions":[]}}}')
+
+
+def _mock_ai(monkeypatch, text=_VALID_JSON, usage=True):
+    from app.services import ai_chat as _ai
+    calls = {"n": 0, "prompts": []}
+
+    def fake_chat(prompt, timeout=600, retries=1, max_tokens=None, return_usage=False):
+        calls["n"] += 1
+        calls["prompts"].append(prompt)
+        if usage and return_usage:
+            return text, {"total_tokens": 1234}
+        return text
+    monkeypatch.setattr(_ai, "chat", fake_chat)
+    monkeypatch.setattr(_ai, "configured", lambda: True)
+    return calls
+
+
+def _no_thread(monkeypatch):
+    """让 start_analysis 不起真线程（测试里手动跑 run_analysis，避免竞态）。"""
+    from app.services import report_ai
+    class _T:
+        def __init__(self, *a, **k):
+            pass
+        def start(self):
+            pass
+    monkeypatch.setattr(report_ai.threading, "Thread", _T)
+
+
+def _seed_compare_data(db):
+    from datetime import date
+    if db.get(Person, "P1") is None:
+        db.add(Person(code="P1", display_name="甲"))
+    if db.get(Person, "P2") is None:
+        db.add(Person(code="P2", display_name="乙"))
+    _seed_sys(db, "P1", date(2026, 9, 16), 4, 2)
+    _seed_sys(db, "P1", date(2026, 9, 17), 5, 0)
+    _seed_sys(db, "P2", date(2026, 9, 16), 3, 0)
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 9, 16),
+                            area="渋谷", p1_cnt=4, p2_cnt=2, total_cnt=6))
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 9, 17),
+                            area="新宿", p1_cnt=2, p2_cnt=0, total_cnt=2))
+    db.add(StaffDailyReport(person_code="P2", report_date=date(2026, 9, 16),
+                            area="池袋", p1_cnt=3, p2_cnt=0, total_cnt=3))
+    db.commit()
+
+
+def test_analysis_generate_and_payload(client, monkeypatch):
+    """生成：数字来自程序、评语来自模型；双语各一份；token 留痕。"""
+    from datetime import date
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_compare_data(db)
+    calls = _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    a, msg = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+    assert a is not None and a.status == "pending"
+    report_ai.run_analysis(a.id)
+    db.expire_all()
+    a = db.get(type(a), a.id)
+    assert a.status == "done"
+    assert set(a.payload["by_lang"].keys()) == {"zh", "ja"}      # 双语
+    assert calls["n"] == 2                                       # 每语言一次调用
+    assert a.payload["by_lang"]["zh"]["per_person"]["P1"]["comment"] == "16 号完全一致"
+    assert a.ai_tokens == 2468 and a.ai_model                  # 2 × 1234
+    assert a.summary["checkin_cnt"] == 3 and a.summary["fingerprint"]
+
+
+def test_prompt_constraints_and_program_numbers(client, monkeypatch):
+    """prompt 必须带硬约束，且**不许模型自己算数字**（只喂算好的汇总）。"""
+    from datetime import date
+    from app.services import daily_report, report_ai
+    db = appdb.SessionLocal()
+    _seed_compare_data(db)
+    calls = _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    res = daily_report.compare(db, date(2026, 9, 16), date(2026, 9, 17))
+    p = report_ai.build_prompt(res, "ja")
+    assert "只使用下面给出的数字" in p
+    assert "不做人身评价" in p and "不做定性指控" in p
+    assert "日本語" in p
+    assert "P1" in p and "P2" in p
+
+
+def test_analysis_reuse_same_fingerprint(client, monkeypatch):
+    """同区间 + 同数据 → 复用已有报告，不再调模型、不新增记录。"""
+    from datetime import date
+    from app.models import StaffReportAnalysis
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_compare_data(db)
+    calls = _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    a, _ = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+    report_ai.run_analysis(a.id)
+    db.expire_all()                     # run_analysis 用自己的会话写库 → 重新读
+    n_after_first = calls["n"]
+    a2, msg = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+    assert a2.id == a.id and "复用" in msg
+    assert calls["n"] == n_after_first                       # 没再烧 token
+    assert db.query(StaffReportAnalysis).count() == 1
+
+
+def test_analysis_bad_json_fails_but_summary_kept(client, monkeypatch):
+    """模型输出非法 JSON → failed，但对比数字（summary）仍然可用。"""
+    from datetime import date
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_compare_data(db)
+    _mock_ai(monkeypatch, text="抱歉，我无法完成。")
+    _no_thread(monkeypatch)
+    a, _ = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+    report_ai.run_analysis(a.id)
+    db.expire_all()
+    a = db.get(type(a), a.id)
+    assert a.status == "failed" and a.ai_error
+    assert a.payload["by_lang"] == {}
+    assert a.summary["checkin_cnt"] == 3                     # 数字照常在
+    assert report_ai.latest_done(db) is None
+
+
+def test_analysis_disabled_by_env(client, monkeypatch):
+    """VISIT_REPORT_AI=0 → 不生成（对比数字不受影响）。"""
+    from datetime import date
+    from app.config import get_settings
+    from app.services import report_ai
+    monkeypatch.setenv("VISIT_REPORT_AI", "0")
+    get_settings.cache_clear()
+    try:
+        assert report_ai.report_ai_enabled() is False
+        db = appdb.SessionLocal()
+        _seed_compare_data(db)
+        a, msg = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+        assert a is None and "关闭" in msg
+    finally:
+        get_settings.cache_clear()
+
+
+def test_person_block_hides_admin_questions(client, monkeypatch):
+    """员工段落只含 comment/off_days，**不含追问���单**。"""
+    from datetime import date
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_compare_data(db)
+    _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    a, _ = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+    report_ai.run_analysis(a.id)
+    db.expire_all()                     # 同上：拿到别的会话写入的 payload
+    a = db.get(type(a), a.id)
+    blk = report_ai.person_block(a, "P1")
+    assert set(blk["zh"].keys()) == {"comment", "off_days"}
+    assert "questions" not in blk["zh"]
+    assert report_ai.person_block(a, "NOBODY") == {}
+
+
+def test_feedback_page_only_shows_own_data(client, monkeypatch):
+    """员工端核对页：只有自己的评语与明细，**没有他人数据、没有追问清单**。"""
+    from datetime import date
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_compare_data(db)
+    _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    a, _ = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
+    report_ai.run_analysis(a.id)
+    _seed_staff(client, person_code="P1", username="emp1", name="甲")
+    _login_staff(client)
+    html = client.get("/my/report/feedback").text
+    assert "我的准确率" in html
+    assert "16 号完全一致" in html                     # 自己的评语
+    assert "另一个人" not in html                       # 别人的评语
+    assert "P2" not in html                            # 别人的编号
+    assert "是否漏记" not in html                        # 追问清单不下发
+    assert "2026-09-17" in html                        # 自己的逐日明细
+
+
+def test_feedback_page_empty_state(client):
+    """还没有报告时 → 空态提示，不报错。"""
+    _seed_staff(client, person_code="P1", username="emp1", name="甲")
+    _login_staff(client)
+    r = client.get("/my/report/feedback")
+    assert r.status_code == 200 and "还在核对中" in r.text
+
+
+def test_analyze_and_retry_routes_admin_only(client, monkeypatch):
+    """生成/重试：admin 可，员工被拦；生成后落一条 pending。"""
+    from datetime import date
+    from app.models import StaffReportAnalysis
+    _seed_compare_data(appdb.SessionLocal())
+    _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    _seed_admin(client)
+    csrf = _login_admin(client)
+    r = client.post("/staff-reports/compare/analyze",
+                    data={"csrf_token": csrf, "start": "2026-09-16", "end": "2026-09-17"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and "msg=" in r.headers["location"]
+    db = appdb.SessionLocal()
+    a = db.query(StaffReportAnalysis).order_by(StaffReportAnalysis.id.desc()).first()
+    assert a is not None and a.status == "pending"
+    page = client.get("/staff-reports/compare?start=2026-09-16&end=2026-09-17")
+    assert page.status_code == 200 and "AI 分析报告" in page.text
+    # 员工被拦
+    client.get("/logout")
+    _seed_staff(client, person_code="P1", username="emp1", name="甲")
+    _login_staff(client)
+    r2 = client.post("/staff-reports/compare/analyze",
+                     data={"csrf_token": "x", "start": "2026-09-16", "end": "2026-09-17"},
+                     follow_redirects=False)
+    assert r2.status_code in (302, 307)
