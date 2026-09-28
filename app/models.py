@@ -260,6 +260,9 @@ class StoreMergeLog(Base):
 class FormalRecord(Base):
     """V3 正式数据：文件判定后入此表（算绩效的唯一依据）。"""
     __tablename__ = "formal_records"
+    # min/max(japan_date) 出现在每个报告/对比/导出请求里 → 必须有索引，
+    # 否则 3 万行的正式表每次全表扫描（评审实测 SCAN formal_records）。
+    __table_args__ = (Index("ix_formal_japan_date", "japan_date"),)
     id = Column(Integer, primary_key=True)
     import_id = Column(Integer, ForeignKey("imports.id"), nullable=False)
     raw_record_id = Column(Integer, ForeignKey("raw_records.id"),
@@ -740,9 +743,7 @@ class StaffReportComparePerson(Base):
     d1 = Column(Integer, nullable=False, default=0)
     d2 = Column(Integer, nullable=False, default=0)
     d_total = Column(Integer, nullable=False, default=0)
-    acc = Column(Float, nullable=True)
-    acc1 = Column(Float, nullable=True)
-    acc2 = Column(Float, nullable=True)
+    acc = Column(Float, nullable=True)      # 0..1；NULL=没有可对照的日子
     days_filled = Column(Integer, nullable=False, default=0)
     days_system = Column(Integer, nullable=False, default=0)
     days_both = Column(Integer, nullable=False, default=0)

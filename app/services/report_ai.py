@@ -11,7 +11,7 @@
 import hashlib
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.models import StaffReportAnalysis, StaffDailyReport  # noqa: F401
 
@@ -165,11 +165,32 @@ def _estimate_tokens(*texts) -> int:
     return max(1, sum(len(t or "") for t in texts) // 3)
 
 
+STALE_MINUTES = 15      # pending/running 超过这个时长视为卡死（线程被重启掐掉等）
+
+
+def is_stale(a) -> bool:
+    """pending/running 是否已卡死（超时）。"""
+    if a is None or a.status not in ("pending", "running"):
+        return False
+    created = a.created_at
+    if created is None:
+        return False
+    return created < datetime.utcnow() - timedelta(minutes=STALE_MINUTES)
+
+
+def can_retry(a) -> bool:
+    """能否重试：失败、或卡死的 pending/running；done 与在跑中的都不行。"""
+    if a is None:
+        return False
+    return a.status == "failed" or is_stale(a)
+
+
 def run_analysis(analysis_id: int) -> None:
     """后台执行：running → 逐语言调模型 → done/failed（线程内自建 DB 会话）。"""
     import app.db as appdb
     from app.services import ai_chat, daily_report
     db = appdb.SessionLocal()
+    a = None
     try:
         a = db.get(StaffReportAnalysis, analysis_id)
         if a is None:
@@ -212,6 +233,17 @@ def run_analysis(analysis_id: int) -> None:
             materialize(db, analysis_id, res)
         except Exception:  # noqa: BLE001  best-effort
             db.rollback()
+    except Exception as e:  # noqa: BLE001  **兜底：任何意外都不允许把状态卡在 running**
+        db.rollback()
+        try:
+            row = db.get(StaffReportAnalysis, analysis_id)
+            if row is not None:
+                row.status = "failed"
+                row.ai_error = ("生成过程异常：%s" % e)[:2000]
+                row.finished_at = datetime.utcnow()
+                db.commit()
+        except Exception:  # noqa: BLE001  连兜底都失败就只能放弃
+            db.rollback()
     finally:
         db.close()
 
@@ -228,6 +260,14 @@ def start_analysis(db, user, start, end):
     if not res["summary"]["checkin_cnt"] and not res["summary"]["formal_cnt"]:
         return None, "该区间没有可对比的数据"
     fp = data_fingerprint(res)
+    # 同区间已有"正在生成"的记录 → 复用它（避免重复线程 + 重复烧 token）
+    for p in (db.query(StaffReportAnalysis)
+              .filter(StaffReportAnalysis.period_start == start,
+                      StaffReportAnalysis.period_end == end,
+                      StaffReportAnalysis.status.in_(("pending", "running")))
+              .order_by(StaffReportAnalysis.id.desc()).all()):
+        if not is_stale(p):
+            return p, "同区间报告正在生成中，未重复触发"
     prev = (db.query(StaffReportAnalysis)
             .filter(StaffReportAnalysis.period_start == start,
                     StaffReportAnalysis.period_end == end,
@@ -249,10 +289,15 @@ def start_analysis(db, user, start, end):
 
 
 def retry(db, analysis_id: int):
-    """失败报告重跑（同一条记录，状态回 pending）。"""
+    """失败/卡死报告重跑（同一条记录）。**在跑中的不允许重复触发**。"""
     a = db.get(StaffReportAnalysis, analysis_id)
     if a is None:
         return None, "报告不存在"
+    if not report_ai_enabled():
+        return a, "AI 报告已关闭（VISIT_REPORT_AI=0）"
+    if not can_retry(a):
+        return a, ("报告已完成，无需重试" if a.status == "done"
+                   else "报告正在生成中，请稍候")
     a.status = "pending"
     a.ai_error = None
     db.commit()
@@ -274,6 +319,8 @@ def materialize(db, analysis_id: int, res: dict) -> int:
 
     员工端核对页从此**只读物化表**，不再实时跑 compare()。
     """
+    from sqlalchemy.exc import IntegrityError
+
     from app.models import StaffReportCompareDay as _D
     from app.models import StaffReportComparePerson as _P
     db.query(_D).filter(_D.analysis_id == analysis_id).delete(
@@ -286,7 +333,7 @@ def materialize(db, analysis_id: int, res: dict) -> int:
                   sys_total=p["sys_total"], rep_p1=p["rep_p1"],
                   rep_p2=p["rep_p2"], rep_total=p["rep_total"], d1=p["d1"],
                   d2=p["d2"], d_total=p["d_total"], acc=p["acc"],
-                  acc1=p["acc1"], acc2=p["acc2"], days_filled=p["days_filled"],
+                  days_filled=p["days_filled"],
                   days_system=p["days_system"], days_both=p["days_both"],
                   gaps=p["gaps"], abs_dt=p["abs_dt"]))
     for r in res["daily"]:
@@ -295,35 +342,55 @@ def materialize(db, analysis_id: int, res: dict) -> int:
                   sys_p2=r["sys_p2"], sys_total=r["sys_total"],
                   rep_p1=r["rep_p1"], rep_p2=r["rep_p2"],
                   rep_total=r["rep_total"], d1=r["d1"], d2=r["d2"], dt=r["dt"]))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:      # 并发重复落表 → 不是错误（唯一键就是干这个的）
+        db.rollback()
+        return 0
     return len(res["persons"]) + len(res["daily"])
+
+
+def refresh_for_date(db, ref_date) -> int:
+    """**数据变化后刷新物化行**：覆盖该日期的已完成报告重算并落表。
+
+    触发点：员工填报/修改（`daily_report`）、系统侧统计重算（`perf.sync_month_stats`）。
+    不刷新的话，员工端核对页会一直显示报告生成那一刻的旧数字（与管理端实时对比不一致）。
+    返回刷新了几份报告。
+    """
+    from app.services import daily_report
+    rows = (db.query(StaffReportAnalysis)
+            .filter(StaffReportAnalysis.status == "done",
+                    StaffReportAnalysis.period_start <= ref_date,
+                    StaffReportAnalysis.period_end >= ref_date).all())
+    for a in rows:
+        res = daily_report.compare(db, a.period_start, a.period_end)
+        if res["persons"]:
+            materialize(db, a.id, res)
+    return len(rows)
 
 
 def _person_row(p) -> dict:
     return {"person_code": p.person_code, "name": p.name, "sys_p1": p.sys_p1,
             "sys_p2": p.sys_p2, "sys_total": p.sys_total, "rep_p1": p.rep_p1,
             "rep_p2": p.rep_p2, "rep_total": p.rep_total, "d1": p.d1,
-            "d2": p.d2, "d_total": p.d_total, "acc": p.acc, "acc1": p.acc1,
-            "acc2": p.acc2, "days_filled": p.days_filled,
+            "d2": p.d2, "d_total": p.d_total, "acc": p.acc,
+            "days_filled": p.days_filled,
             "days_system": p.days_system, "days_both": p.days_both,
             "gaps": p.gaps, "abs_dt": p.abs_dt}
 
 
 def employee_snapshot(db, analysis, person_code: str) -> dict:
-    """员工端读物化结果：{person, days}。老报告没有物化行 → 现算一次并补写（自愈）。"""
+    """员工端**只读**物化结果：{person, days}。
+
+    物化行在报告生成时写入（`run_analysis`）或由 `scripts/backfill_compare.py` 补写；
+    这里**绝不写库**（读接口不能有副作用，并发下会撞唯一键）。
+    """
     from app.models import StaffReportCompareDay as _D
     from app.models import StaffReportComparePerson as _P
     if analysis is None:
         return {"person": None, "days": []}
     p = (db.query(_P).filter(_P.analysis_id == analysis.id,
                              _P.person_code == person_code).first())
-    if p is None:
-        from app.services import daily_report
-        res = daily_report.compare(db, analysis.period_start, analysis.period_end)
-        if any(x["person_code"] == person_code for x in res["persons"]):
-            materialize(db, analysis.id, res)
-            p = (db.query(_P).filter(_P.analysis_id == analysis.id,
-                                     _P.person_code == person_code).first())
     days = (db.query(_D).filter(_D.analysis_id == analysis.id,
                                 _D.person_code == person_code)
             .order_by(_D.ref_date).all())
@@ -347,48 +414,32 @@ def file_coverage(db):
     return (row[0], row[1]) if row and row[0] and row[1] else (None, None)
 
 
-def available_periods(db, person_code: str = "", *, limit: int = 12,
-                      backfill_limit: int = 3) -> list:
+def available_periods(db, person_code: str = "", *, limit: int = 12) -> list:
     """员工端可看的核对区间：同区间取最新一份，且**整段落在已导入文件的覆盖范围内**。
 
-    数据源 = 物化表（staff_report_compare_person）；老报告没有物化行时现算补写一次。
+    数据源 = 物化表（`staff_report_compare_person`，报告生成时写入）。
+    **只读**：老报告若没有物化行，用 `scripts/backfill_compare.py` 补（不在读路径里写库）。
     """
     from app.models import StaffReportAnalysis as _A
     from app.models import StaffReportComparePerson as _P
     cov_start, cov_end = file_coverage(db)
     if cov_start is None:
         return []
-
-    def _query():
-        q = (db.query(_A).join(_P, _P.analysis_id == _A.id)
-             .filter(_A.status == "done"))
-        if person_code:
-            q = q.filter(_P.person_code == person_code)
-        seen, out = set(), []
-        for a in q.order_by(_A.id.desc()).all():
-            if a.period_start < cov_start or a.period_end > cov_end:
-                continue                      # 跨出文件覆盖范围 → 不列（没有离线数据可比）
-            key = (a.period_start, a.period_end)
-            if key in seen:                   # 同区间重复生成过 → 只留最新
-                continue
-            seen.add(key)
-            out.append(a)
-            if len(out) >= limit:
-                break
-        return out
-
-    out = _query()
-    if not out:                               # 老报告兜底：现算 + 补写物化行（最多 N 份）
-        from app.services import daily_report
-        for a in (db.query(_A).filter(_A.status == "done")
-                  .order_by(_A.id.desc()).limit(backfill_limit).all()):
-            try:
-                res = daily_report.compare(db, a.period_start, a.period_end)
-                if res["persons"]:
-                    materialize(db, a.id, res)
-            except Exception:  # noqa: BLE001
-                db.rollback()
-        out = _query()
+    q = (db.query(_A).join(_P, _P.analysis_id == _A.id)
+         .filter(_A.status == "done"))
+    if person_code:
+        q = q.filter(_P.person_code == person_code)
+    seen, out = set(), []
+    for a in q.order_by(_A.id.desc()).all():
+        if a.period_start < cov_start or a.period_end > cov_end:
+            continue                      # 跨出文件覆盖范围 → 不列（没有离线数据可比）
+        key = (a.period_start, a.period_end)
+        if key in seen:                   # 同区间重复生成过 → 只留最新
+            continue
+        seen.add(key)
+        out.append(a)
+        if len(out) >= limit:
+            break
     return out
 
 
@@ -401,7 +452,10 @@ def latest_for(db, start, end):
 
 
 def import_period(db, import_id: int):
-    """该文件在正式表里的日期范围；取不到则回退全局覆盖范围。"""
+    """**该文件**在正式表里的日期范围；没有正式记录时返回 (None, None)。
+
+    刻意不回退全局覆盖范围：入表 0 条的文件不该触发生成报告。
+    """
     from sqlalchemy import func
 
     from app.models import FormalRecord
@@ -410,7 +464,7 @@ def import_period(db, import_id: int):
            .filter(FormalRecord.import_id == import_id).first())
     if row and row[0] and row[1]:
         return row[0], row[1]
-    return file_coverage(db)
+    return None, None
 
 
 def auto_for_import(db, import_id: int) -> str:
@@ -428,6 +482,8 @@ def auto_for_import(db, import_id: int) -> str:
         return "AI 未配置，跳过"
     start, end = import_period(db, import_id)
     if not start or not end:
+        # 该文件没有进正式表（全被判重/全失败）→ 不生成；**不回退到全局范围**，
+        # 否则会拿整个库的数据范围生成一份没人要的报告（白烧 token）。
         return "该文件没有正式记录，跳过"
     _, msg = start_analysis(db, None, start, end)
     return "%s ~ %s：%s" % (start, end, msg)

@@ -18,7 +18,7 @@ def upgrade():
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
     op.execute("INSERT INTO sys_configs (config_month, per_point, bonus_group, bonus_amount, updated_at) VALUES "
-               "('2026-08', 250, 68, 3000, now()), ('2026-09', 250, 75, 1250, now())")
+               "('2026-08', 250, 68, 3000, CURRENT_TIMESTAMP), ('2026-09', 250, 75, 1250, CURRENT_TIMESTAMP)")
 
 def downgrade():
     op.drop_table("sys_configs")

@@ -167,12 +167,17 @@ def my_report_feedback(request: Request,
         return _denied()
     from app.models import StaffReportAnalysis
     from app.services import report_ai
-    done = report_ai.available_periods(db, user.person_code)   # 物化表 + 文件覆盖
+    from app.services import perf as _perf
+    svf = _perf.staff_visible_from(db)          # 员工可见起始月（默认 2026-10）
+    done = [a for a in report_ai.available_periods(db, user.person_code)
+            if not svf or str(a.period_start)[:7] >= svf]
     analysis = None
     if aid:
         analysis = db.get(StaffReportAnalysis, aid)
-        if analysis is not None and analysis.status != "done":
-            analysis = None
+        if analysis is not None and (
+                analysis.status != "done"
+                or (svf and str(analysis.period_start)[:7] < svf)):
+            analysis = None                     # 不在可见窗口内 → 当作没指定
     if analysis is None and done:
         analysis = done[0]
     from app.services import report_ai as _rai
@@ -289,6 +294,9 @@ def staff_reports_export(user: Optional[User] = Depends(require_login),
     from urllib.parse import quote as _q
 
     from fastapi.responses import StreamingResponse
+
+    if kind not in ("reports", "compare"):      # 白名单：kind 会进 Content-Disposition
+        return HTMLResponse("未知的导出类型", status_code=400)
 
     from app.services import report_export
     s, e = _resolved_period(db, start, end)

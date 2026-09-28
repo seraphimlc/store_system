@@ -282,15 +282,15 @@ def test_month_days_leaves_gap_rows(client):
     from app.services import daily_report
     db = appdb.SessionLocal()
     _seed_staff(client)
-    # 直接造历史数据：本月 1 号、3 号有填报，2 号缺
-    today = daily_report.jst_today()
+    # 用**固定历史月**造数（不能用"本月"，否则每月 1、2 号这条测试必挂：页面只列到今天）
+    today = date(2026, 3, 20)
     first = today.replace(day=1)
     for d, p1, p2 in ((first, 3, 1), (date(first.year, first.month, 3), 2, 2)):
         db.add(StaffDailyReport(person_code="P1", report_date=d, area="渋谷",
                                 p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
     db.commit()
-    v = daily_report.month_days(db, "P1", today.strftime("%Y-%m"), today=today)
-    assert v["visible_days"] == today.day             # 只列到"今天"（没到的日子不显示）
+    v = daily_report.month_days(db, "P1", "2026-03", today=today)
+    assert v["visible_days"] == 20                    # 只列到传入的"今天"
     assert all(d["future"] is False for d in v["days"])
     assert v["days"][0]["date"] == first and v["days"][0]["empty"] is False
     assert v["filled"] == len([d for d in v["days"] if not d["empty"]]) == 2
@@ -786,7 +786,8 @@ def test_analysis_disabled_by_env(client, monkeypatch):
 def test_feedback_page_numbers_only(client, monkeypatch):
     """员工端核对页：**只给数字**（准确率 + 逐日 Δ）；无评语、无状态列、无他人数据。"""
     from datetime import date
-    from app.services import report_ai
+    from app.services import perf, report_ai
+    monkeypatch.setattr(perf, "staff_visible_from", lambda db: "")   # 放行 9 月
     db = appdb.SessionLocal()
     _seed_compare_data(db)
     _mock_ai(monkeypatch)
@@ -896,6 +897,15 @@ def test_available_periods_dedupe_and_file_coverage(client):
     db.add(StaffReportAnalysis(period_start=date(2026, 9, 16), period_end=date(2026, 9, 17),
                                status="failed", summary={}, payload={}))
     db.commit()
+    # 读接口只读物化表（不再懒补写）→ 显式给"最新的那份 9/16~9/17"落表
+    from app.services import daily_report as _dr
+    newest = (db.query(StaffReportAnalysis)
+              .filter(StaffReportAnalysis.status == "done",
+                      StaffReportAnalysis.period_start == date(2026, 9, 16),
+                      StaffReportAnalysis.period_end == date(2026, 9, 17))
+              .order_by(StaffReportAnalysis.id.desc()).first())
+    report_ai.materialize(db, newest.id,
+                          _dr.compare(db, date(2026, 9, 16), date(2026, 9, 17)))
     ps = report_ai.available_periods(db)
     assert len(ps) == 1                                     # 去重 + 只留覆盖范围内的区间
     assert (ps[0].period_start, ps[0].period_end) == (date(2026, 9, 16), date(2026, 9, 17))
@@ -923,8 +933,8 @@ def test_auto_for_import_triggers_analysis(client, monkeypatch):
     assert a.status == "pending"
 
 
-def test_import_period_falls_back_to_coverage(client):
-    """没有正式记录的文件 → 回退全局覆盖范围。"""
+def test_import_period_is_strict(client):
+    """没有正式记录的文件 → (None, None)（**刻意不回退全局**：空文件不该触发生成）。"""
     from datetime import date
     from app.models import ImportFile
     from app.services import report_ai
@@ -934,7 +944,10 @@ def test_import_period_falls_back_to_coverage(client):
                        stored_path="/tmp/e.xlsx", uploaded_by=1, status="parsed")
     db.add(empty)
     db.commit()
-    assert report_ai.import_period(db, empty.id) == (date(2026, 9, 10), date(2026, 9, 20))
+    assert report_ai.import_period(db, empty.id) == (None, None)
+    # 有正式记录的文件 → 该文件自己的范围（用现成的覆盖夹具）
+    imp2 = _seed_coverage(db, date(2026, 9, 12), tag="has")
+    assert report_ai.import_period(db, imp2.id) == (date(2026, 9, 12), date(2026, 9, 12))
 
 
 # ---------- 当天填报可修改 ----------

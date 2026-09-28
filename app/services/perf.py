@@ -336,6 +336,20 @@ def _month_edges(month: str):
     return _d(y, m0, 1), _d(y, m0 + 1, 1)
 
 
+def refresh_compare_materialized(db, month: str) -> int:
+    """月度统计变化后刷新核对结果物化行（best-effort；不刷新员工端会显示旧数字）。"""
+    try:
+        from datetime import date as _d
+
+        from app.services import report_ai
+        y, m = int(month[:4]), int(month[5:7])
+        return report_ai.refresh_for_date(db, _d(y, m, 1)) + \
+            report_ai.refresh_for_date(db, _d(y, m, 28))
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return 0
+
+
 def sync_month_stats(db, month: str) -> int:
     """刷新 person_daily_stats：删除该月后按正式表重算（人 × 日 点数/店数）。"""
     from app.models import FormalRecord, PersonDailyStat

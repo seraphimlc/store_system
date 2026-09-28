@@ -66,6 +66,7 @@ def update_today(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0) -> StaffDailyR
     row.p2_cnt = to_count(p2_cnt, "2点店铺数")
     row.total_cnt = row.p1_cnt + row.p2_cnt
     db.commit()
+    _refresh_materialized(db, row.report_date)      # 数据变了 → 刷新核对页物化行
     return row
 
 
@@ -90,7 +91,21 @@ def submit_report(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
     except IntegrityError:            # 并发重复提交 → 交给唯一约束兜底
         db.rollback()
         raise AlreadySubmitted(today_report(db, code))
+    _refresh_materialized(db, today)  # 数据变了 → 刷新核对页物化行
     return row
+
+
+def _refresh_materialized(db, ref_date) -> None:
+    """刷新覆盖该日期的已完成报告的物化行（best-effort，失败不影响填报）。
+
+    没有这一步，员工端核对页会一直显示"报告生成那一刻"的旧数字，
+    与管理端实时对比结果不一致（2026-09-28 评审发现的真实错数）。
+    """
+    try:
+        from app.services import report_ai
+        report_ai.refresh_for_date(db, ref_date)
+    except Exception:  # noqa: BLE001  刷新失败不影响填报本身
+        db.rollback()
 
 
 def _row_dict(r: StaffDailyReport) -> dict:
@@ -396,8 +411,6 @@ def compare(db, start, end, person_code: str = "", sort: str = "acc") -> dict:
     persons = list(per.values())
     for p in persons:
         p["acc"] = _acc(p["abs_dt"], p["both_sys_total"]) if p["days_both"] else None
-        p["acc1"] = _acc(p["abs_d1"], p["both_sys_p1"]) if p["days_both"] else None
-        p["acc2"] = _acc(p["abs_d2"], p["both_sys_p2"]) if p["days_both"] else None
         p["d_total"] = p["sys_total"] - p["rep_total"]          # >0 少报 / <0 多报
         p["d1"] = p["sys_p1"] - p["rep_p1"]
         p["d2"] = p["sys_p2"] - p["rep_p2"]

@@ -28,7 +28,7 @@ def reports_xlsx(db, start, end, person_code: str = ""):
     from app.services import daily_report
     names = _names(db)
     data = daily_report.list_reports(db, start=start, end=end,
-                                     person_code=person_code, page=1, per=100000)
+                                     person_code=person_code, page=1, per=20000)
     wb = Workbook()
     _sheet(wb, "自报明细",
            ["日期", "员工编号", "姓名", "担当区域", "1点店铺数", "2点店铺数",
