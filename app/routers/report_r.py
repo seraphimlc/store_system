@@ -43,12 +43,16 @@ def my_report_page(request: Request,
     if not month or month not in months:
         month = this_month
     view = daily_report.month_days(db, user.person_code, month, today=today)
+    series = daily_report.chart_series(db, user.person_code, today=today)
+    chart = {"series": series,
+             "geo": daily_report.chart_geometry(series) if series["show"] else {}}
+
     return templates.TemplateResponse("my_report.html", {
         "request": request, "current_user": user,
         "today": today, "existing": existing,
         "existing_jst": (existing.submitted_at + timedelta(hours=9)
                          ).strftime("%Y-%m-%d %H:%M") if existing else "",
-        "view": view, "month": month, "months": months,
+        "view": view, "chart": chart, "month": month, "months": months,
         "wd_labels": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
         "msg": msg, "err": err,
     })

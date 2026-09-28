@@ -94,6 +94,73 @@ def my_reports(db, person_code: str, *, month: str = "", limit: int = 60) -> lis
     return [_row_dict(r) for r in rows]
 
 
+CHART_DAYS = 30          # 趋势窗口
+CHART_MIN_FILLED = 3     # 少于这么多天就不给图（规格：太少了不给）
+
+
+def chart_series(db, person_code: str, *, days: int = CHART_DAYS,
+                 today=None) -> dict:
+    """最近 N 天（含今天）的自报序列：缺的天标 filled=False。
+
+    `show` = 是否值得画（已填报天数 >= CHART_MIN_FILLED）。
+    """
+    today = today or jst_today()
+    start = today - timedelta(days=days - 1)
+    rows = {r.report_date: r for r in db.query(StaffDailyReport).filter(
+        StaffDailyReport.person_code == person_code,
+        StaffDailyReport.report_date >= start,
+        StaffDailyReport.report_date <= today).all()}
+    pts, d = [], start
+    while d <= today:
+        r = rows.get(d)
+        pts.append({"date": d, "filled": r is not None,
+                    "p1": r.p1_cnt if r else 0, "p2": r.p2_cnt if r else 0,
+                    "total": r.total_cnt if r else 0})
+        d += timedelta(days=1)
+    filled = sum(1 for x in pts if x["filled"])
+    vals = [x[k] for x in pts for k in ("p1", "p2")]
+    return {"days": pts, "filled": filled, "start": start, "end": today,
+            "p1": sum(x["p1"] for x in pts), "p2": sum(x["p2"] for x in pts),
+            "total": sum(x["total"] for x in pts),
+            "max": max(vals) if vals else 0,
+            "min_filled": CHART_MIN_FILLED,
+            "show": filled >= CHART_MIN_FILLED}
+
+
+def chart_geometry(series: dict, *, width: int = 320, height: int = 120,
+                   pad_x: int = 10, pad_y: int = 12) -> dict:
+    """把序列转成 SVG 几何：两条线各自分段（**缺数据处断开**）+ 每个有数据日的点。"""
+    days = series["days"]
+    n = len(days)
+    mx = max(1, series["max"] or 1)
+    step = (width - 2 * pad_x) / max(n - 1, 1)
+    span = height - 2 * pad_y
+
+    def xy(i, v):
+        return (pad_x + i * step, height - pad_y - (v / mx) * span)
+
+    out = {"width": width, "height": height, "pad_x": pad_x, "pad_y": pad_y,
+           "max": mx, "grid": pad_y, "base": height - pad_y,
+           "x_first": str(days[0]["date"]) if days else "",
+           "x_last": str(days[-1]["date"]) if days else ""}
+    for key in ("p1", "p2"):
+        segs, dots, cur = [], [], []
+        for i, d in enumerate(days):
+            if d["filled"]:
+                x, y = xy(i, d[key])
+                cur.append("%.1f,%.1f" % (x, y))
+                dots.append({"x": "%.1f" % x, "y": "%.1f" % y, "v": d[key]})
+            else:
+                if len(cur) > 1:
+                    segs.append(" ".join(cur))
+                cur = []
+        if len(cur) > 1:
+            segs.append(" ".join(cur))
+        out["segments_" + key] = segs
+        out["dots_" + key] = dots
+    return out
+
+
 def month_days(db, person_code: str, month: str = "", *,
                today=None) -> dict:
     """**本月逐日视图**：1 号到「今天或月末」，**缺填报的日子留空行**。

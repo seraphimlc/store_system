@@ -330,3 +330,69 @@ def test_my_report_page_shows_gap_rows(client):
     assert "本月合计" in html
     if today.day >= 2:
         assert "已填报" in html
+
+
+def test_chart_series_window_and_threshold(client):
+    """30 天窗口（含今天）；报过 3 天才 show=True；窗口外的数据不计。"""
+    from datetime import date, timedelta
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    today = date(2026, 9, 28)
+    # 窗口内 2 天 + 窗口外 1 天（第 31 天，不应计入）
+    for off, p1, p2 in ((0, 2, 1), (5, 3, 0), (30, 9, 9)):
+        d = today - timedelta(days=off)
+        db.add(StaffDailyReport(person_code="P1", report_date=d, area="x",
+                                p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
+    db.commit()
+    s = daily_report.chart_series(db, "P1", today=today)
+    assert len(s["days"]) == 30 and s["start"] == today - timedelta(days=29)
+    assert s["filled"] == 2 and s["show"] is False        # 少于 3 天 → 不给图
+    assert s["total"] == 6                                # 窗口外那条不计
+    db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=2),
+                            area="x", p1_cnt=1, p2_cnt=1, total_cnt=2))
+    db.commit()
+    s2 = daily_report.chart_series(db, "P1", today=today)
+    assert s2["filled"] == 3 and s2["show"] is True
+
+
+def test_chart_geometry_breaks_on_gap(client):
+    """缺数据的日子让曲线断开（分段），点只画在有数据的日子。"""
+    from datetime import date
+    from app.services import daily_report
+    s = {"days": [{"date": date(2026, 9, 1), "filled": True, "p1": 1, "p2": 0, "total": 1},
+                  {"date": date(2026, 9, 2), "filled": True, "p1": 3, "p2": 0, "total": 3},
+                  {"date": date(2026, 9, 3), "filled": False, "p1": 0, "p2": 0, "total": 0},
+                  {"date": date(2026, 9, 4), "filled": True, "p1": 2, "p2": 0, "total": 2},
+                  {"date": date(2026, 9, 5), "filled": True, "p1": 4, "p2": 0, "total": 4}],
+         "filled": 4, "start": date(2026, 9, 1), "end": date(2026, 9, 5),
+         "p1": 10, "p2": 0, "total": 10, "max": 4, "min_filled": 3, "show": True}
+    g = daily_report.chart_geometry(s, width=320, height=120)
+    assert len(g["segments_p1"]) == 2                     # 3 号断开 → 两段
+    assert len(g["dots_p1"]) == 4                         # 只有 4 天有数据
+    assert g["max"] == 4
+    # 最大值贴在顶部（y = pad_y）
+    top = min(float(d["y"]) for d in g["dots_p1"])
+    assert abs(top - g["pad_y"]) < 0.01
+
+
+def test_my_report_page_chart_visibility(client):
+    """报满 3 天 → 页面有 SVG；不足 3 天 → 只有提示、没有 SVG。"""
+    from datetime import timedelta
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    _seed_staff(client)
+    today = daily_report.jst_today()
+    db.add(StaffDailyReport(person_code="P1", report_date=today, area="x",
+                            p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    _login_staff(client)
+    html = client.get("/my/report").text
+    assert 'data-testid="trend-svg"' not in html          # 才 1 天 → 不给图
+    assert 'data-testid="trend-hint"' in html
+    for off in (1, 2):
+        db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=off),
+                                area="x", p1_cnt=2, p2_cnt=1, total_cnt=3))
+    db.commit()
+    html2 = client.get("/my/report").text
+    assert 'data-testid="trend-svg"' in html2
+    assert "polyline" in html2

@@ -39,6 +39,39 @@
   {% endif %}
 </div>
 
+{% if chart and chart.series.show %}
+<div class="card" data-testid="trend-card" style="margin-top:1.2rem">
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .3rem">{{ t('最近 30 天自报趋势') }}
+    <span class="hint">（{{ t('已填报') }} {{ chart.series.filled }} {{ t('天') }} ·
+      {{ t('合计') }} {{ chart.series.total }}）</span></h2>
+  <svg viewBox="0 0 {{ chart.geo.width }} {{ chart.geo.height }}"
+       style="width:100%;height:auto;display:block" data-testid="trend-svg"
+       role="img" aria-label="{{ t('最近 30 天自报趋势') }}">
+    <line x1="{{ chart.geo.pad_x }}" y1="{{ chart.geo.grid }}"
+          x2="{{ chart.geo.width - chart.geo.pad_x }}" y2="{{ chart.geo.grid }}"
+          stroke="var(--line)" stroke-width="1"></line>
+    <line x1="{{ chart.geo.pad_x }}" y1="{{ chart.geo.base }}"
+          x2="{{ chart.geo.width - chart.geo.pad_x }}" y2="{{ chart.geo.base }}"
+          stroke="var(--line)" stroke-width="1"></line>
+    {% for pts in chart.geo.segments_p1 %}
+    <polyline points="{{ pts }}" fill="none" stroke="#2f5bea" stroke-width="2"
+              stroke-linejoin="round" stroke-linecap="round"></polyline>{% endfor %}
+    {% for pts in chart.geo.segments_p2 %}
+    <polyline points="{{ pts }}" fill="none" stroke="#e08a00" stroke-width="2"
+              stroke-linejoin="round" stroke-linecap="round"></polyline>{% endfor %}
+    {% for d in chart.geo.dots_p1 %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.2" fill="#2f5bea"></circle>{% endfor %}
+    {% for d in chart.geo.dots_p2 %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.2" fill="#e08a00"></circle>{% endfor %}
+  </svg>
+  <div class="hint" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem">
+    <span><b style="color:#2f5bea">━</b> {{ t('1点店铺数') }}　<b style="color:#e08a00">━</b> {{ t('2点店铺数') }}　{{ t('纵轴上限') }} {{ chart.geo.max }}</span>
+    <span>{{ chart.series.start }} ～ {{ chart.series.end }}</span>
+  </div>
+</div>
+{% elif chart and chart.series.filled > 0 %}
+<div class="hint" style="margin-top:1.2rem" data-testid="trend-hint">
+  {{ t('报满 3 天后这里显示最近 30 天的趋势曲线（当前已填报') }} {{ chart.series.filled }} {{ t('天') }}）。
+</div>
+{% endif %}
 <div class="page-title" style="margin-top:1.2rem">
   <h1 style="font-size:1.05rem;margin:0">{{ t('我的填报历史') }}（{{ month }}）</h1>
   <div class="actions">
