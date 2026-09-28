@@ -235,7 +235,8 @@ def test_my_report_page_and_submit_route(client):
     r = client.post("/my/report", data={
         "csrf_token": csrf, "area": "渋谷", "p1_cnt": "4", "p2_cnt": "1"},
         follow_redirects=False)
-    assert r.status_code == 303 and "msg=" in r.headers["location"]
+    assert r.status_code == 303
+    assert r.headers["location"] == "/my/report"        # 成功不留 URL 参数
     db = appdb.SessionLocal()
     row = db.query(StaffDailyReport).one()
     assert (row.area, row.p1_cnt, row.p2_cnt, row.total_cnt) == ("渋谷", 4, 1, 5)
@@ -946,7 +947,7 @@ def test_update_today_route(client):
     r = client.post("/my/report/update",
                     data={"csrf_token": csrf, "area": "池袋", "p1_cnt": "7",
                           "p2_cnt": "3"}, follow_redirects=False)
-    assert r.status_code == 303 and "msg=" in r.headers["location"]
+    assert r.status_code == 303 and r.headers["location"] == "/my/report"
     db = appdb.SessionLocal()
     row = db.query(StaffDailyReport).one()
     assert (row.area, row.p1_cnt, row.p2_cnt, row.total_cnt) == ("池袋", 7, 3, 10)

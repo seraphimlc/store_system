@@ -74,8 +74,8 @@ def my_report_submit(request: Request,
     try:
         daily_report.submit_report(db, user, area=area, p1_cnt=p1_cnt,
                                    p2_cnt=p2_cnt, client_ts=client_ts)
-        return RedirectResponse("/my/report?msg=" + quote("今日填报已提交"),
-                                status_code=303)
+        # 成功不留 URL 参数：页面上的数据本身就是反馈（错误才用 ?err= 提示）
+        return RedirectResponse("/my/report", status_code=303)
     except daily_report.AlreadySubmitted:
         return RedirectResponse("/my/report?err=" + quote("今天已经填报过了（一天一次）"),
                                 status_code=303)
@@ -145,7 +145,7 @@ def my_report_update(request: Request,
     from app.services import daily_report
     try:
         daily_report.update_today(db, user, area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt)
-        return RedirectResponse("/my/report?msg=" + quote("已保存"), status_code=303)
+        return RedirectResponse("/my/report", status_code=303)
     except daily_report.NoReport:
         return RedirectResponse("/my/report?err=" + quote("今天还没有填报记录"),
                                 status_code=303)
