@@ -37,7 +37,8 @@ def materialize(db, analysis_id: int, res: dict) -> int:
                   ref_date=r["date"], kind=r["kind"], sys_p1=r["sys_p1"],
                   sys_p2=r["sys_p2"], sys_total=r["sys_total"],
                   rep_p1=r["rep_p1"], rep_p2=r["rep_p2"],
-                  rep_total=r["rep_total"], d1=r["d1"], d2=r["d2"], dt=r["dt"]))
+                  rep_total=r["rep_total"], d1=r["d1"], d2=r["d2"], dt=r["dt"],
+                  acc=r.get("acc")))
     try:
         db.commit()
     except IntegrityError:      # 并发重复落表 → 不是错误（唯一键就是干这个的）
@@ -94,7 +95,8 @@ def employee_snapshot(db, analysis, person_code: str) -> dict:
             "days": [{"date": d.ref_date, "kind": d.kind, "sys_total": d.sys_total,
                       "sys_p1": d.sys_p1, "sys_p2": d.sys_p2,
                       "rep_total": d.rep_total, "rep_p1": d.rep_p1,
-                      "rep_p2": d.rep_p2, "dt": d.dt} for d in days]}
+                      "rep_p2": d.rep_p2, "dt": d.dt, "acc": d.acc}
+                     for d in days]}
 
 
 def file_coverage(db):
@@ -103,6 +105,26 @@ def file_coverage(db):
     这是"离线数据"的边界：区间超出它就没有系统侧数字可比。
     """
     return formal_date_range(db)
+
+
+def delete_analysis(db, analysis_id: int) -> bool:
+    """删除一份分析报告及其物化行。
+
+    报告是**可再生的产物**（自报与正式数据不动），所以删它不需要"已对账"那种保护；
+    删掉后该区间在员工端/管理端就回到"还没生成报告"的状态。
+    """
+    from app.models import StaffReportCompareDay as _D
+    from app.models import StaffReportComparePerson as _P
+    a = db.get(StaffReportAnalysis, analysis_id)
+    if a is None:
+        return False
+    db.query(_D).filter(_D.analysis_id == analysis_id).delete(
+        synchronize_session=False)
+    db.query(_P).filter(_P.analysis_id == analysis_id).delete(
+        synchronize_session=False)
+    db.delete(a)
+    db.commit()
+    return True
 
 
 def available_periods(db, person_code: str = "", *, limit: int = 12) -> list:

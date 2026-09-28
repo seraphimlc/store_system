@@ -30,6 +30,15 @@ def jst_today() -> date:
     return datetime.now(JST).date()
 
 
+_UNIQUE_REPORT = "uq_sdr_person_date"
+
+
+def is_duplicate_error(e) -> bool:
+    """IntegrityError 是否来自"一天一条"的唯一约束（其余约束错误不能被当成重复填报）。"""
+    text = "%s" % getattr(e, "orig", e)
+    return _UNIQUE_REPORT in text or "unique" in text.lower() or "duplicate" in text.lower()
+
+
 def to_count(value, field="数量") -> int:
     """把表单值转成 0..999 的整数；非法 → ValueError（带可展示的文案）。"""
     s = str(value if value is not None else "").strip()
@@ -100,9 +109,12 @@ def submit_report(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
     db.add(row)
     try:
         db.commit()
-    except IntegrityError:            # 并发重复提交 → 交给唯一约束兜底
+    except IntegrityError as e:
         db.rollback()
-        raise AlreadySubmitted(today_report(db, code))
+        if is_duplicate_error(e):     # 并发重复提交 → 唯一约束兜底
+            raise AlreadySubmitted(today_report(db, code))
+        # 其它完整性错误（如编号悬空、正文违反约束）：**不能**谎报"今天已填报"
+        raise ValueError("保存失败：数据不合法（%s）" % str(getattr(e, "orig", e))[:80])
     _refresh_materialized(db, today)  # 数据变了 → 刷新核对页物化行
     return row
 
@@ -166,11 +178,31 @@ def save_by_admin(db, *, person_code: str, report_date, area: str = "",
         row.source = "admin"
     try:
         db.commit()
-    except IntegrityError:            # 并发补同一天 → 唯一约束兜底
+    except IntegrityError as e:
         db.rollback()
-        raise AlreadySubmitted(today_report(db, code))
+        if is_duplicate_error(e):     # 并发补同一天 → 唯一约束兜底
+            raise AlreadySubmitted(today_report(db, code))
+        raise ValueError("保存失败：数据不合法（%s）" % str(getattr(e, "orig", e))[:80])
     _refresh_materialized(db, report_date)
     return row
+
+
+def delete_by_admin(db, *, person_code: str, report_date,
+                    force: bool = False) -> bool:
+    """删除某天的自报（默认只删**未对账**的日期）。
+
+    `force=True` 连已对账的也删 —— 只给 `scripts/cleanup_staff_reports.py`
+    清理演示/测试数据用，正常界面路径不走这里。
+    """
+    row = get_report(db, person_code, report_date)
+    if row is None:
+        return False
+    if not force and is_locked(db, report_date):
+        raise Locked(report_date)
+    db.delete(row)
+    db.commit()
+    _refresh_materialized(db, report_date)
+    return True
 
 
 def _refresh_materialized(db, ref_date) -> None:

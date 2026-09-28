@@ -259,12 +259,14 @@ def staff_reports_page(request: Request,
     names = dict(db.query(Person.code, Person.display_name).all())
     locked = {r["date"] for r in data["rows"]
               if daily_report.is_locked(db, r["date"])}
+    missing = report_compare.missing_summary(db, s, e)
     return templates.TemplateResponse("staff_reports.html", {
         "request": request, "current_user": user, "data": data,
         "start": s, "end": e, "person_code": person_code,
         "names": names, "staff_opts": _staff_options(db), "msg": msg, "err": err,
         "jst_delta": timedelta(hours=9),
         "cov_end": daily_report.coverage_end(db), "locked_dates": locked,
+        "missing": missing,
         "edit_row": _edit_row(db, person_code, edit_date),
     })
 
@@ -305,12 +307,62 @@ def staff_report_save(request: Request,
         return RedirectResponse(back + "&err=" + quote(str(e)), status_code=303)
 
 
+@router.post("/staff-reports/report/delete")
+def staff_report_delete(request: Request,
+                        person_code: str = Form(""), report_date: str = Form(""),
+                        csrf_token: str = Form(""), start: str = Form(""),
+                        end: str = Form(""),
+                        user: Optional[User] = Depends(require_login),
+                        db: Session = Depends(get_db)):
+    """删除某天自报（仅未对账的日期；已对账的不可删，与补录同一条规则）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import daily_report
+    back = "/staff-reports?start=%s&end=%s" % (quote(start), quote(end))
+    d = _as_date(report_date, None)
+    if d is None:
+        return RedirectResponse(back + "&err=" + quote("时间格式应为 YYYY-MM-DD"),
+                                status_code=303)
+    try:
+        ok = daily_report.delete_by_admin(db, person_code=person_code,
+                                          report_date=d)
+        key = "已删除自报" if ok else "没有这条自报"
+        return RedirectResponse(back + "&msg=" + quote(key), status_code=303)
+    except daily_report.Locked:
+        return RedirectResponse(
+            back + "&err=" + quote("该日期已有系统数据（已对账），不能删除"),
+            status_code=303)
+
+
+@router.post("/staff-reports/analysis/{aid}/delete")
+def staff_reports_analysis_delete(aid: int, request: Request,
+                                  csrf_token: str = Form(""),
+                                  start: str = Form(""), end: str = Form(""),
+                                  user: Optional[User] = Depends(require_login),
+                                  db: Session = Depends(get_db)):
+    """删除一份 AI 分析报告（含物化行）；报告可重新生成。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import report_store
+    ok = report_store.delete_analysis(db, aid)
+    back = ("/staff-reports/compare?start=%s&end=%s"
+            % (quote(start), quote(end)))
+    key = "已删除报告" if ok else "报告不存在"
+    return RedirectResponse(back + "&msg=" + quote(key), status_code=303)
+
+
 @router.get("/staff-reports/compare", response_class=HTMLResponse)
 def staff_reports_compare(request: Request,
                           user: Optional[User] = Depends(require_login),
                           db: Session = Depends(get_db), start: str = "", end: str = "",
                           person_code: str = "", sort: str = "acc", kind: str = "",
-                          msg: str = "", err: str = ""):
+                          dpage: int = 1, msg: str = "", err: str = ""):
     """区间对比：逐人合计 + 准确率排名 + 逐日明细（程序算；模型不参与）。"""
     g = _admin_guard(user)
     if g:
@@ -318,7 +370,12 @@ def staff_reports_compare(request: Request,
     from app.services import daily_report, report_compare, report_store
     s, e = _resolved_period(db, start, end)
     res = report_compare.compare(db, s, e, person_code, sort=sort)
-    daily = [r for r in res["daily"] if not kind or r["kind"] == kind]
+    daily_all = [r for r in res["daily"] if not kind or r["kind"] == kind]
+    # 逐日明细分页（评审：整段区间一次渲染，3 个月可达 598 行 / 184KB）
+    dper = 100
+    dpages = max(1, (len(daily_all) + dper - 1) // dper)
+    dpage = min(max(1, dpage), dpages)
+    daily = daily_all[(dpage - 1) * dper:dpage * dper]
     from app.i18n import CURRENT_LANG
     from app.services import report_ai
     analysis = report_ai.latest_for(db, s, e)
@@ -338,6 +395,7 @@ def staff_reports_compare(request: Request,
         "analysis": analysis, "report": report,
         "ai_enabled": report_ai.report_ai_enabled(),
         "coverage_warn": coverage_warn, "cov_end": cov_end,
+        "dpage": dpage, "dpages": dpages, "daily_total": len(daily_all),
     })
 
 

@@ -56,7 +56,10 @@ def compare(db, start, end, person_code: str = "", sort: str = "acc") -> dict:
             "sys_total": s["total"] if s else None,
             "rep_p1": rp["p1"] if rp else None, "rep_p2": rp["p2"] if rp else None,
             "rep_total": rp["total"] if rp else None,
-            "d1": d1, "d2": d2, "dt": dt})
+            "d1": d1, "d2": d2, "dt": dt,
+            # 单日准确率（规格 §7）：max(0, 1 − |Δ总| ÷ max(系统总店数, 1))；只算 both 日
+            "acc": (_acc(abs(dt or 0), s["total"]) if (kind == KIND_BOTH and s)
+                    else None)})
         p = per.setdefault(code, {
             "person_code": code, "name": names.get(code, code),
             "sys_p1": 0, "sys_p2": 0, "sys_total": 0,
@@ -108,6 +111,25 @@ def compare(db, start, end, person_code: str = "", sort: str = "acc") -> dict:
     }
     return {"start": start, "end": end, "summary": summary, "persons": persons,
             "daily": daily, "counts": counts, "sort": sort}
+
+
+def missing_summary(db, start, end, *, limit: int = 60) -> list:
+    """漏填汇总：每人 应填天数/实填天数/漏填天数 + 漏填日期（规格 §7「漏填标记」）。
+
+    应填 = 该区间系统侧有记录的天数；漏填 = 系统有数据但员工没报的天数。
+    """
+    res = compare(db, start, end)
+    dates = {}
+    for r in res["daily"]:
+        if r["kind"] == KIND_MISSING_REPORT:
+            dates.setdefault(r["person_code"], []).append(r["date"])
+    out = []
+    for p in res["persons"]:
+        out.append({"person_code": p["person_code"], "name": p["name"],
+                    "days_system": p["days_system"], "days_filled": p["days_filled"],
+                    "gaps": p["gaps"], "dates": dates.get(p["person_code"], [])})
+    out.sort(key=lambda x: (-x["gaps"], x["person_code"]))
+    return out[:limit]
 
 
 def suggest_period(db):

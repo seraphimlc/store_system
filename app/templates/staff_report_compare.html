@@ -69,13 +69,23 @@
     </ul>
   </details>
   {% endif %}
-  <form method="post" action="/staff-reports/compare/analyze" style="margin-top:.6rem">
-    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-    <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
-    <input type="hidden" name="person_code" value="{{ person_code }}">
-    <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
-  </form>
+  <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
+    <form method="post" action="/staff-reports/compare/analyze">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+      <input type="hidden" name="person_code" value="{{ person_code }}">
+      <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
+    </form>
+    <form method="post" action="/staff-reports/analysis/{{ analysis.id }}/delete"
+          onsubmit="return confirm('{{ t('删除这份报告？') }}')">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+      <button class="btn ghost" style="color:var(--err)" type="submit"
+              data-testid="del-analysis">{{ t('删除报告') }}</button>
+    </form>
+  </div>
   {% endif %}
 </div>
 {% elif ai_enabled %}
@@ -123,7 +133,8 @@
 </div>
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="compare-daily">
   <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('类型') }}</th>
-      <th>{{ t('系统') }}（1/2）</th><th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+      <th>{{ t('系统') }}（1/2）</th><th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th>
+      <th>{{ t('准确率') }}</th></tr>
   {% for r in daily %}
   <tr>
     <td>{{ r.date }}</td>
@@ -134,7 +145,17 @@
     <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
     <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
     <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
+    <td class="num">{% if r.acc is not none %}{{ (r.acc * 100) | round(1) }}%{% else %}—{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="6" class="empty">{{ t('没有符合条件的明细') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7" class="empty">{{ t('没有符合条件的明细') }}</td></tr>{% endfor %}
 </table></div>
+{% if dpages > 1 %}
+<div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap;align-items:center">
+  <span class="hint">{{ t('共') }} {{ daily_total }} {{ t('行') }} · {{ dpage }} / {{ dpages }}</span>
+  {% for pg in range(1, dpages + 1) %}
+  <a class="btn ghost" style="padding:.15rem .6rem{% if pg == dpage %};border-color:var(--brand);color:var(--brand){% endif %}"
+     href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&sort={{ sort }}&kind={{ kind }}&dpage={{ pg }}">{{ pg }}</a>
+  {% endfor %}
+</div>
+{% endif %}
 {% endblock %}

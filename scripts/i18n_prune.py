@@ -14,6 +14,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 I18N = os.path.join(ROOT, "app", "i18n.py")
 SCAN_DIRS = ("app", "store_settle", "mcp_service", "deploy")
 
+sys.path.insert(0, ROOT)
+from scripts.i18n_runtime_keys import RUNTIME_KEYS  # noqa: E402
+
 
 def _blob():
     parts = []
@@ -42,7 +45,7 @@ def main():
         if k in blob:
             continue
         # 太短的键容易误判（如 "或"）：即使命中率低也保守跳过
-        if len(k) < 3:
+        if len(k) < 3 or k in RUNTIME_KEYS:
             continue
         dead.append(k)
     print("拟删除死键 %d 个：" % len(dead))

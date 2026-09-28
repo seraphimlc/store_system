@@ -38,12 +38,19 @@ PROMPT_VERSION = 2      # prompt/标签口径变更时 +1 → 旧报告不再被
 
 
 def data_fingerprint(res: dict) -> str:
-    """对比数据的指纹（含区间、逐人数字、prompt 版本）：同数据同口径 → 复用报告。"""
+    """对比数据的指纹：区间 + 逐人合计 + **逐人逐日 Δ** + prompt 版本。
+
+    逐日必须进指纹（2026-09-28 评审）：只看合计的话，"同样的合计换个日子" 会被判为同数据
+    → 复用旧报告，而旧报告里的日期（`off_days`）与新逐日表对不上，管理端会看到自相矛盾的评语。
+    """
     payload = {"v": PROMPT_VERSION,
                "start": str(res["start"]), "end": str(res["end"]),
                "counts": res.get("counts") or {},
                "persons": [[p["person_code"], p["sys_p1"], p["sys_p2"],
-                            p["rep_p1"], p["rep_p2"]] for p in res["persons"]]}
+                            p["rep_p1"], p["rep_p2"]] for p in res["persons"]],
+               "daily": [[r["person_code"], str(r["date"]), r["kind"],
+                          r["sys_total"], r["rep_total"], r["dt"]]
+                         for r in res["daily"]]}
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 

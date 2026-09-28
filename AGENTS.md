@@ -90,12 +90,20 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   **锁定规则**：某日期 ≤ 已导入正式数据的最后一天 = **已对账 → 自报不可改**；
   之后的日期仍可补录/修改（`daily_report.is_locked/coverage_end/save_by_admin`）。
   员工端「当天可改」也守同一条规则（今天已对账则拒绝）。列表页锁定行显示「已对账」、可改行给「改」入口。
+- **删除能力（2026-09-28）**：管理端列表对**未对账**的行给「删除」（与补录同一条锁定规则，
+  已对账不可删）；对比页报告卡可「删除报告」（删除分析 + 物化行，报告可再生）。
+  清理演示/测试数据用 `scripts/cleanup_staff_reports.py`（默认 dry-run，`--apply --force` 可越过锁定）。
+- **单日准确率**（规格 §7 `acc_day = max(0, 1 − |Δ总| ÷ max(系统总店数,1))`，只算 both 日）：
+  员工端与管理端逐日表都显示「准确率」列；物化表 `staff_report_compare_day.acc`。
+- **漏填汇总**（规格 §7 漏填标记）：管理端列表按人给出 应填天数/实填天数/漏填天数 + 漏填日期。
+- 数据指纹**含逐人逐日 Δ**：只看合计的话，"同样合计换个日子" 会误判为同数据而复用旧报告。
+- Excel 导出用 `Workbook(write_only=True)` **流式写**（不在内存里保留整份工作簿）。
 - **手工建号（编号即身份键）**：`/staff-admin` 新增「新建员工」——**编号必填**（NFKC 归一）、
   重复只提示不覆盖；导入时**按编号判定**（有→用系统里的，无→创建），命中手工建号的人时补写
   `first_seen_import_id`。**不做身份合并**：不同编号 = 不同的人（用户明确）。
 - 表：`staff_daily_reports`（`(person_code, report_date)` 唯一）/ `staff_report_analyses`（`summary` 数字 + `payload` 评语）；
   另有物化表 `staff_report_compare_person`（人×区间）/ `staff_report_compare_day`（人×日）、
-  防重复提交的 `form_tokens`；迁移 `b8c9d0e1f2a3` → `c9d0e1f2a3b4` → `d0e1f2a3b4c5` → `a2b3c4d5e6f7`（正式表日期索引）；**现有业务表一行未改**（只加表/索引）。
+  防重复提交的 `form_tokens`；迁移 `b8c9d0e1f2a3` → `c9d0e1f2a3b4` → `d0e1f2a3b4c5` → `a2b3c4d5e6f7`（正式表日期索引）→ `b3c4d5e6f7a8`（逐日单日准确率列）；**现有业务表一行未改**（只加表/列/索引）。
 - **报告生成结点 = 文件入表后自动**（`flow.auto_finalize_pipeline` → `report_ai.auto_for_import`）：
   自报在时间上先于系统数据，文件入表完成才是两边齐备的时刻；同数据指纹复用、AI 未配置/文件无正式记录则跳过。
 - **物化与失效**：报告生成时把对比结果落物化表（员工端只读，避免实时重算与并发写）；

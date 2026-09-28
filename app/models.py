@@ -773,6 +773,7 @@ class StaffReportCompareDay(Base):
     d1 = Column(Integer, nullable=True)
     d2 = Column(Integer, nullable=True)
     dt = Column(Integer, nullable=True)
+    acc = Column(Float, nullable=True)      # 单日准确率（仅 both 日有值）
     created_at = Column(DateTime, nullable=False, default=_now)
 
 

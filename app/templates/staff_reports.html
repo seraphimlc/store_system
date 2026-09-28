@@ -65,6 +65,26 @@
   <div class="stat-card"><p class="k">{{ t('页') }}</p><p class="v">{{ data.page }} / {{ data.pages }}</p></div>
 </div>
 
+{% if missing %}
+<div class="card" style="margin-bottom:.8rem">
+  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('漏填汇总') }}</h2>
+  <div class="tbl-wrap"><table class="grid-tbl" data-testid="missing-table">
+    <tr><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('应填天数') }}</th>
+        <th>{{ t('实填天数') }}</th><th>{{ t('漏填天数') }}</th><th>{{ t('漏填日期') }}</th></tr>
+    {% for m in missing if m.gaps %}
+    <tr>
+      <td>{{ m.name }}</td>
+      <td class="hint">{{ m.person_code }}</td>
+      <td class="num">{{ m.days_system }}</td>
+      <td class="num">{{ m.days_filled }}</td>
+      <td class="num" style="color:var(--warn);font-weight:650">{{ m.gaps }}</td>
+      <td class="hint">{% for d in m.dates[:8] %}{{ d }}　{% endfor %}{% if m.dates|length > 8 %}…{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="6" class="empty">{{ t('该区间没有漏填') }}</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">
   <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('担当区域') }}</th>
       <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th><th>{{ t('提交时间') }}</th><th>{{ t('操作') }}</th></tr>
@@ -78,7 +98,18 @@
     <td class="hint">{{ (r.submitted_at + jst_delta).strftime('%Y-%m-%d %H:%M') if r.submitted_at else '—' }}</td>
     <td>{% if r.date in locked_dates %}<span class="pill">{{ t('已对账') }}</span>
         {% else %}<a class="btn ghost" style="padding:.1rem .5rem"
-           href="/staff-reports?start={{ start }}&end={{ end }}&person_code={{ r.person_code }}&edit_date={{ r.date }}">{{ t('改') }}</a>{% endif %}</td>
+           href="/staff-reports?start={{ start }}&end={{ end }}&person_code={{ r.person_code }}&edit_date={{ r.date }}">{{ t('改') }}</a>
+        <form method="post" action="/staff-reports/report/delete" style="display:inline"
+              onsubmit="return confirm('{{ t('删除这条自报？') }}')">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
+          <input type="hidden" name="start" value="{{ start }}">
+          <input type="hidden" name="end" value="{{ end }}">
+          <input type="hidden" name="person_code" value="{{ r.person_code }}">
+          <input type="hidden" name="report_date" value="{{ r.date }}">
+          <button class="btn ghost" style="padding:.1rem .5rem;color:var(--err)"
+                  type="submit" data-testid="admin-del-report">{{ t('删除') }}</button>
+        </form>{% endif %}</td>
   </tr>
   {% else %}<tr><td colspan="9" class="empty">{{ t('该区间没有填报记录') }}</td></tr>{% endfor %}
 </table></div>

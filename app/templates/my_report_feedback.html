@@ -39,15 +39,16 @@
 
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-compare-daily">
   <tr><th>{{ t('日期') }}</th><th>{{ t('系统') }}（1/2）</th>
-      <th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+      <th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th><th>{{ t('准确率') }}</th></tr>
   {% for r in days %}
   <tr {% if r.kind != 'both' %}style="background:#fbfcfe"{% endif %}>
     <td>{{ r.date }}</td>
     <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
     <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
     <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
+    <td class="num">{% if r.acc is not none %}{{ (r.acc * 100) | round(1) }}%{% else %}—{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="4" class="empty">{{ t('这个区间没有你的记录') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="5" class="empty">{{ t('这个区间没有你的记录') }}</td></tr>{% endfor %}
 </table></div>
 {% endif %}
 {% endblock %}

@@ -80,8 +80,11 @@ def main():
 
     if only_added:
         used = used & _added_keys()
+    import sys as _sys
+    _sys.path.insert(0, ROOT)
+    from scripts.i18n_runtime_keys import RUNTIME_KEYS
     missing = sorted(k for k in used if k not in keys)
-    dead = sorted(k for k in keys if k not in blob)
+    dead = sorted(k for k in keys if k not in blob and k not in RUNTIME_KEYS)
 
     print("模板/代码用到但字典缺失（日文界面会显示中文）: %d%s"
           % (len(missing), "（仅本分支改过的文件）" if only_changed else ""))
