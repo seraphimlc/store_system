@@ -61,9 +61,7 @@ def my_perf(request: Request,
         return _denied()
     from app.services import perf
     code = user.person_code
-    mine = [r for r in db.query(FormalRecord).filter(
-        FormalRecord.person_code == code).all()]
-    months = sorted({(str(r.japan_date or ""))[:7] for r in mine if r.japan_date})
+    months = perf.person_months(db, code)          # 物化表取月份（不拉正式表全表）
     # 员工可见起始月：员工端只显示该月及之后（管理员不受影响）
     svf = perf.staff_visible_from(db)
     if svf:
@@ -76,9 +74,8 @@ def my_perf(request: Request,
             "request": request, "current_user": user, "month": "",
             "months": months, "daily": [], "summary": None,
             "daily_totals": None})
-    # 当月全部逐日明细（升序），不做日期筛选
-    daily = sorted((d for d in perf.daily_perf(db, month) if d["code"] == code),
-                   key=lambda x: str(x["date"]))
+    # 当月全部逐日明细（升序）——读物化表 person_daily_stats
+    daily = perf.daily_perf_person(db, month, code)
     daily_totals = None
     if daily:
         daily_totals = {

@@ -879,6 +879,8 @@ def test_available_periods_dedupe_and_file_coverage(client):
     from app.services import report_ai
     db = appdb.SessionLocal()
     _seed_coverage(db, date(2026, 9, 16), date(2026, 9, 17))   # 覆盖 9/16~9/17
+    _seed_sys(db, "P1", date(2026, 9, 16), 4, 2)               # 该区间确有可对比数据
+    db.commit()
     # 同区间两份（模拟重新生成过）+ 一份没有文件覆盖的区间（10 月）
     db.add(StaffReportAnalysis(period_start=date(2026, 9, 16), period_end=date(2026, 9, 17),
                                status="done", summary={}, payload={"by_lang": {"zh": {}}}))

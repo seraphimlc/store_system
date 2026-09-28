@@ -99,6 +99,8 @@ def test_staff_hidden_pre_launch_months(client):
                         person_code="P1", japan_date=date(2026, 10, 3),
                         points=2))
     db.commit()
+    _pf.sync_month_stats(db, "2026-08")   # 管线入表后会同步日统计表
+    _pf.sync_month_stats(db, "2026-10")
     _pf.sync_month_perf(db, "2026-10")
     db.close()
     # 默认起始月 2026-10 → 员工月份下拉只有 2026-10
@@ -153,6 +155,7 @@ def test_staff_visible_from_config_roundtrip(client):
                         points=1))
     db.commit()
     from app.services import perf as _pf
+    _pf.sync_month_stats(db, "2026-09")   # 管线入表后会同步日统计表
     _pf.sync_month_perf(db, "2026-09")
     db.close()
     _staff(client, "emp1", "员工甲", "P1")

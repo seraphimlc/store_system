@@ -164,8 +164,8 @@ def my_report_feedback(request: Request,
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
     from app.models import StaffReportAnalysis
-    from app.services import daily_report, report_ai
-    done = report_ai.available_periods(db)          # 去重 + 只列有文件覆盖的区间
+    from app.services import report_ai
+    done = report_ai.available_periods(db, user.person_code)   # 物化表 + 文件覆盖
     analysis = None
     if aid:
         analysis = db.get(StaffReportAnalysis, aid)
@@ -173,14 +173,12 @@ def my_report_feedback(request: Request,
             analysis = None
     if analysis is None and done:
         analysis = done[0]
-    res, mine = None, None
-    if analysis is not None:
-        res = daily_report.compare(db, analysis.period_start, analysis.period_end,
-                                   user.person_code)
-        mine = res["persons"][0] if res["persons"] else None
+    from app.services import report_ai as _rai
+    snap = _rai.employee_snapshot(db, analysis, user.person_code)
     return templates.TemplateResponse("my_report_feedback.html", {
         "request": request, "current_user": user, "analysis": analysis,
-        "periods": done, "aid": aid, "res": res, "mine": mine,
+        "periods": done, "aid": aid, "mine": snap["person"],
+        "days": snap["days"],
     })
 
 

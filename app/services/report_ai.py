@@ -207,6 +207,11 @@ def run_analysis(analysis_id: int) -> None:
         a.status = "done" if by_lang else "failed"
         a.finished_at = datetime.utcnow()
         db.commit()
+        # 落物化表（员工端只读它；失败不影响报告本身）
+        try:
+            materialize(db, analysis_id, res)
+        except Exception:  # noqa: BLE001  best-effort
+            db.rollback()
     finally:
         db.close()
 
@@ -264,6 +269,71 @@ def latest_done(db, start=None, end=None):
     return q.order_by(StaffReportAnalysis.id.desc()).first()
 
 
+def materialize(db, analysis_id: int, res: dict) -> int:
+    """把对比结果落成物化表（幂等：先删后插）。返回写入行数。
+
+    员工端核对页从此**只读物化表**，不再实时跑 compare()。
+    """
+    from app.models import StaffReportCompareDay as _D
+    from app.models import StaffReportComparePerson as _P
+    db.query(_D).filter(_D.analysis_id == analysis_id).delete(
+        synchronize_session=False)
+    db.query(_P).filter(_P.analysis_id == analysis_id).delete(
+        synchronize_session=False)
+    for p in res["persons"]:
+        db.add(_P(analysis_id=analysis_id, person_code=p["person_code"],
+                  name=p["name"] or "", sys_p1=p["sys_p1"], sys_p2=p["sys_p2"],
+                  sys_total=p["sys_total"], rep_p1=p["rep_p1"],
+                  rep_p2=p["rep_p2"], rep_total=p["rep_total"], d1=p["d1"],
+                  d2=p["d2"], d_total=p["d_total"], acc=p["acc"],
+                  acc1=p["acc1"], acc2=p["acc2"], days_filled=p["days_filled"],
+                  days_system=p["days_system"], days_both=p["days_both"],
+                  gaps=p["gaps"], abs_dt=p["abs_dt"]))
+    for r in res["daily"]:
+        db.add(_D(analysis_id=analysis_id, person_code=r["person_code"],
+                  ref_date=r["date"], kind=r["kind"], sys_p1=r["sys_p1"],
+                  sys_p2=r["sys_p2"], sys_total=r["sys_total"],
+                  rep_p1=r["rep_p1"], rep_p2=r["rep_p2"],
+                  rep_total=r["rep_total"], d1=r["d1"], d2=r["d2"], dt=r["dt"]))
+    db.commit()
+    return len(res["persons"]) + len(res["daily"])
+
+
+def _person_row(p) -> dict:
+    return {"person_code": p.person_code, "name": p.name, "sys_p1": p.sys_p1,
+            "sys_p2": p.sys_p2, "sys_total": p.sys_total, "rep_p1": p.rep_p1,
+            "rep_p2": p.rep_p2, "rep_total": p.rep_total, "d1": p.d1,
+            "d2": p.d2, "d_total": p.d_total, "acc": p.acc, "acc1": p.acc1,
+            "acc2": p.acc2, "days_filled": p.days_filled,
+            "days_system": p.days_system, "days_both": p.days_both,
+            "gaps": p.gaps, "abs_dt": p.abs_dt}
+
+
+def employee_snapshot(db, analysis, person_code: str) -> dict:
+    """员工端读物化结果：{person, days}。老报告没有物化行 → 现算一次并补写（自愈）。"""
+    from app.models import StaffReportCompareDay as _D
+    from app.models import StaffReportComparePerson as _P
+    if analysis is None:
+        return {"person": None, "days": []}
+    p = (db.query(_P).filter(_P.analysis_id == analysis.id,
+                             _P.person_code == person_code).first())
+    if p is None:
+        from app.services import daily_report
+        res = daily_report.compare(db, analysis.period_start, analysis.period_end)
+        if any(x["person_code"] == person_code for x in res["persons"]):
+            materialize(db, analysis.id, res)
+            p = (db.query(_P).filter(_P.analysis_id == analysis.id,
+                                     _P.person_code == person_code).first())
+    days = (db.query(_D).filter(_D.analysis_id == analysis.id,
+                                _D.person_code == person_code)
+            .order_by(_D.ref_date).all())
+    return {"person": _person_row(p) if p is not None else None,
+            "days": [{"date": d.ref_date, "kind": d.kind, "sys_total": d.sys_total,
+                      "sys_p1": d.sys_p1, "sys_p2": d.sys_p2,
+                      "rep_total": d.rep_total, "rep_p1": d.rep_p1,
+                      "rep_p2": d.rep_p2, "dt": d.dt} for d in days]}
+
+
 def file_coverage(db):
     """已导入文件在正式表里的日期覆盖范围 (min, max)；没有任何正式记录 → (None, None)。
 
@@ -277,30 +347,48 @@ def file_coverage(db):
     return (row[0], row[1]) if row and row[0] and row[1] else (None, None)
 
 
-def available_periods(db, *, limit: int = 12) -> list:
-    """**员工端可看的核对区间**：同一区间只取最新一份，且**整段落在已导入文件的覆盖范围内**。
+def available_periods(db, person_code: str = "", *, limit: int = 12,
+                      backfill_limit: int = 3) -> list:
+    """员工端可看的核对区间：同区间取最新一份，且**整段落在已导入文件的覆盖范围内**。
 
-    核对结果依赖**文件导入**（离线数据）：没有文件覆盖的区间不列出来——
-    否则会出现"整段都是自报有/系统无"的假区间（用户 2026-09-28 明确）。
-    例：文件只到 9/16，则"9/16 ~ 9/30"这种跨出覆盖范围的区间不上架。
+    数据源 = 物化表（staff_report_compare_person）；老报告没有物化行时现算补写一次。
     """
+    from app.models import StaffReportAnalysis as _A
+    from app.models import StaffReportComparePerson as _P
     cov_start, cov_end = file_coverage(db)
-    rows = (db.query(StaffReportAnalysis)
-            .filter(StaffReportAnalysis.status == "done")
-            .order_by(StaffReportAnalysis.id.desc()).all())
-    seen, out = set(), []
-    for a in rows:
-        key = (a.period_start, a.period_end)
-        if key in seen:                       # 同区间重复生成过 → 只留最新一份
-            continue
-        seen.add(key)
-        if cov_start is None:
-            continue                          # 一条正式记录都没有 → 没有可核对区间
-        if a.period_start < cov_start or a.period_end > cov_end:
-            continue                          # 跨出文件覆盖范围 → 不列（没有离线数据可比）
-        out.append(a)
-        if len(out) >= limit:
-            break
+    if cov_start is None:
+        return []
+
+    def _query():
+        q = (db.query(_A).join(_P, _P.analysis_id == _A.id)
+             .filter(_A.status == "done"))
+        if person_code:
+            q = q.filter(_P.person_code == person_code)
+        seen, out = set(), []
+        for a in q.order_by(_A.id.desc()).all():
+            if a.period_start < cov_start or a.period_end > cov_end:
+                continue                      # 跨出文件覆盖范围 → 不列（没有离线数据可比）
+            key = (a.period_start, a.period_end)
+            if key in seen:                   # 同区间重复生成过 → 只留最新
+                continue
+            seen.add(key)
+            out.append(a)
+            if len(out) >= limit:
+                break
+        return out
+
+    out = _query()
+    if not out:                               # 老报告兜底：现算 + 补写物化行（最多 N 份）
+        from app.services import daily_report
+        for a in (db.query(_A).filter(_A.status == "done")
+                  .order_by(_A.id.desc()).limit(backfill_limit).all()):
+            try:
+                res = daily_report.compare(db, a.period_start, a.period_end)
+                if res["persons"]:
+                    materialize(db, a.id, res)
+            except Exception:  # noqa: BLE001
+                db.rollback()
+        out = _query()
     return out
 
 

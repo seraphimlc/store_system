@@ -713,3 +713,63 @@ class StaffReportAnalysis(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now)
     finished_at = Column(DateTime, nullable=True)
+
+
+# ---------- 核对结果物化（员工端只读；报告生成时落表） ----------
+class StaffReportComparePerson(Base):
+    """对比结果·人×区间汇总（物化）。
+
+    报告生成时写一次；**员工端核对页直接读本表**，不再实时跑 compare()。
+    `acc/acc1/acc2` 存 0..1 的准确率（NULL=没有可对照的日子）。
+    """
+    __tablename__ = "staff_report_compare_person"
+    __table_args__ = (UniqueConstraint("analysis_id", "person_code",
+                                       name="uq_srcp_analysis_person"),
+                      Index("ix_srcp_person", "person_code"))
+    id = Column(Integer, primary_key=True)
+    analysis_id = Column(Integer, ForeignKey("staff_report_analyses.id"),
+                         nullable=False)
+    person_code = Column(String(32), nullable=False)
+    name = Column(String(64), nullable=False, default="", server_default="")
+    sys_p1 = Column(Integer, nullable=False, default=0)
+    sys_p2 = Column(Integer, nullable=False, default=0)
+    sys_total = Column(Integer, nullable=False, default=0)
+    rep_p1 = Column(Integer, nullable=False, default=0)
+    rep_p2 = Column(Integer, nullable=False, default=0)
+    rep_total = Column(Integer, nullable=False, default=0)
+    d1 = Column(Integer, nullable=False, default=0)
+    d2 = Column(Integer, nullable=False, default=0)
+    d_total = Column(Integer, nullable=False, default=0)
+    acc = Column(Float, nullable=True)
+    acc1 = Column(Float, nullable=True)
+    acc2 = Column(Float, nullable=True)
+    days_filled = Column(Integer, nullable=False, default=0)
+    days_system = Column(Integer, nullable=False, default=0)
+    days_both = Column(Integer, nullable=False, default=0)
+    gaps = Column(Integer, nullable=False, default=0)      # 应填未填
+    abs_dt = Column(Integer, nullable=False, default=0)    # Σ|Δ|（准确率分子）
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class StaffReportCompareDay(Base):
+    """对比结果·人×日明细（物化）。`kind` ∈ both / missing_report / missing_system。"""
+    __tablename__ = "staff_report_compare_day"
+    __table_args__ = (UniqueConstraint("analysis_id", "person_code", "ref_date",
+                                       name="uq_srcd_analysis_person_date"),
+                      Index("ix_srcd_person", "person_code"))
+    id = Column(Integer, primary_key=True)
+    analysis_id = Column(Integer, ForeignKey("staff_report_analyses.id"),
+                         nullable=False)
+    person_code = Column(String(32), nullable=False)
+    ref_date = Column(Date, nullable=False)
+    kind = Column(String(16), nullable=False, default="", server_default="")
+    sys_p1 = Column(Integer, nullable=True)
+    sys_p2 = Column(Integer, nullable=True)
+    sys_total = Column(Integer, nullable=True)
+    rep_p1 = Column(Integer, nullable=True)
+    rep_p2 = Column(Integer, nullable=True)
+    rep_total = Column(Integer, nullable=True)
+    d1 = Column(Integer, nullable=True)
+    d2 = Column(Integer, nullable=True)
+    dt = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)

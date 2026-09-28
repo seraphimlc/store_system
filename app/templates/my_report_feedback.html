@@ -23,23 +23,24 @@
 {% endif %}
 
 {% if mine %}
-<div class="stat-grid" style="margin-bottom:.8rem">
-  <div class="stat-card {% if mine.acc is none %}hl{% elif mine.acc >= 0.95 %}okk{% elif mine.acc >= 0.8 %}warnk{% else %}errk{% endif %}">
-    <p class="k">{{ t('我的准确率') }}</p>
-    <p class="v">{% if mine.acc is none %}—{% else %}{{ (mine.acc * 100) | round(1) }}%{% endif %}</p></div>
-  <div class="stat-card"><p class="k">{{ t('系统核到') }}</p><p class="v">{{ mine.sys_total }}<small>（{{ t('1点') }} {{ mine.sys_p1 }} / {{ t('2点') }} {{ mine.sys_p2 }}）</small></p></div>
-  <div class="stat-card"><p class="k">{{ t('自报') }}</p><p class="v">{{ mine.rep_total }}<small>（{{ t('1点') }} {{ mine.rep_p1 }} / {{ t('2点') }} {{ mine.rep_p2 }}）</small></p></div>
-  <div class="stat-card"><p class="k">Δ{{ t('合计') }}</p>
-    <p class="v" style="color:{% if mine.d_total > 0 %}var(--warn){% elif mine.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % mine.d_total }}</p></div>
-  <div class="stat-card"><p class="k">{{ t('已报天数') }}</p><p class="v">{{ mine.days_filled }}<small> / {{ mine.days_system }}</small></p></div>
-  <div class="stat-card {% if mine.gaps %}warnk{% endif %}"><p class="k">{{ t('应填未填') }}</p><p class="v">{{ mine.gaps }}</p></div>
-</div>
+<table class="kv" data-testid="my-summary" style="margin-bottom:1rem">
+  <tr><th>{{ t('我的准确率') }}</th>
+      <td>{% if mine.acc is none %}—{% else %}<b>{{ (mine.acc * 100) | round(1) }}%</b>{% endif %}</td></tr>
+  <tr><th>{{ t('系统核到') }}</th>
+      <td>{{ mine.sys_total }}<span class="hint">（{{ t('1点') }} {{ mine.sys_p1 }} / {{ t('2点') }} {{ mine.sys_p2 }}）</span></td></tr>
+  <tr><th>{{ t('自报') }}</th>
+      <td>{{ mine.rep_total }}<span class="hint">（{{ t('1点') }} {{ mine.rep_p1 }} / {{ t('2点') }} {{ mine.rep_p2 }}）</span></td></tr>
+  <tr class="tot"><th>Δ{{ t('合计') }}</th>
+      <td style="color:{% if mine.d_total > 0 %}var(--warn){% elif mine.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % mine.d_total }}</td></tr>
+  <tr><th>{{ t('已报天数') }}</th><td>{{ mine.days_filled }} / {{ mine.days_system }}</td></tr>
+  <tr><th>{{ t('应填未填') }}</th><td>{{ mine.gaps }}</td></tr>
+</table>
 {% endif %}
 
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-compare-daily">
   <tr><th>{{ t('日期') }}</th><th>{{ t('系统') }}（1/2）</th>
       <th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
-  {% for r in res.daily %}
+  {% for r in days %}
   <tr {% if r.kind != 'both' %}style="background:#fbfcfe"{% endif %}>
     <td>{{ r.date }}</td>
     <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>

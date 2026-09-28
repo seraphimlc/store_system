@@ -264,6 +264,33 @@ def sync_month_perf(db, month: str) -> int:
     return len(agg)
 
 
+def person_months(db, person_code: str) -> list:
+    """某人出现过记录的月份（倒序）——**读物化表**，不拉全量正式记录。"""
+    from app.models import PersonDailyStat
+    rows = (db.query(PersonDailyStat.ref_date)
+            .filter(PersonDailyStat.person_code == person_code).all())
+    return sorted({str(r[0])[:7] for r in rows if r[0]}, reverse=True)
+
+
+def daily_perf_person(db, month: str, person_code: str) -> list:
+    """某人的逐日绩效——**读物化表 person_daily_stats**（员工端用，避免扫正式表全表）。"""
+    from datetime import date as _date
+
+    from app.models import PersonDailyStat
+    q = db.query(PersonDailyStat).filter(
+        PersonDailyStat.person_code == person_code)
+    if month:
+        y, m = month.split("-")
+        y, m = int(y), int(m)
+        start = _date(y, m, 1)
+        nxt = _date(y + 1, 1, 1) if m == 12 else _date(y, m + 1, 1)
+        q = q.filter(PersonDailyStat.ref_date >= start,
+                     PersonDailyStat.ref_date < nxt)
+    return [{"code": r.person_code, "date": r.ref_date, "records": r.records,
+             "p1": r.p1, "p2": r.p2, "points": r.points}
+            for r in q.order_by(PersonDailyStat.ref_date).all()]
+
+
 def daily_perf(db, month: str = ""):
     """日绩效：每人每天 {date, records, p1, p2, points}，按日期排序。"""
     rows, names = _fetch(db)

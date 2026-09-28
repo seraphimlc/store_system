@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的核对结果</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="has-tabbar">
+
+<header class="topbar" x-data="{menu:false}">
+  <span class="brand">巡店结算系统</span>
+  <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
+          :aria-expanded="menu ? 'true' : 'false'">☰</button>
+  <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
+  
+  
+  <span class="spacer"></span>
+  <span class="user">陈嘉溢</span>
+  <a class="nav" href="/my/password">修改密码</a>
+  <span class="lang-switch">
+    <a class="nav" href="?lang=zh"
+       >中文</a>
+    /
+    <a class="nav" href="?lang=ja">日本語</a>
+  </span>
+  <form method="post" action="/logout" class="logout-form">
+    <input type="hidden" name="csrf_token" value="a8630e565b5236b215b6f0b047820daf">
+    <button class="logout" type="submit">退出</button>
+  </form>
+  </nav>
+</header>
+
+<main class="wrap">
+<div class="page-title"><h1>我的核对结果</h1></div>
+
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/my/report/feedback" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <b style="font-size:.95rem">区间</b>
+    <select name="aid" onchange="this.form.submit()">
+      
+      <option value="4" selected>
+        2026-09-01 ～ 2026-09-16</option>
+      
+    </select>
+  </form>
+</div>
+
+
+
+
+<table class="kv" data-testid="my-summary" style="margin-bottom:1rem">
+  <tr><th>我的准确率</th>
+      <td><b>97.8%</b></td></tr>
+  <tr><th>系统核到</th>
+      <td>546<span class="hint">（1点 428 / 2点 118）</span></td></tr>
+  <tr><th>自报</th>
+      <td>535<span class="hint">（1点 418 / 2点 117）</span></td></tr>
+  <tr class="tot"><th>Δ合计</th>
+      <td style="color:var(--warn)">+11</td></tr>
+  <tr><th>已报天数</th><td>5 / 6</td></tr>
+  <tr><th>应填未填</th><td>1</td></tr>
+</table>
+
+
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="my-compare-daily">
+  <tr><th>日期</th><th>系统（1/2）</th>
+      <th>自报（1/2）</th><th>Δ合计</th></tr>
+  
+  <tr >
+    <td>2026-09-01</td>
+    <td class="num">93 <span class="hint">59/34</span></td>
+    <td class="num">88 <span class="hint">56/32</span></td>
+    <td class="num" style="color:var(--warn)">+5</td>
+  </tr>
+  
+  <tr >
+    <td>2026-09-02</td>
+    <td class="num">114 <span class="hint">82/32</span></td>
+    <td class="num">114 <span class="hint">82/32</span></td>
+    <td class="num" style="color:">+0</td>
+  </tr>
+  
+  <tr >
+    <td>2026-09-03</td>
+    <td class="num">92 <span class="hint">63/29</span></td>
+    <td class="num">93 <span class="hint">63/30</span></td>
+    <td class="num" style="color:var(--err)">-1</td>
+  </tr>
+  
+  <tr >
+    <td>2026-09-04</td>
+    <td class="num">142 <span class="hint">136/6</span></td>
+    <td class="num">136 <span class="hint">130/6</span></td>
+    <td class="num" style="color:var(--warn)">+6</td>
+  </tr>
+  
+  <tr >
+    <td>2026-09-05</td>
+    <td class="num">104 <span class="hint">87/17</span></td>
+    <td class="num">104 <span class="hint">87/17</span></td>
+    <td class="num" style="color:">+0</td>
+  </tr>
+  
+  <tr style="background:#fbfcfe">
+    <td>2026-09-08</td>
+    <td class="num">1 <span class="hint">1/0</span></td>
+    <td class="num">—</td>
+    <td class="num" style="color:">—</td>
+  </tr>
+  
+</table></div>
+
+</main>
+
+
+
+
+<nav class="tabbar" aria-label="主导航">
+  <a class="tab " href="/my/perf"
+     data-testid="tab-perf">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><path d="M6 20v-7"/><path d="M12 20V6"/><path d="M18 20v-11"/></svg>
+    <span>我的绩效</span>
+  </a>
+  <a class="tab "
+     href="/my/report" data-testid="tab-report">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    <span>每日填报</span>
+  </a>
+  <a class="tab on"
+     href="/my/report/feedback" data-testid="tab-feedback">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+    <span>核对结果</span>
+  </a>
+</nav>
+
+<script>window.__PAGE_STATE__ = {};</script>
+</body>
+</html>
