@@ -68,6 +68,9 @@ def create_app() -> FastAPI:
         tok = _LANG.set(lang)
         try:
             response = await call_next(request)
+            # 页面禁止缓存：保存/修改后必须看到最新数据（浏览器复用旧页面会让人以为没刷新）
+            if response.headers.get("content-type", "").startswith("text/html"):
+                response.headers["Cache-Control"] = "no-store, must-revalidate"
             # 仅显式 ?lang= 切换时才持久化 cookie；否则保留现有 cookie，
             # 避免登录时的默认语言覆盖账号级/浏览器级选择
             if request.query_params.get("lang", "").strip().lower() in ("zh", "ja"):
