@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""MCP Token 管理员代发/吊销、员工状态联动提示、/mcp-audit（管理员审计）。
+"""MCP Token 管理员代发/吊销、员工状态联动提示。
 
-注：员工端自助签发页 /my/token 已于 2026-09-28 删除（员工走 OAuth，不需要管凭证）。
+注：2026-09-28 起 **员工端自助签发页 /my/token 与审计页 /mcp-audit 均已删除**
+（员工走 OAuth，不需要感知 MCP 操作；调用日志只留库表供离线统计）。
 
 
 约定：
@@ -71,8 +72,8 @@ def _digest(raw):
 
 # ---------- 未登录 ----------
 def test_unauthenticated_redirects_to_login(client):
-    r = client.get("/mcp-audit", follow_redirects=False)
-    assert r.status_code == 302, f"/mcp-audit 未登录应 302，实际 {r.status_code}"
+    r = client.get("/staff-admin", follow_redirects=False)
+    assert r.status_code == 302, f"/staff-admin 未登录应 302，实际 {r.status_code}"
     assert r.headers["location"].startswith("/login")
 
 
@@ -110,14 +111,6 @@ def test_write_requires_csrf(client):
                     data={"csrf_token": "bad"}, follow_redirects=False)
     assert r.status_code == 400
 
-
-# ---------- 员工访问 /mcp-audit 被拒 ----------
-def test_staff_blocked_from_audit(client):
-    _seed()
-    _login(client, "emp1")
-    r = client.get("/mcp-audit", follow_redirects=False)
-    assert r.status_code == 302
-    assert r.headers["location"].startswith("/my/perf")
 
 
 # ---------- 管理员：任意员工 token 列表 + 代发 + 吊销 ----------
@@ -190,53 +183,18 @@ def test_staff_status_change_token_invalidation_hint(client):
     assert "有效" in page
 
 
-# ---------- /mcp-audit：列/过滤/分页 ----------
-def test_audit_page_columns_and_filters(client):
-    _seed()
-    _login(client, "admin")
-    uid1 = _uid("emp1")
-    db = _db()
-    now = datetime.utcnow()
-    for i in range(3):
-        db.add(McpAuditLog(user_id=uid1, token_id=1,
-                           tool="visit_overview",
-                           params_json='{"month":"2026-08"}',
-                           ok=True, error_code=None, duration_ms=12,
-                           created_at=now - timedelta(days=1)))
-    db.add(McpAuditLog(user_id=None, token_id=None, tool="visit_whoami",
-                       params_json="{}", ok=False,
-                       error_code="UNAUTHORIZED", duration_ms=1,
-                       created_at=now - timedelta(days=2)))
-    db.commit()
-    db.close()
-    page = client.get("/mcp-audit").text
-    assert "MCP 调用审计" in page
-    assert "visit_overview" in page
-    assert "UNAUTHORIZED" in page
-    assert "参数摘要" in page
-    # 按人过滤
-    page = client.get(f"/mcp-audit?user_id={uid1}").text
-    assert "visit_overview" in page
-    assert "visit_whoami" not in page
-    # 按工具过滤
-    page = client.get("/mcp-audit?tool=whoami").text
-    assert "visit_whoami" in page
-    assert "visit_overview" not in page
 
 
-def test_audit_pagination(client):
+
+def test_audit_page_removed_but_data_kept(client):
+    """审计页已删除（路由 404、导航无入口），但审计数据仍在库里。"""
     _seed()
     _login(client, "admin")
-    uid1 = _uid("emp1")
+    assert client.get("/mcp-audit", follow_redirects=False).status_code == 404
+    assert "MCP 审计" not in client.get("/staff-admin").text
     db = _db()
-    for i in range(60):
-        db.add(McpAuditLog(user_id=uid1, tool="tool_%02d" % i, ok=True,
-                           created_at=datetime.utcnow()))
-    db.commit()
-    db.close()
-    p1 = client.get("/mcp-audit").text
-    assert "tool_59" in p1 and "tool_00" not in p1
-    assert "下一页" in p1
-    p2 = client.get("/mcp-audit?page=2").text
-    assert "tool_00" in p2 and "tool_59" not in p2
-    assert "上一页" in p2
+    try:
+        from app.models import McpAuditLog
+        assert db.query(McpAuditLog).count() >= 0          # 表还在（数据供离线统计）
+    finally:
+        db.close()

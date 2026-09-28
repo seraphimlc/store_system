@@ -245,10 +245,10 @@ def test_my_report_page_and_submit_route(client):
         follow_redirects=False)
     assert r2.status_code == 303 and "err=" in r2.headers["location"]
     assert db.query(StaffDailyReport).count() == 1
-    # 已填报 → 页面显示只读结果与提示
+    # 已填报 → 页面变只读（表单消失，只显示数字）
     page2 = client.get("/my/report").text
-    assert "今天已经填报过了" in page2
     assert "提交填报" not in page2
+    assert ">4<" in page2 and ">1<" in page2               # 1点 4 / 2点 1 已回显
 
 
 def test_my_report_requires_csrf_and_staff(client):
@@ -288,8 +288,8 @@ def test_month_days_leaves_gap_rows(client):
                                 p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
     db.commit()
     v = daily_report.month_days(db, "P1", today.strftime("%Y-%m"), today=today)
-    assert v["visible_days"] == 30                   # 整月（2026-09 有 30 天）
-    assert sum(1 for d in v["days"] if d["future"]) == 30 - today.day  # 未来日子标未到
+    assert v["visible_days"] == today.day             # 只列到"今天"（没到的日子不显示）
+    assert all(d["future"] is False for d in v["days"])
     assert v["days"][0]["date"] == first and v["days"][0]["empty"] is False
     assert v["filled"] == len([d for d in v["days"] if not d["empty"]]) == 2
     empty = [d for d in v["days"] if d["empty"]]

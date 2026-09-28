@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""管理员代发/吊销 MCP Token（/staff-admin/*）+ MCP 调用审计（/mcp-audit）。
+"""管理员代发/吊销 MCP Token（/staff-admin/*）。
 
-**员工端自助签发页（/my/token）已删除**（2026-09-28，用户明确）：
-员工对接 MCP 走 OAuth（SSO），换出的 access token 同样是 `api_tokens` 一行，
-员工不需要感知也不需要管理凭证；MCP 调用日志只供我方离线统计。
+2026-09-28 用户明确：**员工不需要感知 MCP 操作**，因此
+- 员工端自助签发页 `/my/token` **已删除**（员工走 OAuth SSO，换出的 access token
+  同样是 `api_tokens` 一行，不需要自己管凭证）；
+- 审计页 `/mcp-audit` **已删除**（调用日志只供我方离线统计，数据仍在 `mcp_audit_log` 表）；
+- 保留管理员代发/吊销：OAuth 异常时的按人应急通道。
 
-写操作（生成/吊销）沿用项目既有 `csrf_ok` / `request.state.csrf` 模式 + 登录校验；
-明文 token 只在签发后的那个响应页显示一次。
+明文 token 只在签发后的那个响应页显示一次；写操作沿用 `csrf_ok` + 登录校验。
 """
 from datetime import datetime, timedelta
 from typing import Optional
@@ -69,49 +70,3 @@ def staff_admin_tokens_revoke(uid: int, tid: int, request: Request,
         raise HTTPException(404, "Token 不存在")
     mcp_tokens.revoke(db, tid, uid)
     return RedirectResponse("/staff-admin?msg=已吊销", status_code=303)
-
-
-# ---------- /mcp-audit：管理员审计 ----------
-@router.get("/mcp-audit", response_class=HTMLResponse)
-def mcp_audit_page(request: Request,
-                   user: Optional[User] = Depends(require_login),
-                   db: Session = Depends(get_db),
-                   user_id: str = Query(""), tool: str = Query(""),
-                   from_: str = Query("", alias="from"),
-                   to: str = Query("", alias="to"),
-                   page: int = Query(1, ge=1)):
-    if user is None:
-        return _denied()
-    if user.role != "admin":
-        return RedirectResponse("/my/perf", status_code=302)
-    q = db.query(McpAuditLog)
-    if user_id.strip().isdigit():
-        q = q.filter(McpAuditLog.user_id == int(user_id))
-    if tool.strip():
-        q = q.filter(McpAuditLog.tool.like("%" + tool.strip() + "%"))
-    for field, fmt in (("from_", "%Y-%m-%d"), ("to", "%Y-%m-%d")):
-        v = locals()[field].strip()
-        if not v:
-            continue
-        try:
-            dt = datetime.strptime(v, fmt)
-        except ValueError:
-            raise HTTPException(400, "时间格式应为 YYYY-MM-DD")
-        if field == "from_":
-            q = q.filter(McpAuditLog.created_at >= dt)
-        else:
-            q = q.filter(McpAuditLog.created_at
-                         <= dt + timedelta(days=1) - timedelta(seconds=1))
-    total = q.count()
-    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
-    page = min(page, pages)
-    rows = (q.order_by(McpAuditLog.id.desc())
-             .offset((page - 1) * PER_PAGE).limit(PER_PAGE).all())
-    users = db.query(User).order_by(User.id).all()
-    user_map = {u.id: u for u in users}
-    return templates.TemplateResponse("mcp_audit.html", {
-        "request": request, "current_user": user, "rows": rows,
-        "users": users, "user_map": user_map,
-        "f_user_id": user_id, "f_tool": tool, "f_from": from_, "f_to": to,
-        "page": page, "pages": pages, "total": total,
-        "page_state": {"page": "mcp_audit", "total": total, "page": page}})

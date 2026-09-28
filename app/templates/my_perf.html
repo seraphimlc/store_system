@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t('我的绩效') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>{{ t('我的绩效') }}</h1>
-  <span class="sub">{{ t('只统计已确认并计入正式表的有效店。') }}</span></div>
+<div class="page-title"><h1>{{ t('我的绩效') }}</h1></div>
 
 <div class="card" style="margin-bottom:.8rem">
   <form method="get" action="/my/perf" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
@@ -36,12 +35,9 @@
 <div class="card">
   <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem">
     <h2 style="font-size:1rem;margin:0">{{ month }} {{ t('每日明细') }}</h2>
-    <span class="hint">{{ t('当月全部逐日列出') }}</span>
   </div>
   {% if not daily %}<p class="empty">{{ t('本月暂无逐日数据') }}</p>
   {% else %}
-  <p class="hint" style="margin:.2rem 0 .5rem">{{ t('重复巡店（同店重复,影响效率）') }}：
-    <b style="color:{% if summary.dups > 5 %}#b02a37{% else %}#1a7f37{% endif %}">{{ summary.dups }} {{ t('家') }}</b></p>
   <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">
     <tr><th>{{ t('日期') }}</th><th class="num">{{ t('有效店') }}</th><th class="num">{{ t('1点') }}</th><th class="num">{{ t('2点') }}</th><th class="num">{{ t('点数') }}</th></tr>
     {% for d in daily %}

@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ t('每日填报') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>{{ t('每日填报') }}</h1>
-  <span class="sub">{{ t('每天提交一次：今天在哪个担当区域、跑了多少家 1 点 / 2 点店铺。数据只用于与文件结果对比，不参与工资计算。') }}</span></div>
+<div class="page-title"><h1>{{ t('每日填报') }}</h1></div>
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
 
 <div class="card" data-testid="today-card">
-  <h2 style="font-size:1rem;margin:.1rem 0 .6rem">{{ t('今日填报') }} · {{ today }}</h2>
+  <h2 style="font-size:1rem;margin:.1rem 0 .6rem">{{ today }}</h2>
   {% if existing %}
   <div class="stat-grid" style="margin-bottom:.5rem">
     <div class="stat-card okk"><p class="k">{{ t('1点店铺数') }}</p><p class="v">{{ existing.p1_cnt }}</p></div>
@@ -15,7 +14,6 @@
     <div class="stat-card hl"><p class="k">{{ t('合计') }}</p><p class="v">{{ existing.total_cnt }}</p></div>
   </div>
   <div class="hint">{{ t('担当区域') }}：{{ existing.area or '—' }}{% if existing_jst %}　·　{{ t('提交时间') }} {{ existing_jst }}{% endif %}</div>
-  <div class="msg warn" style="margin-top:.6rem">{{ t('今天已经填报过了（一天一次）') }}</div>
   {% else %}
   <form method="post" action="/my/report" x-data="{ p1: '0', p2: '0' }">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
@@ -50,7 +48,7 @@
       {{ t('1点店铺数') }}</span>
     <span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e8862a;vertical-align:middle"></i>
       {{ t('2点店铺数') }}</span>
-    <span class="hint">{{ t('虚线=今天；缺填报的日子曲线断开') }}</span>
+    <span class="hint">{{ t('缺填报的日子曲线断开') }}</span>
   </div>
   <svg viewBox="0 0 {{ chart.geo.width }} {{ chart.geo.height }}"
        style="width:100%;height:auto;display:block" data-testid="trend-svg"
@@ -74,9 +72,6 @@
     {% endfor %}
     {% for pts in chart.geo.areas_p1 %}<path d="{{ pts }}" fill="url(#g1)" stroke="none"></path>{% endfor %}
     {% for pts in chart.geo.areas_p2 %}<path d="{{ pts }}" fill="url(#g2)" stroke="none"></path>{% endfor %}
-    <line x1="{{ chart.geo.today_x }}" y1="{{ chart.geo.pad_t }}"
-          x2="{{ chart.geo.today_x }}" y2="{{ chart.geo.base_y }}"
-          stroke="#b9c2d6" stroke-width="1" stroke-dasharray="3 3"></line>
     {% for pts in chart.geo.paths_p2 %}
     <path d="{{ pts }}" fill="none" stroke="#e8862a" stroke-width="2.2"
           stroke-linecap="round" stroke-linejoin="round"></path>{% endfor %}
@@ -113,7 +108,11 @@
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-reports">
   <tr><th>{{ t('日期') }}</th><th>{{ t('星期') }}</th><th>{{ t('状态') }}</th><th>{{ t('担当区域') }}</th>
       <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th></tr>
-  {% for r in view.days %}
+  {% if view.days %}
+  <tr class="totals"><td colspan="4">{{ t('本月合计') }}（{{ t('已填报') }} {{ view.filled }} / {{ view.visible_days }} {{ t('天') }}）</td>
+      <td class="num">{{ view.p1 }}</td><td class="num">{{ view.p2 }}</td><td class="num">{{ view.total }}</td></tr>
+  {% endif %}
+  {% for r in view.days|reverse %}
   <tr {% if r.future %}style="color:#aab;background:#fcfcfe"{% elif r.empty %}style="color:var(--muted);background:#fbfcfe"{% endif %}>
     <td>{{ r.date }}</td>
     <td class="hint">{{ t(wd_labels[r.wd]) }}</td>
@@ -126,9 +125,5 @@
     <td class="num">{% if r.empty %}—{% else %}{{ r.total }}{% endif %}</td>
   </tr>
   {% else %}<tr><td colspan="7" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
-  {% if view.days %}
-  <tr class="totals"><td colspan="4">{{ t('本月合计') }}（{{ t('已填报') }} {{ view.filled }} / {{ view.visible_days }} {{ t('天') }}）</td>
-      <td class="num">{{ view.p1 }}</td><td class="num">{{ view.p2 }}</td><td class="num">{{ view.total }}</td></tr>
-  {% endif %}
 </table></div>
 {% endblock %}

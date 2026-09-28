@@ -19,6 +19,10 @@
   </form>
 </div>
 
+{% if mine and mine.days_filled == 0 %}
+<div class="msg warn">{{ t('这个区间你没有填报记录（系统侧核到') }} {{ mine.days_system }} {{ t('天），所以没有可核对的内容。填报之后再看这里，就能看到哪几天报得准。') }}</div>
+{% endif %}
+
 {% if mine %}
 <div class="stat-grid" style="margin-bottom:.8rem">
   <div class="stat-card {% if mine.acc is none %}hl{% elif mine.acc >= 0.95 %}okk{% elif mine.acc >= 0.8 %}warnk{% else %}errk{% endif %}">

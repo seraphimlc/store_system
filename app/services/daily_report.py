@@ -249,19 +249,20 @@ def month_days(db, person_code: str, month: str = "", *,
     start = date(y, m, 1)
     nxt = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
     month_end = nxt - timedelta(days=1)
-    if start > today:
-        # 未开始的月份：不列一屏"未到"，直接空态
+    # **没到的日子不显示**：只列到"今天"（未来日期不出现，也不标"未到"）
+    last_visible = min(month_end, today)
+    if last_visible < start:
         return {"month": month, "days": [], "filled": 0, "visible_days": 0,
                 "p1": 0, "p2": 0, "total": 0}
     rows = {r.report_date: r for r in db.query(StaffDailyReport).filter(
         StaffDailyReport.person_code == person_code,
         StaffDailyReport.report_date >= start,
-        StaffDailyReport.report_date <= month_end).all()}
+        StaffDailyReport.report_date <= last_visible).all()}
     days, filled = [], 0
     d = start
-    while d <= month_end:                     # **整月**列出：未来日子标 future（未到）
+    while d <= last_visible:
         r = rows.get(d)
-        future = d > today
+        future = False
         if r is not None:
             filled += 1
             days.append({"date": d, "wd": d.weekday(), "empty": False,
