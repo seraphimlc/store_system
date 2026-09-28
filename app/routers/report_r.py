@@ -151,6 +151,10 @@ def my_report_update(request: Request,
     except daily_report.NoReport:
         return RedirectResponse("/my/report?err=" + quote("今天还没有填报记录"),
                                 status_code=303)
+    except daily_report.Locked:
+        return RedirectResponse(
+            "/my/report?err=" + quote("该日期已有系统数据（已对账），不能再改"),
+            status_code=303)
     except ValueError as e:  # noqa: BLE001
         return RedirectResponse("/my/report?err=" + quote(str(e)), status_code=303)
 
@@ -215,6 +219,21 @@ def _resolved_period(db, start, end):
     return (b, a) if a > b else (a, b)
 
 
+def _edit_row(db, person_code: str, edit_date: str):
+    """点列表里的「改」时，把该行回填到补录卡片。"""
+    from app.services import daily_report
+    if not person_code or not edit_date:
+        return None
+    d = _as_date(edit_date, None)
+    if d is None:
+        return None
+    r = daily_report.get_report(db, person_code, d)
+    if r is None:
+        return {"person_code": person_code, "date": d, "area": "", "p1": 0, "p2": 0}
+    return {"person_code": person_code, "date": r.report_date,
+            "area": r.area or "", "p1": r.p1_cnt, "p2": r.p2_cnt}
+
+
 def _staff_options(db):
     from app.models import Person
     rows = (db.query(Person.code, Person.display_name)
@@ -227,7 +246,7 @@ def staff_reports_page(request: Request,
                        user: Optional[User] = Depends(require_login),
                        db: Session = Depends(get_db), start: str = "", end: str = "",
                        person_code: str = "", page: int = 1,
-                       msg: str = "", err: str = ""):
+                       msg: str = "", err: str = "", edit_date: str = ""):
     """员工每日填报列表（可按区间/人筛选）。"""
     g = _admin_guard(user)
     if g:
@@ -238,12 +257,52 @@ def staff_reports_page(request: Request,
                                      page=page, per=50)
     from app.models import Person
     names = dict(db.query(Person.code, Person.display_name).all())
+    locked = {r["date"] for r in data["rows"]
+              if daily_report.is_locked(db, r["date"])}
     return templates.TemplateResponse("staff_reports.html", {
         "request": request, "current_user": user, "data": data,
         "start": s, "end": e, "person_code": person_code,
         "names": names, "staff_opts": _staff_options(db), "msg": msg, "err": err,
         "jst_delta": timedelta(hours=9),
+        "cov_end": daily_report.coverage_end(db), "locked_dates": locked,
+        "edit_row": _edit_row(db, person_code, edit_date),
     })
+
+
+@router.post("/staff-reports/report/save")
+def staff_report_save(request: Request,
+                      person_code: str = Form(""), report_date: str = Form(""),
+                      area: str = Form(""), p1_cnt: str = Form(""),
+                      p2_cnt: str = Form(""), csrf_token: str = Form(""),
+                      start: str = Form(""), end: str = Form(""),
+                      user: Optional[User] = Depends(require_login),
+                      db: Session = Depends(get_db)):
+    """管理员给员工**补录 / 修改**自报（仅未对账的日期）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import daily_report
+    back = "/staff-reports?start=%s&end=%s" % (quote(start), quote(end))
+    d = _as_date(report_date, None)
+    if d is None:
+        return RedirectResponse(back + "&err=" + quote("时间格式应为 YYYY-MM-DD"),
+                                status_code=303)
+    try:
+        row = daily_report.save_by_admin(
+            db, person_code=person_code, report_date=d, area=area,
+            p1_cnt=p1_cnt, p2_cnt=p2_cnt, user_id=getattr(user, "id", None))
+        return RedirectResponse(back + "&msg=" + quote("已保存补录"), status_code=303)
+    except daily_report.Locked:
+        return RedirectResponse(
+            back + "&err=" + quote("该日期已有系统数据（已对账），不能再改"),
+            status_code=303)
+    except daily_report.AlreadySubmitted:
+        return RedirectResponse(back + "&err=" + quote("保存冲突，请刷新重试"),
+                                status_code=303)
+    except ValueError as e:  # noqa: BLE001
+        return RedirectResponse(back + "&err=" + quote(str(e)), status_code=303)
 
 
 @router.get("/staff-reports/compare", response_class=HTMLResponse)
