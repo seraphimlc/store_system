@@ -131,17 +131,31 @@ def test_status_filter_and_reactive(client):
     assert r.status_code == 302
 
 
-def test_no_manual_create(client):
-    """员工不再手动创建（导入自动开户）；页面无新建入口与路由。"""
+def test_manual_create_requires_admin_and_csrf(client):
+    """手工建号（编号即身份键）需要 admin + CSRF；员工身份不可用。
+
+    需求变更（2026-09-27）：客户确认可提供员工编号 → 支持手工建号。
+    """
+    from app.models import Person, User
+    import app.db as appdb
     _seed()
     _login(client, "admin", "pw123456")
     page = client.get("/staff-admin").text
-    assert "新建员工账号" not in page
-    assert "/staff-admin/create" not in page
+    assert "/staff-admin/create" in page
+    # 无 CSRF → 400，且不建号
     r = client.post("/staff-admin/create", data={
         "username": "hack", "person_code": "111", "password": "x12345",
-        "csrf_token": _csrf(client)}, follow_redirects=False)
-    assert r.status_code in (404, 405)
+        "csrf_token": ""}, follow_redirects=False)
+    assert r.status_code == 400
+    # 带 CSRF 正常建号
+    r2 = client.post("/staff-admin/create", data={
+        "code": "2188240601234567", "name": "新人乙", "username": "",
+        "password": "", "csrf_token": _csrf(client)}, follow_redirects=False)
+    assert r2.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(Person, "2188240601234567") is not None
+    assert db.query(User).filter(User.person_code == "2188240601234567").count() == 1
+    db.close()
 
 
 def test_auto_create_employee_person_code_unique(client):

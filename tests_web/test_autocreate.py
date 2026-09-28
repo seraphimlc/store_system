@@ -92,19 +92,21 @@ def test_same_name_generates_unique_usernames(client, tmp_path):
     db.close()
 
 
-def test_staff_admin_page_has_no_create(client):
-    """员工管理页不再提供手动创建入口。"""
+def test_staff_admin_page_has_create_by_code(client):
+    """员工管理页提供「新建员工」入口（按编号建号，规格 D19/D20）。
+
+    需求变更（2026-09-27）：客户确认新建员工时可填写员工编号，编号即身份键，
+    因此手工建号从"不提供"改为"支持"；无 csrf 的请求仍必须被拒。
+    """
     _seed_admin(client)
     _login(client)
     page = client.get("/staff-admin").text
-    assert "/staff-admin/create" not in page
-    assert "新建员工账号" not in page
-    assert "自动开户" in page or "自动" in page
-    # create 路由已移除 → 404/405
+    assert "/staff-admin/create" in page          # 有新建入口
+    assert "自动" in page                          # 导入自动开户的说明仍在
     r = client.post("/staff-admin/create", data={
         "username": "hack", "person_code": "1", "password": "x12345",
         "csrf_token": ""}, follow_redirects=False)
-    assert r.status_code in (404, 405)
+    assert r.status_code == 400                    # CSRF 校验失败
 
 
 def test_pinyin_username_unit():

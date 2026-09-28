@@ -347,7 +347,11 @@ def ensure_persons(db, imp: ImportFile, default_password="demo123"):
                           first_seen_import_id=imp.id))
             names[c] = display
         else:
-            names[c] = db.get(Person, c).display_name
+            _p = db.get(Person, c)
+            if _p.first_seen_import_id is None:
+                # 手工建号的人：首次在文件中出现 → 补写来源（规格 §7.5）
+                _p.first_seen_import_id = imp.id
+            names[c] = _p.display_name
     db.commit()
     for c in codes:
         ensure_staff_user(db, c, names.get(c, c))
