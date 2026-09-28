@@ -9,13 +9,7 @@
 {% set _p2 = existing.p2_cnt if existing else 0 %}
 <div class="card" data-testid="today-card"
      x-data="{ edit: {{ 'false' if existing else 'true' }}, p1: '{{ _p1 }}', p2: '{{ _p2 }}' }">
-  <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.2rem">
-    <h2 style="font-size:1rem;margin:0">{{ today }}</h2>
-    {% if existing %}
-    <button class="btn ghost" type="button" style="padding:.15rem .7rem;margin-left:auto"
-            @click="edit = !edit" x-show="!edit" data-testid="edit-report">{{ t('修改') }}</button>
-    {% endif %}
-  </div>
+  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ today }}</h2>
 
   {% if existing %}
   <table class="kv" data-testid="today-summary" x-show="!edit">
@@ -24,6 +18,10 @@
     <tr><th>{{ t('2点店铺数') }}</th><td>{{ existing.p2_cnt }}</td></tr>
     <tr class="tot"><th>{{ t('合计') }}</th><td>{{ existing.total_cnt }}</td></tr>
   </table>
+  <div class="form-actions" style="margin-top:.7rem" x-show="!edit">
+    <button class="btn" type="button" @click="edit = true"
+            data-testid="edit-report">{{ t('修改') }}</button>
+  </div>
   {% endif %}
 
   <form method="post" action="{{ '/my/report/update' if existing else '/my/report' }}"
