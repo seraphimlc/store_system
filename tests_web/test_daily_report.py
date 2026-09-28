@@ -272,3 +272,61 @@ def test_my_report_requires_csrf_and_staff(client):
                 follow_redirects=False)
     r2 = client.get("/my/report", follow_redirects=False)
     assert r2.status_code in (302, 307)
+
+
+def test_month_days_leaves_gap_rows(client):
+    """逐日视图：本月 1 号到今天，缺填报的日子留空行（员工要看得到"哪天没数据"）。"""
+    from datetime import date
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    _seed_staff(client)
+    # 直接造历史数据：本月 1 号、3 号有填报，2 号缺
+    today = daily_report.jst_today()
+    first = today.replace(day=1)
+    for d, p1, p2 in ((first, 3, 1), (date(first.year, first.month, 3), 2, 2)):
+        db.add(StaffDailyReport(person_code="P1", report_date=d, area="渋谷",
+                                p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
+    db.commit()
+    v = daily_report.month_days(db, "P1", today.strftime("%Y-%m"), today=today)
+    assert v["visible_days"] == today.day            # 1 号到今天
+    assert v["days"][0]["date"] == first and v["days"][0]["empty"] is False
+    assert v["filled"] == len([d for d in v["days"] if not d["empty"]]) == 2
+    empty = [d for d in v["days"] if d["empty"]]
+    assert all(d["p1"] == 0 and d["total"] == 0 for d in empty)
+    assert v["p1"] == 5 and v["p2"] == 3 and v["total"] == 8
+
+
+def test_month_days_historical_month_is_full(client):
+    """历史月份：整月逐日列出（月末到月末）。"""
+    from datetime import date
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 2, 10),
+                            area="新宿", p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    v = daily_report.month_days(db, "P1", "2026-02", today=date(2026, 9, 28))
+    assert v["visible_days"] == 28                   # 2026-02 是 28 天
+    assert v["filled"] == 1
+    assert [d["date"] for d in v["days"] if not d["empty"]] == [date(2026, 2, 10)]
+    # 未来月份 → 不列任何天
+    v2 = daily_report.month_days(db, "P1", "2026-12", today=date(2026, 9, 28))
+    assert v2["days"] == [] and v2["visible_days"] == 0
+
+
+def test_my_report_page_shows_gap_rows(client):
+    """页面把没填报的日子显示为「未填报」。"""
+    from datetime import date, timedelta
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    _seed_staff(client)
+    today = daily_report.jst_today()
+    if today.day >= 2:                                # 造前一天的数据，今天留空
+        db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=1),
+                                area="渋谷", p1_cnt=2, p2_cnt=1, total_cnt=3))
+        db.commit()
+    _login_staff(client)
+    html = client.get("/my/report").text
+    assert "未填报" in html
+    assert "本月合计" in html
+    if today.day >= 2:
+        assert "已填报" in html

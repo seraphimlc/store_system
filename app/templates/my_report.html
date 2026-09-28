@@ -40,7 +40,7 @@
 </div>
 
 <div class="page-title" style="margin-top:1.2rem">
-  <h1 style="font-size:1.05rem;margin:0">{{ t('我的填报历史') }}</h1>
+  <h1 style="font-size:1.05rem;margin:0">{{ t('我的填报历史') }}（{{ month }}）</h1>
   <div class="actions">
     <form method="get" action="/my/report">
       <select name="month" onchange="this.form.submit()">
@@ -51,10 +51,22 @@
   </div>
 </div>
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-reports">
-  <tr><th>{{ t('日期') }}</th><th>{{ t('担当区域') }}</th><th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th></tr>
-  {% for r in rows %}
-  <tr><td>{{ r.date }}</td><td>{{ r.area or '—' }}</td>
-      <td class="num">{{ r.p1 }}</td><td class="num">{{ r.p2 }}</td><td class="num">{{ r.total }}</td></tr>
-  {% else %}<tr><td colspan="5" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
+  <tr><th>{{ t('日期') }}</th><th>{{ t('星期') }}</th><th>{{ t('状态') }}</th><th>{{ t('担当区域') }}</th>
+      <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th></tr>
+  {% for r in view.days %}
+  <tr {% if r.empty %}style="color:var(--muted);background:#fbfcfe"{% endif %}>
+    <td>{{ r.date }}</td>
+    <td class="hint">{{ t(wd_labels[r.wd]) }}</td>
+    <td>{% if r.empty %}<span class="pill err">{{ t('未填报') }}</span>{% else %}<span class="pill ok">{{ t('已填报') }}</span>{% endif %}</td>
+    <td>{{ r.area or '—' }}</td>
+    <td class="num">{{ r.p1 if not r.empty else '—' }}</td>
+    <td class="num">{{ r.p2 if not r.empty else '—' }}</td>
+    <td class="num">{% if r.empty %}—{% else %}{{ r.total }}{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
+  {% if view.days %}
+  <tr class="totals"><td colspan="4">{{ t('本月合计') }}（{{ t('已填报') }} {{ view.filled }} / {{ view.visible_days }} {{ t('天') }}）</td>
+      <td class="num">{{ view.p1 }}</td><td class="num">{{ view.p2 }}</td><td class="num">{{ view.total }}</td></tr>
+  {% endif %}
 </table></div>
 {% endblock %}

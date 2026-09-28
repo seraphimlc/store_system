@@ -94,6 +94,48 @@ def my_reports(db, person_code: str, *, month: str = "", limit: int = 60) -> lis
     return [_row_dict(r) for r in rows]
 
 
+def month_days(db, person_code: str, month: str = "", *,
+               today=None) -> dict:
+    """**本月逐日视图**：1 号到「今天或月末」，**缺填报的日子留空行**。
+
+    员工要能看到"哪天没有数据"，所以这里不做"只列有记录的天"。
+    返回：{month, days:[{date, wd, empty, area, p1, p2, total}], filled,
+          visible_days, p1, p2, total}
+    """
+    today = today or jst_today()
+    if not month:
+        month = today.strftime("%Y-%m")
+    y, m = (int(x) for x in month.split("-"))
+    start = date(y, m, 1)
+    nxt = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+    last_visible = min(nxt - timedelta(days=1), today)
+    rows = {}
+    if last_visible >= start:
+        rows = {r.report_date: r for r in db.query(StaffDailyReport).filter(
+            StaffDailyReport.person_code == person_code,
+            StaffDailyReport.report_date >= start,
+            StaffDailyReport.report_date <= last_visible).all()}
+    days, filled = [], 0
+    d = start
+    while d <= last_visible:
+        r = rows.get(d)
+        if r is not None:
+            filled += 1
+            days.append({"date": d, "wd": d.weekday(), "empty": False,
+                         "area": r.area or "", "p1": r.p1_cnt, "p2": r.p2_cnt,
+                         "total": r.total_cnt, "submitted_at": r.submitted_at})
+        else:
+            days.append({"date": d, "wd": d.weekday(), "empty": True,
+                         "area": "", "p1": 0, "p2": 0, "total": 0,
+                         "submitted_at": None})
+        d += timedelta(days=1)
+    return {"month": month, "days": days, "filled": filled,
+            "visible_days": len(days),
+            "p1": sum(x["p1"] for x in days),
+            "p2": sum(x["p2"] for x in days),
+            "total": sum(x["total"] for x in days)}
+
+
 def my_months(db, person_code: str) -> list:
     """我填报过的月份（倒序），用于表单默认月份。"""
     rows = (db.query(StaffDailyReport.report_date)

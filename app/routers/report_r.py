@@ -37,15 +37,20 @@ def my_report_page(request: Request,
     today = daily_report.jst_today()
     existing = daily_report.today_report(db, user.person_code)
     months = daily_report.my_months(db, user.person_code)
+    this_month = today.strftime("%Y-%m")
+    if this_month not in months:
+        months = [this_month] + months
     if not month or month not in months:
-        month = months[0] if months else today.strftime("%Y-%m")
+        month = this_month
+    view = daily_report.month_days(db, user.person_code, month, today=today)
     return templates.TemplateResponse("my_report.html", {
         "request": request, "current_user": user,
         "today": today, "existing": existing,
         "existing_jst": (existing.submitted_at + timedelta(hours=9)
                          ).strftime("%Y-%m-%d %H:%M") if existing else "",
-        "rows": daily_report.my_reports(db, user.person_code, month=month),
-        "month": month, "months": months, "msg": msg, "err": err,
+        "view": view, "month": month, "months": months,
+        "wd_labels": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+        "msg": msg, "err": err,
     })
 
 
