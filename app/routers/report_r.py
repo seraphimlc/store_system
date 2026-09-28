@@ -135,14 +135,12 @@ def staff_reports_analysis_retry(aid: int, request: Request,
 def my_report_feedback(request: Request,
                        user: Optional[User] = Depends(require_login),
                        db: Session = Depends(get_db), aid: int = 0):
-    """员工端：我在某个区间报得准不准（逐日偏差 + 我的评语）。
+    """员工端：我在某个区间报得准不准（**只给数字**：准确率 + 逐日 Δ）。
 
-    **只返回本人段落**：`report_ai.person_block()` 已剔除管理端的追问清单，
-    且这里从不把整份 payload 交给模板（避免越权看到他人评语）。
+    评语只给管理员（2026-09-28 用户要求）；这里也从不把报告 payload 交给模板。
     """
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
-    from app.i18n import CURRENT_LANG
     from app.models import StaffReportAnalysis
     from app.services import daily_report, report_ai
     done = report_ai.available_periods(db)          # 去重 + 只列有文件覆盖的区间
@@ -153,18 +151,14 @@ def my_report_feedback(request: Request,
             analysis = None
     if analysis is None and done:
         analysis = done[0]
-    res, mine, block = None, None, {}
+    res, mine = None, None
     if analysis is not None:
         res = daily_report.compare(db, analysis.period_start, analysis.period_end,
                                    user.person_code)
         mine = res["persons"][0] if res["persons"] else None
-        block = report_ai.person_block(analysis, user.person_code)
-    lang = CURRENT_LANG.get()
-    my_report = block.get(lang) or (next(iter(block.values())) if block else {})
     return templates.TemplateResponse("my_report_feedback.html", {
         "request": request, "current_user": user, "analysis": analysis,
         "periods": done, "aid": aid, "res": res, "mine": mine,
-        "report": my_report, "lang": lang,
     })
 
 

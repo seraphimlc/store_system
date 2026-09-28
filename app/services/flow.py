@@ -737,6 +737,12 @@ def auto_finalize_pipeline(db, fid: int, user_id: int = None) -> dict:
             except Exception:  # noqa: BLE001
                 pass
     db.commit()
+    # —— 对比分析报告：**文件入表后自动生成**（自报先于系统数据，触发点就是入表完成）——
+    try:
+        from app.services import report_ai as _rai
+        res["analysis"] = _rai.auto_for_import(db, fid)
+    except Exception:  # noqa: BLE001  best-effort：报告失败不影响上传
+        res["analysis"] = "生成失败（不影响上传）"
     import threading as _th
     from app.db import SessionLocal as _SL
 

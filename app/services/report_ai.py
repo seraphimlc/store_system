@@ -312,16 +312,34 @@ def latest_for(db, start, end):
             .order_by(StaffReportAnalysis.id.desc()).first())
 
 
-def person_block(analysis, person_code: str, lang: str = "") -> dict:
-    """员工端取**本人**段落：只含 comment / off_days，**不含 questions**（管理工具）。"""
-    if analysis is None:
-        return {}
-    by = (analysis.payload or {}).get("by_lang") or {}
-    langs = [lang] if lang else list(by.keys())
-    out = {}
-    for lg in langs:
-        pp = ((by.get(lg) or {}).get("per_person") or {}).get(person_code)
-        if pp:
-            out[lg] = {"comment": pp.get("comment") or "",
-                       "off_days": pp.get("off_days") or []}
-    return out
+def import_period(db, import_id: int):
+    """该文件在正式表里的日期范围；取不到则回退全局覆盖范围。"""
+    from sqlalchemy import func
+
+    from app.models import FormalRecord
+    row = (db.query(func.min(FormalRecord.japan_date),
+                    func.max(FormalRecord.japan_date))
+           .filter(FormalRecord.import_id == import_id).first())
+    if row and row[0] and row[1]:
+        return row[0], row[1]
+    return file_coverage(db)
+
+
+def auto_for_import(db, import_id: int) -> str:
+    """**文件上传并入表后**调用（`flow.auto_finalize_pipeline`）→ 自动生成该区间的对比报告。
+
+    理由（2026-09-28 用户明确）：自报在时间上**先于**系统数据（员工当天就报，
+    文件是事后才上传），所以对比分析的天然触发点就是"文件入表完成"。
+    best-effort：失败不影响上传；同数据已有完整报告则直接复用，不重复消耗。
+    """
+    if not report_ai_enabled():
+        return "AI 报告已关闭（VISIT_REPORT_AI=0）"
+    from app.services import ai_chat
+    if not ai_chat.configured():
+        # AI 未配置：不要建空报告、更不要起后台线程（否则测试/无 key 环境会起无用线程）
+        return "AI 未配置，跳过"
+    start, end = import_period(db, import_id)
+    if not start or not end:
+        return "该文件没有正式记录，跳过"
+    _, msg = start_analysis(db, None, start, end)
+    return "%s ~ %s：%s" % (start, end, msg)

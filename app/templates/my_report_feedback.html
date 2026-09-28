@@ -28,7 +28,7 @@
     <p class="k">{{ t('我的准确率') }}</p>
     <p class="v">{% if mine.acc is none %}—{% else %}{{ (mine.acc * 100) | round(1) }}%{% endif %}</p></div>
   <div class="stat-card"><p class="k">{{ t('系统核到') }}</p><p class="v">{{ mine.sys_total }}<small>（{{ t('1点') }} {{ mine.sys_p1 }} / {{ t('2点') }} {{ mine.sys_p2 }}）</small></p></div>
-  <div class="stat-card"><p class="k">{{ t('我报的') }}</p><p class="v">{{ mine.rep_total }}<small>（{{ t('1点') }} {{ mine.rep_p1 }} / {{ t('2点') }} {{ mine.rep_p2 }}）</small></p></div>
+  <div class="stat-card"><p class="k">{{ t('自报') }}</p><p class="v">{{ mine.rep_total }}<small>（{{ t('1点') }} {{ mine.rep_p1 }} / {{ t('2点') }} {{ mine.rep_p2 }}）</small></p></div>
   <div class="stat-card"><p class="k">Δ{{ t('合计') }}</p>
     <p class="v" style="color:{% if mine.d_total > 0 %}var(--warn){% elif mine.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % mine.d_total }}</p></div>
   <div class="stat-card"><p class="k">{{ t('已报天数') }}</p><p class="v">{{ mine.days_filled }}<small> / {{ mine.days_system }}</small></p></div>
@@ -36,30 +36,17 @@
 </div>
 {% endif %}
 
-{% if report and report.comment %}
-<div class="card" style="margin-bottom:.8rem" data-testid="my-comment">
-  <b>{{ t('我的评语') }}</b>
-  <p style="margin:.4rem 0 0">{{ report.comment }}</p>
-  {% if report.off_days %}
-  <div class="hint" style="margin-top:.4rem">{% for o in report.off_days %}· {{ o.date }}：{{ o.note }}　{% endfor %}</div>
-  {% endif %}
-</div>
-{% endif %}
-
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-compare-daily">
-  <tr><th>{{ t('日期') }}</th><th>{{ t('状态') }}</th><th>{{ t('系统') }}（1/2）</th>
-      <th>{{ t('我报的') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+  <tr><th>{{ t('日期') }}</th><th>{{ t('系统') }}（1/2）</th>
+      <th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
   {% for r in res.daily %}
   <tr {% if r.kind != 'both' %}style="background:#fbfcfe"{% endif %}>
     <td>{{ r.date }}</td>
-    <td>{% if r.kind == 'both' %}<span class="pill ok">{{ t('两侧都有') }}</span>
-        {% elif r.kind == 'missing_report' %}<span class="pill warn">{{ t('系统有 / 未报') }}</span>
-        {% else %}<span class="pill err">{{ t('自报有 / 系统无') }}</span>{% endif %}</td>
     <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
     <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
     <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
   </tr>
-  {% else %}<tr><td colspan="5" class="empty">{{ t('这个���间没有你的记录') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="4" class="empty">{{ t('这个区间没有你的记录') }}</td></tr>{% endfor %}
 </table></div>
 {% endif %}
 {% endblock %}

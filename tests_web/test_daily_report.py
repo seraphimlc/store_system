@@ -616,7 +616,7 @@ def test_export_xlsx_both_kinds(client):
 
 # ---------- Chunk 5：AI 分析报告（全程 mock，不连外网） ----------
 
-_VALID_JSON = ('{"overall_comment":"整体一致性一般","accuracy_notes":"��差集中在少数人",'
+_VALID_JSON = ('{"overall_comment":"整体一致性一般","accuracy_notes":"偏差集中在少数人",'
                '"per_person":{"P1":{"comment":"16 号完全一致","off_days":'
                '[{"date":"2026-09-17","delta":3,"note":"少报 3 家"}],'
                '"questions":["17 号是否漏记"]},'
@@ -777,26 +777,9 @@ def test_analysis_disabled_by_env(client, monkeypatch):
         get_settings.cache_clear()
 
 
-def test_person_block_hides_admin_questions(client, monkeypatch):
-    """员工段落只含 comment/off_days，**不含追问���单**。"""
-    from datetime import date
-    from app.services import report_ai
-    db = appdb.SessionLocal()
-    _seed_compare_data(db)
-    _mock_ai(monkeypatch)
-    _no_thread(monkeypatch)
-    a, _ = report_ai.start_analysis(db, None, date(2026, 9, 16), date(2026, 9, 17))
-    report_ai.run_analysis(a.id)
-    db.expire_all()                     # 同上：拿到别的会话写入的 payload
-    a = db.get(type(a), a.id)
-    blk = report_ai.person_block(a, "P1")
-    assert set(blk["zh"].keys()) == {"comment", "off_days"}
-    assert "questions" not in blk["zh"]
-    assert report_ai.person_block(a, "NOBODY") == {}
 
-
-def test_feedback_page_only_shows_own_data(client, monkeypatch):
-    """员工端核对页：只有自己的评语与明细，**没有他人数据、没有追问清单**。"""
+def test_feedback_page_numbers_only(client, monkeypatch):
+    """员工端核对页：**只给数字**（准确率 + 逐日 Δ）；无评语、无状态列、无他人数据。"""
     from datetime import date
     from app.services import report_ai
     db = appdb.SessionLocal()
@@ -809,12 +792,18 @@ def test_feedback_page_only_shows_own_data(client, monkeypatch):
     _seed_staff(client, person_code="P1", username="emp1", name="甲")
     _login_staff(client)
     html = client.get("/my/report/feedback").text
-    assert "我的准确率" in html
-    assert "16 号完全一致" in html                     # 自己的评语
-    assert "另一个人" not in html                       # 别人的评语
-    assert "P2" not in html                            # 别人的编号
-    assert "是否漏记" not in html                        # 追问清单不下发
-    assert "2026-09-17" in html                        # 自己的逐日明细
+    # 数字在
+    assert "我的准确率" in html and "自报" in html and "2026-09-17" in html
+    # 评语不再下发给员工
+    assert "我的评语" not in html
+    assert "16 号完全一致" not in html          # 模型写的评语（mock 里的）
+    assert "另一个人" not in html                # 别人的评语
+    assert "是否漏记" not in html                # 管理端追问清单
+    # 状态列去掉；标签改成「自报」
+    assert "两侧都有" not in html and "系统有 / 未报" not in html
+    assert "我报的" not in html
+    # 他人数据
+    assert "P2" not in html
 
 
 def test_feedback_page_empty_state(client):
@@ -903,3 +892,39 @@ def test_available_periods_dedupe_and_file_coverage(client):
     ps = report_ai.available_periods(db)
     assert len(ps) == 1                                     # 去重 + 只留覆盖范围内的区间
     assert (ps[0].period_start, ps[0].period_end) == (date(2026, 9, 16), date(2026, 9, 17))
+
+
+def test_auto_for_import_triggers_analysis(client, monkeypatch):
+    """**文件入表后自动生成**该区间的对比报告；AI 未配置则跳过（不建空报告）。"""
+    from datetime import date
+    from app.models import StaffReportAnalysis
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    imp = _seed_coverage(db, date(2026, 9, 16), date(2026, 9, 17), tag="auto")
+    _seed_sys(db, "P1", date(2026, 9, 16), 4, 2)        # 对比读的是日统计表
+    db.commit()
+    # AI 未配置（测试环境默认）→ 跳过，不产生报告行
+    assert "未配置" in report_ai.auto_for_import(db, imp.id)
+    assert db.query(StaffReportAnalysis).count() == 0
+    # AI 可用 → 建 pending（区间 = 该文件在正式表里的日期范围）
+    _mock_ai(monkeypatch)
+    _no_thread(monkeypatch)
+    msg = report_ai.auto_for_import(db, imp.id)
+    assert "2026-09-16" in msg and "2026-09-17" in msg
+    a = db.query(StaffReportAnalysis).order_by(StaffReportAnalysis.id.desc()).first()
+    assert (a.period_start, a.period_end) == (date(2026, 9, 16), date(2026, 9, 17))
+    assert a.status == "pending"
+
+
+def test_import_period_falls_back_to_coverage(client):
+    """没有正式记录的文件 → 回退全局覆盖范围。"""
+    from datetime import date
+    from app.models import ImportFile
+    from app.services import report_ai
+    db = appdb.SessionLocal()
+    _seed_coverage(db, date(2026, 9, 10), date(2026, 9, 20), tag="cov2")
+    empty = ImportFile(file_name="e.xlsx", file_sha256="sha-empty", file_size=1,
+                       stored_path="/tmp/e.xlsx", uploaded_by=1, status="parsed")
+    db.add(empty)
+    db.commit()
+    assert report_ai.import_period(db, empty.id) == (date(2026, 9, 10), date(2026, 9, 20))
