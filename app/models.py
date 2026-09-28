@@ -664,3 +664,52 @@ class PayrollSettlementLink(Base):
     person_code = Column(String(32), nullable=False, index=True)
     amount = Column(Integer, nullable=False, default=0)     # 本次冲抵（负=扣回）
     created_at = Column(DateTime, nullable=False, default=_now)
+
+
+# ---------- 员工每日填报 + 对比分析报告 ----------
+class StaffDailyReport(Base):
+    """员工每天提交一次：担当区域 + 1点店铺数 + 2点店铺数。
+
+    填报数据**不参与工资计算**，只用于与文件跑出的 person_daily_stats 对比（规格 D1–D7）。
+    一天一条：`(person_code, report_date)` 唯一；`report_date` 为 JST 业务日。
+    """
+    __tablename__ = "staff_daily_reports"
+    __table_args__ = (UniqueConstraint("person_code", "report_date",
+                                       name="uq_sdr_person_date"),
+                      Index("ix_sdr_date", "report_date"))
+    id = Column(Integer, primary_key=True)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    report_date = Column(Date, nullable=False)              # JST 业务日
+    area = Column(String(64), nullable=False, default="", server_default="")
+    p1_cnt = Column(Integer, nullable=False, default=0)     # 1 点店铺数
+    p2_cnt = Column(Integer, nullable=False, default=0)     # 2 点店铺数
+    total_cnt = Column(Integer, nullable=False, default=0)  # = p1_cnt + p2_cnt
+    submitted_at = Column(DateTime, nullable=False, default=_now)
+    client_ts = Column(String(40), nullable=False, default="", server_default="")
+    source = Column(String(16), nullable=False, default="web", server_default="web")
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class StaffReportAnalysis(Base):
+    """区间对比分析报告。
+
+    `summary` = **程序算出的**对比结果（数字唯一可信来源）；
+    `payload` = **模型产出的**结构化评语（`by_lang.zh/ja`，逐人段落）。
+    管理端渲染全部；员工端只渲染 `per_person[自己]`（服务端裁剪，规格 D13/D14/D15）。
+    """
+    __tablename__ = "staff_report_analyses"
+    __table_args__ = (Index("ix_sra_period", "period_start", "period_end"),)
+    id = Column(Integer, primary_key=True)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    status = Column(String(12), nullable=False, default="pending",
+                    server_default="pending")        # pending/running/done/failed
+    summary = Column(JSON, nullable=False, default=dict)
+    payload = Column(JSON, nullable=False, default=dict)
+    ai_model = Column(String(64), nullable=False, default="", server_default="")
+    ai_tokens = Column(Integer, nullable=False, default=0)
+    ai_error = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    finished_at = Column(DateTime, nullable=True)

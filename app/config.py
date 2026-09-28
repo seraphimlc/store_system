@@ -86,6 +86,17 @@ class Settings:
     visit_oauth_refresh_days: int = field(
         default_factory=lambda: _env_int("VISIT_OAUTH_REFRESH_DAYS", 90))
 
+    # 员工每日填报 + 对比分析报告（规格 v7 §6.4）
+    report_ai_enabled: int = field(
+        default_factory=lambda: _env_int("VISIT_REPORT_AI", 1))
+    report_ai_langs: str = field(
+        default_factory=lambda: os.environ.get("VISIT_REPORT_LANGS", "zh,ja"))
+    report_ai_max_tokens: int = field(
+        default_factory=lambda: _env_int("VISIT_REPORT_AI_MAX_TOKENS", 6000))
+    report_ai_timeout: int = field(
+        default_factory=lambda: _env_int("VISIT_REPORT_AI_TIMEOUT", 300))
+    report_ai_top_n: int = field(
+        default_factory=lambda: _env_int("VISIT_REPORT_AI_TOP_N", 15))
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
