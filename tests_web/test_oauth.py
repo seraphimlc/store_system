@@ -456,7 +456,7 @@ def test_consent_requires_csrf(client):
 
 # ---------- VISIT_OAUTH_ENABLED=0 ----------
 
-def test_disabled_oauth_returns_404_but_my_token_works(client, monkeypatch):
+def test_disabled_oauth_returns_404(client, monkeypatch):
     _seed()
     monkeypatch.setenv("VISIT_OAUTH_ENABLED", "0")
     get_settings.cache_clear()
@@ -470,9 +470,9 @@ def test_disabled_oauth_returns_404_but_my_token_works(client, monkeypatch):
     assert r.status_code == 404
     # 发现端点保留
     assert client.get("/.well-known/oauth-protected-resource").status_code == 200
-    # /my/token 自助签发不受影响（登录后 200）
+    # 员工端自助签发页已删除（2026-09-28）；静态 env token 通道不受 OAuth 开关影响
     _login(client, "admin")
-    assert client.get("/my/token").status_code == 200
+    assert client.get("/my/token").status_code == 404
     get_settings.cache_clear()
 
 
@@ -624,7 +624,7 @@ def test_e2e_oauth_token_calls_mcp_tool(e2e_env, tmp_path):
         assert r2.status_code == 200, r2.text[:300]
         assert body2["result"]["structuredContent"]["ok"] is True
 
-        # 验收 9：审计有 user_id（与 /my/token 签发无差别）
+        # 验收 9：审计有 user_id（OAuth 换出的 token 与其它签发方式一致）
         from sqlalchemy.orm import sessionmaker
         S = sessionmaker(bind=eng, expire_on_commit=False)
         s = S()

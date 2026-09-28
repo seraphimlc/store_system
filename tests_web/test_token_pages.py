@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""MCP Token 自助签发页测试：/my/token（生成/列表/吊销）、
-/staff-admin 代发与吊销、员工状态联动提示、/mcp-audit（管理员审计）。
+"""MCP Token 管理员代发/吊销、员工状态联动提示、/mcp-audit（管理员审计）。
+
+注：员工端自助签发页 /my/token 已于 2026-09-28 删除（员工走 OAuth，不需要管凭证）。
+
 
 约定：
 - 明文 token 只显示一次（签发后那个响应页），库内只存前缀 + sha256；
@@ -69,114 +71,42 @@ def _digest(raw):
 
 # ---------- 未登录 ----------
 def test_unauthenticated_redirects_to_login(client):
-    for path in ("/my/token", "/mcp-audit"):
-        r = client.get(path, follow_redirects=False)
-        assert r.status_code == 302, f"{path} 未登录应 302，实际 {r.status_code}"
-        assert r.headers["location"].startswith("/login"), path
-    # 写操作同样被拦
-    r = client.post("/my/token/issue", data={"name": "x", "scope": "read",
-                                             "days": "90", "csrf_token": "x"},
-                    follow_redirects=False)
-    assert r.status_code in (302, 403)
+    r = client.get("/mcp-audit", follow_redirects=False)
+    assert r.status_code == 302, f"/mcp-audit 未登录应 302，实际 {r.status_code}"
+    assert r.headers["location"].startswith("/login")
 
 
-# ---------- 员工自助：生成（明文一次）→ 列表 → 吊销 ----------
-def test_staff_issue_plaintext_once_list_revoke(client):
+def test_employee_self_service_token_page_removed(client):
+    """员工端自助签发页已删除：导航无入口、员工被中间件拦住、路由本身也不存在。"""
     _seed()
     _login(client, "emp1")
-    uid = _uid("emp1")
-    csrf = _csrf_of(client, "/my/token")
-    r = client.post("/my/token/issue", data={"name": "WorkBuddy 连接",
-                                             "scope": "read", "days": "90",
-                                             "csrf_token": csrf},
-                    follow_redirects=False)
-    assert r.status_code == 303, f"签发应 303，实际 {r.status_code}"
-    loc = urlparse(r.headers["location"])
-    assert loc.path == "/my/token"
-    raw = parse_qs(loc.query).get("token", [""])[0]
-    assert len(raw) >= 30
-    # 明文只显示一次
-    page = client.get(r.headers["location"]).text
-    assert raw in page
-    assert "请立即复制到 WorkBuddy 连接器" in page
-    # 再次打开 /my/token → 明文消失
-    page2 = client.get("/my/token").text
-    assert raw not in page2
-    # 库内只存前缀 + sha256，无明文列
-    rows = _token_rows("emp1")
-    assert len(rows) == 1
-    row = rows[0]
-    assert row.token_prefix == raw[:8]
-    assert row.token_hash == _digest(raw)
-    assert row.scopes == "read"
-    assert row.user_id == uid
-    # 90 天有效期
-    assert row.expires_at is not None
-    remain = row.expires_at - datetime.utcnow()
-    assert timedelta(days=89) < remain < timedelta(days=91)
-    # 列表可见：前缀/名称/权限/状态=有效
-    assert raw[:8] in page2
-    assert "WorkBuddy 连接" in page2
-    assert "只读" in page2
-    assert "有效" in page2
-    # 吊销
-    csrf = _csrf_of(client, "/my/token")
-    r = client.post(f"/my/token/{row.id}/revoke",
-                    data={"csrf_token": csrf}, follow_redirects=False)
-    assert r.status_code == 303
-    rows = _token_rows("emp1")
-    assert rows[0].revoked_at is not None
-    page3 = client.get("/my/token").text
-    assert "已吊销" in page3
-    assert raw not in page3
-    # 吊销后不可重复吊销
-    csrf = _csrf_of(client, "/my/token")
-    r = client.post(f"/my/token/{row.id}/revoke",
-                    data={"csrf_token": csrf}, follow_redirects=False)
-    assert r.status_code in (303, 404)
-
-
-# ---------- 员工请求永久 → 强制 90 天 ----------
-def test_staff_cannot_issue_permanent(client):
-    _seed()
-    _login(client, "emp1")
-    csrf = _csrf_of(client, "/my/token")
-    r = client.post("/my/token/issue", data={"name": "p", "scope": "read",
-                                             "days": "", "csrf_token": csrf},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    rows = _token_rows("emp1")
-    assert rows[0].expires_at is not None, "员工请求永久必须被强制为 90 天"
-
-
-# ---------- 员工不能吊销别人的 token ----------
-def test_staff_cannot_revoke_others_token(client):
-    _seed()
+    # 导航里没有入口
+    assert "我的 Token" not in client.get("/my/perf").text
+    # 员工访问 → 中间件按白名单拦到 /my/perf（不再放行到自助页）
+    r = client.get("/my/token", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"].startswith("/my/perf")
+    # 路由本身已删除：管理员绕过员工白名单 → 404 / 405
+    client.get("/logout")
     _login(client, "admin")
-    uid1 = _uid("emp1")
-    csrf = _csrf_of(client, "/staff-admin")
-    client.post(f"/staff-admin/{uid1}/tokens/issue",
-                data={"name": "for emp1", "scope": "read", "days": "90",
-                      "csrf_token": csrf}, follow_redirects=False)
-    tid = _token_rows("emp1")[0].id
-    _login(client, "emp2")
-    csrf = _csrf_of(client, "/my/token")
-    r = client.post(f"/my/token/{tid}/revoke",
-                    data={"csrf_token": csrf}, follow_redirects=False)
-    assert r.status_code in (404, 403, 400)
-    rows = _token_rows("emp1")
-    assert rows[0].revoked_at is None
+    assert client.get("/my/token", follow_redirects=False).status_code == 404
+    assert client.post("/my/token/issue", data={"name": "x", "scope": "read"},
+                       follow_redirects=False).status_code in (404, 405)
+
+
+
 
 
 # ---------- CSRF ----------
 def test_write_requires_csrf(client):
+    """管理员代发/吊销同样要 CSRF。"""
     _seed()
-    _login(client, "emp1")
-    r = client.post("/my/token/issue", data={"name": "x", "scope": "read",
-                                             "days": "90", "csrf_token": "bad"},
-                    follow_redirects=False)
+    _login(client, "admin")
+    uid = _uid("emp1")
+    r = client.post(f"/staff-admin/{uid}/tokens/issue",
+                    data={"name": "x", "scope": "read", "days": "90",
+                          "csrf_token": "bad"}, follow_redirects=False)
     assert r.status_code == 400
-    r = client.post(f"/my/token/999/revoke",
+    r = client.post(f"/staff-admin/{uid}/tokens/999/revoke",
                     data={"csrf_token": "bad"}, follow_redirects=False)
     assert r.status_code == 400
 

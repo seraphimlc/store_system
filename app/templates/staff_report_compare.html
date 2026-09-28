@@ -47,9 +47,7 @@
 <div class="card" data-testid="report-card" style="margin-bottom:1rem">
   <h2 style="font-size:1.05rem;margin:.1rem 0 .4rem">{{ t('AI 分析报告') }}
     <span class="hint">{{ analysis.period_start }} ～ {{ analysis.period_end }} ·
-      {{ t('状态') }} {{ analysis.status }} ·
-      {{ t('模型') }} {{ analysis.ai_model or '—' }} ·
-      {{ t('消耗 token') }} {{ analysis.ai_tokens }}</span></h2>
+      {{ t('状态') }} {{ analysis.status }}</span></h2>
   {% if analysis.status in ('pending', 'running') %}
   <div class="msg warn">{{ t('报告生成中（可稍后刷新本页）') }}</div>
   {% elif analysis.status == 'failed' %}
@@ -76,7 +74,7 @@
     <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
     <input type="hidden" name="person_code" value="{{ person_code }}">
     <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
-    <span class="hint">{{ t('同一份数据会直接复用已有报告，不重复消耗 token。') }}</span>
+    <span class="hint">{{ t('同一份数据会直接复用已有报告，不会重复生成。') }}</span>
   </form>
   {% endif %}
 </div>

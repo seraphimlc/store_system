@@ -75,7 +75,8 @@ def test_base_staff_bottom_tabs():
     assert 'href="/my/perf"' in staff and 'href="/my/report"' in staff
     # 顶栏不再重复这两项（只保留次要项）
     assert staff.count('>我的绩效<') == 1 and staff.count('>每日填报<') == 1
-    assert "我的核对结果" in staff and "我的 Token" in staff
+    assert "我的核对结果" in staff
+    assert "我的 Token" not in staff          # 员工端 token 自助页已删除（2026-09-28）
     admin = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="管理员", role="admin"), request=_req())
     assert 'class="tabbar"' not in admin and "has-tabbar" not in admin

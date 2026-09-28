@@ -17,7 +17,6 @@
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
   {% if current_user.role == 'staff' %}
   <a class="nav" href="/my/report/feedback"><b>{{ t('我的核对结果') }}</b></a>
-  <a class="nav" href="/my/token"><b>{{ t('我的 Token') }}</b></a>
   {% else %}
   <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
   <a class="nav" href="/files"><b>{{ t('文件上传') }}</b></a>

@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
-"""MCP Token 自助签发（/my/token）+ 管理员代发/吊销（/staff-admin/*）+ MCP 调用审计（/mcp-audit）。
+"""管理员代发/吊销 MCP Token（/staff-admin/*）+ MCP 调用审计（/mcp-audit）。
+
+**员工端自助签发页（/my/token）已删除**（2026-09-28，用户明确）：
+员工对接 MCP 走 OAuth（SSO），换出的 access token 同样是 `api_tokens` 一行，
+员工不需要感知也不需要管理凭证；MCP 调用日志只供我方离线统计。
 
 写操作（生成/吊销）沿用项目既有 `csrf_ok` / `request.state.csrf` 模式 + 登录校验；
-明文 token 只在签发后的那个响应页显示一次（URL 经 JS history.replaceState 清除）。
+明文 token 只在签发后的那个响应页显示一次。
 """
 from datetime import datetime, timedelta
 from typing import Optional
@@ -24,59 +28,6 @@ templates = get_templates()
 
 SCOPES_ALLOW = {"read", "read,write"}
 PER_PAGE = 50
-
-
-# ---------- /my/token：登录用户自助 ----------
-@router.get("/my/token", response_class=HTMLResponse)
-def my_token_page(request: Request, user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db),
-                  issued: str = "", name: str = "", token: str = "",
-                  msg: str = ""):
-    if user is None:
-        return _denied()
-    tokens = [mcp_tokens.decorate(row, user)
-              for row in mcp_tokens.list_for_user(db, user.id)]
-    return templates.TemplateResponse("my_token.html", {
-        "request": request, "current_user": user,
-        "tokens": tokens, "issued": bool(issued), "new_token": token,
-        "new_token_name": name, "msg": msg,
-        "is_admin": user.role == "admin",
-        "page_state": {"page": "my_token", "token_count": len(tokens)}})
-
-
-@router.post("/my/token/issue")
-def my_token_issue(request: Request, name: str = Form(""),
-                   scope: str = Form("read"), days: str = Form("90"),
-                   csrf_token: str = Form(...),
-                   user: Optional[User] = Depends(require_login),
-                   db: Session = Depends(get_db)):
-    if user is None:
-        return _denied()
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
-    if scope not in SCOPES_ALLOW:
-        raise HTTPException(400, "权限只能是只读或读写")
-    if days == "permanent" and user.role != "admin":
-        days = "90"  # 员工强制 90 天（永久仅管理员）
-    if days not in ("90", "permanent"):
-        raise HTTPException(400, "有效期只能是 90 天或永久")
-    n_days = 90 if days == "90" else None
-    raw, row = mcp_tokens.issue(db, user.id, name, scope, n_days)
-    q = (f"?issued=1&name={quote((name or '').strip()[:128])}&token={raw}")
-    return RedirectResponse("/my/token" + q, status_code=303)
-
-
-@router.post("/my/token/{tid}/revoke")
-def my_token_revoke(tid: int, request: Request, csrf_token: str = Form(...),
-                    user: Optional[User] = Depends(require_login),
-                    db: Session = Depends(get_db)):
-    if user is None:
-        return _denied()
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
-    if not mcp_tokens.revoke(db, tid, user.id):
-        raise HTTPException(404, "Token 不存在或不属于你")
-    return RedirectResponse("/my/token?msg=已吊销", status_code=303)
 
 
 # ---------- 管理员：代发/吊销任意员工 token ----------

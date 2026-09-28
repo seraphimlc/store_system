@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
 
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
-                     "/my/appeal", "/my/perf", "/my/token", "/my/report",
+                     "/my/appeal", "/my/perf", "/my/report",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")
 
