@@ -12,7 +12,9 @@ from app.db import get_db
 from app.models import Person, User
 from app.routers.auth_r import csrf_ok, require_login
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 # 员工状态：展示名 + 是否可登录 + 徽标样式

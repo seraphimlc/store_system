@@ -12,7 +12,9 @@ from app.models import StoreEntity, StorePair, User
 from app.routers.auth_r import csrf_ok, require_login
 from app.services import ai_batch, store_master
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 
 
 def _recompute_after_master_change(db, user_id, month_hint=None):

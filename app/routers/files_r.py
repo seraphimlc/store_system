@@ -13,7 +13,9 @@ from app.models import ImportFile, RawRecord, User
 from app.routers.auth_r import csrf_ok, require_login
 from app.services import importer
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 MONTH_CHOICES = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]

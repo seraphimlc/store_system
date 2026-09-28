@@ -48,6 +48,7 @@
           <form method="post" action="/stores/entities/{{ c.id }}/split"
                 onsubmit="return confirm('只把这一条解绑成独立店铺？其它关联不受影响')">
             <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <input type="hidden" name="_ft" value="{{ form_token() }}">
             <button class="btn ghost" style="padding:.2rem .5rem" type="submit">{{ t('解绑这一条') }}</button>
           </form>
         </td>
@@ -71,6 +72,7 @@
 <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.8rem">
   <form method="post" action="/stores/ai-run">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <button class="btn" type="submit">{{ t('让 AI 再自动处理一轮') }}</button>
   </form>
   <span class="hint">AI {{ t('高置信的自动处理，其余留给你（附 AI 建议）') }}</span>
@@ -99,16 +101,19 @@
   <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.5rem">
     <form method="post" action="/stores/pairs/{{ p.pair.id }}/merge?kind=fuzzy" style="display:inline">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
       <input type="hidden" name="keep" value="{{ p.a.id }}">
       <button class="btn" type="submit">{{ t('是') }}→ {{ t('保留左，合并右') }}</button>
     </form>
     <form method="post" action="/stores/pairs/{{ p.pair.id }}/merge?kind=fuzzy" style="display:inline">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
       <input type="hidden" name="keep" value="{{ p.b.id }}">
       <button class="btn" type="submit">{{ t('是') }}→ {{ t('保留右，合并左') }}</button>
     </form>
     <form method="post" action="/stores/pairs/{{ p.pair.id }}/skip?kind=fuzzy" style="display:inline">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
       <button class="btn ghost" type="submit">{{ t('不是同一家') }}</button>
     </form>
   </div>

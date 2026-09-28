@@ -38,6 +38,8 @@ def create_app() -> FastAPI:
 
     from fastapi.responses import RedirectResponse as _RR
 
+    from app.forms import reset_ctx as _reset_form_ctx
+
     @app.middleware("http")
     async def lang_middleware(request, call_next):
         """解析当前语言（URL→cookie→账号级→浏览器→默认）并注入 contextvar。
@@ -67,6 +69,8 @@ def create_app() -> FastAPI:
                         accept=request.headers.get("accept-language", ""))
         tok = _LANG.set(lang)
         try:
+            from app.auth import SESSION_COOKIE as _SC, read_session_token as _rst
+            _reset_form_ctx((_rst(request.cookies.get(_SC)) or {}).get("uid"))
             response = await call_next(request)
             # 页面禁止缓存：保存/修改后必须看到最新数据（浏览器复用旧页面会让人以为没刷新）
             if response.headers.get("content-type", "").startswith("text/html"):

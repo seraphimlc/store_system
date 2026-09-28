@@ -9,7 +9,7 @@ from app.models import (AppealRecord, FormalRecord, ImportFile, Person,
                         RawRecord, StoreEntity, User)
 from app.services.importer import parse_file, upload_and_store
 from app.services import flow, period
-from tests.helpers import write_workbook
+from tests.helpers import write_workbook, form_token
 
 H = ["Store ID", "Store Name-Local", "Store Name-English", "Modified Time",
      "Submitter", "Record ID", "A+ POSM Visible", "Existing A+ POSM", "NEW A+ POSM"]
@@ -803,7 +803,7 @@ def test_recon_attribution_and_ai_placeholder(client, tmp_path):
     # 未配置模型 → 提示而非崩溃
     csrf = _csrf_of(client, f"/recon?task_id={tk.id}")
     r = client.post(f"/recon/{tk.id}/interpret",
-                    data={"csrf_token": csrf}, follow_redirects=False)
+                    data={"_ft": form_token(client), "csrf_token": csrf}, follow_redirects=False)
     assert r.status_code == 303
     from urllib.parse import unquote
     assert "未配置" in unquote(r.headers.get("location", ""))

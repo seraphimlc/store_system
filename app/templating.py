@@ -23,4 +23,7 @@ def get_templates() -> Jinja2Templates:
         qs = "&".join(f"{k}={v}" for k, v in q.items())
         return f"?{qs}" if qs else ""
     tpl.env.globals["lang_url"] = _lang_url
+
+    from app.forms import form_token as _ft
+    tpl.env.globals["form_token"] = _ft      # 模板里 {{ form_token() }}
     return tpl

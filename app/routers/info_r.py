@@ -8,7 +8,10 @@ from app.templating import get_templates
 
 import markdown as _md
 
-router = APIRouter()
+from fastapi import Depends  # noqa: E402
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 _DOC = Path(__file__).resolve().parent.parent / "product_doc.md"

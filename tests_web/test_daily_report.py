@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.models import Person, StaffDailyReport, StaffReportAnalysis
 
 
@@ -120,14 +121,14 @@ def test_staff_admin_create_route(client):
     _seed_admin(client)
     csrf = _login_admin(client)
     r = client.post("/staff-admin/create",
-                    data={"csrf_token": csrf, "code": "2188240600000009",
+                    data={"_ft": form_token(client), "csrf_token": csrf, "code": "2188240600000009",
                           "name": "新人甲", "username": "", "password": ""},
                     follow_redirects=False)
     assert r.status_code == 303 and "msg=" in r.headers["location"]
     db = appdb.SessionLocal()
     assert db.get(Person, "2188240600000009") is not None
     r2 = client.post("/staff-admin/create",
-                     data={"csrf_token": csrf, "code": "2188240600000009",
+                     data={"_ft": form_token(client), "csrf_token": csrf, "code": "2188240600000009",
                            "name": "重复的人"},
                      follow_redirects=False)
     assert r2.status_code == 303 and "err=" in r2.headers["location"]
@@ -232,7 +233,7 @@ def test_my_report_page_and_submit_route(client):
     page = client.get("/my/report")
     assert page.status_code == 200
     assert daily_report.jst_today().isoformat() in page.text
-    r = client.post("/my/report", data={
+    r = client.post("/my/report", data={"_ft": form_token(client), 
         "csrf_token": csrf, "area": "渋谷", "p1_cnt": "4", "p2_cnt": "1"},
         follow_redirects=False)
     assert r.status_code == 303
@@ -241,7 +242,7 @@ def test_my_report_page_and_submit_route(client):
     row = db.query(StaffDailyReport).one()
     assert (row.area, row.p1_cnt, row.p2_cnt, row.total_cnt) == ("渋谷", 4, 1, 5)
     # 重复提交 → err，且不新增行
-    r2 = client.post("/my/report", data={
+    r2 = client.post("/my/report", data={"_ft": form_token(client), 
         "csrf_token": csrf, "area": "渋谷", "p1_cnt": "9", "p2_cnt": "9"},
         follow_redirects=False)
     assert r2.status_code == 303 and "err=" in r2.headers["location"]
@@ -258,7 +259,7 @@ def test_my_report_requires_csrf_and_staff(client):
     from app.models import User
     _seed_staff(client)
     csrf = _login_staff(client)
-    r = client.post("/my/report", data={"csrf_token": "", "area": "x",
+    r = client.post("/my/report", data={"_ft": form_token(client), "csrf_token": "", "area": "x",
                                         "p1_cnt": "1", "p2_cnt": "0"},
                     follow_redirects=False)
     assert r.status_code == 400
@@ -828,7 +829,7 @@ def test_analyze_and_retry_routes_admin_only(client, monkeypatch):
     _seed_admin(client)
     csrf = _login_admin(client)
     r = client.post("/staff-reports/compare/analyze",
-                    data={"csrf_token": csrf, "start": "2026-09-16", "end": "2026-09-17"},
+                    data={"_ft": form_token(client), "csrf_token": csrf, "start": "2026-09-16", "end": "2026-09-17"},
                     follow_redirects=False)
     assert r.status_code == 303 and "msg=" in r.headers["location"]
     db = appdb.SessionLocal()
@@ -943,11 +944,11 @@ def test_update_today_route(client):
     from app.services import daily_report
     _seed_staff(client)
     csrf = _login_staff(client)
-    client.post("/my/report", data={"csrf_token": csrf, "area": "渋谷",
+    client.post("/my/report", data={"_ft": form_token(client), "csrf_token": csrf, "area": "渋谷",
                                     "p1_cnt": "4", "p2_cnt": "1"},
                 follow_redirects=False)
     r = client.post("/my/report/update",
-                    data={"csrf_token": csrf, "area": "池袋", "p1_cnt": "7",
+                    data={"_ft": form_token(client), "csrf_token": csrf, "area": "池袋", "p1_cnt": "7",
                           "p2_cnt": "3"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/my/report"
     db = appdb.SessionLocal()

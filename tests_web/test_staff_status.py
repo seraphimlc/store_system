@@ -3,6 +3,7 @@
 import re
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.auth import hash_password
 from app.models import Person, User
 
@@ -59,7 +60,7 @@ def test_set_leave_still_logs_in_and_confirms(client):
     _login(client, "admin", "pw123456")
     uid = _uid("emp111")
     r = client.post(f"/staff-admin/{uid}/status",
-                    data={"new_status": "leave", "csrf_token": _csrf(client)},
+                    data={"_ft": form_token(client), "new_status": "leave", "csrf_token": _csrf(client)},
                     follow_redirects=False)
     assert r.status_code == 303
     db = _db()
@@ -78,7 +79,7 @@ def test_set_disabled_cannot_login(client):
     _login(client, "admin", "pw123456")
     uid = _uid("emp111")
     r = client.post(f"/staff-admin/{uid}/status",
-                    data={"new_status": "disabled", "csrf_token": _csrf(client)},
+                    data={"_ft": form_token(client), "new_status": "disabled", "csrf_token": _csrf(client)},
                     follow_redirects=False)
     assert r.status_code == 303
     db = _db()
@@ -97,7 +98,7 @@ def test_set_resigned_keeps_record_and_blocks(client):
     _login(client, "admin", "pw123456")
     uid = _uid("emp222")
     r = client.post(f"/staff-admin/{uid}/status",
-                    data={"new_status": "resigned", "csrf_token": _csrf(client)},
+                    data={"_ft": form_token(client), "new_status": "resigned", "csrf_token": _csrf(client)},
                     follow_redirects=False)
     assert r.status_code == 303
     # 记录仍在（不删除）
@@ -119,13 +120,13 @@ def test_status_filter_and_reactive(client):
     _login(client, "admin", "pw123456")
     uid = _uid("emp111")
     client.post(f"/staff-admin/{uid}/status",
-                data={"new_status": "resigned", "csrf_token": _csrf(client)},
+                data={"_ft": form_token(client), "new_status": "resigned", "csrf_token": _csrf(client)},
                 follow_redirects=False)
     page = client.get("/staff-admin?status=resigned").text
     assert "emp111" in page and "emp222" not in page
     # 改回在岗 → 能登录
     client.post(f"/staff-admin/{uid}/status",
-                data={"new_status": "active", "csrf_token": _csrf(client)},
+                data={"_ft": form_token(client), "new_status": "active", "csrf_token": _csrf(client)},
                 follow_redirects=False)
     r = _login(client, "emp111", "pass123")
     assert r.status_code == 302
@@ -143,12 +144,12 @@ def test_manual_create_requires_admin_and_csrf(client):
     page = client.get("/staff-admin").text
     assert "/staff-admin/create" in page
     # 无 CSRF → 400，且不建号
-    r = client.post("/staff-admin/create", data={
+    r = client.post("/staff-admin/create", data={"_ft": form_token(client), 
         "username": "hack", "person_code": "111", "password": "x12345",
         "csrf_token": ""}, follow_redirects=False)
     assert r.status_code == 400
     # 带 CSRF 正常建号
-    r2 = client.post("/staff-admin/create", data={
+    r2 = client.post("/staff-admin/create", data={"_ft": form_token(client), 
         "code": "2188240601234567", "name": "新人乙", "username": "",
         "password": "", "csrf_token": _csrf(client)}, follow_redirects=False)
     assert r2.status_code == 303
@@ -183,5 +184,5 @@ def test_no_delete_endpoint(client):
     assert "/delete" not in page
     # 也没有删除路由
     r = client.post(f"/staff-admin/{uid}/delete",
-                    data={"csrf_token": _csrf(client)}, follow_redirects=False)
+                    data={"_ft": form_token(client), "csrf_token": _csrf(client)}, follow_redirects=False)
     assert r.status_code == 404 or r.status_code == 405 or r.status_code == 400

@@ -15,7 +15,9 @@ from app.models import (AppealRecord, FormalRecord, ImportFile, Person,
 from app.routers.auth_r import csrf_ok, require_login
 from app.services import flow
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 _REASON_CN = {"master_late": "同主档已有更早有效（本店非首次）",

@@ -22,6 +22,7 @@
   <form method="post" action="/staff-admin/create" id="ns-form"
         style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('员工编号') }}
       <input name="code" id="ns-code" required maxlength="32" style="width:210px;padding:.25rem .4rem"></label>
     <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('姓名') }}
@@ -74,6 +75,7 @@
         onsubmit="return confirm('{{ t('将重置全部员工口令为系统默认并要求各自首登修改，确认？') }}')"
         style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <b style="font-size:.9rem">{{ t('批量重置：') }}</b>
     <span class="hint">{{ t('正式发号前一次性使用——全部员工口令重置为系统默认，每人首次登录必须改成自己的密码。') }}</span>
     <button class="btn" style="padding:.2rem .7rem" type="submit">{{ t('重置全部员工口令并要求首登修改') }}</button>
@@ -91,6 +93,7 @@
       <form method="post" action="/staff-admin/{{ u.id }}/lang"
             style="display:inline-flex;gap:.3rem;align-items:center">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <select name="lang" style="padding:.2rem .4rem">
           {% for lv, ln in langs.items() %}
           <option value="{{ lv }}" {% if lv == u.lang %}selected{% endif %}>{{ ln }}</option>
@@ -103,6 +106,7 @@
       <form method="post" action="/staff-admin/{{ u.id }}/status"
             style="display:inline-flex;gap:.4rem;align-items:center">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <select name="new_status" style="padding:.2rem .4rem">
           {% for s, label in labels.items() %}
           <option value="{{ s }}" {% if s == u.status %}selected{% endif %}>{{ t(label) }}</option>
@@ -113,6 +117,7 @@
       <form method="post" action="/staff-admin/{{ u.id }}/reset"
             style="display:inline-flex;gap:.3rem;margin-left:.4rem">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <input name="password" placeholder="{{ t('新口令（不填用系统默认）') }}"
                style="width:150px;padding:.2rem .4rem">
         <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('重置口令') }}</button>
@@ -134,6 +139,7 @@
           {% if tk.row.revoked_at is none %}
           <form method="post" action="/staff-admin/{{ u.id }}/tokens/{{ tk.row.id }}/revoke" style="display:inline">
             <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <input type="hidden" name="_ft" value="{{ form_token() }}">
             <button class="btn danger" style="padding:.1rem .5rem" type="submit"
                     onclick="return confirm('{{ t('确认吊销该 Token？吊销后立即失效，不可恢复。') }}')">{{ t('吊销') }}</button>
           </form>
@@ -145,6 +151,7 @@
         <form method="post" action="/staff-admin/{{ u.id }}/tokens/issue"
               style="display:flex;gap:.3rem;align-items:center;flex-wrap:wrap;margin-top:.4rem">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
           <input name="name" placeholder="{{ t('Token 名称') }}" maxlength="128"
                  style="width:120px;padding:.2rem .4rem">
           <select name="scope" style="padding:.2rem .3rem">

@@ -40,6 +40,7 @@
   </span>
   <form method="post" action="/logout" class="logout-form">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <button class="logout" type="submit">{{ t('退出') }}</button>
   </form>
   </nav>
@@ -68,6 +69,38 @@
   </a>
 </nav>
 {% endif %}
+<script>
+/* 防重复提交（客户端层）：提交按钮点过一次就禁用，4 秒或校验失败后恢复。
+   服务端一次性令牌（app/forms.py）才是兜底，这里只是体验层。 */
+(function () {
+  var canUse = function (el) { return el && el.closest; };
+  var btnOf = function (form) {
+    return form && form.querySelector('button[type=submit], button:not([type])');
+  };
+  document.addEventListener('click', function (e) {
+    if (!canUse(e.target)) return;
+    var b = e.target.closest('form button[type=submit], form button:not([type])');
+    if (!b || b.disabled) return;
+    setTimeout(function () {                 // 让浏览器先发起提交
+      var f = b.form;
+      if (f && f.dataset.submitted === '1') return;
+      b.disabled = true;
+      if (f) f.dataset.submitted = '1';
+      setTimeout(function () {               // 兜底恢复（校验失败/原地返回时）
+        b.disabled = false;
+        if (f) delete f.dataset.submitted;
+      }, 4000);
+    }, 0);
+  }, true);
+  document.addEventListener('invalid', function (e) {   // 原生校验失败 → 立即恢复
+    var f = e.target && e.target.form;
+    if (!f) return;
+    delete f.dataset.submitted;
+    var b = btnOf(f);
+    if (b) b.disabled = false;
+  }, true);
+})();
+</script>
 <script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>
 </body>
 </html>

@@ -65,3 +65,22 @@ def wide_xlsx_bytes(tmp_path, submitters, name="wide"):
     write_workbook(p, [("STORE_TASK_EXCEL_SHEET", [WIDE_H1, WIDE_H2], rows)])
     with open(p, "rb") as f:
         return f.read()
+
+
+def form_token(client, *paths):
+    """取一个**一次性提交令牌**（防重复提交机制）：从任意带表单的已登录页面抽取。
+
+    默认用 /my/password —— 任何已登录角色都能访问且页面上有表单。
+    """
+    import re as _re
+    cands = list(paths) + ["/my/password", "/my/report", "/staff-admin",
+                           "/files", "/config", "/stores"]
+    for p in cands:
+        try:
+            r = client.get(p, follow_redirects=True)
+        except Exception:
+            continue
+        m = _re.search(r'name="_ft" value="([^"]+)"', r.text or "")
+        if m:
+            return m.group(1)
+    raise AssertionError("取不到表单令牌：先登录，并确认目标页面有表单")

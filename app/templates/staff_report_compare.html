@@ -53,6 +53,7 @@
   <div class="msg err">{{ t('AI 评语生成失败（下面的对比数字不受影响）：') }}{{ analysis.ai_error }}</div>
   <form method="post" action="/staff-reports/analysis/{{ analysis.id }}/retry" style="margin-top:.4rem">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
     <button class="btn" type="submit">{{ t('重新生成') }}</button>
   </form>
@@ -70,6 +71,7 @@
   {% endif %}
   <form method="post" action="/staff-reports/compare/analyze" style="margin-top:.6rem">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
     <input type="hidden" name="person_code" value="{{ person_code }}">
     <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
@@ -81,6 +83,7 @@
   <b>{{ t('AI 分析报告') }}</b>
   <form method="post" action="/staff-reports/compare/analyze">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
     <input type="hidden" name="person_code" value="{{ person_code }}">
     <button class="btn" type="submit" data-testid="gen-report">{{ t('生成 AI 分析报告') }}</button>

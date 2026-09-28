@@ -773,3 +773,17 @@ class StaffReportCompareDay(Base):
     d2 = Column(Integer, nullable=True)
     dt = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class FormToken(Base):
+    """**一次性提交令牌**（防重复提交）。
+
+    渲染表单时发放（`{{ form_token() }}`），提交时校验并**立即作废**：
+    双击、返回再提交、网络重试、脚本重放都会在第二次被拒。
+    `user_id` 为空 = 未登录时发放（登录页豁免，用不到）。
+    """
+    __tablename__ = "form_tokens"
+    token = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=_now, index=True)
+    used_at = Column(DateTime, nullable=True)

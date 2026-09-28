@@ -18,6 +18,7 @@ def _env():
         q["lang"] = lang
         return "?" + "&".join(f"{k}={v}" for k, v in q.items())
     env.globals["lang_url"] = _lang_url
+    env.globals["form_token"] = lambda: "ft-test"   # 一次性提交令牌存根
     return env
 
 

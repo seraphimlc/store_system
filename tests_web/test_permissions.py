@@ -3,6 +3,7 @@
 from datetime import date
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.models import (FormalRecord, ImportFile, Person, PersonDailyStat,
                         RawRecord, User)
 from app.auth import hash_password
@@ -164,7 +165,7 @@ def test_staff_visible_from_config_roundtrip(client):
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
     csrf = _csrf_of(client, "/config")
-    r = client.post("/config/save", data={
+    r = client.post("/config/save", data={"_ft": form_token(client), 
         "csrf_token": csrf, "per_point": 250, "bonus_group": 68,
         "bonus_amount": 3000, "staff_visible_from": "2026-09"},
         follow_redirects=False)
@@ -176,7 +177,7 @@ def test_staff_visible_from_config_roundtrip(client):
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
     csrf = _csrf_of(client, "/config")
-    r = client.post("/config/save", data={
+    r = client.post("/config/save", data={"_ft": form_token(client), 
         "csrf_token": csrf, "per_point": 250, "bonus_group": 68,
         "bonus_amount": 3000, "staff_visible_from": "bad"},
         follow_redirects=False)

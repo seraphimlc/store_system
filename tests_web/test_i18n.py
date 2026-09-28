@@ -3,6 +3,7 @@
 import re
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.auth import hash_password
 from app.i18n import resolve_lang, translate
 from app.models import User
@@ -86,7 +87,7 @@ def test_admin_set_staff_lang(client):
     db.close()
     m = re.search(r'name="csrf_token" value="([^"]+)"', page)
     r = client.post(f"/staff-admin/{uid}/lang",
-                    data={"lang": "ja", "csrf_token": m.group(1)},
+                    data={"_ft": form_token(client), "lang": "ja", "csrf_token": m.group(1)},
                     follow_redirects=False)
     assert r.status_code == 303
     db = appdb.SessionLocal()

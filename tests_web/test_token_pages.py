@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from urllib.parse import parse_qs, unquote, urlparse
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.auth import hash_password
 from app.models import ApiToken, McpAuditLog, User
 
@@ -90,7 +91,7 @@ def test_employee_self_service_token_page_removed(client):
     client.get("/logout")
     _login(client, "admin")
     assert client.get("/my/token", follow_redirects=False).status_code == 404
-    assert client.post("/my/token/issue", data={"name": "x", "scope": "read"},
+    assert client.post("/my/token/issue", data={"_ft": form_token(client), "name": "x", "scope": "read"},
                        follow_redirects=False).status_code in (404, 405)
 
 
@@ -104,11 +105,11 @@ def test_write_requires_csrf(client):
     _login(client, "admin")
     uid = _uid("emp1")
     r = client.post(f"/staff-admin/{uid}/tokens/issue",
-                    data={"name": "x", "scope": "read", "days": "90",
+                    data={"_ft": form_token(client), "name": "x", "scope": "read", "days": "90",
                           "csrf_token": "bad"}, follow_redirects=False)
     assert r.status_code == 400
     r = client.post(f"/staff-admin/{uid}/tokens/999/revoke",
-                    data={"csrf_token": "bad"}, follow_redirects=False)
+                    data={"_ft": form_token(client), "csrf_token": "bad"}, follow_redirects=False)
     assert r.status_code == 400
 
 
@@ -120,7 +121,7 @@ def test_admin_issue_revoke_for_staff(client):
     uid = _uid("emp1")
     csrf = _csrf_of(client, "/staff-admin")
     r = client.post(f"/staff-admin/{uid}/tokens/issue",
-                    data={"name": "代发 token", "scope": "read,write",
+                    data={"_ft": form_token(client), "name": "代发 token", "scope": "read,write",
                           "days": "permanent", "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303
@@ -145,7 +146,7 @@ def test_admin_issue_revoke_for_staff(client):
     # 管理员吊销
     csrf = _csrf_of(client, "/staff-admin")
     r = client.post(f"/staff-admin/{uid}/tokens/{rows[0].id}/revoke",
-                    data={"csrf_token": csrf}, follow_redirects=False)
+                    data={"_ft": form_token(client), "csrf_token": csrf}, follow_redirects=False)
     assert r.status_code == 303
     rows = _token_rows("emp1")
     assert rows[0].revoked_at is not None
@@ -161,12 +162,12 @@ def test_staff_status_change_token_invalidation_hint(client):
     uid = _uid("emp1")
     csrf = _csrf_of(client, "/staff-admin")
     client.post(f"/staff-admin/{uid}/tokens/issue",
-                data={"name": "t1", "scope": "read", "days": "90",
+                data={"_ft": form_token(client), "name": "t1", "scope": "read", "days": "90",
                       "csrf_token": csrf}, follow_redirects=False)
     # 改状态为请假 → 提示 token 失效
     csrf = _csrf_of(client, "/staff-admin")
     r = client.post(f"/staff-admin/{uid}/status",
-                    data={"new_status": "leave", "csrf_token": csrf},
+                    data={"_ft": form_token(client), "new_status": "leave", "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303
     assert "token 已随之失效" in unquote(r.headers["location"])
@@ -176,7 +177,7 @@ def test_staff_status_change_token_invalidation_hint(client):
     # 改回在岗 → 提示恢复
     csrf = _csrf_of(client, "/staff-admin")
     r = client.post(f"/staff-admin/{uid}/status",
-                    data={"new_status": "active", "csrf_token": csrf},
+                    data={"_ft": form_token(client), "new_status": "active", "csrf_token": csrf},
                     follow_redirects=False)
     assert "token 已恢复有效" in unquote(r.headers["location"])
     page = client.get("/staff-admin").text

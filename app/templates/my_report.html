@@ -27,6 +27,7 @@
   <form method="post" action="{{ '/my/report/update' if existing else '/my/report' }}"
         x-show="edit" x-cloak>
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <table class="kv">
       <tr><th><label for="area">{{ t('担当区域') }}</label></th>
           <td><input type="text" name="area" id="area" maxlength="64" autocomplete="off"
