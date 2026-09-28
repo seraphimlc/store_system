@@ -67,6 +67,29 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   注意：模板循环变量**不可用 `t`**（会覆盖全局 t()，如 recon 用 `task`、dashboard 用 `tp`）；`{# 注释 #}` 与 JS 内中文不会被脚本包裹。
   批量包裹工具：`scripts/i18n_wrap.py`（自动包文本节点+placeholder/title，跳过 script/style；用后需人工查破损：`{#` 注释、字符串字面量内嵌套）。
 
+## 员工每日填报 + 对比 + AI 报告（2026-09 交付 · 独立支线）
+- **员工每天报一次**：担当区域 + **1点店铺数 + 2点店铺数**（`/my/report`）。**一天一条**，重复提交被拒；
+  **不拍照、不定位、不涉及店名**；填报数据**不参与工资计算**，只用于与文件结果对比。
+- **管理端**（`/staff-reports`）：填报列表（区间/人筛选、分页）→ **对比页**
+  （逐人合计 + **准确率排名** + 逐日明细 + 三类计数）→ **一键生成 AI 分析报告** → Excel 双导出。
+- **口径（写死在测试里）**：`Δ = 系统 − 自报`（**正=少报、负=多报**）；
+  **准确率 = 1 − Σ|Δ| ÷ Σ系统**（用绝对值之和，**多报少报不抵消**）；
+  **漏填报不计入准确率**，单独算「应填未填」= **系统当天有数据但员工没报**的天数；
+  两侧都没数据的身份不进报告。
+- **报告双视角**：管理端看全员 + 「建议核实清单」；**员工端 `/my/report/feedback` 只看自己**
+  （`report_ai.person_block()` 服务端裁剪，**不含他人数据、不含追问清单**）。
+- **报告双语**：管理端中文、员工端日文（`VISIT_REPORT_LANGS=zh,ja`）；prompt 里的**标签按语言本地化**
+  （日文用 システム／自己申告／正確率／要申告未申告），否则日文报告会混中文词。
+- **数字一律由程序算，模型只写评语**（prompt 明确"只使用给出的数字"）；
+  同区间 + 同数据指纹（**含 `PROMPT_VERSION`**）→ 复用已有报告，不重复烧 token；
+  单一语言失败不影响另一种，全部失败 → `failed` 但**对比数字照常可用**；`VISIT_REPORT_AI=0` 一键关闭。
+- **手工建号（编号即身份键）**：`/staff-admin` 新增「新建员工」——**编号必填**（NFKC 归一）、
+  重复只提示不覆盖；导入时**按编号判定**（有→用系统里的，无→创建），命中手工建号的人时补写
+  `first_seen_import_id`。**不做身份合并**：不同编号 = 不同的人（用户明确）。
+- 表：`staff_daily_reports`（`(person_code, report_date)` 唯一）/ `staff_report_analyses`（`summary` 数字 + `payload` 评语）；
+  迁移 `b8c9d0e1f2a3`；**现有表一行未改**。
+- 测试：`tests_web/test_daily_report.py`（35 项，AI 全程 mock 不连外网）。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
