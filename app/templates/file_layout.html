@@ -27,6 +27,7 @@
 
   <form method="post" action="/files/{{ imp.id }}/reparse">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <table style="width:auto">
       <tr>
         <th style="text-align:left">{{ t('表头行号（1') }}={{ t('第一行）') }}</th>

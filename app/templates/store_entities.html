@@ -23,6 +23,7 @@
       {% else %}→ <a href="/stores/entities?q={{ m.store_id_raw }}">{{ m.name_local or m.name_norm or '({{ t('无名)') }}' }}</a> <span class="hint">#{{ e.master_id }}</span>
       <form method="post" action="/stores/entities/{{ e.id }}/split" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <button class="btn ghost" style="padding:.2rem .5rem" type="submit">{{ t('拆回') }}</button>
       </form>{% endif %}
     </td>

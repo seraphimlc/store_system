@@ -7,6 +7,7 @@
 from urllib.parse import unquote
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.models import AppealRecord, FormalRecord, RawRecord, User
 from app.services import flow
 from tests_web.test_flow import (_csrf_of, _seed_admin, _up, db_fresh)
@@ -23,7 +24,7 @@ def test_finalize_nonexistent_file_rejected(client, tmp_path):
     _seed_admin(client)
     _login_admin(client)
     csrf = _csrf_of(client, "/files")
-    r = client.post("/files/999999/finalize", data={"csrf_token": csrf},
+    r = client.post("/files/999999/finalize", data={"_ft": form_token(client), "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 400                 # 非 303（不再假成功）
     assert r.status_code not in (301, 302, 303)
@@ -46,7 +47,7 @@ def test_finalize_existing_file_still_works(client, tmp_path):
     flow.process_import(db_fresh(), imp.id)
     _login_admin(client)
     csrf = _csrf_of(client, "/files")
-    r = client.post(f"/files/{imp.id}/finalize", data={"csrf_token": csrf},
+    r = client.post(f"/files/{imp.id}/finalize", data={"_ft": form_token(client), "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303
     db = appdb.SessionLocal()
@@ -63,7 +64,7 @@ def test_resolve_appeal_missing_still_404(client, tmp_path):
     _login_admin(client)
     csrf = _csrf_of(client, "/files")
     r = client.post("/files/1/appeals/888888/resolve",
-                    data={"csrf_token": csrf, "decision": "accept"},
+                    data={"_ft": form_token(client), "csrf_token": csrf, "decision": "accept"},
                     follow_redirects=False)
     assert r.status_code == 404
 
@@ -88,7 +89,7 @@ def test_month_rebuild_invalid_month_format(client, tmp_path):
                 "0000-01", "0000-12", "9999-12", "2026-08\n", "٢٠٢٦-08",
                 "\uff12\uff10\uff12\uff16-08"):
         r = client.post("/month/rebuild",
-                        data={"month": bad, "csrf_token": csrf},
+                        data={"_ft": form_token(client), "month": bad, "csrf_token": csrf},
                         follow_redirects=False)
         assert r.status_code == 303, f"{bad!r} → {r.status_code}"
         loc = unquote(r.headers.get("location", ""))
@@ -129,7 +130,7 @@ def test_month_rebuild_fullwidth_month_does_not_wipe_formal(client, tmp_path):
     _login_admin(client)
     csrf = _csrf_of(client, "/dashboard")
     r = client.post("/month/rebuild",
-                    data={"month": "\uff12\uff10\uff12\uff16-08",
+                    data={"_ft": form_token(client), "month": "\uff12\uff10\uff12\uff16-08",
                           "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303
@@ -143,7 +144,7 @@ def test_month_rebuild_fullwidth_month_does_not_wipe_formal(client, tmp_path):
     db.close()
     # 合法月仍照常重算（数据口径不变）
     r = client.post("/month/rebuild",
-                    data={"month": "2026-08", "csrf_token": csrf},
+                    data={"_ft": form_token(client), "month": "2026-08", "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303 and "err=" not in unquote(
         r.headers.get("location", ""))
@@ -218,7 +219,7 @@ def test_month_rebuild_valid_month_still_works(client, tmp_path):
     _login_admin(client)
     csrf = _csrf_of(client, "/dashboard")
     r = client.post("/month/rebuild",
-                    data={"month": "2026-08", "csrf_token": csrf},
+                    data={"_ft": form_token(client), "month": "2026-08", "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303
     loc = unquote(r.headers.get("location", ""))
@@ -248,7 +249,7 @@ def test_month_rebuild_pending_appeal_err_branch_still_works(client, tmp_path):
     _login_admin(client)
     csrf = _csrf_of(client, "/dashboard")
     r = client.post("/month/rebuild",
-                    data={"month": "2026-08", "csrf_token": csrf},
+                    data={"_ft": form_token(client), "month": "2026-08", "csrf_token": csrf},
                     follow_redirects=False)
     assert r.status_code == 303
     loc = unquote(r.headers.get("location", ""))

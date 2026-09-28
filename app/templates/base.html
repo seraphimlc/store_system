@@ -8,17 +8,14 @@
 <script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
 <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+<body class="{% if current_user and current_user.role == 'staff' %}has-tabbar{% endif %}">
 {% if current_user %}
 <header class="topbar" x-data="{menu:false}">
   <span class="brand">{{ t('巡店结算系统') }}</span>
   <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
           :aria-expanded="menu ? 'true' : 'false'">☰</button>
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
-  {% if current_user.role == 'staff' %}
-  <a class="nav" href="/my/perf"><b>{{ t('我的绩效') }}</b></a>
-  <a class="nav" href="/my/token"><b>{{ t('我的 Token') }}</b></a>
-  {% else %}
+  {% if current_user.role != 'staff' %}
   <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
   <a class="nav" href="/files"><b>{{ t('文件上传') }}</b></a>
   <a class="nav" href="/perf"><b>{{ t('绩效工资') }}</b></a>
@@ -28,7 +25,7 @@
   <span class="nav disabled">｜</span>
   <a class="nav" href="/stores">{{ t('店铺主档') }}</a>
   <a class="nav" href="/staff-admin">{{ t('员工管理') }}</a>
-  <a class="nav" href="/mcp-audit">{{ t('MCP 审计') }}</a>
+  <a class="nav" href="/staff-reports">{{ t('填报与对比') }}</a>
   <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
   {% endif %}
   <span class="spacer"></span>
@@ -42,6 +39,7 @@
   </span>
   <form method="post" action="/logout" class="logout-form">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <button class="logout" type="submit">{{ t('退出') }}</button>
   </form>
   </nav>
@@ -49,6 +47,59 @@
 {% endif %}
 <main class="wrap">{% block content %}{% endblock %}</main>
 {# agent 友好：结构化页面状态注入，浏览器自动化直接读取（替代截图 OCR） #}
+{% if current_user and current_user.role == 'staff' %}
+{# 员工端底部主导航：两项常驻，不再藏在汉堡菜单里（窄屏尤其重要） #}
+{% set _p = (request.url.path if request.url is defined else "") %}
+<nav class="tabbar" aria-label="{{ t('主导航') }}">
+  <a class="tab {% if _p.startswith('/my/perf') %}on{% endif %}" href="/my/perf"
+     data-testid="tab-perf">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><path d="M6 20v-7"/><path d="M12 20V6"/><path d="M18 20v-11"/></svg>
+    <span>{{ t('我的绩效') }}</span>
+  </a>
+  <a class="tab {% if _p.startswith('/my/report') and not _p.startswith('/my/report/feedback') %}on{% endif %}"
+     href="/my/report" data-testid="tab-report">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    <span>{{ t('每日填报') }}</span>
+  </a>
+  <a class="tab {% if _p.startswith('/my/report/feedback') %}on{% endif %}"
+     href="/my/report/feedback" data-testid="tab-feedback">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+    <span>{{ t('核对结果') }}</span>
+  </a>
+</nav>
+{% endif %}
+<script>
+/* 防重复提交（客户端层）：提交按钮点过一次就禁用，4 秒或校验失败后恢复。
+   服务端一次性令牌（app/forms.py）才是兜底，这里只是体验层。 */
+(function () {
+  var canUse = function (el) { return el && el.closest; };
+  var btnOf = function (form) {
+    return form && form.querySelector('button[type=submit], button:not([type])');
+  };
+  document.addEventListener('click', function (e) {
+    if (!canUse(e.target)) return;
+    var b = e.target.closest('form button[type=submit], form button:not([type])');
+    if (!b || b.disabled) return;
+    setTimeout(function () {                 // 让浏览器先发起提交
+      var f = b.form;
+      if (f && f.dataset.submitted === '1') return;
+      b.disabled = true;
+      if (f) f.dataset.submitted = '1';
+      setTimeout(function () {               // 兜底恢复（校验失败/原地返回时）
+        b.disabled = false;
+        if (f) delete f.dataset.submitted;
+      }, 4000);
+    }, 0);
+  }, true);
+  document.addEventListener('invalid', function (e) {   // 原生校验失败 → 立即恢复
+    var f = e.target && e.target.form;
+    if (!f) return;
+    delete f.dataset.submitted;
+    var b = btnOf(f);
+    if (b) b.disabled = false;
+  }, true);
+})();
+</script>
 <script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>
 </body>
 </html>

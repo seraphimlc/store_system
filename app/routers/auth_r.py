@@ -13,7 +13,9 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import ImportFile, User
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 

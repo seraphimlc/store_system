@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ t('填报与对比') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('自报 vs 系统（对比）') }}</h1></div>
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+{% if coverage_warn %}<div class="msg warn">{{ t(coverage_warn) }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/staff-reports/compare" class="form-grid">
+    <label class="fld">{{ t('起') }}<input type="date" name="start" value="{{ start }}"></label>
+    <label class="fld">{{ t('止') }}<input type="date" name="end" value="{{ end }}"></label>
+    <label class="fld">{{ t('员工') }}
+      <select name="person_code">
+        <option value="">{{ t('全部') }}</option>
+        {% for s in staff_opts %}
+        <option value="{{ s.code }}" {% if s.code == person_code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
+        {% endfor %}
+      </select></label>
+    <label class="fld">{{ t('排序') }}
+      <select name="sort">
+        <option value="acc" {% if sort == 'acc' %}selected{% endif %}>{{ t('最不准在前') }}</option>
+        <option value="abs" {% if sort == 'abs' %}selected{% endif %}>{{ t('偏差最大在前') }}</option>
+      </select></label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit">{{ t('查询') }}</button>
+      <a class="btn ghost" href="/staff-reports?start={{ start }}&end={{ end }}">{{ t('看填报列表') }}</a>
+      <a class="btn ghost" href="/staff-reports/export?kind=compare&start={{ start }}&end={{ end }}&person_code={{ person_code }}">{{ t('导出对比结果') }}</a>
+    </div>
+  </form>
+</div>
+
+<div class="stat-grid" style="margin-bottom:.8rem">
+  <div class="stat-card hl"><p class="k">{{ t('自报条数') }}</p><p class="v">{{ res.summary.checkin_cnt }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('系统条数') }}</p><p class="v">{{ res.summary.formal_cnt }}</p></div>
+  <div class="stat-card okk"><p class="k">{{ t('两侧都有（可对照）') }}</p><p class="v">{{ res.summary.matched_cnt }}</p></div>
+  <div class="stat-card okk"><p class="k">{{ t('完全一致') }}</p><p class="v">{{ res.summary.consistent_cnt }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('一致率') }}</p>
+    <p class="v">{% if res.summary.consistent_rate is none %}—{% else %}{{ (res.summary.consistent_rate * 100) | round(1) }}%{% endif %}</p></div>
+  <div class="stat-card warnk"><p class="k">{{ t('系统有 / 未报') }}</p><p class="v">{{ res.counts.missing_report }}</p></div>
+  <div class="stat-card errk"><p class="k">{{ t('自报有 / 系统无') }}</p><p class="v">{{ res.counts.missing_system }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('涉及员工') }}</p><p class="v">{{ res.summary.persons }}</p></div>
+</div>
+
+{% if analysis %}
+<div class="card" data-testid="report-card" style="margin-bottom:1rem">
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .4rem">{{ t('AI 分析报告') }}
+    <span class="hint">{{ analysis.period_start }} ～ {{ analysis.period_end }} ·
+      {{ t('状态') }} {{ analysis.status }}</span></h2>
+  {% if analysis.status in ('pending', 'running') %}
+  <div class="msg warn">{{ t('报告生成中（可稍后刷新本页）') }}</div>
+  {% elif analysis.status == 'failed' %}
+  <div class="msg err">{{ t('AI 评语生成失败（下面的对比数字不受影响）：') }}{{ analysis.ai_error }}</div>
+  <form method="post" action="/staff-reports/analysis/{{ analysis.id }}/retry" style="margin-top:.4rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+    <button class="btn" type="submit">{{ t('重新生成') }}</button>
+  </form>
+  {% elif report %}
+  <p style="margin:.2rem 0 .5rem">{{ report.overall_comment }}</p>
+  {% if report.accuracy_notes %}<div class="hint" style="margin-bottom:.6rem">{{ report.accuracy_notes }}</div>{% endif %}
+  {% set qs = [] %}
+  {% for code, blk in report.per_person.items() %}{% for q in blk.questions %}{% set _ = qs.append({'name': blk.name, 'code': code, 'q': q}) %}{% endfor %}{% endfor %}
+  {% if qs %}
+  <details open><summary><b>{{ t('建议核实清单') }}</b>（{{ qs|length }}）</summary>
+    <ul style="margin:.4rem 0 0;padding-left:1.2rem;line-height:1.9">
+      {% for x in qs %}<li><b>{{ x.name }}</b>（{{ x.code }}）：{{ x.q }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  <form method="post" action="/staff-reports/compare/analyze" style="margin-top:.6rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+    <input type="hidden" name="person_code" value="{{ person_code }}">
+    <button class="btn ghost" type="submit">{{ t('重新生成报告') }}</button>
+  </form>
+  {% endif %}
+</div>
+{% elif ai_enabled %}
+<div class="card" style="margin-bottom:1rem">
+  <b>{{ t('AI 分析报告') }}</b>
+  <form method="post" action="/staff-reports/compare/analyze">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}">
+    <input type="hidden" name="person_code" value="{{ person_code }}">
+    <button class="btn" type="submit" data-testid="gen-report">{{ t('生成 AI 分析报告') }}</button>
+  </form>
+</div>
+{% else %}
+<div class="msg warn">{{ t('AI 报告已关闭（VISIT_REPORT_AI=0）：对比数字照常可用。') }}</div>
+{% endif %}
+
+<div class="tbl-wrap" style="margin-bottom:1rem"><table class="grid-tbl" data-testid="compare-persons">
+  <tr><th>{{ t('员工') }}</th><th>{{ t('系统合计') }}</th><th>{{ t('自报合计') }}</th>
+      <th>Δ{{ t('合计') }}</th><th>Δ{{ t('1点店铺数') }}</th><th>Δ{{ t('2点店铺数') }}</th>
+      <th>{{ t('准确率') }}</th><th>{{ t('已报天数') }}</th><th>{{ t('应填未填') }}</th><th>{{ t('AI 评语') }}</th></tr>
+  {% for p in res.persons %}
+  <tr>
+    <td>{{ p.name }}<div class="hint">{{ p.person_code }}</div></td>
+    <td class="num">{{ p.sys_total }}<div class="hint">{{ p.sys_p1 }} / {{ p.sys_p2 }}</div></td>
+    <td class="num">{{ p.rep_total }}<div class="hint">{{ p.rep_p1 }} / {{ p.rep_p2 }}</div></td>
+    <td class="num" style="color:{% if p.d_total > 0 %}var(--warn){% elif p.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % p.d_total }}</td>
+    <td class="num">{{ '%+d' % p.d1 }}</td>
+    <td class="num">{{ '%+d' % p.d2 }}</td>
+    <td class="num">{% if p.acc is none %}—{% else %}<b style="color:{% if p.acc >= 0.95 %}var(--ok){% elif p.acc >= 0.8 %}var(--warn){% else %}var(--err){% endif %}">{{ (p.acc * 100) | round(1) }}%</b>{% endif %}</td>
+    <td class="num">{{ p.days_filled }} / {{ p.days_system }}</td>
+    <td class="num">{% if p.gaps %}<span class="pill err">{{ p.gaps }}</span>{% else %}0{% endif %}</td>
+    <td style="white-space:normal;max-width:340px">{% set blk = (report.per_person or {}).get(p.person_code) %}{% if blk %}{{ blk.comment }}{% if blk.off_days %}<div class="hint">{% for o in blk.off_days %}· {{ o.date }} {{ o.note }}　{% endfor %}</div>{% endif %}{% else %}<span class="hint">—</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="10" class="empty">{{ t('该区间没有可对比的数据（先上传并判定文件）') }}</td></tr>{% endfor %}
+</table></div>
+
+<div class="page-title"><h1 style="font-size:1.05rem;margin:0">{{ t('逐日明细') }}</h1>
+  <div class="actions">
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=">{{ t('全部') }}</a>
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=both">{{ t('仅两侧都有') }}</a>
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=missing_report">{{ t('仅未报') }}</a>
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=missing_system">{{ t('仅系统无') }}</a>
+  </div>
+</div>
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="compare-daily">
+  <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('类型') }}</th>
+      <th>{{ t('系统') }}（1/2）</th><th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+  {% for r in daily %}
+  <tr>
+    <td>{{ r.date }}</td>
+    <td>{{ r.name }}</td>
+    <td>{% if r.kind == 'both' %}<span class="pill ok">{{ t('两侧都有') }}</span>
+        {% elif r.kind == 'missing_report' %}<span class="pill warn">{{ t('系统有 / 未报') }}</span>
+        {% else %}<span class="pill err">{{ t('自报有 / 系统无') }}</span>{% endif %}</td>
+    <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
+    <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
+    <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="empty">{{ t('没有符合条件的明细') }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

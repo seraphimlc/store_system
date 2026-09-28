@@ -29,6 +29,7 @@
   <div style="font-weight:600;margin-bottom:.4rem">{{ t('修改配置（保存后全局生效；需对相关月份点「月度重算」+「薪资找平-生成/更新」）') }}</div>
   <form method="post" action="/config/save">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <table style="width:auto">
       <tr><th style="text-align:left">{{ t('每点金额(円)') }}</th>
         <td><input type="number" name="per_point" value="{{ per_point }}" style="width:6rem"></td></tr>

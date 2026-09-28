@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ t('填报与对比') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('员工每日填报') }}</h1></div>
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/staff-reports" class="form-grid">
+    <label class="fld">{{ t('起') }}<input type="date" name="start" value="{{ start }}"></label>
+    <label class="fld">{{ t('止') }}<input type="date" name="end" value="{{ end }}"></label>
+    <label class="fld">{{ t('员工') }}
+      <select name="person_code">
+        <option value="">{{ t('全部') }}</option>
+        {% for s in staff_opts %}
+        <option value="{{ s.code }}" {% if s.code == person_code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
+        {% endfor %}
+      </select></label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit">{{ t('查询') }}</button>
+      <a class="btn ghost" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}">{{ t('去对比') }}</a>
+      <a class="btn ghost" href="/staff-reports/export?kind=reports&start={{ start }}&end={{ end }}&person_code={{ person_code }}">{{ t('导出自报明细') }}</a>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:.8rem">
+  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('补录 / 修改自报') }}</h2>
+  {% if cov_end %}<div class="hint" style="margin-bottom:.3rem">{{ t('已对账至') }} {{ cov_end }}（{{ t('该日及之前不可改') }}）</div>{% endif %}
+  <form method="post" action="/staff-reports/report/save">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="start" value="{{ start }}">
+    <input type="hidden" name="end" value="{{ end }}">
+    <table class="kv">
+      <tr><th><label for="ed_person">{{ t('员工') }}</label></th>
+          <td><select name="person_code" id="ed_person">
+            <option value="">{{ t('请选择员工') }}</option>
+            {% for s in staff_opts %}
+            <option value="{{ s.code }}" {% if edit_row and edit_row.person_code == s.code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
+            {% endfor %}
+          </select></td></tr>
+      <tr><th><label for="ed_date">{{ t('日期') }}</label></th>
+          <td><input type="date" name="report_date" id="ed_date"
+                     value="{{ edit_row.date if edit_row else '' }}"></td></tr>
+      <tr><th><label for="ed_area">{{ t('担当区域') }}</label></th>
+          <td><input type="text" name="area" id="ed_area" maxlength="64"
+                     value="{{ edit_row.area if edit_row else '' }}"></td></tr>
+      <tr><th><label for="ed_p1">{{ t('1点店铺数') }}</label></th>
+          <td><input type="text" name="p1_cnt" id="ed_p1" inputmode="numeric"
+                     pattern="[0-9]*" value="{{ edit_row.p1 if edit_row else 0 }}"></td></tr>
+      <tr><th><label for="ed_p2">{{ t('2点店铺数') }}</label></th>
+          <td><input type="text" name="p2_cnt" id="ed_p2" inputmode="numeric"
+                     pattern="[0-9]*" value="{{ edit_row.p2 if edit_row else 0 }}"></td></tr>
+    </table>
+    <div class="form-actions" style="margin-top:.7rem">
+      <button class="btn" type="submit" data-testid="admin-save-report">{{ t('保存') }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="stat-grid" style="margin-bottom:.8rem">
+  <div class="stat-card"><p class="k">{{ t('自报条数') }}</p><p class="v">{{ data.total }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('区间') }}</p><p class="v" style="font-size:1rem">{{ start }} ～ {{ end }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('页') }}</p><p class="v">{{ data.page }} / {{ data.pages }}</p></div>
+</div>
+
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">
+  <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('担当区域') }}</th>
+      <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th><th>{{ t('提交时间') }}</th><th>{{ t('操作') }}</th></tr>
+  {% for r in data.rows %}
+  <tr>
+    <td>{{ r.date }}</td>
+    <td>{{ names.get(r.person_code, '') }}</td>
+    <td class="hint">{{ r.person_code }}</td>
+    <td>{{ r.area or '—' }}</td>
+    <td class="num">{{ r.p1 }}</td><td class="num">{{ r.p2 }}</td><td class="num">{{ r.total }}</td>
+    <td class="hint">{{ (r.submitted_at + jst_delta).strftime('%Y-%m-%d %H:%M') if r.submitted_at else '—' }}</td>
+    <td>{% if r.date in locked_dates %}<span class="pill">{{ t('已对账') }}</span>
+        {% else %}<a class="btn ghost" style="padding:.1rem .5rem"
+           href="/staff-reports?start={{ start }}&end={{ end }}&person_code={{ r.person_code }}&edit_date={{ r.date }}">{{ t('改') }}</a>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="9" class="empty">{{ t('该区间没有填报记录') }}</td></tr>{% endfor %}
+</table></div>
+{% if data.pages > 1 %}
+<div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
+  {% for p in range(1, data.pages + 1) %}
+  <a class="btn ghost" style="padding:.15rem .6rem{% if p == data.page %};border-color:var(--brand);color:var(--brand){% endif %}"
+     href="/staff-reports?start={{ start }}&end={{ end }}&person_code={{ person_code }}&page={{ p }}">{{ p }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

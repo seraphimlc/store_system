@@ -3,7 +3,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.templating import get_templates
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,9 @@ from app.db import get_db
 from app.models import Person, User
 from app.routers.auth_r import csrf_ok, require_login
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 # 员工状态：展示名 + 是否可登录 + 徽标样式
@@ -72,6 +74,7 @@ def my_password_submit(request: Request, old_password: str = Form(...),
 @router.get("/staff-admin", response_class=HTMLResponse)
 def staff_admin_page(request: Request, user: Optional[User] = Depends(require_login),
                      db: Session = Depends(get_db), msg: str = "",
+                     err: str = "",
                      status: str = "", new_token: str = "",
                      new_token_name: str = "", new_token_uid: str = ""):
     if user is None:
@@ -88,7 +91,7 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
                              for r in _mt.list_for_user(db, u.id)] for u in staff}
     return templates.TemplateResponse("staff_admin.html", {
         "request": request, "current_user": user, "staff": staff,
-        "msg": msg, "status": status,
+        "msg": msg, "err": err, "status": status,
         "labels": STATUS_LABELS, "pill": _status_pill,
         "langs": {"": "自动", "zh": "中文", "ja": "日本語"},
         "counts": {s: db.query(User).filter(User.role == "staff",
@@ -97,6 +100,45 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
         "tokens_by_user": tokens_by_user,
         "new_token": new_token, "new_token_name": new_token_name,
         "new_token_uid": new_token_uid})
+
+
+# ---------- 新建员工（编号即身份键，规格 D19/D20） ----------
+@router.post("/staff-admin/create")
+def staff_create(request: Request, code: str = Form(""), name: str = Form(""),
+                 username: str = Form(""), password: str = Form(""),
+                 csrf_token: str = Form(...),
+                 user: Optional[User] = Depends(require_login),
+                 db: Session = Depends(get_db)):
+    """手工建号：编号必填；重复只提示、不覆盖、不建第二个。"""
+    from urllib.parse import quote as _q
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import staff_accounts
+    try:
+        staff_accounts.create_staff(db, code=code, name=name,
+                                    username=username, password=password)
+        return RedirectResponse("/staff-admin?msg=" + _q("已创建员工"),
+                                status_code=303)
+    except staff_accounts.CodeExists:
+        return RedirectResponse("/staff-admin?err=" + _q("该编号已存在"),
+                                status_code=303)
+    except ValueError as e:  # noqa: BLE001
+        return RedirectResponse("/staff-admin?err=" + _q(str(e)),
+                                status_code=303)
+
+
+@router.post("/staff-admin/suggest-username")
+def staff_suggest_username(name: str = Form(""), code: str = Form(""),
+                           user: Optional[User] = Depends(require_login),
+                           db: Session = Depends(get_db)):
+    """按姓名生成登录名候选（admin 专属；AI 不可用时自动回退规则）。"""
+    if user is None or user.role != "admin":
+        return JSONResponse({"ok": False}, status_code=403)
+    from app.services import staff_accounts
+    return JSONResponse(dict(ok=True,
+                             **staff_accounts.suggest_login_name(db, name, code)))
 
 
 @router.post("/staff-admin/{uid}/lang")

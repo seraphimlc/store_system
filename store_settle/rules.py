@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """纯规则：提交人/时间解析、1点2点、68 点精算（spec v0.4 §5.3/§5.6、§4.3 注）。"""
 import re
+import unicodedata
 from datetime import datetime, date
 from typing import Optional, Tuple
 
@@ -11,14 +12,19 @@ YES_NO_BLANK = {"YES", "NO", ""}
 
 
 def parse_submitter(raw) -> Optional[Tuple[str, str]]:
-    """'姓名(编号)' -> (姓名, 编号)；无法解析返回 None（=未识别，spec §9）。"""
+    """'姓名(编号)' -> (姓名, 编号)；无法解析返回 None（=未识别，spec §9）。
+
+    **编号做 NFKC 归一 + 去空白**：文件里常出现全角数字（２１８８…），
+    不归一就会与手工建号/前次导入的编号"看起来一样却匹配不上" → 又建一个人。
+    与 `app/services/staff_accounts.normalize_code` 口径一致。
+    """
     if raw is None:
         return None
-    s = str(raw).strip()
+    s = unicodedata.normalize("NFKC", str(raw)).strip()
     m = _SUB.match(s)
     if not m:
         return None
-    return m.group(1).strip(), m.group(2)
+    return m.group(1).strip(), m.group(2).strip()
 
 
 def parse_modified_jst(text) -> Optional[datetime]:

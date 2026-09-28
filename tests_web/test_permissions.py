@@ -3,6 +3,7 @@
 from datetime import date
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.models import (FormalRecord, ImportFile, Person, PersonDailyStat,
                         RawRecord, User)
 from app.auth import hash_password
@@ -99,6 +100,8 @@ def test_staff_hidden_pre_launch_months(client):
                         person_code="P1", japan_date=date(2026, 10, 3),
                         points=2))
     db.commit()
+    _pf.sync_month_stats(db, "2026-08")   # 管线入表后会同步日统计表
+    _pf.sync_month_stats(db, "2026-10")
     _pf.sync_month_perf(db, "2026-10")
     db.close()
     # 默认起始月 2026-10 → 员工月份下拉只有 2026-10
@@ -153,6 +156,7 @@ def test_staff_visible_from_config_roundtrip(client):
                         points=1))
     db.commit()
     from app.services import perf as _pf
+    _pf.sync_month_stats(db, "2026-09")   # 管线入表后会同步日统计表
     _pf.sync_month_perf(db, "2026-09")
     db.close()
     _staff(client, "emp1", "员工甲", "P1")
@@ -161,7 +165,7 @@ def test_staff_visible_from_config_roundtrip(client):
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
     csrf = _csrf_of(client, "/config")
-    r = client.post("/config/save", data={
+    r = client.post("/config/save", data={"_ft": form_token(client), 
         "csrf_token": csrf, "per_point": 250, "bonus_group": 68,
         "bonus_amount": 3000, "staff_visible_from": "2026-09"},
         follow_redirects=False)
@@ -173,7 +177,7 @@ def test_staff_visible_from_config_roundtrip(client):
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
     csrf = _csrf_of(client, "/config")
-    r = client.post("/config/save", data={
+    r = client.post("/config/save", data={"_ft": form_token(client), 
         "csrf_token": csrf, "per_point": 250, "bonus_group": 68,
         "bonus_amount": 3000, "staff_visible_from": "bad"},
         follow_redirects=False)

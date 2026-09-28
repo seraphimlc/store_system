@@ -12,7 +12,9 @@ from app.db import get_db
 from app.models import User
 from app.routers.auth_r import require_login
 
-router = APIRouter()
+from app.forms import require_form_token as _dep_form_token  # noqa: E402
+
+router = APIRouter(dependencies=[Depends(_dep_form_token)])
 
 
 def _denied():

@@ -3,7 +3,7 @@
 from datetime import date as _date
 from collections import defaultdict
 
-from app.db import get_db  # noqa: F401
+from app.services.daterange import month_bounds
 from app.models import FormalRecord, Person, RawRecord
 
 # 全局薪资规则（确认口径）：每点 250 円；奖金「每满 bonus_group 点奖 bonus_amount 円」。
@@ -264,6 +264,30 @@ def sync_month_perf(db, month: str) -> int:
     return len(agg)
 
 
+def person_months(db, person_code: str) -> list:
+    """某人出现过记录的月份（倒序）——**读物化表**，不拉全量正式记录。"""
+    from app.models import PersonDailyStat
+    rows = (db.query(PersonDailyStat.ref_date)
+            .filter(PersonDailyStat.person_code == person_code).all())
+    return sorted({str(r[0])[:7] for r in rows if r[0]}, reverse=True)
+
+
+def daily_perf_person(db, month: str, person_code: str) -> list:
+    """某人的逐日绩效——**读物化表 person_daily_stats**（员工端用，避免扫正式表全表）。"""
+    from datetime import date as _date
+
+    from app.models import PersonDailyStat
+    q = db.query(PersonDailyStat).filter(
+        PersonDailyStat.person_code == person_code)
+    if month:
+        start, nxt = month_bounds(month)
+        q = q.filter(PersonDailyStat.ref_date >= start,
+                     PersonDailyStat.ref_date < nxt)
+    return [{"code": r.person_code, "date": r.ref_date, "records": r.records,
+             "p1": r.p1, "p2": r.p2, "points": r.points}
+            for r in q.order_by(PersonDailyStat.ref_date).all()]
+
+
 def daily_perf(db, month: str = ""):
     """日绩效：每人每天 {date, records, p1, p2, points}，按日期排序。"""
     rows, names = _fetch(db)
@@ -302,11 +326,23 @@ def company_summary(db, month: str = ""):
             "pass37": rate >= 0.37}
 
 def _month_edges(month: str):
-    from datetime import date as _d
-    y, m0 = int(month[:4]), int(month[5:7])
-    if m0 == 12:
-        return _d(y, m0, 1), _d(y + 1, 1, 1)
-    return _d(y, m0, 1), _d(y, m0 + 1, 1)
+    """月份边界（单一来源在 `daterange.month_bounds`）。"""
+    return month_bounds(month)
+
+
+def refresh_compare_materialized(db, month: str) -> int:
+    """月度统计变化后刷新核对结果物化行（best-effort；不刷新员工端会显示旧数字）。"""
+    from app.services import report_store
+    try:
+        from datetime import date as _d
+
+        from app.services import report_ai
+        y, m = int(month[:4]), int(month[5:7])
+        return report_store.refresh_for_date(db, _d(y, m, 1)) + \
+            report_store.refresh_for_date(db, _d(y, m, 28))
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return 0
 
 
 def sync_month_stats(db, month: str) -> int:

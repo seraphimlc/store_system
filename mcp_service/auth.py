@@ -121,7 +121,7 @@ class _BodyCapture:
 
 
 class BearerAuthMiddleware:
-    """Bearer 鉴权（P1：查 api_tokens 表；env token 降级为���读 bootstrap）。"""
+    """Bearer 鉴权（P1：查 api_tokens 表；env token 降级为只读 bootstrap）。"""
 
     def __init__(self, app, log: Callable[[dict[str, Any]], None],
                  bootstrap_token: str | None = None) -> None:

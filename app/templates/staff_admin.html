@@ -16,6 +16,54 @@
 </div>
 <script>history.replaceState(null, '', '/staff-admin');</script>
 {% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+<div class="card" style="margin-bottom:.8rem;padding:.6rem .8rem">
+  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('新建员工') }}</h2>
+  <form method="post" action="/staff-admin/create" id="ns-form"
+        style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('员工编号') }}
+      <input name="code" id="ns-code" required maxlength="32" style="width:210px;padding:.25rem .4rem"></label>
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('姓名') }}
+      <input name="name" id="ns-name" required maxlength="64" style="width:150px;padding:.25rem .4rem"></label>
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('登录名') }}
+      <input name="username" id="ns-username" maxlength="64" style="width:180px;padding:.25rem .4rem"></label>
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('初始口令') }}
+      <input name="password" maxlength="64" style="width:170px;padding:.25rem .4rem"></label>
+    <button class="btn ghost" type="button" id="ns-gen">{{ t('AI 生成登录名') }}</button>
+    <button class="btn" type="submit">{{ t('创建') }}</button>
+  </form>
+  <div class="hint" id="ns-hint" style="margin-top:.35rem"></div>
+</div>
+<script>
+(function () {
+  var timer = null;
+  function fill() {
+    var nm = document.getElementById('ns-name').value.trim();
+    if (!nm) return;
+    var fd = new FormData();
+    fd.append('name', nm);
+    fd.append('code', document.getElementById('ns-code').value.trim());
+    fetch('/staff-admin/suggest-username', {method: 'POST', body: fd})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok || !d.username) return;
+        document.getElementById('ns-username').value = d.username;
+        document.getElementById('ns-hint').textContent =
+          (d.source === 'ai' ? '{{ t('AI 生成') }}' : '{{ t('规则生成（AI 未启用）') }}')
+          + '：' + d.username;
+      })
+      .catch(function () {});
+  }
+  document.getElementById('ns-name').addEventListener('blur', function () {
+    if (document.getElementById('ns-username').value.trim()) return;
+    clearTimeout(timer);
+    timer = setTimeout(fill, 800);
+  });
+  document.getElementById('ns-gen').addEventListener('click', fill);
+})();
+</script>
 <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">
   <a class="btn ghost" style="padding:.2rem .7rem" href="/staff-admin">{{ t('全部') }} {{ counts.values()|sum }}</a>
   {% for s, label in labels.items() %}
@@ -27,6 +75,7 @@
         onsubmit="return confirm('{{ t('将重置全部员工口令为系统默认并要求各自首登修改，确认？') }}')"
         style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <b style="font-size:.9rem">{{ t('批量重置：') }}</b>
     <span class="hint">{{ t('正式发号前一次性使用——全部员工口令重置为系统默认，每人首次登录必须改成自己的密码。') }}</span>
     <button class="btn" style="padding:.2rem .7rem" type="submit">{{ t('重置全部员工口令并要求首登修改') }}</button>
@@ -44,6 +93,7 @@
       <form method="post" action="/staff-admin/{{ u.id }}/lang"
             style="display:inline-flex;gap:.3rem;align-items:center">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <select name="lang" style="padding:.2rem .4rem">
           {% for lv, ln in langs.items() %}
           <option value="{{ lv }}" {% if lv == u.lang %}selected{% endif %}>{{ ln }}</option>
@@ -56,6 +106,7 @@
       <form method="post" action="/staff-admin/{{ u.id }}/status"
             style="display:inline-flex;gap:.4rem;align-items:center">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <select name="new_status" style="padding:.2rem .4rem">
           {% for s, label in labels.items() %}
           <option value="{{ s }}" {% if s == u.status %}selected{% endif %}>{{ t(label) }}</option>
@@ -66,6 +117,7 @@
       <form method="post" action="/staff-admin/{{ u.id }}/reset"
             style="display:inline-flex;gap:.3rem;margin-left:.4rem">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <input name="password" placeholder="{{ t('新口令（不填用系统默认）') }}"
                style="width:150px;padding:.2rem .4rem">
         <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('重置口令') }}</button>
@@ -87,6 +139,7 @@
           {% if tk.row.revoked_at is none %}
           <form method="post" action="/staff-admin/{{ u.id }}/tokens/{{ tk.row.id }}/revoke" style="display:inline">
             <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <input type="hidden" name="_ft" value="{{ form_token() }}">
             <button class="btn danger" style="padding:.1rem .5rem" type="submit"
                     onclick="return confirm('{{ t('确认吊销该 Token？吊销后立即失效，不可恢复。') }}')">{{ t('吊销') }}</button>
           </form>
@@ -98,6 +151,7 @@
         <form method="post" action="/staff-admin/{{ u.id }}/tokens/issue"
               style="display:flex;gap:.3rem;align-items:center;flex-wrap:wrap;margin-top:.4rem">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
           <input name="name" placeholder="{{ t('Token 名称') }}" maxlength="128"
                  style="width:120px;padding:.2rem .4rem">
           <select name="scope" style="padding:.2rem .3rem">
@@ -122,7 +176,7 @@
     <li><b>{{ t('请假') }}</b>：{{ t('可登录、可照常确认与报问题（账号保留，回来不用重建）。') }}</li>
     <li><b>{{ t('停用') }}</b>：{{ t('暂时不能登录（如账号风险/长期未用），随时可改回。') }}</li>
     <li><b>{{ t('离职') }}</b>：{{ t('不能登录，但账号与历史数据、结算记录永久保留，供查账。') }}</li>
-    <li>{{ t('员工账号不用手动建：导入数据文件时发现') }}<b>{{ t('新的人员编号') }}</b>{{ t('，系统自动开户——登录名按姓名自动生成（拼音），初始口令为系统默认，员工') }}<b>{{ t('首次登录必须先改成自己的密码') }}</b>{{ t('。') }}</li>
+    <li>{{ t('员工账号也会随导入自动开通：导入数据文件时发现') }}<b>{{ t('新的人员编号') }}</b>{{ t('，系统自动开户——登录名按姓名自动生成（拼音），初始口令为系统默认，员工') }}<b>{{ t('首次登录必须先改成自己的密码') }}</b>{{ t('。') }}</li>
     <li>{{ t('员工忘口令时，管理员在此「重置口令」（框留空即系统默认初始口令），重置后员工同样须首登改密。') }}</li>
     <li>{{ t('系统不提供删除员工——删人会让历史核算对不上。') }}</li>
     <li>{{ t('界面语言：可给每人指定（中文/日本語/自动）。自动=跟随浏览器语言；日本员工可设「日本語」后默认日文界面。') }}</li>

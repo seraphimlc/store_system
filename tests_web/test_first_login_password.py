@@ -3,6 +3,7 @@
 import re
 
 import app.db as appdb
+from tests.helpers import form_token
 from app.auth import hash_password
 from app.models import Person, User
 
@@ -52,7 +53,7 @@ def test_new_staff_must_change_first_login(client):
     page = client.get("/my/password?must=1").text
     assert "必须先修改密码" in page
     # 提交新密码 → 清除标志 → 放行
-    r = client.post("/my/password", data={
+    r = client.post("/my/password", data={"_ft": form_token(client), 
         "csrf_token": _csrf(client), "old_password": "demo123",
         "new_password": "mynewpass1"}, follow_redirects=False)
     assert r.status_code == 303
@@ -74,7 +75,7 @@ def test_admin_reset_requires_change_again(client):
     uid = u.id
     db.close()
     # 管理员重置口令 → 强制再次改密
-    r = client.post(f"/staff-admin/{uid}/reset", data={
+    r = client.post(f"/staff-admin/{uid}/reset", data={"_ft": form_token(client), 
         "password": "reset123", "csrf_token": _csrf(client, "/staff-admin")},
         follow_redirects=False)
     assert r.status_code == 303
@@ -113,7 +114,7 @@ def test_admin_reset_all_requires_change(client):
                 follow_redirects=False)
     csrf = _csrf(client, "/staff-admin")
     r = client.post("/staff-admin/reset-all",
-                    data={"csrf_token": csrf, "password": "demo123"},
+                    data={"_ft": form_token(client), "csrf_token": csrf, "password": "demo123"},
                     follow_redirects=False)
     assert r.status_code == 303
     from urllib.parse import unquote

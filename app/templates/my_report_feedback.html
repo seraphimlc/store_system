@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ t('我的核对结果') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('我的核对结果') }}</h1></div>
+
+{% if not analysis %}
+<div class="card"><div class="empty">{{ t('本期数据还在核对中') }}</div></div>
+{% else %}
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/my/report/feedback" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <b style="font-size:.95rem">{{ t('区间') }}</b>
+    <select name="aid" onchange="this.form.submit()">
+      {% for a in periods %}
+      <option value="{{ a.id }}" {% if analysis and a.id == analysis.id %}selected{% endif %}>
+        {{ a.period_start }} ～ {{ a.period_end }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if mine and mine.days_filled == 0 %}
+<div class="msg warn">{{ t('本区间没有你的填报记录') }}</div>
+{% endif %}
+
+{% if mine %}
+<table class="kv" data-testid="my-summary" style="margin-bottom:1rem">
+  <tr><th>{{ t('我的准确率') }}</th>
+      <td>{% if mine.acc is none %}—{% else %}<b>{{ (mine.acc * 100) | round(1) }}%</b>{% endif %}</td></tr>
+  <tr><th>{{ t('系统核到') }}</th>
+      <td>{{ mine.sys_total }}<span class="hint">（{{ t('1点') }} {{ mine.sys_p1 }} / {{ t('2点') }} {{ mine.sys_p2 }}）</span></td></tr>
+  <tr><th>{{ t('自报') }}</th>
+      <td>{{ mine.rep_total }}<span class="hint">（{{ t('1点') }} {{ mine.rep_p1 }} / {{ t('2点') }} {{ mine.rep_p2 }}）</span></td></tr>
+  <tr class="tot"><th>Δ{{ t('合计') }}</th>
+      <td style="color:{% if mine.d_total > 0 %}var(--warn){% elif mine.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % mine.d_total }}</td></tr>
+  <tr><th>{{ t('已报天数') }}</th><td>{{ mine.days_filled }} / {{ mine.days_system }}</td></tr>
+  <tr><th>{{ t('应填未填') }}</th><td>{{ mine.gaps }}</td></tr>
+</table>
+{% endif %}
+
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="my-compare-daily">
+  <tr><th>{{ t('日期') }}</th><th>{{ t('系统') }}（1/2）</th>
+      <th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+  {% for r in days %}
+  <tr {% if r.kind != 'both' %}style="background:#fbfcfe"{% endif %}>
+    <td>{{ r.date }}</td>
+    <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
+    <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
+    <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="4" class="empty">{{ t('这个区间没有你的记录') }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

@@ -11,6 +11,7 @@
         style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"
         data-testid="recon-upload-form">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <label class="f">{{ t('月份') }}<input type="month" name="month" value="2026-08"
         data-testid="recon-month"></label>
     <input type="file" name="file" accept=".xlsx" required data-testid="recon-file">
@@ -173,6 +174,7 @@
       <h3 style="font-size:.98rem;margin:.2rem 0 .4rem">AI {{ t('对账分析') }}</h3>
       <form method="post" action="/recon/{{ cur.id }}/interpret">
         <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <input type="hidden" name="_ft" value="{{ form_token() }}">
         <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('生成/更新 AI 分析') }}</button>
       </form>
     </div>

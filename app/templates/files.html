@@ -10,6 +10,7 @@
   <fieldset>
     <legend>{{ t('上传并解析') }}</legend>
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
     <div class="upload-zone">
       <input type="file" name="files" accept=".xlsx" multiple required>
       <button class="btn" type="submit">{{ t('上传并解析') }}</button>
@@ -56,6 +57,7 @@
           {% if st and not st.formal and not st.pend_appeal %}
           <form method="post" action="/files/{{ f.id }}/finalize">
             <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <input type="hidden" name="_ft" value="{{ form_token() }}">
             <button class="btn" style="padding:.2rem .6rem" type="submit">{{ t('入正式表') }}</button>
           </form>
           {% endif %}
@@ -64,6 +66,7 @@
         <form method="post" action="/files/{{ f.id }}/delete"
               onsubmit="return confirm('删除该文件将移除其全部原始记录')">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
           <button class="btn ghost danger-ghost" style="padding:.2rem .6rem" type="submit">{{ t('删除') }}</button>
         </form>
         </span>

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """权限隔离与改密测试。"""
 import app.db as appdb
+from tests.helpers import form_token
 from app.auth import hash_password, verify_password
 from app.models import Person, User
 
@@ -31,7 +32,7 @@ def test_staff_own_password_change(client):
     import re
     page = client.get("/my/password").text
     csrf = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
-    r = client.post("/my/password", data={"csrf_token": csrf,
+    r = client.post("/my/password", data={"_ft": form_token(client), "csrf_token": csrf,
                                           "old_password": "pass123",
                                           "new_password": "newpass1"},
                     follow_redirects=False)

@@ -10,7 +10,7 @@ def create_app() -> FastAPI:
 
     from app.routers import (auth_r, files_r, perf_r,
                         stores_r, accounts_r, info_r, settle_r, tokens_r,
-                        oauth_r)
+                        oauth_r, report_r)
     app.include_router(auth_r.router)
     app.include_router(files_r.router)
     app.include_router(perf_r.router)
@@ -20,6 +20,7 @@ def create_app() -> FastAPI:
     app.include_router(settle_r.router)
     app.include_router(tokens_r.router)
     app.include_router(oauth_r.router)
+    app.include_router(report_r.router)
 
     # 多语言：模板全局函数已在 app/templating.get_templates() 统一注册（t/LANG_NAMES/lang_url）
 
@@ -31,11 +32,13 @@ def create_app() -> FastAPI:
 
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
-                     "/my/appeal", "/my/perf", "/my/token",
+                     "/my/appeal", "/my/perf", "/my/report",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")
 
     from fastapi.responses import RedirectResponse as _RR
+
+    from app.forms import reset_ctx as _reset_form_ctx
 
     @app.middleware("http")
     async def lang_middleware(request, call_next):
@@ -66,7 +69,12 @@ def create_app() -> FastAPI:
                         accept=request.headers.get("accept-language", ""))
         tok = _LANG.set(lang)
         try:
+            from app.auth import SESSION_COOKIE as _SC, read_session_token as _rst
+            _reset_form_ctx((_rst(request.cookies.get(_SC)) or {}).get("uid"))
             response = await call_next(request)
+            # 页面禁止缓存：保存/修改后必须看到最新数据（浏览器复用旧页面会让人以为没刷新）
+            if response.headers.get("content-type", "").startswith("text/html"):
+                response.headers["Cache-Control"] = "no-store, must-revalidate"
             # 仅显式 ?lang= 切换时才持久化 cookie；否则保留现有 cookie，
             # 避免登录时的默认语言覆盖账号级/浏览器级选择
             if request.query_params.get("lang", "").strip().lower() in ("zh", "ja"):

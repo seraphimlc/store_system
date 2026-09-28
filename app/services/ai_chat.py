@@ -22,7 +22,7 @@ def configured() -> bool:
 
 
 def chat(prompt: str, timeout: int = 600, retries: int = 1,
-         max_tokens: int = None) -> str:
+         max_tokens: int = None, return_usage: bool = False):
     """调用模型，返回文本；失败自动重试（共 retries+1 次），仍失败抛异常。
 
     兼容推理型模型：思考很长 → max_tokens 取配置（默认 380000）；
@@ -43,10 +43,13 @@ def chat(prompt: str, timeout: int = 600, retries: int = 1,
                                  "max_tokens": max_tokens},
                            timeout=timeout)
             r.raise_for_status()
-            msg = r.json()["choices"][0].get("message", {})
+            data = r.json()
+            msg = data["choices"][0].get("message", {})
             content = (msg.get("content") or "").strip()
             if not content:
                 content = (msg.get("reasoning_content") or "").strip()
+            if return_usage:      # 可选：一并回传 usage（token 留痕用）
+                return content, (data.get("usage") or {})
             return content
         except Exception as e:  # noqa: BLE001
             last = e
