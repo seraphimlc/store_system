@@ -15,6 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NEW_TABLES = ("staff_daily_reports", "staff_report_analyses",
               "staff_report_compare_person", "staff_report_compare_day",
               "form_tokens")
+# 也校验正式表：本轮给它加了 ix_formal_japan_date（曾因文件名撞车漏掉迁移）
+CHECK_TABLES = NEW_TABLES + ("formal_records",)
 
 
 def _alembic(db_path, *args):
@@ -62,7 +64,7 @@ def test_migration_schema_matches_orm(tmp_path):
     assert r.returncode == 0, r.stderr[-2000:]
     insp = inspect(create_engine("sqlite:///%s" % db))
     problems = []
-    for table in NEW_TABLES:
+    for table in CHECK_TABLES:
         mig_cols = {c["name"]: c["nullable"] for c in insp.get_columns(table)}
         orm_cols = {c.name: c.nullable for c in Base.metadata.tables[table].columns}
         if set(mig_cols) != set(orm_cols):
@@ -74,4 +76,10 @@ def test_migration_schema_matches_orm(tmp_path):
             if mig_cols[name] != nullable:
                 problems.append("%s.%s 可空性不同：迁移=%s ORM=%s" % (
                     table, name, mig_cols[name], nullable))
+        # 索引也要一致：ORM 声明了索引但迁移没建 → 线上少索引（静默性能退化）
+        mig_idx = {i["name"] for i in insp.get_indexes(table)}
+        orm_idx = {i.name for i in Base.metadata.tables[table].indexes}
+        if orm_idx - mig_idx:
+            problems.append("%s 缺索引（ORM 有、迁移没建）：%s"
+                            % (table, sorted(orm_idx - mig_idx)))
     assert not problems, "迁移与 ORM 不一致：\n  " + "\n  ".join(problems)
