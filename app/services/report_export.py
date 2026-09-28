@@ -25,9 +25,9 @@ def reports_xlsx(db, start, end, person_code: str = ""):
     """自报明细导出。"""
     from openpyxl import Workbook
 
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     names = _names(db)
-    data = daily_report.list_reports(db, start=start, end=end,
+    data = report_compare.list_reports(db, start=start, end=end,
                                      person_code=person_code, page=1, per=20000)
     wb = Workbook()
     _sheet(wb, "自报明细",
@@ -46,8 +46,8 @@ def compare_xlsx(db, start, end, person_code: str = ""):
     """对比结果导出（逐人：系统 vs 自报 + 偏差 + 准确率）。"""
     from openpyxl import Workbook
 
-    from app.services import daily_report
-    res = daily_report.compare(db, start, end, person_code)
+    from app.services import daily_report, report_compare
+    res = report_compare.compare(db, start, end, person_code)
     wb = Workbook()
     per_rows = [[p["person_code"], p["name"], p["sys_p1"], p["sys_p2"], p["sys_total"],
                  p["rep_p1"], p["rep_p2"], p["rep_total"],

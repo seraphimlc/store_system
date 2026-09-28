@@ -3,6 +3,7 @@
 from datetime import date as _date
 from collections import defaultdict
 
+from app.services.daterange import month_bounds
 from app.models import FormalRecord, Person, RawRecord
 
 # 全局薪资规则（确认口径）：每点 250 円；奖金「每满 bonus_group 点奖 bonus_amount 円」。
@@ -279,10 +280,7 @@ def daily_perf_person(db, month: str, person_code: str) -> list:
     q = db.query(PersonDailyStat).filter(
         PersonDailyStat.person_code == person_code)
     if month:
-        y, m = month.split("-")
-        y, m = int(y), int(m)
-        start = _date(y, m, 1)
-        nxt = _date(y + 1, 1, 1) if m == 12 else _date(y, m + 1, 1)
+        start, nxt = month_bounds(month)
         q = q.filter(PersonDailyStat.ref_date >= start,
                      PersonDailyStat.ref_date < nxt)
     return [{"code": r.person_code, "date": r.ref_date, "records": r.records,
@@ -328,22 +326,20 @@ def company_summary(db, month: str = ""):
             "pass37": rate >= 0.37}
 
 def _month_edges(month: str):
-    from datetime import date as _d
-    y, m0 = int(month[:4]), int(month[5:7])
-    if m0 == 12:
-        return _d(y, m0, 1), _d(y + 1, 1, 1)
-    return _d(y, m0, 1), _d(y, m0 + 1, 1)
+    """月份边界（单一来源在 `daterange.month_bounds`）。"""
+    return month_bounds(month)
 
 
 def refresh_compare_materialized(db, month: str) -> int:
     """月度统计变化后刷新核对结果物化行（best-effort；不刷新员工端会显示旧数字）。"""
+    from app.services import report_store
     try:
         from datetime import date as _d
 
         from app.services import report_ai
         y, m = int(month[:4]), int(month[5:7])
-        return report_ai.refresh_for_date(db, _d(y, m, 1)) + \
-            report_ai.refresh_for_date(db, _d(y, m, 28))
+        return report_store.refresh_for_date(db, _d(y, m, 1)) + \
+            report_store.refresh_for_date(db, _d(y, m, 28))
     except Exception:  # noqa: BLE001
         db.rollback()
         return 0

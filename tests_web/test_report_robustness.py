@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 import app.db as appdb
+from app.services import report_store
 from app.auth import SESSION_COOKIE, hash_password, read_session_token
 from app.models import (FormalRecord, ImportFile, Person, PersonDailyStat,
                         RawRecord, StaffDailyReport, StaffReportAnalysis,
@@ -89,14 +90,14 @@ def _coverage(db, *dates, tag="rb"):
 
 
 def _done_analysis(db, start, end, person_code="P1"):
-    from app.services import daily_report, report_ai
-    res = daily_report.compare(db, start, end)
+    from app.services import daily_report, report_compare, report_ai
+    res = report_compare.compare(db, start, end)
     a = StaffReportAnalysis(period_start=start, period_end=end, status="done",
                             summary=dict(res["summary"], fingerprint="fp"),
                             payload={"by_lang": {"zh": {}}})
     db.add(a)
     db.commit()
-    report_ai.materialize(db, a.id, res)
+    report_store.materialize(db, a.id, res)
     return a
 
 
@@ -110,7 +111,7 @@ def _compare_row(db, aid, code="P1"):
 
 def test_materialization_refreshes_after_report_change(client):
     """员工填报/修改后，覆盖该日期的报告物化行必须刷新（否则员工端是旧数字）。"""
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     _sys_day(db, "P1", date(2026, 9, 16), 4, 2)
     db.commit()
@@ -143,7 +144,7 @@ def test_materialization_refreshes_after_report_change(client):
 
 def test_run_analysis_marks_failed_on_unexpected_error(client, monkeypatch):
     """生成过程中任何意外异常 → 落 failed（绝不卡在 running/pending）。"""
-    from app.services import daily_report, report_ai
+    from app.services import daily_report, report_compare, report_ai
     db = appdb.SessionLocal()
     _sys_day(db, "P1", date(2026, 9, 16), 4, 2)
     db.commit()
@@ -152,7 +153,7 @@ def test_run_analysis_marks_failed_on_unexpected_error(client, monkeypatch):
                             summary={}, payload={})
     db.add(a)
     db.commit()
-    monkeypatch.setattr(daily_report, "compare",
+    monkeypatch.setattr(report_compare, "compare",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("炸了")))
     report_ai.run_analysis(a.id)
     db.expire_all()
@@ -211,7 +212,7 @@ def test_auto_for_import_skips_import_without_formal_records(client, monkeypatch
                      status="parsed")
     db.add(imp)
     db.commit()
-    assert report_ai.import_period(db, imp.id) == (None, None)
+    assert report_store.import_period(db, imp.id) == (None, None)
     assert "跳过" in report_ai.auto_for_import(db, imp.id)
     assert db.query(StaffReportAnalysis).count() == 0
     db.close()

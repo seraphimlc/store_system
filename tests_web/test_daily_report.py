@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 import app.db as appdb
+from app.services import report_chart, report_store
 from tests.helpers import form_token
 from app.models import Person, StaffDailyReport, StaffReportAnalysis
 
@@ -88,7 +89,7 @@ def _login_admin(client):
 def test_create_staff_normalize_duplicate_and_validation(client):
     """编号 NFKC 归一；重复 → CodeExists；编号/姓名/长度校验。"""
     from app.models import User
-    from app.services import staff_accounts as sa
+    from app.services import staff_accounts as sa, report_chart
     db = appdb.SessionLocal()
     assert sa.normalize_code(" ２１８８２４０６０００００００１ ") == "2188240600000001"
     p = sa.create_staff(db, code=" ２１８８２４０６０００００００１ ", name="テスト太郎")
@@ -204,13 +205,13 @@ def _login_staff(client, username="emp1"):
 def test_jst_today_is_japan_time(client):
     """业务日按 JST（+09:00）。"""
     from datetime import datetime, timedelta, timezone
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     assert daily_report.jst_today() == datetime.now(timezone(timedelta(hours=9))).date()
 
 
 def test_submit_report_service(client):
     """提交：合计自动算；重复 → AlreadySubmitted；非法数字/超范围 → ValueError。"""
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     _seed_staff(client)
     from app.models import User
@@ -229,7 +230,7 @@ def test_submit_report_service(client):
 
 def test_my_report_page_and_submit_route(client):
     """页面可访问；提交 303 落库；重复提交提示；已填报后页面只读展示。"""
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     _seed_staff(client)
     csrf = _login_staff(client)
     page = client.get("/my/report")
@@ -281,7 +282,7 @@ def test_my_report_requires_csrf_and_staff(client):
 def test_month_days_leaves_gap_rows(client):
     """逐日视图：本月 1 号到今天，缺填报的日子留空行（员工要看得到"哪天没数据"）。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     _seed_staff(client)
     # 用**固定历史月**造数（不能用"本月"，否则每月 1、2 号这条测试必挂：页面只列到今天）
@@ -304,7 +305,7 @@ def test_month_days_leaves_gap_rows(client):
 def test_month_days_historical_month_is_full(client):
     """历史月份：整月逐日列出（月末到月末）。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 2, 10),
                             area="新宿", p1_cnt=1, p2_cnt=0, total_cnt=1))
@@ -321,7 +322,7 @@ def test_month_days_historical_month_is_full(client):
 def test_my_report_page_shows_gap_rows(client):
     """页面列出整月逐日（未填报的显示 —，日期带星期括号标注）。"""
     from datetime import date, timedelta
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     _seed_staff(client)
     today = daily_report.jst_today()
@@ -351,7 +352,7 @@ def test_my_report_page_shows_gap_rows(client):
 def test_chart_series_window_and_threshold(client):
     """30 天窗口（含今天）；报过 3 天才 show=True；窗口外的数据不计。"""
     from datetime import date, timedelta
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     today = date(2026, 9, 28)
     # 窗口内 2 天 + 窗口外 1 天（第 31 天，不应计入）
@@ -360,7 +361,7 @@ def test_chart_series_window_and_threshold(client):
         db.add(StaffDailyReport(person_code="P1", report_date=d, area="x",
                                 p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
     db.commit()
-    s = daily_report.chart_series(db, "P1", today=today)
+    s = report_chart.chart_series(db, "P1", today=today)
     # 横轴自适应：右端=今天，左端取"第一个有数据的日子"与"今天-6"中更早者（最少铺开 7 天）
     assert s["start"] == today - timedelta(days=6) and s["span_days"] == 7
     assert s["window_days"] == 30                         # 上限仍是 30 天
@@ -369,7 +370,7 @@ def test_chart_series_window_and_threshold(client):
     db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=2),
                             area="x", p1_cnt=1, p2_cnt=1, total_cnt=2))
     db.commit()
-    s2 = daily_report.chart_series(db, "P1", today=today)
+    s2 = report_chart.chart_series(db, "P1", today=today)
     assert s2["filled"] == 3 and s2["show"] is True
 
 
@@ -387,13 +388,13 @@ def _series(days):
 def test_chart_geometry_breaks_on_gap(client):
     """缺数据的日子让曲线断开（分段），点只画在有数据的日子；两条曲线独立。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     s = _series([{"date": date(2026, 9, 1), "filled": True, "p1": 1, "p2": 0, "total": 1},
                  {"date": date(2026, 9, 2), "filled": True, "p1": 3, "p2": 0, "total": 3},
                  {"date": date(2026, 9, 3), "filled": False, "p1": 0, "p2": 0, "total": 0},
                  {"date": date(2026, 9, 4), "filled": True, "p1": 2, "p2": 0, "total": 2},
                  {"date": date(2026, 9, 5), "filled": True, "p1": 4, "p2": 0, "total": 4}])
-    g = daily_report.chart_geometry(s, width=320, height=120)
+    g = report_chart.chart_geometry(s, width=320, height=120)
     assert len(g["paths_p1"]) == 2 and len(g["areas_p1"]) == 2   # 3 号断开 → 两段
     # 所有路径必须以 M 开头（浏览器会拒绝没有 moveto 的 d；孤立点不能连成非法路径）
     for k in ("paths_p1", "paths_p2", "areas_p1", "areas_p2"):
@@ -406,11 +407,11 @@ def test_chart_geometry_breaks_on_gap(client):
 def test_chart_geometry_axes(client):
     """坐标轴：纵轴好看的上限 + 3 条刻度；横轴最多 4 个 MM-DD 标签；今天虚线。"""
     from datetime import date, timedelta
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     d0 = date(2026, 9, 20)
     days = [{"date": d0 + timedelta(days=i), "filled": True, "p1": i + 1,
              "p2": 0, "total": i + 1} for i in range(9)]      # 最大 9 → 上限抬到 10
-    g = daily_report.chart_geometry(_series(days))
+    g = report_chart.chart_geometry(_series(days))
     assert g["top"] == 10 and [tk["v"] for tk in g["ticks"]] == [10, 5, 0]
     assert g["ticks"][0]["y"] == g["top_y"] and g["ticks"][-1]["y"] == g["base_y"]
     assert 2 <= len(g["x_ticks"]) <= 4
@@ -425,9 +426,9 @@ def test_chart_geometry_axes(client):
 def test_chart_geometry_empty_and_single_point(client):
     """空数据 → empty；只有一天 → 只画点、不画线。"""
     from datetime import date
-    from app.services import daily_report
-    assert daily_report.chart_geometry(_series([]))["empty"] is True
-    g = daily_report.chart_geometry(_series(
+    from app.services import daily_report, report_compare
+    assert report_chart.chart_geometry(_series([]))["empty"] is True
+    g = report_chart.chart_geometry(_series(
         [{"date": date(2026, 9, 1), "filled": True, "p1": 2, "p2": 1, "total": 3}]))
     assert g["paths_p1"] == [] and len(g["dots_p1"]) == 1
 
@@ -435,7 +436,7 @@ def test_chart_geometry_empty_and_single_point(client):
 def test_my_report_page_chart_visibility(client):
     """报满 3 天 → 页面有 SVG；不足 3 天 → 只有提示、没有 SVG。"""
     from datetime import timedelta
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     _seed_staff(client)
     today = daily_report.jst_today()
@@ -468,7 +469,7 @@ def _seed_sys(db, code, day, p1, p2):
 def test_compare_three_kinds_and_direction(client):
     """三类：both / 系统有员工没报 / 员工报了系统没有；Δ = 系统 − 自报（>0 少报）。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     db.add(Person(code="P1", display_name="甲"))
     _seed_sys(db, "P1", date(2026, 9, 16), 4, 2)      # 与自报相同 → 一致
@@ -479,7 +480,7 @@ def test_compare_three_kinds_and_direction(client):
         db.add(StaffDailyReport(person_code="P1", report_date=d, area="渋谷",
                                 p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
     db.commit()
-    res = daily_report.compare(db, date(2026, 9, 16), date(2026, 9, 19))
+    res = report_compare.compare(db, date(2026, 9, 16), date(2026, 9, 19))
     c = res["counts"]
     assert c["both"] == 2 and c["missing_report"] == 1 and c["missing_system"] == 1
     p = res["persons"][0]
@@ -496,7 +497,7 @@ def test_compare_three_kinds_and_direction(client):
 def test_accuracy_does_not_offset(client):
     """**准确率不抵消**：+5 与 −5 两天，净差为 0，但准确率必须 < 1。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     db.add(Person(code="P2", display_name="乙"))
     _seed_sys(db, "P2", date(2026, 9, 20), 10, 0)       # 自报 5 → 少报 5
@@ -506,7 +507,7 @@ def test_accuracy_does_not_offset(client):
     db.add(StaffDailyReport(person_code="P2", report_date=date(2026, 9, 21),
                             area="x", p1_cnt=10, p2_cnt=0, total_cnt=10))
     db.commit()
-    res = daily_report.compare(db, date(2026, 9, 20), date(2026, 9, 21))
+    res = report_compare.compare(db, date(2026, 9, 20), date(2026, 9, 21))
     p = res["persons"][0]
     assert p["d_total"] == 0                             # 净差为 0（会骗人的口径）
     assert p["abs_dt"] == 10                             # Σ|Δ| = 10（真相）
@@ -517,7 +518,7 @@ def test_accuracy_does_not_offset(client):
 def test_accuracy_excludes_missing_report(client):
     """漏填报不计入准确率（单独算已填/应填），避免"忘了填"和"报不准"混为一谈。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     db.add(Person(code="P3", display_name="丙"))
     _seed_sys(db, "P3", date(2026, 9, 22), 3, 0)
@@ -525,7 +526,7 @@ def test_accuracy_excludes_missing_report(client):
     db.add(StaffDailyReport(person_code="P3", report_date=date(2026, 9, 22),
                             area="x", p1_cnt=3, p2_cnt=0, total_cnt=3))
     db.commit()
-    res = daily_report.compare(db, date(2026, 9, 22), date(2026, 9, 23))
+    res = report_compare.compare(db, date(2026, 9, 22), date(2026, 9, 23))
     p = res["persons"][0]
     assert p["acc"] == 1.0                               # 只有一个对照日，完全一致
     assert p["gaps"] == 1 and p["days_system"] == 2 and p["days_filled"] == 1
@@ -534,12 +535,12 @@ def test_accuracy_excludes_missing_report(client):
 def test_compare_skips_persons_with_no_data_either_side(client):
     """两侧都没数据的身份不进报告（历史遗留账号不产生噪音行）。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     db.add(Person(code="GHOST", display_name="幽灵"))
     _seed_sys(db, "P1", date(2026, 9, 24), 1, 0)
     db.commit()
-    res = daily_report.compare(db, date(2026, 9, 24), date(2026, 9, 24))
+    res = report_compare.compare(db, date(2026, 9, 24), date(2026, 9, 24))
     assert [p["person_code"] for p in res["persons"]] == ["P1"]
 
 
@@ -547,7 +548,7 @@ def test_suggest_period_uses_latest_import_range(client):
     """默认区间 = 最近一次上传文件在正式表里的日期范围。"""
     from datetime import date
     from app.models import FormalRecord, ImportFile, RawRecord
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     imp = ImportFile(file_name="t.xlsx", file_sha256="sha-sp", file_size=1,
                      stored_path="/tmp/t.xlsx", uploaded_by=1, status="parsed")
@@ -565,7 +566,7 @@ def test_suggest_period_uses_latest_import_range(client):
         db.add(FormalRecord(import_id=imp.id, raw_record_id=raw.id, person_code="1",
                             store_id_raw=raw.store_id_raw, japan_date=d, points=1))
     db.commit()
-    assert daily_report.suggest_period(db) == (date(2026, 9, 16), date(2026, 9, 30))
+    assert report_compare.suggest_period(db) == (date(2026, 9, 16), date(2026, 9, 30))
 
 
 # ---------- Chunk 4：管理端页面与导出 ----------
@@ -728,12 +729,12 @@ def test_analysis_generate_and_payload(client, monkeypatch):
 def test_prompt_constraints_and_program_numbers(client, monkeypatch):
     """prompt 必须带硬约束，且**不许模型自己算数字**（只喂算好的汇总）。"""
     from datetime import date
-    from app.services import daily_report, report_ai
+    from app.services import daily_report, report_compare, report_ai
     db = appdb.SessionLocal()
     _seed_compare_data(db)
     calls = _mock_ai(monkeypatch)
     _no_thread(monkeypatch)
-    res = daily_report.compare(db, date(2026, 9, 16), date(2026, 9, 17))
+    res = report_compare.compare(db, date(2026, 9, 16), date(2026, 9, 17))
     p = report_ai.build_prompt(res, "ja")
     assert "只使用下面给出的数字" in p
     assert "不做人身评价" in p and "不做定性指控" in p
@@ -863,7 +864,7 @@ def test_analyze_and_retry_routes_admin_only(client, monkeypatch):
 def test_chart_series_autofit_long_history(client):
     """有 30 天以上历史时：整段 30 天都画（左端顶到上限），不会无限回溯。"""
     from datetime import date, timedelta
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     db = appdb.SessionLocal()
     today = date(2026, 9, 28)
     for off in range(0, 45, 3):                    # 45 天里每 3 天一条
@@ -871,7 +872,7 @@ def test_chart_series_autofit_long_history(client):
         db.add(StaffDailyReport(person_code="P9", report_date=d, area="x",
                                 p1_cnt=1, p2_cnt=0, total_cnt=1))
     db.commit()
-    s = daily_report.chart_series(db, "P9", today=today)
+    s = report_chart.chart_series(db, "P9", today=today)
     # 数据最早在 27 天前 → 左端就从那天起（28 天铺满图宽）
     assert s["start"] == today - timedelta(days=27)
     assert s["span_days"] == 28 and s["filled"] == 10
@@ -880,7 +881,7 @@ def test_chart_series_autofit_long_history(client):
     db.add(StaffDailyReport(person_code="P9", report_date=today - timedelta(days=40),
                             area="x", p1_cnt=9, p2_cnt=9, total_cnt=18))
     db.commit()
-    s2 = daily_report.chart_series(db, "P9", today=today)
+    s2 = report_chart.chart_series(db, "P9", today=today)
     assert (s2["start"], s2["span_days"], s2["filled"]) == (
         s["start"], s["span_days"], s["filled"])
     assert s2["total"] == s["total"]                       # 40 天前那条不计
@@ -910,15 +911,15 @@ def test_available_periods_dedupe_and_file_coverage(client):
                                status="failed", summary={}, payload={}))
     db.commit()
     # 读接口只读物化表（不再懒补写）→ 显式给"最新的那份 9/16~9/17"落表
-    from app.services import daily_report as _dr
+    from app.services import daily_report, report_compare as _dr
     newest = (db.query(StaffReportAnalysis)
               .filter(StaffReportAnalysis.status == "done",
                       StaffReportAnalysis.period_start == date(2026, 9, 16),
                       StaffReportAnalysis.period_end == date(2026, 9, 17))
               .order_by(StaffReportAnalysis.id.desc()).first())
-    report_ai.materialize(db, newest.id,
+    report_store.materialize(db, newest.id,
                           _dr.compare(db, date(2026, 9, 16), date(2026, 9, 17)))
-    ps = report_ai.available_periods(db)
+    ps = report_store.available_periods(db)
     assert len(ps) == 1                                     # 去重 + 只留覆盖范围内的区间
     assert (ps[0].period_start, ps[0].period_end) == (date(2026, 9, 16), date(2026, 9, 17))
 
@@ -956,17 +957,17 @@ def test_import_period_is_strict(client):
                        stored_path="/tmp/e.xlsx", uploaded_by=1, status="parsed")
     db.add(empty)
     db.commit()
-    assert report_ai.import_period(db, empty.id) == (None, None)
+    assert report_store.import_period(db, empty.id) == (None, None)
     # 有正式记录的文件 → 该文件自己的范围（用现成的覆盖夹具）
     imp2 = _seed_coverage(db, date(2026, 9, 12), tag="has")
-    assert report_ai.import_period(db, imp2.id) == (date(2026, 9, 12), date(2026, 9, 12))
+    assert report_store.import_period(db, imp2.id) == (date(2026, 9, 12), date(2026, 9, 12))
 
 
 # ---------- 当天填报可修改 ----------
 
 def test_update_today_route(client):
     """当天填报可修改（区域/1点/2点），合计自动重算；页面出现「修改」按钮。"""
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     _seed_staff(client)
     csrf = _login_staff(client)
     client.post("/my/report", data={"_ft": form_token(client), "csrf_token": csrf, "area": "渋谷",
@@ -988,7 +989,7 @@ def test_update_today_route(client):
 def test_update_today_requires_existing_report(client):
     """没有当天记录 → NoReport（跨天不能被改：昨天那条今天改不了）。"""
     from datetime import timedelta
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     _seed_staff(client)
     db = appdb.SessionLocal()
     from app.models import User
@@ -1004,7 +1005,7 @@ def test_update_today_requires_existing_report(client):
 
 def test_update_today_validates_counts(client):
     """修改同样做 0..999 校验。"""
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     _seed_staff(client)
     db = appdb.SessionLocal()
     from app.models import User
@@ -1018,11 +1019,11 @@ def test_update_today_validates_counts(client):
 def test_chart_isolated_point_has_no_line_or_area(client):
     """孤立的一天（前后都断档）：只画点，不产生连线/面积（历史 bug：非法 path 报浏览器错误）。"""
     from datetime import date
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     s = _series([{"date": date(2026, 9, 1), "filled": False, "p1": 0, "p2": 0, "total": 0},
                  {"date": date(2026, 9, 2), "filled": True, "p1": 5, "p2": 2, "total": 7},
                  {"date": date(2026, 9, 3), "filled": False, "p1": 0, "p2": 0, "total": 0}])
-    g = daily_report.chart_geometry(s)
+    g = report_chart.chart_geometry(s)
     assert len(g["dots_p1"]) == 1                       # 点还在
     assert g["paths_p1"] == [] and g["areas_p1"] == []  # 连线和面积都为空
     assert g["paths_p2"] == [] and g["areas_p2"] == []

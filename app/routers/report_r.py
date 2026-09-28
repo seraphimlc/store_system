@@ -35,7 +35,7 @@ def my_report_page(request: Request,
     """员工填报页：今天还没填 → 表单；已填 → 只读展示；下方是本月历史。"""
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
-    from app.services import daily_report
+    from app.services import daily_report, report_compare, report_chart
     today = daily_report.jst_today()
     existing = daily_report.today_report(db, user.person_code)
     months = daily_report.my_months(db, user.person_code)
@@ -45,9 +45,9 @@ def my_report_page(request: Request,
     if not month or month not in months:
         month = this_month
     view = daily_report.month_days(db, user.person_code, month, today=today)
-    series = daily_report.chart_series(db, user.person_code, today=today)
+    series = report_chart.chart_series(db, user.person_code, today=today)
     chart = {"series": series,
-             "geo": daily_report.chart_geometry(series) if series["show"] else {}}
+             "geo": report_chart.chart_geometry(series) if series["show"] else {}}
 
     return templates.TemplateResponse("my_report.html", {
         "request": request, "current_user": user,
@@ -72,7 +72,7 @@ def my_report_submit(request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     try:
         daily_report.submit_report(db, user, area=area, p1_cnt=p1_cnt,
                                    p2_cnt=p2_cnt, client_ts=client_ts)
@@ -144,7 +144,7 @@ def my_report_update(request: Request,
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     try:
         daily_report.update_today(db, user, area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt)
         return RedirectResponse("/my/report", status_code=303)
@@ -163,13 +163,14 @@ def my_report_feedback(request: Request,
 
     评语只给管理员（2026-09-28 用户要求）；这里也从不把报告 payload 交给模板。
     """
+    from app.services import report_store
     if user is None or user.role != "staff" or not user.person_code:
         return _denied()
     from app.models import StaffReportAnalysis
     from app.services import report_ai
     from app.services import perf as _perf
     svf = _perf.staff_visible_from(db)          # 员工可见起始月（默认 2026-10）
-    done = [a for a in report_ai.available_periods(db, user.person_code)
+    done = [a for a in report_store.available_periods(db, user.person_code)
             if not svf or str(a.period_start)[:7] >= svf]
     analysis = None
     if aid:
@@ -180,8 +181,7 @@ def my_report_feedback(request: Request,
             analysis = None                     # 不在可见窗口内 → 当作没指定
     if analysis is None and done:
         analysis = done[0]
-    from app.services import report_ai as _rai
-    snap = _rai.employee_snapshot(db, analysis, user.person_code)
+    snap = report_store.employee_snapshot(db, analysis, user.person_code)
     return templates.TemplateResponse("my_report_feedback.html", {
         "request": request, "current_user": user, "analysis": analysis,
         "periods": done, "aid": aid, "mine": snap["person"],
@@ -209,8 +209,8 @@ def _as_date(s, default):
 
 def _resolved_period(db, start, end):
     """未传/非法 → 取「最近一次上传文件」的日期范围。"""
-    from app.services import daily_report
-    d1, d2 = daily_report.suggest_period(db)
+    from app.services import daily_report, report_compare
+    d1, d2 = report_compare.suggest_period(db)
     a, b = _as_date(start, d1), _as_date(end, d2)
     return (b, a) if a > b else (a, b)
 
@@ -232,9 +232,9 @@ def staff_reports_page(request: Request,
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import daily_report
+    from app.services import daily_report, report_compare
     s, e = _resolved_period(db, start, end)
-    data = daily_report.list_reports(db, start=s, end=e, person_code=person_code,
+    data = report_compare.list_reports(db, start=s, end=e, person_code=person_code,
                                      page=page, per=50)
     from app.models import Person
     names = dict(db.query(Person.code, Person.display_name).all())
@@ -256,14 +256,14 @@ def staff_reports_compare(request: Request,
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import daily_report
+    from app.services import daily_report, report_compare, report_store
     s, e = _resolved_period(db, start, end)
-    res = daily_report.compare(db, s, e, person_code, sort=sort)
+    res = report_compare.compare(db, s, e, person_code, sort=sort)
     daily = [r for r in res["daily"] if not kind or r["kind"] == kind]
     from app.i18n import CURRENT_LANG
     from app.services import report_ai
     analysis = report_ai.latest_for(db, s, e)
-    cov_start, cov_end = report_ai.file_coverage(db)
+    cov_start, cov_end = report_store.file_coverage(db)
     coverage_warn = ""
     if cov_end and e > cov_end:
         coverage_warn = ("该区间的结束日（%s）超出已导入文件的覆盖范围（最后一天 %s），"
