@@ -427,7 +427,7 @@ def test_my_report_page_chart_visibility(client):
     _login_staff(client)
     html = client.get("/my/report").text
     assert 'data-testid="trend-svg"' not in html          # 才 1 天 → 不给图
-    assert 'data-testid="trend-hint"' in html
+    assert 'data-testid="trend-card"' not in html        # 也不给任何提示（用户要求不加解释文案）
     for off in (1, 2):
         db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=off),
                                 area="x", p1_cnt=2, p2_cnt=1, total_cnt=3))

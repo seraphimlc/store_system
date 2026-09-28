@@ -88,11 +88,8 @@
           font-size="9.5" fill="#8a93a8">{{ tk.label }}</text>{% endfor %}
   </svg>
 </div>
-{% elif chart and chart.series.filled > 0 %}
-<div class="hint" style="margin-top:1.2rem" data-testid="trend-hint">
-  {{ t('报满 3 天后这里显示最近 30 天的趋势曲线（当前已填报') }} {{ chart.series.filled }} {{ t('天') }}）。
-</div>
 {% endif %}
+
 <div class="page-title" style="margin-top:1.2rem">
   <h1 style="font-size:1.05rem;margin:0">{{ t('我的填报历史') }}（{{ month }}）</h1>
   <div class="actions">
