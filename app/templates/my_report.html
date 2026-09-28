@@ -7,41 +7,50 @@
 
 {% set _p1 = existing.p1_cnt if existing else 0 %}
 {% set _p2 = existing.p2_cnt if existing else 0 %}
-<div class="card" data-testid="today-card" x-data="{ edit: {{ 'false' if existing else 'true' }},
-                                                    p1: '{{ _p1 }}', p2: '{{ _p2 }}' }">
-  <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+<div class="card" data-testid="today-card"
+     x-data="{ edit: {{ 'false' if existing else 'true' }}, p1: '{{ _p1 }}', p2: '{{ _p2 }}' }">
+  <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.2rem">
     <h2 style="font-size:1rem;margin:0">{{ today }}</h2>
-    {% if existing %}<span class="today-line" data-testid="today-summary">
-      {% if existing.area %}<span class="area">{{ existing.area }}</span>{% endif %}
-      <span><i>{{ t('1点') }}</i>{{ existing.p1_cnt }}</span>
-      <span><i>{{ t('2点') }}</i>{{ existing.p2_cnt }}</span>
-      <span><i>{{ t('合计') }}</i><b>{{ existing.total_cnt }}</b></span>
-    </span>
+    {% if existing %}
     <button class="btn ghost" type="button" style="padding:.15rem .7rem;margin-left:auto"
             @click="edit = !edit" x-show="!edit" data-testid="edit-report">{{ t('修改') }}</button>
     {% endif %}
   </div>
+
+  {% if existing %}
+  <table class="kv" data-testid="today-summary" x-show="!edit">
+    {% if existing.area %}<tr><th>{{ t('担当区域') }}</th><td>{{ existing.area }}</td></tr>{% endif %}
+    <tr><th>{{ t('1点店铺数') }}</th><td>{{ existing.p1_cnt }}</td></tr>
+    <tr><th>{{ t('2点店铺数') }}</th><td>{{ existing.p2_cnt }}</td></tr>
+    <tr class="tot"><th>{{ t('合计') }}</th><td>{{ existing.total_cnt }}</td></tr>
+  </table>
+  {% endif %}
+
   <form method="post" action="{{ '/my/report/update' if existing else '/my/report' }}"
         x-show="edit" x-cloak>
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-    <div class="form-grid" style="margin-top:.5rem">
-      <label class="fld fld-wide">{{ t('担当区域') }}
-        <input type="text" name="area" maxlength="64" autocomplete="off"
-               value="{{ existing.area if existing else '' }}"></label>
-      <label class="fld">{{ t('1点店铺数') }}
-        <input type="text" name="p1_cnt" inputmode="numeric" pattern="[0-9]*"
-               value="{{ _p1 }}" x-model="p1" autocomplete="off" data-testid="p1"></label>
-      <label class="fld">{{ t('2点店铺数') }}
-        <input type="text" name="p2_cnt" inputmode="numeric" pattern="[0-9]*"
-               value="{{ _p2 }}" x-model="p2" autocomplete="off" data-testid="p2"></label>
-    </div>
-    <div class="form-actions">
-      <span class="hint">{{ t('合计') }}：<b class="big-num"
-        x-text="(parseInt(p1 || 0, 10) || 0) + (parseInt(p2 || 0, 10) || 0)"></b></span>
+    <table class="kv">
+      <tr><th><label for="area">{{ t('担当区域') }}</label></th>
+          <td><input type="text" name="area" id="area" maxlength="64" autocomplete="off"
+                     value="{{ existing.area if existing else '' }}"></td></tr>
+      <tr><th><label for="p1_cnt">{{ t('1点店铺数') }}</label></th>
+          <td><input type="text" name="p1_cnt" id="p1_cnt" inputmode="numeric"
+                     pattern="[0-9]*" value="{{ _p1 }}" x-model="p1" autocomplete="off"
+                     data-testid="p1"></td></tr>
+      <tr><th><label for="p2_cnt">{{ t('2点店铺数') }}</label></th>
+          <td><input type="text" name="p2_cnt" id="p2_cnt" inputmode="numeric"
+                     pattern="[0-9]*" value="{{ _p2 }}" x-model="p2" autocomplete="off"
+                     data-testid="p2"></td></tr>
+      <tr class="tot"><th>{{ t('合计') }}</th>
+          <td x-text="(parseInt(p1 || 0, 10) || 0) + (parseInt(p2 || 0, 10) || 0)"></td></tr>
+    </table>
+    <div class="form-actions" style="margin-top:.7rem">
       <button class="btn" type="submit"
               data-testid="{{ 'save-report' if existing else 'submit-report' }}">{{ t('保存') if existing else t('提交填报') }}</button>
       {% if existing %}<button class="btn ghost" type="button" @click="edit = false">{{ t('取消') }}</button>{% endif %}
     </div>
+  </form>
+</div>
   </form>
 </div>
 
