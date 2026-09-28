@@ -5,6 +5,8 @@
 """
 from datetime import date
 
+import re
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -317,7 +319,7 @@ def test_month_days_historical_month_is_full(client):
 
 
 def test_my_report_page_shows_gap_rows(client):
-    """页面把没填报的日子显示为「未填报」。"""
+    """页面列出整月逐日（未填报的显示 —，日期带星期括号标注）。"""
     from datetime import date, timedelta
     from app.services import daily_report
     db = appdb.SessionLocal()
@@ -328,8 +330,19 @@ def test_my_report_page_shows_gap_rows(client):
                                 area="渋谷", p1_cnt=2, p2_cnt=1, total_cnt=3))
         db.commit()
     _login_staff(client)
+    # 状态列已去掉（用户要求）：未填报靠"—"区分；日期与星期合并成一列（星期进括号）
     html = client.get("/my/report").text
-    assert "未填报" in html
+    assert "未填报" not in html and ">状态<" not in html and ">星期<" not in html
+    wd_set = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+    if today.day >= 2:                                   # 昨天那条：日期带（周X）
+        yest = today - timedelta(days=1)
+        m = re.search(r'>%s<span class="hint">（([^）]+)）</span></td>'
+                      % yest.isoformat(), html)
+        assert m and m.group(1) in wd_set, "日期与星期应合并成一列"
+        # 今天还没填报 → 数字列是 —
+        m2 = re.search(r'>%s<span class="hint">（[^）]+）</span></td>(?:\s*<td[^>]*>[^<]*</td>){3}'
+                       % today.isoformat(), html)
+        assert m2, "今天应有逐日行（未填报 → 数字为 —）"
     assert "本月合计" in html
     if today.day >= 2:
         assert "已填报" in html
