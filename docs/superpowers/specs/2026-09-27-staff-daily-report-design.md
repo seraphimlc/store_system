@@ -219,10 +219,18 @@ def person_block(analysis, person_code, lang) -> dict          # 员工端取本
 |---|---|---|
 | **员工编号** | **是** | 即文件里的 `submitter_code`（如 `2188240626279038`）。**必须与文件完全一致**，否则会被当成两个人 |
 | 姓名 | 是 | 写入 `Person.display_name`；文件里同编号存在时**以系统里的为准**（导入只用不覆盖） |
-| 登录名 | 否 | 留空 → 复用 `login_names.login_name_for`（模型优先生成拼音/罗马字，失败回退规则），并做唯一性处理 |
+| 登录名 | 否 | **输入姓名后由 AI 自动生成并回填**（可手改）；留空提交则服务端再生成一次。见下「登录名生成」 |
 | 初始口令 | 否 | 留空 → 系统默认初始口令，且 `must_change_password=True`（首登强制改密） |
 
 **写入**：`Person(code=编号, display_name=姓名, first_seen_import_id=None)` + `User(role="staff", person_code=编号, status="active", is_active=True, must_change_password=True)`。
+
+**登录名生成（复用现有能力，不新造）**
+- **交互**：姓名输入框**失焦（或点「AI 生成」按钮）** → 调 `POST /staff-admin/suggest-username`（admin 专属）→ 回填登录名；旁边给一个「重新生成」。输入姓名后 800ms 防抖，避免打多字时连发。
+- **后端**：`ai_login_candidates([姓名])` 拿模型候选（中文→拼音 / 日文→罗马字 / 英文→原名清洗）→ `suggest_username()` 清洗 → `unique_username()` **自动去重**（同名的人加后缀）→ 返回 `{"username": "...", "source": "ai"|"rule"}`。
+- **降级**：模型未配置 / 调用失败 / 返回不合法 → 自动回退**规则拼音或编号**（现有 `login_name_for` 就是这个行为）；页面按 `source` 提示「AI 未启用，已用规则生成」。
+- **可手改**：生成结果只是**建议**，管理员可任意改；提交时若为空则服务端再生成一次（保证一定有值）。
+- **缓存**：现有 `ai_login_candidates` 按姓名在**进程内缓存**——同名员工会拿到同一个候选，随后由去重逻辑加后缀（预期行为，不算 bug）。
+- **消耗**：一次几十到一百 token，可忽略；但它是"建号即用 AI"的一个自然触点。
 
 **校验**
 1. 编号必填；**NFKC 归一 + 去首尾空白**（与文件写入口径一致，避免全角/空格导致"看起来一样但匹配不上"）；长度 ≤ 32（`Person.code` 是 String(32)）。
