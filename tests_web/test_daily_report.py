@@ -396,3 +396,178 @@ def test_my_report_page_chart_visibility(client):
     html2 = client.get("/my/report").text
     assert 'data-testid="trend-svg"' in html2
     assert "polyline" in html2
+
+
+# ---------- Chunk 4：对比与准确率 ----------
+
+def _seed_sys(db, code, day, p1, p2):
+    from app.models import PersonDailyStat
+    db.add(PersonDailyStat(person_code=code, ref_date=day, records=p1 + p2,
+                           p1=p1, p2=p2, points=p1 + 2 * p2))
+
+
+def test_compare_three_kinds_and_direction(client):
+    """三类：both / 系统有员工没报 / 员工报了系统没有；Δ = 系统 − 自报（>0 少报）。"""
+    from datetime import date
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    db.add(Person(code="P1", display_name="甲"))
+    _seed_sys(db, "P1", date(2026, 9, 16), 4, 2)      # 与自报相同 → 一致
+    _seed_sys(db, "P1", date(2026, 9, 17), 5, 0)      # 自报 2 → 少报 3
+    _seed_sys(db, "P1", date(2026, 9, 18), 1, 0)      # 员工没报 → 漏填报
+    for d, p1, p2 in ((date(2026, 9, 16), 4, 2), (date(2026, 9, 17), 2, 0),
+                      (date(2026, 9, 19), 3, 1)):     # 19 号系统没有 → 自报无记录
+        db.add(StaffDailyReport(person_code="P1", report_date=d, area="渋谷",
+                                p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2))
+    db.commit()
+    res = daily_report.compare(db, date(2026, 9, 16), date(2026, 9, 19))
+    c = res["counts"]
+    assert c["both"] == 2 and c["missing_report"] == 1 and c["missing_system"] == 1
+    p = res["persons"][0]
+    assert (p["sys_total"], p["rep_total"]) == (4 + 2 + 5 + 1, 6 + 2 + 4) == (12, 12)
+    assert p["days_system"] == 3 and p["days_filled"] == 3
+    assert p["gaps"] == 1                               # 18 号应填未填
+    assert p["both_consistent"] == 1                    # 16 号一致
+    row17 = [r for r in res["daily"] if r["date"] == date(2026, 9, 17)][0]
+    assert row17["kind"] == "both" and row17["dt"] == 3   # 系统5 − 自报2 = +3（少报）
+    assert res["summary"]["matched_cnt"] == 2
+    assert res["summary"]["consistent_cnt"] == 1
+
+
+def test_accuracy_does_not_offset(client):
+    """**准确率不抵消**：+5 与 −5 两天，净差为 0，但准确率必须 < 1。"""
+    from datetime import date
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    db.add(Person(code="P2", display_name="乙"))
+    _seed_sys(db, "P2", date(2026, 9, 20), 10, 0)       # 自报 5 → 少报 5
+    _seed_sys(db, "P2", date(2026, 9, 21), 5, 0)         # 自报 10 → 多报 5
+    db.add(StaffDailyReport(person_code="P2", report_date=date(2026, 9, 20),
+                            area="x", p1_cnt=5, p2_cnt=0, total_cnt=5))
+    db.add(StaffDailyReport(person_code="P2", report_date=date(2026, 9, 21),
+                            area="x", p1_cnt=10, p2_cnt=0, total_cnt=10))
+    db.commit()
+    res = daily_report.compare(db, date(2026, 9, 20), date(2026, 9, 21))
+    p = res["persons"][0]
+    assert p["d_total"] == 0                             # 净差为 0（会骗人的口径）
+    assert p["abs_dt"] == 10                             # Σ|Δ| = 10（真相）
+    assert abs(p["acc"] - (1 - 10 / 15)) < 1e-9          # 1 − 10/15 ≈ 0.333
+    assert p["acc"] < 1.0
+
+
+def test_accuracy_excludes_missing_report(client):
+    """漏填报不计入准确率（单独算已填/应填），避免"忘了填"和"报不准"混为一谈。"""
+    from datetime import date
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    db.add(Person(code="P3", display_name="丙"))
+    _seed_sys(db, "P3", date(2026, 9, 22), 3, 0)
+    _seed_sys(db, "P3", date(2026, 9, 23), 100, 0)       # 这天员工没报
+    db.add(StaffDailyReport(person_code="P3", report_date=date(2026, 9, 22),
+                            area="x", p1_cnt=3, p2_cnt=0, total_cnt=3))
+    db.commit()
+    res = daily_report.compare(db, date(2026, 9, 22), date(2026, 9, 23))
+    p = res["persons"][0]
+    assert p["acc"] == 1.0                               # 只有一个对照日，完全一致
+    assert p["gaps"] == 1 and p["days_system"] == 2 and p["days_filled"] == 1
+
+
+def test_compare_skips_persons_with_no_data_either_side(client):
+    """两侧都没数据的身份不进报告（历史遗留账号不产生噪音行）。"""
+    from datetime import date
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    db.add(Person(code="GHOST", display_name="幽灵"))
+    _seed_sys(db, "P1", date(2026, 9, 24), 1, 0)
+    db.commit()
+    res = daily_report.compare(db, date(2026, 9, 24), date(2026, 9, 24))
+    assert [p["person_code"] for p in res["persons"]] == ["P1"]
+
+
+def test_suggest_period_uses_latest_import_range(client):
+    """默认区间 = 最近一次上传文件在正式表里的日期范围。"""
+    from datetime import date
+    from app.models import FormalRecord, ImportFile, RawRecord
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    imp = ImportFile(file_name="t.xlsx", file_sha256="sha-sp", file_size=1,
+                     stored_path="/tmp/t.xlsx", uploaded_by=1, status="parsed")
+    db.add(imp)
+    db.commit()
+    raws = []
+    for i, d in enumerate((date(2026, 9, 16), date(2026, 9, 30))):
+        raw = RawRecord(import_id=imp.id, sheet_name="s", excel_row=2 + i,
+                        store_id_raw="S%d" % (i + 1), submitter_raw="甲(1)",
+                        submitter_code="1")
+        db.add(raw)
+        db.commit()
+        raws.append((raw, d))
+    for raw, d in raws:                     # raw_record_id 唯一 → 一条 raw 一条正式记录
+        db.add(FormalRecord(import_id=imp.id, raw_record_id=raw.id, person_code="1",
+                            store_id_raw=raw.store_id_raw, japan_date=d, points=1))
+    db.commit()
+    assert daily_report.suggest_period(db) == (date(2026, 9, 16), date(2026, 9, 30))
+
+
+# ---------- Chunk 4：管理端页面与导出 ----------
+
+def _seed_admin_staff_and_data(client):
+    from datetime import date
+    _seed_admin(client)
+    db = appdb.SessionLocal()
+    if db.get(Person, "P1") is None:
+        db.add(Person(code="P1", display_name="甲"))
+    _seed_sys(db, "P1", date(2026, 9, 16), 4, 2)
+    _seed_sys(db, "P1", date(2026, 9, 17), 5, 0)
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 9, 16),
+                            area="渋谷", p1_cnt=4, p2_cnt=2, total_cnt=6))
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 9, 17),
+                            area="新宿", p1_cnt=2, p2_cnt=0, total_cnt=2))
+    db.commit()
+    db.close()
+
+
+def test_admin_reports_and_compare_pages(client):
+    """管理端列表页与对比页可访问，含关键数字与三类计数。"""
+    _seed_admin_staff_and_data(client)
+    _login_admin(client)
+    r = client.get("/staff-reports?start=2026-09-16&end=2026-09-17")
+    assert r.status_code == 200
+    assert "自报条数" in r.text and "渋谷" in r.text and "新宿" in r.text
+    assert "P1" in r.text          # 员工编号列必须有值（_row_dict 漏字段时这里会挂）
+    c = client.get("/staff-reports/compare?start=2026-09-16&end=2026-09-17")
+    assert c.status_code == 200
+    assert "准确率" in c.text and "应填未填" in c.text
+    # 16 号一致(Δ0)、17 号系统 5 / 自报 2 → Δ=+3；Σ|Δ|=3，Σ系统=6+5=11
+    # 准确率 = 1 − 3/11 ≈ 72.7%（用绝对值之和，不抵消）
+    assert "72.7%" in c.text
+
+
+def test_admin_pages_forbidden_for_staff(client):
+    """员工身份不能访问管理端填报/对比页。"""
+    _seed_staff(client)
+    _login_staff(client)
+    for path in ("/staff-reports", "/staff-reports/compare",
+                 "/staff-reports/export?kind=compare"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code in (302, 307), path
+
+
+def test_export_xlsx_both_kinds(client):
+    """两个导出都能生成合法 xlsx（openpyxl 可打开）且表头正确。"""
+    import io as _io
+
+    from openpyxl import load_workbook
+    _seed_admin_staff_and_data(client)
+    _login_admin(client)
+    r = client.get("/staff-reports/export?kind=reports&start=2026-09-16&end=2026-09-17")
+    assert r.status_code == 200
+    wb = load_workbook(_io.BytesIO(r.content))
+    ws = wb.active
+    assert [c.value for c in ws[1]][:5] == ["日期", "员工编号", "姓名", "担当区域", "1点店铺数"]
+    assert ws.max_row == 3                                  # 表头 + 2 条自报
+    r2 = client.get("/staff-reports/export?kind=compare&start=2026-09-16&end=2026-09-17")
+    assert r2.status_code == 200
+    wb2 = load_workbook(_io.BytesIO(r2.content))
+    assert wb2.sheetnames[:3] == ["对比(按人)", "对比(逐日)", "汇总"]
+    assert "准确率%" in [c.value for c in wb2["对比(按人)"][1]]

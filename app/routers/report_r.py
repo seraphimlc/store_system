@@ -82,3 +82,109 @@ def my_report_submit(request: Request,
     except ValueError as e:  # noqa: BLE001
         return RedirectResponse("/my/report?err=" + quote(str(e)),
                                 status_code=303)
+
+
+# ---------------- 管理端：填报列表 + 对比 + 导出（规格 §9） ----------------
+
+def _admin_guard(user):
+    if user is None:
+        return RedirectResponse("/login", status_code=302)
+    if user.role != "admin":
+        return RedirectResponse("/my/perf", status_code=302)
+    return None
+
+
+def _as_date(s, default):
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime((s or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return default
+
+
+def _resolved_period(db, start, end):
+    """未传/非法 → 取「最近一次上传文件」的日期范围。"""
+    from app.services import daily_report
+    d1, d2 = daily_report.suggest_period(db)
+    a, b = _as_date(start, d1), _as_date(end, d2)
+    return (b, a) if a > b else (a, b)
+
+
+def _staff_options(db):
+    from app.models import Person
+    rows = (db.query(Person.code, Person.display_name)
+            .order_by(Person.display_name).all())
+    return [{"code": c, "name": n or c} for c, n in rows]
+
+
+@router.get("/staff-reports", response_class=HTMLResponse)
+def staff_reports_page(request: Request,
+                       user: Optional[User] = Depends(require_login),
+                       db: Session = Depends(get_db), start: str = "", end: str = "",
+                       person_code: str = "", page: int = 1,
+                       msg: str = "", err: str = ""):
+    """员工每日填报列表（可按区间/人筛选）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    from app.services import daily_report
+    s, e = _resolved_period(db, start, end)
+    data = daily_report.list_reports(db, start=s, end=e, person_code=person_code,
+                                     page=page, per=50)
+    from app.models import Person
+    names = dict(db.query(Person.code, Person.display_name).all())
+    return templates.TemplateResponse("staff_reports.html", {
+        "request": request, "current_user": user, "data": data,
+        "start": s, "end": e, "person_code": person_code,
+        "names": names, "staff_opts": _staff_options(db), "msg": msg, "err": err,
+        "jst_delta": timedelta(hours=9),
+    })
+
+
+@router.get("/staff-reports/compare", response_class=HTMLResponse)
+def staff_reports_compare(request: Request,
+                          user: Optional[User] = Depends(require_login),
+                          db: Session = Depends(get_db), start: str = "", end: str = "",
+                          person_code: str = "", sort: str = "acc", kind: str = "",
+                          msg: str = "", err: str = ""):
+    """区间对比：逐人合计 + 准确率排名 + 逐日明细（程序算；模型不参与）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    from app.services import daily_report
+    s, e = _resolved_period(db, start, end)
+    res = daily_report.compare(db, s, e, person_code, sort=sort)
+    daily = [r for r in res["daily"] if not kind or r["kind"] == kind]
+    return templates.TemplateResponse("staff_report_compare.html", {
+        "request": request, "current_user": user, "res": res, "daily": daily,
+        "start": s, "end": e, "person_code": person_code, "sort": sort, "kind": kind,
+        "staff_opts": _staff_options(db), "msg": msg, "err": err,
+    })
+
+
+@router.get("/staff-reports/export")
+def staff_reports_export(user: Optional[User] = Depends(require_login),
+                         db: Session = Depends(get_db), kind: str = "reports",
+                         start: str = "", end: str = "", person_code: str = ""):
+    """导出 Excel：kind=reports（自报明细）| compare（对比结果）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    import io as _io
+    from urllib.parse import quote as _q
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services import report_export
+    s, e = _resolved_period(db, start, end)
+    if kind == "compare":
+        data, fname = report_export.compare_xlsx(db, s, e, person_code)
+    else:
+        data, fname = report_export.reports_xlsx(db, s, e, person_code)
+    cd = ("attachment; filename=staff_%s.xlsx; filename*=UTF-8''%s"
+          % (kind, _q(fname)))
+    return StreamingResponse(
+        _io.BytesIO(data),
+        media_type=("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+        headers={"Content-Disposition": cd})

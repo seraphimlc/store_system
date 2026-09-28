@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ t('填报与对比') }}{% endblock %}
+{% block content %}
+<div class="page-title"><h1>{{ t('自报 vs 系统（对比）') }}</h1>
+  <span class="sub">{{ t('系统侧 = 上传文件跑出的结果（只读）；自报侧 = 员工每日填报。所有数字由程序计算：Δ = 系统 − 自报（正=少报，负=多报）；准确率 = 1 − Σ|Δ| ÷ Σ系统（用绝对值之和，不抵消）；漏填报不计入准确率，单独看「应填未填」。') }}</span></div>
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/staff-reports/compare" class="form-grid">
+    <label class="fld">{{ t('起') }}<input type="date" name="start" value="{{ start }}"></label>
+    <label class="fld">{{ t('止') }}<input type="date" name="end" value="{{ end }}"></label>
+    <label class="fld">{{ t('员工') }}
+      <select name="person_code">
+        <option value="">{{ t('全部') }}</option>
+        {% for s in staff_opts %}
+        <option value="{{ s.code }}" {% if s.code == person_code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
+        {% endfor %}
+      </select></label>
+    <label class="fld">{{ t('排序') }}
+      <select name="sort">
+        <option value="acc" {% if sort == 'acc' %}selected{% endif %}>{{ t('最不准在前') }}</option>
+        <option value="abs" {% if sort == 'abs' %}selected{% endif %}>{{ t('偏差最大在前') }}</option>
+      </select></label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit">{{ t('查询') }}</button>
+      <a class="btn ghost" href="/staff-reports?start={{ start }}&end={{ end }}">{{ t('看填报列表') }}</a>
+      <a class="btn ghost" href="/staff-reports/export?kind=compare&start={{ start }}&end={{ end }}&person_code={{ person_code }}">{{ t('导出对比结果') }}</a>
+    </div>
+  </form>
+</div>
+
+<div class="stat-grid" style="margin-bottom:.8rem">
+  <div class="stat-card hl"><p class="k">{{ t('自报条数') }}</p><p class="v">{{ res.summary.checkin_cnt }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('系统条数') }}</p><p class="v">{{ res.summary.formal_cnt }}</p></div>
+  <div class="stat-card okk"><p class="k">{{ t('两侧都有（可对照）') }}</p><p class="v">{{ res.summary.matched_cnt }}</p></div>
+  <div class="stat-card okk"><p class="k">{{ t('完全一致') }}</p><p class="v">{{ res.summary.consistent_cnt }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('一致率') }}</p>
+    <p class="v">{% if res.summary.consistent_rate is none %}—{% else %}{{ (res.summary.consistent_rate * 100) | round(1) }}%{% endif %}</p></div>
+  <div class="stat-card warnk"><p class="k">{{ t('系统有 / 未报') }}</p><p class="v">{{ res.counts.missing_report }}</p></div>
+  <div class="stat-card errk"><p class="k">{{ t('自报有 / 系统无') }}</p><p class="v">{{ res.counts.missing_system }}</p></div>
+  <div class="stat-card"><p class="k">{{ t('涉及员工') }}</p><p class="v">{{ res.summary.persons }}</p></div>
+</div>
+
+<div class="tbl-wrap" style="margin-bottom:1rem"><table class="grid-tbl" data-testid="compare-persons">
+  <tr><th>{{ t('员工') }}</th><th>{{ t('系统合计') }}</th><th>{{ t('自报合计') }}</th>
+      <th>Δ{{ t('合计') }}</th><th>Δ{{ t('1点店铺数') }}</th><th>Δ{{ t('2点店铺数') }}</th>
+      <th>{{ t('准确率') }}</th><th>{{ t('已报天数') }}</th><th>{{ t('应填未填') }}</th></tr>
+  {% for p in res.persons %}
+  <tr>
+    <td>{{ p.name }}<div class="hint">{{ p.person_code }}</div></td>
+    <td class="num">{{ p.sys_total }}<div class="hint">{{ p.sys_p1 }} / {{ p.sys_p2 }}</div></td>
+    <td class="num">{{ p.rep_total }}<div class="hint">{{ p.rep_p1 }} / {{ p.rep_p2 }}</div></td>
+    <td class="num" style="color:{% if p.d_total > 0 %}var(--warn){% elif p.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % p.d_total }}</td>
+    <td class="num">{{ '%+d' % p.d1 }}</td>
+    <td class="num">{{ '%+d' % p.d2 }}</td>
+    <td class="num">{% if p.acc is none %}—{% else %}<b style="color:{% if p.acc >= 0.95 %}var(--ok){% elif p.acc >= 0.8 %}var(--warn){% else %}var(--err){% endif %}">{{ (p.acc * 100) | round(1) }}%</b>{% endif %}</td>
+    <td class="num">{{ p.days_filled }} / {{ p.days_system }}</td>
+    <td class="num">{% if p.gaps %}<span class="pill err">{{ p.gaps }}</span>{% else %}0{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="9" class="empty">{{ t('该区间没有可对比的数据（先上传并判定文件）') }}</td></tr>{% endfor %}
+</table></div>
+
+<div class="page-title"><h1 style="font-size:1.05rem;margin:0">{{ t('逐日明细') }}</h1>
+  <div class="actions">
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=">{{ t('全部') }}</a>
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=both">{{ t('仅两侧都有') }}</a>
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=missing_report">{{ t('仅未报') }}</a>
+    <a class="btn ghost" style="padding:.15rem .6rem" href="/staff-reports/compare?start={{ start }}&end={{ end }}&person_code={{ person_code }}&kind=missing_system">{{ t('仅系统无') }}</a>
+  </div>
+</div>
+<div class="tbl-wrap"><table class="grid-tbl" data-testid="compare-daily">
+  <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('类型') }}</th>
+      <th>{{ t('系统') }}（1/2）</th><th>{{ t('自报') }}（1/2）</th><th>Δ{{ t('合计') }}</th></tr>
+  {% for r in daily %}
+  <tr>
+    <td>{{ r.date }}</td>
+    <td>{{ r.name }}</td>
+    <td>{% if r.kind == 'both' %}<span class="pill ok">{{ t('两侧都有') }}</span>
+        {% elif r.kind == 'missing_report' %}<span class="pill warn">{{ t('系统有 / 未报') }}</span>
+        {% else %}<span class="pill err">{{ t('自报有 / 系统无') }}</span>{% endif %}</td>
+    <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
+    <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
+    <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="empty">{{ t('没有符合条件的明细') }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}
