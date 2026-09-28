@@ -3,7 +3,6 @@
 from datetime import date as _date
 from collections import defaultdict
 
-from app.db import get_db  # noqa: F401
 from app.models import FormalRecord, Person, RawRecord
 
 # 全局薪资规则（确认口径）：每点 250 円；奖金「每满 bonus_group 点奖 bonus_amount 円」。

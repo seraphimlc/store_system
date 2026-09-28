@@ -10,7 +10,6 @@
 """
 import re
 import unicodedata
-from typing import Optional
 
 from app.models import Person, User
 

@@ -13,7 +13,7 @@ import json
 import threading
 from datetime import datetime, timedelta
 
-from app.models import StaffReportAnalysis, StaffDailyReport  # noqa: F401
+from app.models import StaffReportAnalysis
 
 
 class ReportAIError(Exception):
@@ -303,15 +303,6 @@ def retry(db, analysis_id: int):
     db.commit()
     threading.Thread(target=run_analysis, args=(a.id,), daemon=True).start()
     return a, "已重新开始生成"
-
-
-def latest_done(db, start=None, end=None):
-    q = db.query(StaffReportAnalysis).filter(StaffReportAnalysis.status == "done")
-    if start:
-        q = q.filter(StaffReportAnalysis.period_start == start)
-    if end:
-        q = q.filter(StaffReportAnalysis.period_end == end)
-    return q.order_by(StaffReportAnalysis.id.desc()).first()
 
 
 def materialize(db, analysis_id: int, res: dict) -> int:

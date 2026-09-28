@@ -15,8 +15,7 @@
   <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
           :aria-expanded="menu ? 'true' : 'false'">☰</button>
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
-  {% if current_user.role == 'staff' %}
-  {% else %}
+  {% if current_user.role != 'staff' %}
   <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
   <a class="nav" href="/files"><b>{{ t('文件上传') }}</b></a>
   <a class="nav" href="/perf"><b>{{ t('绩效工资') }}</b></a>

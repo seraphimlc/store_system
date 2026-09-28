@@ -226,7 +226,6 @@ input[type=number] { border: 1px solid var(--line); border-radius: 7px;
   .form-grid .fld input, .form-grid .fld select { padding: .6rem .7rem; font-size: 1rem; }
   .form-actions .btn { width: 100%; text-align: center; padding: .7rem; }
 }
-.big-num { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---------- 员工端底部 Tab（主要导航；顶栏只留次要项） ---------- */
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;

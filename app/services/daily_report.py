@@ -115,21 +115,6 @@ def _row_dict(r: StaffDailyReport) -> dict:
             "source": r.source}
 
 
-def my_reports(db, person_code: str, *, month: str = "", limit: int = 60) -> list:
-    """我的填报历史（倒序）。month='YYYY-MM' 时只取该月。"""
-    q = db.query(StaffDailyReport).filter(
-        StaffDailyReport.person_code == person_code)
-    if month:
-        y, m = month.split("-")
-        start = date(int(y), int(m), 1)
-        end = date(int(y) + (1 if int(m) == 12 else 0),
-                   1 if int(m) == 12 else int(m) + 1, 1)
-        q = q.filter(StaffDailyReport.report_date >= start,
-                     StaffDailyReport.report_date < end)
-    rows = q.order_by(StaffDailyReport.report_date.desc()).limit(limit).all()
-    return [_row_dict(r) for r in rows]
-
-
 CHART_DAYS = 30          # 趋势窗口
 CHART_MIN_FILLED = 3     # 少于这么多天就不给图（规格：太少了不给）
 CHART_MIN_SPAN = 7       # 横轴最少铺开的天数（数据太少时避免一条陡线）

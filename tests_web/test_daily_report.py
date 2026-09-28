@@ -775,7 +775,6 @@ def test_analysis_bad_json_fails_but_summary_kept(client, monkeypatch):
     assert a.status == "failed" and a.ai_error
     assert a.payload["by_lang"] == {}
     assert a.summary["checkin_cnt"] == 3                     # 数字照常在
-    assert report_ai.latest_done(db) is None
 
 
 def test_analysis_disabled_by_env(client, monkeypatch):

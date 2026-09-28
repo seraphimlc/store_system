@@ -76,8 +76,10 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   **准确率 = 1 − Σ|Δ| ÷ Σ系统**（用绝对值之和，**多报少报不抵消**）；
   **漏填报不计入准确率**，单独算「应填未填」= **系统当天有数据但员工没报**的天数；
   两侧都没数据的身份不进报告。
-- **报告双视角**：管理端看全员 + 「建议核实清单」；**员工端 `/my/report/feedback` 只看自己**
-  （`report_ai.person_block()` 服务端裁剪，**不含他人数据、不含追问清单**）。
+- **报告双视角**：管理端看全员 + 「建议核实清单」；**员工端 `/my/report/feedback` 只看自己**，
+  且**只给数字**（准确率 + 逐日 Δ，2026-09-28 用户明确"评语给管理员就行"）——
+  数据来自物化表 `staff_report_compare_person/day`（读接口只读，服务端按 `person_code` 过滤，
+  payload 从不进模板）。
 - **报告双语**：管理端中文、员工端日文（`VISIT_REPORT_LANGS=zh,ja`）；prompt 里的**标签按语言本地化**
   （日文用 システム／自己申告／正確率／要申告未申告），否则日文报告会混中文词。
 - **数字一律由程序算，模型只写评语**（prompt 明确"只使用给出的数字"）；
@@ -87,8 +89,22 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   重复只提示不覆盖；导入时**按编号判定**（有→用系统里的，无→创建），命中手工建号的人时补写
   `first_seen_import_id`。**不做身份合并**：不同编号 = 不同的人（用户明确）。
 - 表：`staff_daily_reports`（`(person_code, report_date)` 唯一）/ `staff_report_analyses`（`summary` 数字 + `payload` 评语）；
-  迁移 `b8c9d0e1f2a3`；**现有表一行未改**。
-- 测试：`tests_web/test_daily_report.py`（35 项，AI 全程 mock 不连外网）。
+  另有物化表 `staff_report_compare_person`（人×区间）/ `staff_report_compare_day`（人×日）、
+  防重复提交的 `form_tokens`；迁移 `b8c9d0e1f2a3` → `c9d0e1f2a3b4` → `d0e1f2a3b4c5` → `e1f2a3b4c5d6`；**现有业务表一行未改**。
+- **报告生成结点 = 文件入表后自动**（`flow.auto_finalize_pipeline` → `report_ai.auto_for_import`）：
+  自报在时间上先于系统数据，文件入表完成才是两边齐备的时刻；同数据指纹复用、AI 未配置/文件无正式记录则跳过。
+- **物化与失效**：报告生成时把对比结果落物化表（员工端只读，避免实时重算与并发写）；
+  **数据一变就刷新**——员工填报/修改（`daily_report._refresh_materialized`）与月度统计重算
+  （`perf.refresh_compare_materialized`）都会重算覆盖该日期的报告。读接口**绝不写库**。
+- **防重复提交（2026-09-28 全站机制）**：服务端**一次性提交令牌**（`app/forms.py` + `app/services/form_tokens.py`）——
+  每个 POST 表单渲染时发一个 token，提交时校验并**立即作废**（2 小时 TTL、绑定本人、机器端点与未登录豁免），
+  客户端再加"提交按钮禁用"兜底。**新增表单记得放 `{{ form_token() }}`**。
+- **迁移必须真跑**：`tests_web/test_migrations.py` 会在临时库执行 `alembic upgrade head` 并核对与 ORM 的列/可空性是否一致
+  （本地用 `create_all` 建表，只跑测试不跑迁移曾漏掉一个致命迁移错误）。
+- 测试：`tests_web/test_daily_report.py`（填报/逐日/趋势/对比口径/导出）、
+  `tests_web/test_report_robustness.py`（物化失效/状态机/重试护栏/可见月/编号归一/导出白名单）、
+  `tests_web/test_form_token.py`（一次性令牌）、`tests_web/test_migrations.py`（迁移冒烟 + schema 一致性）；
+  AI 全程 mock 不连外网。i18n 巡检：`scripts/i18n_audit.py`（缺日文/死键）、`scripts/i18n_prune.py`（清死键）。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

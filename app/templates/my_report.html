@@ -50,8 +50,6 @@
     </div>
   </form>
 </div>
-  </form>
-</div>
 
 {% if chart and chart.series.show %}
 <div class="card" data-testid="trend-card" style="margin-top:1.2rem">
@@ -109,7 +107,6 @@
     <form method="get" action="/my/report">
       <select name="month" onchange="this.form.submit()">
         {% for m in months %}<option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>{% endfor %}
-        {% if not months %}<option value="{{ today.strftime('%Y-%m') }}">{{ today.strftime('%Y-%m') }}</option>{% endif %}
       </select>
     </form>
   </div>
