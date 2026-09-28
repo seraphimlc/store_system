@@ -188,6 +188,13 @@ def _smooth(pts, tension: float = 0.32):
     return d
 
 
+def _area(d: str, run: list, base_y: float) -> str:
+    """把曲线路径闭合成面积路径；**单点/空路径直接丢弃**（否则会产出没有 M 的非法 d）。"""
+    if not d or not d.startswith("M") or len(run) < 2:
+        return ""
+    return d + " L%.1f,%.1f L%.1f,%.1f Z" % (run[-1][0], base_y, run[0][0], base_y)
+
+
 def chart_geometry(series: dict, *, width: int = 360, height: int = 176,
                    pad_l: int = 30, pad_r: int = 12, pad_t: int = 14,
                    pad_b: int = 26) -> dict:
@@ -239,17 +246,17 @@ def chart_geometry(series: dict, *, width: int = 360, height: int = 176,
                              "v": d[key], "date": str(d["date"])})
             else:
                 if run:
-                    paths.append(_smooth(run))
-                    areas.append(_smooth(run) + " L%.1f,%.1f L%.1f,%.1f Z"
-                                 % (run[-1][0], geo["base_y"], run[0][0],
-                                    geo["base_y"]))
+                    _d = _smooth(run)
+                    paths.append(_d)
+                    areas.append(_area(_d, run, geo["base_y"]))
                 run = []
         if run:
-            paths.append(_smooth(run))
-            areas.append(_smooth(run) + " L%.1f,%.1f L%.1f,%.1f Z"
-                         % (run[-1][0], geo["base_y"], run[0][0], geo["base_y"]))
-        geo["paths_" + key] = [p for p in paths if p]
-        geo["areas_" + key] = [a for a in areas if a]
+            _d = _smooth(run)
+            paths.append(_d)
+            areas.append(_area(_d, run, geo["base_y"]))
+        # 硬校验：只保留合法路径（必须以 M 开头）。单点段（孤立的一天）只画点，不连线、不填面积。
+        geo["paths_" + key] = [p for p in paths if p.startswith("M")]
+        geo["areas_" + key] = [a for a in areas if a.startswith("M")]
         geo["dots_" + key] = dots
     return geo
 

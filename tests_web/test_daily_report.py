@@ -380,6 +380,9 @@ def test_chart_geometry_breaks_on_gap(client):
                  {"date": date(2026, 9, 5), "filled": True, "p1": 4, "p2": 0, "total": 4}])
     g = daily_report.chart_geometry(s, width=320, height=120)
     assert len(g["paths_p1"]) == 2 and len(g["areas_p1"]) == 2   # 3 号断开 → 两段
+    # 所有路径必须以 M 开头（浏览器会拒绝没有 moveto 的 d；孤立点不能连成非法路径）
+    for k in ("paths_p1", "paths_p2", "areas_p1", "areas_p2"):
+        assert all(x.startswith("M") for x in g[k]), k
     assert len(g["dots_p1"]) == 4                                 # 只有 4 天有数据
     assert all(" C" in p for p in g["paths_p1"])                  # 平滑曲线（贝塞尔）
     assert g["dots_p1"][0]["date"] == "2026-09-01"                # 悬停提示带日期
@@ -981,3 +984,16 @@ def test_update_today_validates_counts(client):
     for bad in ("abc", "1000", "-1"):
         with pytest.raises(ValueError):
             daily_report.update_today(db, u, area="x", p1_cnt=bad, p2_cnt=0)
+
+
+def test_chart_isolated_point_has_no_line_or_area(client):
+    """孤立的一天（前后都断档）：只画点，不产生连线/面积（历史 bug：非法 path 报浏览器错误）。"""
+    from datetime import date
+    from app.services import daily_report
+    s = _series([{"date": date(2026, 9, 1), "filled": False, "p1": 0, "p2": 0, "total": 0},
+                 {"date": date(2026, 9, 2), "filled": True, "p1": 5, "p2": 2, "total": 7},
+                 {"date": date(2026, 9, 3), "filled": False, "p1": 0, "p2": 0, "total": 0}])
+    g = daily_report.chart_geometry(s)
+    assert len(g["dots_p1"]) == 1                       # 点还在
+    assert g["paths_p1"] == [] and g["areas_p1"] == []  # 连线和面积都为空
+    assert g["paths_p2"] == [] and g["areas_p2"] == []
