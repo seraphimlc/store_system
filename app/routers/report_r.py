@@ -131,6 +131,28 @@ def staff_reports_analysis_retry(aid: int, request: Request,
 
 # ---------------- 员工端：我的核对结果（只看自己） ----------------
 
+@router.post("/my/report/update")
+def my_report_update(request: Request,
+                     area: str = Form(""), p1_cnt: str = Form(""),
+                     p2_cnt: str = Form(""), csrf_token: str = Form(""),
+                     user: Optional[User] = Depends(require_login),
+                     db: Session = Depends(get_db)):
+    """修改今天已提交的填报（仅当天）。"""
+    if user is None or user.role != "staff" or not user.person_code:
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import daily_report
+    try:
+        daily_report.update_today(db, user, area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt)
+        return RedirectResponse("/my/report?msg=" + quote("已保存"), status_code=303)
+    except daily_report.NoReport:
+        return RedirectResponse("/my/report?err=" + quote("今天还没有填报记录"),
+                                status_code=303)
+    except ValueError as e:  # noqa: BLE001
+        return RedirectResponse("/my/report?err=" + quote(str(e)), status_code=303)
+
+
 @router.get("/my/report/feedback", response_class=HTMLResponse)
 def my_report_feedback(request: Request,
                        user: Optional[User] = Depends(require_login),

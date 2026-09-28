@@ -49,6 +49,26 @@ def today_report(db, person_code: str) -> Optional[StaffDailyReport]:
             .first())
 
 
+class NoReport(Exception):
+    """今天还没有填报记录（无法修改）。"""
+
+
+def update_today(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0) -> StaffDailyReport:
+    """修改**今天**已提交的填报（跨天不允许：那是补录，本期不做）。"""
+    code = getattr(user, "person_code", None)
+    if not code:
+        raise ValueError("账号未绑定员工编号，无法填报")
+    row = today_report(db, code)
+    if row is None:
+        raise NoReport(code)
+    row.area = (area or "").strip()[:64]
+    row.p1_cnt = to_count(p1_cnt, "1点店铺数")
+    row.p2_cnt = to_count(p2_cnt, "2点店铺数")
+    row.total_cnt = row.p1_cnt + row.p2_cnt
+    db.commit()
+    return row
+
+
 def submit_report(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
                   client_ts: str = "") -> StaffDailyReport:
     """提交今天的填报（一天一次）。"""

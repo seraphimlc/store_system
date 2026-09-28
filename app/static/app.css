@@ -244,3 +244,18 @@ input[type=number] { border: 1px solid var(--line); border-radius: 7px;
 .tabbar .tab:active { background: #f5f7fb; }
 body.has-tabbar { padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 380px) { .tabbar .tab { font-size: .72rem; } }
+
+/* ---------- 今日填报：一行紧凑展示 + 两列数字输入 ---------- */
+.today-line { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; }
+.today-line .area { font-size: .95rem; color: #333c52; }
+.today-line span { font-variant-numeric: tabular-nums; }
+.today-line i { font-style: normal; color: var(--muted); font-size: .8rem; margin-right: .2rem; }
+.today-line b { font-size: 1.05rem; }
+.form-grid .fld-wide { grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  /* 两个数字项在手机上并排（别竖着排三行） */
+  .form-grid .fld:not(.fld-wide) { grid-column: auto; }
+  .form-grid { grid-template-columns: 1fr 1fr; }
+  .form-grid .fld:not(.fld-wide) input { text-align: center; }
+}
+[x-cloak] { display: none !important; }

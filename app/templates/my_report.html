@@ -5,44 +5,49 @@
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
 
-<div class="card" data-testid="today-card">
-  <h2 style="font-size:1rem;margin:.1rem 0 .6rem">{{ today }}</h2>
-  {% if existing %}
-  <div class="stat-grid" style="margin-bottom:.5rem">
-    <div class="stat-card okk"><p class="k">{{ t('1点店铺数') }}</p><p class="v">{{ existing.p1_cnt }}</p></div>
-    <div class="stat-card okk"><p class="k">{{ t('2点店铺数') }}</p><p class="v">{{ existing.p2_cnt }}</p></div>
-    <div class="stat-card hl"><p class="k">{{ t('合计') }}</p><p class="v">{{ existing.total_cnt }}</p></div>
+{% set _p1 = existing.p1_cnt if existing else 0 %}
+{% set _p2 = existing.p2_cnt if existing else 0 %}
+<div class="card" data-testid="today-card" x-data="{ edit: {{ 'false' if existing else 'true' }},
+                                                    p1: '{{ _p1 }}', p2: '{{ _p2 }}' }">
+  <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+    <h2 style="font-size:1rem;margin:0">{{ today }}</h2>
+    {% if existing %}<span class="today-line" data-testid="today-summary">
+      {% if existing.area %}<span class="area">{{ existing.area }}</span>{% endif %}
+      <span><i>{{ t('1点') }}</i>{{ existing.p1_cnt }}</span>
+      <span><i>{{ t('2点') }}</i>{{ existing.p2_cnt }}</span>
+      <span><i>{{ t('合计') }}</i><b>{{ existing.total_cnt }}</b></span>
+    </span>
+    <button class="btn ghost" type="button" style="padding:.15rem .7rem;margin-left:auto"
+            @click="edit = !edit" x-show="!edit" data-testid="edit-report">{{ t('修改') }}</button>
+    {% endif %}
   </div>
-  <div class="hint">{{ t('担当区域') }}：{{ existing.area or '—' }}{% if existing_jst %}　·　{{ t('提交时间') }} {{ existing_jst }}{% endif %}</div>
-  {% else %}
-  <form method="post" action="/my/report" x-data="{ p1: '0', p2: '0' }">
+  <form method="post" action="{{ '/my/report/update' if existing else '/my/report' }}"
+        x-show="edit" x-cloak>
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-    <div class="form-grid">
-      <label class="fld">{{ t('担当区域') }}
-        <input type="text" name="area" id="area" maxlength="64" autocomplete="off"
-               placeholder="{{ t('例：渋谷・新宿') }}"></label>
+    <div class="form-grid" style="margin-top:.5rem">
+      <label class="fld fld-wide">{{ t('担当区域') }}
+        <input type="text" name="area" maxlength="64" autocomplete="off"
+               value="{{ existing.area if existing else '' }}"></label>
       <label class="fld">{{ t('1点店铺数') }}
-        <input type="text" name="p1_cnt" id="p1_cnt" inputmode="numeric" pattern="[0-9]*"
-               value="0" x-model="p1" autocomplete="off" data-testid="p1"></label>
+        <input type="text" name="p1_cnt" inputmode="numeric" pattern="[0-9]*"
+               value="{{ _p1 }}" x-model="p1" autocomplete="off" data-testid="p1"></label>
       <label class="fld">{{ t('2点店铺数') }}
-        <input type="text" name="p2_cnt" id="p2_cnt" inputmode="numeric" pattern="[0-9]*"
-               value="0" x-model="p2" autocomplete="off" data-testid="p2"></label>
+        <input type="text" name="p2_cnt" inputmode="numeric" pattern="[0-9]*"
+               value="{{ _p2 }}" x-model="p2" autocomplete="off" data-testid="p2"></label>
     </div>
     <div class="form-actions">
       <span class="hint">{{ t('合计') }}：<b class="big-num"
         x-text="(parseInt(p1 || 0, 10) || 0) + (parseInt(p2 || 0, 10) || 0)"></b></span>
-      <button class="btn" type="submit" data-testid="submit-report">{{ t('提交填报') }}</button>
+      <button class="btn" type="submit"
+              data-testid="{{ 'save-report' if existing else 'submit-report' }}">{{ t('保存') if existing else t('提交填报') }}</button>
+      {% if existing %}<button class="btn ghost" type="button" @click="edit = false">{{ t('取消') }}</button>{% endif %}
     </div>
   </form>
-  {% endif %}
 </div>
 
 {% if chart and chart.series.show %}
 <div class="card" data-testid="trend-card" style="margin-top:1.2rem">
-  <h2 style="font-size:1.05rem;margin:.1rem 0 .5rem">{{ t('自报趋势') }}
-    <span class="hint">（{{ chart.series.start }} ～ {{ chart.series.end }} ·
-      {{ t('已填报') }} {{ chart.series.filled }} {{ t('天') }} ·
-      {{ t('合计') }} {{ chart.series.total }}）</span></h2>
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .5rem">{{ t('自报趋势') }}</h2>
   <div style="display:flex;gap:.9rem;align-items:center;flex-wrap:wrap;margin-bottom:.2rem;font-size:.82rem">
     <span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2f5bea;vertical-align:middle"></i>
       {{ t('1点店铺数') }}</span>

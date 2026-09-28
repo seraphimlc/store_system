@@ -928,3 +928,56 @@ def test_import_period_falls_back_to_coverage(client):
     db.add(empty)
     db.commit()
     assert report_ai.import_period(db, empty.id) == (date(2026, 9, 10), date(2026, 9, 20))
+
+
+# ---------- 当天填报可修改 ----------
+
+def test_update_today_route(client):
+    """当天填报可修改（区域/1点/2点），合计自动重算；页面出现「修改」按钮。"""
+    from app.services import daily_report
+    _seed_staff(client)
+    csrf = _login_staff(client)
+    client.post("/my/report", data={"csrf_token": csrf, "area": "渋谷",
+                                    "p1_cnt": "4", "p2_cnt": "1"},
+                follow_redirects=False)
+    r = client.post("/my/report/update",
+                    data={"csrf_token": csrf, "area": "池袋", "p1_cnt": "7",
+                          "p2_cnt": "3"}, follow_redirects=False)
+    assert r.status_code == 303 and "msg=" in r.headers["location"]
+    db = appdb.SessionLocal()
+    row = db.query(StaffDailyReport).one()
+    assert (row.area, row.p1_cnt, row.p2_cnt, row.total_cnt) == ("池袋", 7, 3, 10)
+    assert row.report_date == daily_report.jst_today()
+    html = client.get("/my/report").text
+    assert 'data-testid="edit-report"' in html and 'data-testid="today-summary"' in html
+    assert 'data-testid="save-report"' in html
+
+
+def test_update_today_requires_existing_report(client):
+    """没有当天记录 → NoReport（跨天不能被改：昨天那条今天改不了）。"""
+    from datetime import timedelta
+    from app.services import daily_report
+    _seed_staff(client)
+    db = appdb.SessionLocal()
+    from app.models import User
+    u = db.query(User).filter(User.username == "emp1").one()
+    today = daily_report.jst_today()
+    db.add(StaffDailyReport(person_code="P1", report_date=today - timedelta(days=1),
+                            area="昨天", p1_cnt=1, p2_cnt=1, total_cnt=2))
+    db.commit()
+    with pytest.raises(daily_report.NoReport):
+        daily_report.update_today(db, u, area="改成今天", p1_cnt=9, p2_cnt=9)
+    assert db.query(StaffDailyReport).one().area == "昨天"     # 昨天那条没被改
+
+
+def test_update_today_validates_counts(client):
+    """修改同样做 0..999 校验。"""
+    from app.services import daily_report
+    _seed_staff(client)
+    db = appdb.SessionLocal()
+    from app.models import User
+    u = db.query(User).filter(User.username == "emp1").one()
+    daily_report.submit_report(db, u, area="x", p1_cnt=1, p2_cnt=1)
+    for bad in ("abc", "1000", "-1"):
+        with pytest.raises(ValueError):
+            daily_report.update_today(db, u, area="x", p1_cnt=bad, p2_cnt=0)
