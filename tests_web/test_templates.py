@@ -64,3 +64,38 @@ def test_base_template_anonymous():
                                                   request=_req())
     assert "巡店结算系统" in html
     assert "对账（阶段二）" not in html
+
+
+def test_base_staff_bottom_tabs():
+    """员工端主导航固定在底部（绩效/每日填报两项）；管理员不显示。"""
+    staff = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="甲", role="staff"), request=_req())
+    assert 'class="tabbar"' in staff and 'has-tabbar' in staff
+    assert 'data-testid="tab-perf"' in staff and 'data-testid="tab-report"' in staff
+    assert 'href="/my/perf"' in staff and 'href="/my/report"' in staff
+    # 顶栏不再重复这两项（只保留次要项）
+    assert staff.count('>我的绩效<') == 1 and staff.count('>每日填报<') == 1
+    assert "我的核对结果" in staff and "我的 Token" in staff
+    admin = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"), request=_req())
+    assert 'class="tabbar"' not in admin and "has-tabbar" not in admin
+
+
+def test_base_staff_tab_marks_active():
+    """当前页对应的 Tab 高亮（/my/report 与 /my/report/feedback 区分开）。"""
+    class _URL:
+        def __init__(self, path):
+            self.path = path
+    for path, on_testid in (("/my/perf", "tab-perf"), ("/my/report", "tab-report")):
+        req = _req()
+        req.url = _URL(path)
+        html = _env().get_template("base.html").render(
+            current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
+        i = html.index('data-testid="%s"' % on_testid)
+        assert 'class="tab on"' in html[i - 40:i], path
+    # 核对页属于次要项 → 填报 Tab 不高亮
+    req = _req()
+    req.url = _URL("/my/report/feedback")
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
+    assert 'class="tab on"' not in html
