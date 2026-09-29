@@ -150,13 +150,14 @@ def test_export_login_url_prefers_public_issuer(client, monkeypatch):
     """登录地址要用公开地址（应用在 nginx 后面，request.base_url 会给出 http://）。"""
     from types import SimpleNamespace
 
-    from app.services import staff_accounts
+    import app.config as app_config
     _mk(client, "admin", "管理员", None, role="admin")
     _mk(client, "empA", "员工A", "PA")
     _login(client, "admin")
-    monkeypatch.setattr(staff_accounts, "get_settings", lambda: SimpleNamespace(
+    # 服务里是函数内 `from app.config import get_settings` → 打到真正的来源上
+    monkeypatch.setattr(app_config, "get_settings", lambda: SimpleNamespace(
         default_staff_password="demo123",
-        visit_oauth_issuer="https://store.visitworld.me"), raising=False)
+        visit_oauth_issuer="https://store.visitworld.me"))
     rows = list(_read_xlsx(client.get(
         "/staff-admin/accounts-export").content)["员工登录名"].values)[1:]
     assert all(r[8].startswith("https://store.visitworld.me/") for r in rows)
