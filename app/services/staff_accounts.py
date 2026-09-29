@@ -70,3 +70,59 @@ def create_staff(db, *, code: str, name: str, username: str = "",
                 is_active=True, status="active", must_change_password=True))
     db.commit()
     return db.get(Person, code)
+
+
+def accounts_xlsx(db, *, only_active: bool = False, base_url: str = ""):
+    """导出员工账号清单（发号用）：登录名 / 姓名 / 编号 / 状态 / 是否需首登改密 / 初始口令。
+
+    `初始口令` 只在"待首登改密"时写出（= 系统默认口令），否则留空 —— 说明本人已自设密码。
+    返回 (xlsx 字节, 文件名)；用 write_only 流式写。
+    """
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Font
+
+    from app.config import get_settings
+    from app.models import User
+
+    q = db.query(User).filter(User.role == "staff")
+    if only_active:
+        q = q.filter(User.status == "active", User.is_active.is_(True))
+    rows = q.order_by(User.status, User.person_code).all()
+    default_pw = get_settings().default_staff_password
+    url = (base_url or "").rstrip("/") + "/login"
+
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("员工登录名")
+    head = ["登录名", "姓名", "员工编号", "在职状态", "账号启用",
+            "首次登录需改密", "初始口令", "界面语言", "登录地址"]
+    cells = []
+    for i, h in enumerate(head, 1):
+        c = WriteOnlyCell(ws, value=h)
+        c.font = Font(bold=True)
+        cells.append(c)
+        ws.column_dimensions[c.column_letter].width = [14, 14, 20, 10, 10, 14, 12, 10, 34][i - 1]
+    ws.append(cells)
+    for u in rows:
+        must = bool(u.must_change_password)
+        ws.append([u.username, u.display_name, u.person_code or "",
+                   u.status, "是" if u.is_active else "否",
+                   "是" if must else "", default_pw if must else "",
+                   u.lang or "自动", url])
+
+    ws2 = wb.create_sheet("使用说明")
+    for line in (["项目", "说明"],
+                 ["登录地址", url],
+                 ["初始口令", "%s（仅用于首次登录）" % default_pw],
+                 ["首次登录", "系统强制要求改为自己的密码，改完才能进入其它页面"],
+                 ["账号状态", "「非在岗」（离职等）的账号无法登录，不必分发"],
+                 ["忘记密码", "请联系管理员在员工管理页重置"]):
+        ws2.append(line)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    from datetime import date
+    return bio.getvalue(), "员工登录名_%s%s.xlsx" % (
+        date.today().isoformat(), "_仅在岗" if only_active else "")

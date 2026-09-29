@@ -211,6 +211,30 @@ def staff_reset(uid: int, request: Request, password: str = Form("demo123"),
     return RedirectResponse("/staff-admin?msg=已重置口令", status_code=303)
 
 
+@router.get("/staff-admin/accounts-export")
+def staff_accounts_export(request: Request, active: str = "",
+                          user: Optional[User] = Depends(require_login),
+                          db: Session = Depends(get_db)):
+    """导出员工登录名清单（发号用）。active=1 → 只导出可登录（在岗且启用）的。"""
+    if user is None or user.role != "admin":
+        return _denied()
+    import io as _io
+
+    from fastapi.responses import StreamingResponse
+
+    from app.services import staff_accounts
+    data, fname = staff_accounts.accounts_xlsx(
+        db, only_active=(active == "1"), base_url=str(request.base_url))
+    from urllib.parse import quote
+    cd = ("attachment; filename=staff_accounts.xlsx; filename*=UTF-8''%s"
+          % quote(fname))
+    return StreamingResponse(
+        _io.BytesIO(data),
+        media_type=("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+        headers={"Content-Disposition": cd})
+
+
 @router.post("/staff-admin/reset-all")
 def staff_reset_all(request: Request, password: str = Form("demo123"),
                     csrf_token: str = Form(...),

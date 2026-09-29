@@ -80,6 +80,14 @@
     <span class="hint">{{ t('正式发号前一次性使用——全部员工口令重置为系统默认，每人首次登录必须改成自己的密码。') }}</span>
     <button class="btn" style="padding:.2rem .7rem" type="submit">{{ t('重置全部员工口令并要求首登修改') }}</button>
   </form>
+  <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
+    <b style="font-size:.9rem">{{ t('导出登录名：') }}</b>
+    <a class="btn ghost" style="padding:.2rem .7rem"
+       href="/staff-admin/accounts-export?active=1" data-testid="export-active">{{ t('仅可登录员工') }}</a>
+    <a class="btn ghost" style="padding:.2rem .7rem"
+       href="/staff-admin/accounts-export" data-testid="export-all">{{ t('全部账号') }}</a>
+    <span class="hint">{{ t('含登录名/姓名/编号/状态/初始口令，另附「使用说明」页便于分发。') }}</span>
+  </div>
 </div>
 <div class="tbl-wrap"><table class="grid-tbl">
   <tr><th>{{ t('登录名') }}</th><th>{{ t('员工姓名') }}</th><th>{{ t('人员编号') }}</th><th>{{ t('状态') }}</th><th>{{ t('界面语言') }}</th><th>{{ t('操作') }}</th><th>{{ t('MCP Token') }}</th></tr>
