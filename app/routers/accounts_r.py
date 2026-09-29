@@ -67,7 +67,9 @@ def my_password_submit(request: Request, old_password: str = Form(...),
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     db.commit()
-    dest = "/my/perf" if user.role == "staff" else "/perf"
+    # 员工改完密码直接进「每日填报」（员工每天真正要用的页面）；
+    # 原来跳「我的绩效」，但员工可见起始月收紧后那里常常是空的。
+    dest = "/my/report" if user.role == "staff" else "/perf"
     return RedirectResponse(dest + "?msg=密码已修改，可正常使用", status_code=303)
 
 
