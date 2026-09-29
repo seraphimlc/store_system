@@ -51,3 +51,9 @@ mcp_service/logs/
 
 # 临时抓取的页面（调试用，勿提交）
 /*.html
+
+# 抓取线上页面/接口时的临时产物（会话 cookie、html 快照）—— 一律不入库
+/cjp*.txt
+/pj*.txt
+/curl_*.txt
+/*.cookies
