@@ -144,3 +144,19 @@ def test_reset_all_sets_default_and_must_change(client):
     assert _login(client, "empA", "demo123").status_code == 302
     r2 = client.get("/my/perf", follow_redirects=False)
     assert r2.status_code == 302 and r2.headers["location"].startswith("/my/password")
+
+
+def test_export_login_url_prefers_public_issuer(client, monkeypatch):
+    """登录地址要用公开地址（应用在 nginx 后面，request.base_url 会给出 http://）。"""
+    from types import SimpleNamespace
+
+    from app.services import staff_accounts
+    _mk(client, "admin", "管理员", None, role="admin")
+    _mk(client, "empA", "员工A", "PA")
+    _login(client, "admin")
+    monkeypatch.setattr(staff_accounts, "get_settings", lambda: SimpleNamespace(
+        default_staff_password="demo123",
+        visit_oauth_issuer="https://store.visitworld.me"), raising=False)
+    rows = list(_read_xlsx(client.get(
+        "/staff-admin/accounts-export").content)["员工登录名"].values)[1:]
+    assert all(r[8].startswith("https://store.visitworld.me/") for r in rows)

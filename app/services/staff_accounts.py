@@ -91,8 +91,10 @@ def accounts_xlsx(db, *, only_active: bool = False, base_url: str = ""):
     if only_active:
         q = q.filter(User.status == "active", User.is_active.is_(True))
     rows = q.order_by(User.status, User.person_code).all()
-    default_pw = get_settings().default_staff_password
-    url = (base_url or "").rstrip("/") + "/login"
+    settings = get_settings()
+    default_pw = settings.default_staff_password
+    # 公开地址优先取配置（应用在 nginx 后面看不到 https，request.base_url 会是 http://）
+    url = (settings.visit_oauth_issuer or base_url or "").rstrip("/") + "/login"
 
     wb = Workbook(write_only=True)
     ws = wb.create_sheet("员工登录名")
