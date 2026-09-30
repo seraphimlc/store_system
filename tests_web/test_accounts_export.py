@@ -161,3 +161,18 @@ def test_export_login_url_prefers_public_issuer(client, monkeypatch):
     rows = list(_read_xlsx(client.get(
         "/staff-admin/accounts-export").content)["员工登录名"].values)[1:]
     assert all(r[8].startswith("https://store.visitworld.me/") for r in rows)
+
+
+def test_cli_create_employee_is_idempotent_by_code(client):
+    """同一编号只能有一个账号（历史 bug：CLI 只按登录名查重 → 同一人两条账号）。"""
+    from app.cli import create_employee
+    _mk(client, "xiaochuanyi", "小川逸", "2188240606634082")   # 模拟已有账号
+
+    # 用一个"不同的登录名"再建一次同编号 → 必须复用，不新建
+    u = create_employee("ogawa", "2188240606634082")
+    db = appdb.SessionLocal()
+    n = (db.query(User)
+         .filter(User.person_code == "2188240606634082").count())
+    assert n == 1, "同一编号出现了 %d 条账号" % n
+    assert u.username == "xiaochuanyi"                   # 复用了已有账号
+    db.close()

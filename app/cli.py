@@ -41,8 +41,12 @@ def create_admin():
 
 
 def create_employee(username: str, person_code: str, password: str = "demo123"):
-    """建员工账号并绑定人员编号（staff）。"""
-    from sqlalchemy import select
+    """建员工账号并绑定人员编号（staff）。
+
+    **编号是身份键**（规格 D19/D20）：先按编号查，已有账号就复用，
+    绝不因为"登录名不同"给同一个人开出第二个账号
+    （历史坑：本函数原先只按 username 查重，导致同一编号出现两条账号）。
+    """
     from app.auth import hash_password
     from app.db import SessionLocal
     from app.models import Person, User
@@ -52,18 +56,33 @@ def create_employee(username: str, person_code: str, password: str = "demo123"):
         if person is None:
             print(f"人员编号不存在: {person_code}", file=sys.stderr)
             sys.exit(1)
+        by_code = (db.query(User)
+                   .filter(User.role == "staff", User.person_code == person_code)
+                   .first())
+        if by_code is not None:
+            print(f"该编号已有员工账号 {by_code.username}（{person_code}），"
+                  f"不重复创建")
+            return by_code
         user = db.query(User).filter(User.username == username).first()
         if user is None:
-            db.add(User(username=username, password_hash=hash_password(password),
-                        display_name=person.display_name or person_code,
-                        role="staff", person_code=person_code, is_active=True,
-                        must_change_password=True))
+            u = User(username=username, password_hash=hash_password(password),
+                     display_name=person.display_name or person_code,
+                     role="staff", person_code=person_code, is_active=True,
+                     must_change_password=True)
+            db.add(u)
             print(f"创建员工 {username}（{person_code}）")
-        else:
-            user.role = "staff"
-            user.person_code = person_code
-            print(f"更新 {username} 为员工（{person_code}）")
+            db.commit()
+            return u
+        # 登录名被占用：如果是别人的编号，拒绝（避免把编号挂到别人账号上）
+        if user.person_code and user.person_code != person_code:
+            print(f"登录名 {username} 已被编号 {user.person_code} 占用，"
+                  f"请换一个登录名", file=sys.stderr)
+            sys.exit(2)
+        user.role = "staff"
+        user.person_code = person_code
+        print(f"更新 {username} 为员工（{person_code}）")
         db.commit()
+        return user
     finally:
         db.close()
 
