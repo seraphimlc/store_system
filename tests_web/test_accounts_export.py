@@ -176,3 +176,57 @@ def test_cli_create_employee_is_idempotent_by_code(client):
     assert n == 1, "同一编号出现了 %d 条账号" % n
     assert u.username == "xiaochuanyi"                   # 复用了已有账号
     db.close()
+
+
+def test_delete_file_purges_empty_month_derived_data(client):
+    """删文件后：该月已无正式记录 → 派生数据（月绩效/日统计/应发工资/看板/分析）必须清掉。
+
+    历史坑（2026-09-29 线上实测）：删掉测试文件后，11 月的派生行仍在库里。
+    """
+    from app.models import (DashMetric, FormalRecord, ImportFile, MonthPerfRecord,
+                            PayrollPeriodRow, PersonDailyStat, RawRecord,
+                            StaffAnalysis, StoreEntity)
+    from app.services import importer
+    db = appdb.SessionLocal()
+    imp = ImportFile(file_name="t.xlsx", file_sha256="sha-purge", file_size=1,
+                     stored_path="/tmp/t.xlsx", uploaded_by=1, status="parsed")
+    db.add(imp)
+    db.commit()
+    raw = RawRecord(import_id=imp.id, sheet_name="s", excel_row=2,
+                    store_id_raw="TESTSTORE1", submitter_raw="甲(PA)",
+                    submitter_code="PA")
+    db.add(raw)
+    db.commit()
+    db.add(FormalRecord(import_id=imp.id, raw_record_id=raw.id, person_code="PA",
+                        store_id_raw="TESTSTORE1", japan_date=date(2026, 11, 1),
+                        points=1))
+    db.add(StoreEntity(store_id_raw="TESTSTORE1", name_local="测试店",
+                       name_norm="测试店", master_id=0,
+                       first_seen_import_id=imp.id))
+    # 该月派生数据（模拟上传时自动同步出来的）
+    db.add(PersonDailyStat(person_code="PA", ref_date=date(2026, 11, 1),
+                           records=1, p1=1, p2=0, points=1))
+    db.add(MonthPerfRecord(month="2026-11", person_code="PA", records=1, p1=1,
+                           p2=0, points=1, salary=250))
+    db.add(PayrollPeriodRow(month="2026-11", person_code="PA"))
+    db.add(DashMetric(month="2026-11", metric="checkins", value=1))
+    db.add(StaffAnalysis(month="2026-11", person_code="PA", content="{}"))
+    db.commit()
+    ent_id = db.query(StoreEntity.id).filter(
+        StoreEntity.store_id_raw == "TESTSTORE1").scalar()
+    imp_id = imp.id
+    db.close()
+
+    db = appdb.SessionLocal()
+    imp = db.get(ImportFile, imp_id)
+    importer.delete_file(imp, db)
+    db.close()
+
+    db = appdb.SessionLocal()
+    for model, args in ((PersonDailyStat, {}), (MonthPerfRecord, {}),
+                        (PayrollPeriodRow, {}), (DashMetric, {}),
+                        (StaffAnalysis, {})):
+        assert db.query(model).count() == 0, model.__name__ + " 还有残留"
+    assert db.query(StoreEntity).filter(StoreEntity.id == ent_id).count() == 0
+    assert db.query(FormalRecord).count() == 0
+    db.close()

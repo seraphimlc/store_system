@@ -168,6 +168,77 @@ def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
 
 
 
+# 删文件后需要连带清理的**遗留表**（无 ORM 模型，用方言无关的文本前缀匹配）
+_LEGACY_BY_DATE = ("daily_system_points", "daily_activity", "clean_records")
+
+
+def purge_orphans(db, months=None, store_ids=None) -> dict:
+    """清理"正式表已无记录"的派生数据（月维度 + 店铺实体）。
+
+    背景：删文件只删正式表/原始行；月维度的派生数据（月绩效/日统计/应发工资/看板/
+    员工分析）与店铺主档会留下幽灵数据（2026-09-29 线上实测：删掉测试文件后，
+    11 月的派生行仍在）。判定规则统一为"该月/该店还有没有正式记录"。
+    """
+    from datetime import date
+
+    from sqlalchemy import func, text as _text
+
+    from app.models import (DashMetric, FormalRecord, MonthPerfRecord,
+                            PayrollPeriodRow, PersonDailyStat, StaffAnalysis,
+                            StoreEntity, StorePair)
+    out = {"months": [], "stores": 0}
+    real_months = {str(m)[:7] for (m,) in
+                   db.query(FormalRecord.japan_date).distinct().all() if m}
+    for month in sorted({str(m)[:7] for m in (months or []) if m}):
+        if month in real_months:
+            continue                      # 该月还有正式记录 → 不动它的派生数据
+        y, mo = int(month[:4]), int(month[5:7])
+        lo = date(y, mo, 1)
+        hi = date(y + 1, 1, 1) if mo == 12 else date(y, mo + 1, 1)
+        # ORM 表（方言无关）
+        db.query(PersonDailyStat).filter(PersonDailyStat.ref_date >= lo,
+                                         PersonDailyStat.ref_date < hi).delete(
+            synchronize_session=False)
+        for model in (MonthPerfRecord, PayrollPeriodRow, DashMetric, StaffAnalysis):
+            db.query(model).filter(model.month == month).delete(
+                synchronize_session=False)
+        # 遗留表（可能不存在）：只回滚这一步
+        for table in _LEGACY_BY_DATE:
+            try:
+                with db.begin_nested():
+                    db.execute(_text("DELETE FROM %s WHERE CAST(japan_date AS TEXT)"
+                                     " LIKE :v" % table), {"v": month + "%"})
+            except Exception:  # noqa: BLE001
+                pass
+        out["months"].append(month)
+    # 店铺实体：该文件带来的、且已无正式记录的（先删配对关系，再删实体）
+    for sid in (store_ids or []):
+        if not sid:
+            continue
+        has = (db.query(func.count(FormalRecord.id))
+               .filter(FormalRecord.store_id_raw == sid).scalar() or 0)
+        if has:
+            continue
+        for e in db.query(StoreEntity).filter(StoreEntity.store_id_raw == sid).all():
+            slaves = (db.query(func.count(StoreEntity.id))
+                      .filter(StoreEntity.master_id == e.id,
+                              StoreEntity.id != e.id).scalar() or 0)
+            if slaves:                    # 有人挂在它下面（合并主档）→ 不动
+                continue
+            ids = [e.id, e.master_id]
+            try:
+                with db.begin_nested():
+                    db.query(StorePair).filter(
+                        StorePair.entity_a.in_(ids) | StorePair.entity_b.in_(ids)
+                    ).delete(synchronize_session=False)
+            except Exception:  # noqa: BLE001
+                pass
+            db.delete(e)
+            out["stores"] += 1
+    db.commit()
+    return out
+
+
 def delete_file(imp: ImportFile, db) -> None:
     """删除文件及其派生数据（PG 外键全量清理，顺序：子表→raw→引用置空→import）。
 
@@ -178,6 +249,11 @@ def delete_file(imp: ImportFile, db) -> None:
     _ = imp.id  # 旧 run 引用检查已下线
     from app.models import AppealRecord, FormalRecord, Person, StoreEntity
     from sqlalchemy import or_
+    # 删除前记下"这个文件牵涉的月份与店铺"，删完据此清理派生数据
+    _months = [m for (m,) in db.query(FormalRecord.japan_date).filter(
+        FormalRecord.import_id == imp.id).distinct().all() if m]
+    _sids = [s for (s,) in db.query(RawRecord.store_id_raw).filter(
+        RawRecord.import_id == imp.id).distinct().all() if s]
     # 该文件 raw 的 id 集合（子表引用 raw 的外键）
     raw_ids = [x[0] for x in db.query(RawRecord.id).filter(
         RawRecord.import_id == imp.id).all()]
@@ -213,6 +289,12 @@ def delete_file(imp: ImportFile, db) -> None:
             {"source_import_id": None}, synchronize_session=False)
     db.delete(imp)
     db.commit()
+    # **清理派生数据**：该文件牵涉的月份若已无正式记录，月绩效/日统计/应发工资/看板/
+    # 员工分析都要一并清掉；该文件带来的店铺若已无正式记录也删掉（否则留下幽灵月份/店铺）
+    try:
+        purge_orphans(db, months=_months, store_ids=_sids)
+    except Exception:  # noqa: BLE001  best-effort：清理失败不影响删除本身
+        db.rollback()
     # 物理 blob：有同名 sha 其它 import 时保留；简化：删除失败不阻断
     try:
         os.remove(imp.stored_path)
