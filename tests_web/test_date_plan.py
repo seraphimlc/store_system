@@ -288,6 +288,44 @@ def test_mark_reported_writes_through(client):
     db.close()
 
 
+def test_resync_repairs_reports_missing_plan_rows(client):
+    """**线上真事故回归**（2026-10-01）：写透上线前提交的自报没有计划行 → 矩阵看不见，
+    跑一次对齐（脚本 `scripts/resync_plan_reported.py` 的逻辑）后必须显示 □。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    # 老数据：只有自报表，没有计划行（写透之前的形态）
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 10, 16),
+                            p1_cnt=2, p2_cnt=1, total_cnt=3))
+    db.commit()
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 10))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    assert rows["P1"]["states"][date(2026, 10, 16)] == date_plan.STATE_NONE  # 看不见
+    # 对齐：按自报表把计划表补/改回来
+    for code, d in db.query(StaffDailyReport.person_code,
+                            StaffDailyReport.report_date).all():
+        date_plan.mark_reported(db, code, d, True)
+    m2 = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 10))
+    rows2 = {r["person_code"]: r for r in m2["rows"]}
+    assert rows2["P1"]["states"][date(2026, 10, 16)] == date_plan.STATE_DONE
+    assert rows2["P1"]["submitted"] is False        # 只是补了自报，不算登记过计划
+    db.close()
+
+
+def test_rebuild_reported_clears_stale_flags(client):
+    """反向清理：计划行标了"已自报"但自报表里没有 → `rebuild_reported` 撤掉。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    date_plan.mark_reported(db, "P1", date(2026, 10, 20), True)
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 10, 20),
+                            p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    db.delete(db.query(StaffDailyReport).one())     # 自报被删（如清理脚本）
+    db.commit()
+    assert date_plan.rebuild_reported(db, person_code="P1") == 1
+    assert db.query(StaffDatePlan).one().reported is False
+    db.close()
+
+
 def test_is_submitted_ignores_report_only_rows(client):
     """只自报没登记计划的人 → **不算已登记**（`source='report'` 的行不算）。"""
     db = appdb.SessionLocal()
@@ -902,10 +940,12 @@ def test_admin_plan_matrix_page(client):
     assert 'data-testid="unsubmitted"' not in r.text
     assert "<th>登记</th>" not in r.text
     assert "未提交计划：" not in r.text
-    assert "未提交计划" in r.text                     # 顶部计数卡还在（催办用）
+    assert "未提交计划" in r.text                     # 顶部信息条上的计数（催办用）
     # 甲登记过（虚线可出勤 + 20 号不出勤），乙没登记 → 乙整行 –
     assert 'data-testid="cell-P1-2026-10-20"' in r.text
     assert r.text.count("未登记") >= 2
+    # 导出链接带 download 属性（防连点重复下载的钩子，见 base.html 的守卫）
+    assert "staff-plans/export" in r.text and "download" in r.text
 
 
 def test_admin_plan_page_defaults_to_open_period(client, frozen):

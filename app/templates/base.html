@@ -125,6 +125,16 @@
     var b = btnOf(f);
     if (b) b.disabled = false;
   }, true);
+  /* 下载链接防连点：双击/连点会让浏览器**下两次**（用户 2026-10-01 反馈"一次下载了两个文件"）。
+     2 秒内第二次点击直接吞掉，之后自动恢复。 */
+  document.addEventListener('click', function (e) {
+    if (!canUse(e.target)) return;
+    var a = e.target.closest('a[download]');
+    if (!a) return;
+    if (a.dataset.busy === '1') { e.preventDefault(); e.stopPropagation(); return; }
+    a.dataset.busy = '1';
+    setTimeout(function () { delete a.dataset.busy; }, 2000);
+  }, true);
 })();
 </script>
 <script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>

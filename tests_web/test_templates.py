@@ -48,6 +48,14 @@ def test_base_staff_nav():
     assert "我的绩效" in html
 
 
+def test_base_has_download_double_click_guard():
+    """下载链接防连点（用户 2026-10-01："一次下载了两个文件"）。"""
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req())
+    assert "a[download]" in html and "busy" in html
+
+
 def test_base_mobile_hamburger_menu():
     """H5：顶栏带汉堡菜单按钮（窄屏折叠导航），导航项仍在 DOM 中。"""
     html = _env().get_template("base.html").render(

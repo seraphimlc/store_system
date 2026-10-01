@@ -180,7 +180,13 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **入口**：员工端底部 tabbar 第 4 项「出勤计划」（`/my/plan` 已进 `STAFF_ALLOWED`）；管理端顶栏「日期计划」。
 - 迁移 `c1d2e3f4a5b6`（建表）+ `c2d3e4f5a6b7`（加 `reported` 并回填历史自报）；**本地库要手工补列/补表**
   （本地不跑 alembic：`create_all` 建表 + `ALTER TABLE staff_date_plans ADD COLUMN reported ...`）。
-- 测试 `tests_web/test_date_plan.py`（57 项：半月划分/闰年大小月/窗口边界与间隙/写透/过去看事实/
+- **写透上线前的自报要对齐一次**：`scripts/resync_plan_reported.py`（默认 dry-run，`--apply` 才写；
+  线上：`docker cp` 进容器后 `docker exec deploy-web-1 python scripts/resync_plan_reported.py --from 2026-09-17 --apply`）。
+  线上 2026-10-01 实测踩过：20 条自报里 11 条没有计划行 → 矩阵把"报了的人"显示成 `–`。
+  回归测试 `test_resync_repairs_reports_missing_plan_rows` / `test_rebuild_reported_clears_stale_flags`。
+- **下载防连点**：导出链接带 `download` 属性 + `base.html` 对 `a[download]` 做 2 秒吞点击
+  （用户 2026-10-01："一次下载了两个文件" = 双击触发两次请求，线上日志可见同端口两次 GET）。
+- 测试 `tests_web/test_date_plan.py`（59 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
   默认全出勤/待填报与登录落点/弹窗与角标/窗口状态条/整行点选无 JS/矩阵无登记列与按日小计/越权/导出）；
   **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
   `test_migrations.py` 已把新表列入 schema 校验。
