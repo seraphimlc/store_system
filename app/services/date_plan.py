@@ -508,6 +508,15 @@ def save_plan(db, user, key: str, unavailable: Iterable = (), today=None,
 
 # ---------------- 管理端矩阵与导出 ----------------
 
+SHORT_CODE_LEN = 5      # 页面/导出只显示编号后 5 位（用户 2026-10-01："取后5位就行"）
+
+
+def short_code(code: Optional[str], n: int = SHORT_CODE_LEN) -> str:
+    """员工编号的短展示：**后 n 位**（编号比 n 短就整条返回，不补零）。"""
+    s = (code or "").strip()
+    return s[-n:] if len(s) > n else s
+
+
 def _matrix_people(db) -> List[dict]:
     """矩阵里的"员工"= 有账号的在岗/请假员工 ∪ 本期有登记记录的人。
 
@@ -580,6 +589,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
         a_cnt = sum(1 for d in days if assumed[d])
         rows.append({
             "person_code": code, "name": cand[code]["name"] or code,
+            "short_code": short_code(code),      # 页面/导出只显示后 5 位（完整编号在 title 里）
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
             "assumed_days": assumed,       # 逐日：这一格是"未登记→默认出勤"（浅色显示）
@@ -670,7 +680,7 @@ def plan_xlsx(db, key: str, today=None):
                 for d in days]
         free = sum(1 for d in days
                    if not m["past"][d] and r["states"][d] in (STATE_ON, STATE_DONE))
-        row([r["name"], r["person_code"], free, *vals])
+        row([r["name"], r["short_code"], free, *vals])
 
     row([""] * ncol)
     row(["可出勤人数（今天起）", "", "",

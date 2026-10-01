@@ -48,7 +48,7 @@
   </tr>
   {% for r in m.rows %}
   <tr>
-    <td>{{ r.name }}<span class="hint">（{{ r.person_code }}）</span></td>
+    <td title="{{ r.person_code }}">{{ r.name }}<span class="hint">（{{ r.short_code }}）</span></td>
     {% for d in m.days %}
     <td class="c {{ r.states[d] }}{% if r.assumed_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
         data-testid="cell-{{ r.person_code }}-{{ d }}"

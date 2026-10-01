@@ -468,6 +468,31 @@ def _seed_matrix(db):
     db.commit()
 
 
+def test_short_code_helper():
+    """编号短展示 = 后 5 位（用户 2026-10-01："员工编号取后5位就行"）。"""
+    assert date_plan.short_code("2188240627782155") == "82155"
+    assert date_plan.short_code(" 2188240627782155 ") == "82155"
+    assert date_plan.short_code("1234") == "1234"      # 不到 5 位 → 原样，不补零
+    assert date_plan.short_code("") == "" and date_plan.short_code(None) == ""
+
+
+def test_admin_matrix_page_shows_short_code(client, monkeypatch):
+    """矩阵里显示后 5 位，完整编号只留在 title（鼠标悬停可查）。"""
+    _admin(client)
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 1))
+    db = appdb.SessionLocal()
+    _person(db, "2188240627782155", "小川逸")
+    db.add(User(username="u82155", display_name="小川逸", role="staff",
+                person_code="2188240627782155", password_hash="x",
+                is_active=True, status="active"))
+    db.commit()
+    db.close()
+    r = client.get("/staff-plans?period=2026-10-H1")
+    assert "（82155）" in r.text
+    assert 'title="2188240627782155"' in r.text           # 完整编号在 tooltip 里
+    assert "2188240627782155）" not in r.text              # 正文不再出现整串
+
+
 def test_admin_matrix_states_counts_and_unsubmitted(client):
     db = appdb.SessionLocal()
     _seed_matrix(db)
@@ -923,6 +948,7 @@ def test_admin_plan_export_xlsx(client):
                            "日", "月", "火", "水", "木", "金", "土"]
     by_name = {row[0]: row for row in grid if row[0] in ("甲", "乙")}
     assert set(by_name) == {"甲", "乙"}
+    assert by_name["甲"][1] == "P1"             # 编号短展示（P1 不到 5 位 → 原样）
     assert by_name["甲"][3 + 4] == "×"          # 10-20：自己标的不出勤
     assert by_name["甲"][3] == "○"              # 10-16：可出勤
     assert by_name["乙"][3] == ""               # 未登记 → 留空

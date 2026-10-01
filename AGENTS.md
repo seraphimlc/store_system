@@ -158,6 +158,8 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   `input:checked ~ .sym::after{content:"×"}`。**表单区不用 Alpine**（CDN 挂了也能填）。
 - **管理端** `/staff-plans`：行=员工（在岗/请假 ∪ 本期有登记记录的人；停用离职但登记过的不隐去）× 列=日期。
   **只有两列文字（员工、日期）——没有「登记」列、不罗列未提交人名**（2026-10-01 用户："看不动"）；
+  **员工编号只显示后 5 位**（`date_plan.short_code`，2026-10-01 用户："员工编号取后5位就行"），
+  完整编号挂在单元格 `title` 上；**页面与导出同一口径**；
   未提交靠"整行没有实色标记"体现。
   **顶部只有两行**（2026-10-01 用户："顶部的几个模块太丑了，还都是废话"）：信息条 `.plan-bar`
   （`填报期 X~Y · 未提交计划 N/M · 今天 N 人可出勤`）+ 一行图例；**已删 4 个统计卡片与 3 段说明文字**
@@ -178,7 +180,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **入口**：员工端底部 tabbar 第 4 项「出勤计划」（`/my/plan` 已进 `STAFF_ALLOWED`）；管理端顶栏「日期计划」。
 - 迁移 `c1d2e3f4a5b6`（建表）+ `c2d3e4f5a6b7`（加 `reported` 并回填历史自报）；**本地库要手工补列/补表**
   （本地不跑 alembic：`create_all` 建表 + `ALTER TABLE staff_date_plans ADD COLUMN reported ...`）。
-- 测试 `tests_web/test_date_plan.py`（55 项：半月划分/闰年大小月/窗口边界与间隙/写透/过去看事实/
+- 测试 `tests_web/test_date_plan.py`（57 项：半月划分/闰年大小月/窗口边界与间隙/写透/过去看事实/
   默认全出勤/待填报与登录落点/弹窗与角标/窗口状态条/整行点选无 JS/矩阵无登记列与按日小计/越权/导出）；
   **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
   `test_migrations.py` 已把新表列入 schema 校验。
