@@ -21,6 +21,7 @@
 {% if view.overdue %}
 <div class="msg warn" data-testid="overdue-hint">
   {{ t('本期的登记截止日是') }} {{ view.deadline }}，{{ t('已逾期（仍可登记，请尽快补上）。') }}
+  {% if not view.submitted %}{{ t('未登记的日子今天起按「默认全部出勤」计算。') }}{% endif %}
 </div>
 {% endif %}
 
@@ -38,6 +39,10 @@
       <span class="hint">/ {{ view.days|length }} {{ t('天') }}</span></div>
     <div><span class="hint">{{ t('已自报出勤') }}</span><b>{{ view.done_cnt }}</b>
       <span class="hint">{{ t('天') }}</span></div>
+    {% if view.assumed_cnt %}
+    <div><span class="hint">{{ t('默认出勤（未登记）') }}</span><b>{{ view.assumed_cnt }}</b>
+      <span class="hint">{{ t('天') }}</span></div>
+    {% endif %}
   </div>
   <div class="plan-legend">
     <span><span class="pm on">○</span> {{ t('可出勤') }}</span>

@@ -131,13 +131,24 @@ def period_days(key: str) -> List[date]:
 
 # ---------------- 三态与锁定 ----------------
 
-def cell_state(plan_available: Optional[bool], reported: bool) -> str:
-    """三态口径（唯一来源）：**已自报 > 计划**；没有计划行 = 未登记。"""
+def cell_state(plan_available: Optional[bool], reported: bool,
+               assumed: bool = False) -> str:
+    """三态口径（唯一来源）：**已自报 > 计划 > 默认**；没有计划行 = 未登记。
+
+    `assumed=True` = **超过登记截止日仍未登记** → 按用户口径"**默认全部出勤**"处理（显示 ○）。
+    只对**今天及以后**的日子生效（`assumed_default`）：已经过去的日期是既成事实，
+    不追认默认出勤（有自报就是方框，没自报就是未登记）。
+    """
     if reported:
         return STATE_DONE
     if plan_available is None:
-        return STATE_NONE
+        return STATE_ON if assumed else STATE_NONE
     return STATE_ON if plan_available else STATE_OFF
+
+
+def assumed_default(d: date, today: date, deadline: date) -> bool:
+    """该日期是否走"未登记 → 默认全部出勤"：今天及以后 + 已过登记截止日。"""
+    return d >= today and today > deadline
 
 
 def lock_of(d: date, today: date, reported: bool) -> str:
@@ -183,6 +194,38 @@ def is_submitted(db, person_code: str, key: str) -> bool:
                     StaffDatePlan.plan_date <= end).first()) is not None
 
 
+# ---------------- 待填报判定与员工落点 ----------------
+
+def needs_plan(db, person_code: Optional[str], today=None) -> dict:
+    """**本期是否还需要填报出勤计划**（未登记即需要）。
+
+    返回 {} = 不需要；否则给出本期信息（含是否逾期）。
+    用于：员工登录落点、员工端弹窗提示（用户 2026-10-01 要求）。
+    """
+    if not person_code:
+        return {}
+    today = today or jst_today()
+    key = current_period(today)
+    if is_submitted(db, person_code, key):
+        return {}
+    start, end, deadline = period_bounds(key)
+    return {"key": key, "start": start, "end": end, "deadline": deadline,
+            "overdue": today > deadline, "label": period_label(key)}
+
+
+def staff_home(db, user) -> str:
+    """**员工登录后的第一个页面**（单一来源）：
+
+    - 本期出勤计划**没登记** → `/my/plan`（先去填计划）；
+    - 否则 → `/my/report`（每日自报）；
+    - 没有绑定员工编号（用不了这两个页面）→ `/my/perf`（保持历史行为）。
+    """
+    code = getattr(user, "person_code", None)
+    if not code:
+        return "/my/perf"
+    return "/my/plan" if needs_plan(db, code) else "/my/report"
+
+
 # ---------------- 员工端视图与提交 ----------------
 
 def plan_days(db, person_code: str, key: str, today=None) -> dict:
@@ -200,13 +243,15 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     d = start
     while d <= end:
         rep = d in reps
-        state = cell_state(plans.get(d), rep)
+        asm = assumed_default(d, today, deadline)
+        state = cell_state(plans.get(d), rep, assumed=asm)
         lock = lock_of(d, today, rep)
         editable = lock == LOCK_NONE
         off = (d in plans) and not plans[d]
         mark = MARKS[STATE_ON] if (editable and state == STATE_NONE) else MARKS[state]
         days.append({"date": d, "wd": d.weekday(), "state": state, "mark": mark,
                      "reported": rep, "off": off, "available": not off,
+                     "assumed": asm and (d not in plans) and not rep,
                      "editable": editable, "lock": lock})
         d += timedelta(days=1)
     stamps = (db.query(StaffDatePlan.updated_at, StaffDatePlan.created_at)
@@ -216,12 +261,13 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     last = max([(r[0] or r[1]) for r in stamps], default=None)
     return {"key": key, "start": start, "end": end, "deadline": deadline,
             "label": period_label(key), "today": today,
-            "overdue": today > deadline,
+            "overdue": today > deadline, "default_all": today > deadline,
             "submitted": bool(plans), "last_at": last,
             "days": days,
             "off_cnt": sum(1 for x in days if x["off"]),
             "free_cnt": sum(1 for x in days if not x["off"]),
             "done_cnt": sum(1 for x in days if x["reported"]),
+            "assumed_cnt": sum(1 for x in days if x["assumed"]),
             "editable_cnt": sum(1 for x in days if x["editable"])}
 
 
@@ -337,32 +383,48 @@ def admin_matrix(db, key: str, today=None) -> dict:
     rows = []
     col_free = {d: 0 for d in days}
     col_none = {d: 0 for d in days}
+    col_default = {d: 0 for d in days}
     for code in codes:
-        states = {d: cell_state(plan_map.get((code, d)), (code, d) in rep_set)
-                  for d in days}
+        states, assumed = {}, {}
+        for d in days:
+            av = plan_map.get((code, d))
+            rep = (code, d) in rep_set
+            asm = assumed_default(d, today, deadline)
+            states[d] = cell_state(av, rep, assumed=asm)
+            assumed[d] = bool(asm and av is None and not rep)   # 这一格是"默认出勤"
         for d in days:
             if states[d] in (STATE_ON, STATE_DONE):
                 col_free[d] += 1
             elif states[d] == STATE_NONE:
                 col_none[d] += 1
+            if assumed[d]:
+                col_default[d] += 1
+        a_cnt = sum(1 for d in days if assumed[d])
         rows.append({
             "person_code": code, "name": cand[code]["name"] or code,
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
             "submitted": code in with_plan,
+            "assumed": a_cnt > 0,          # 该人本期真有"默认出勤"的格子
             "on_cnt": sum(1 for d in days if states[d] == STATE_ON),
             "off_cnt": sum(1 for d in days if states[d] == STATE_OFF),
             "done_cnt": sum(1 for d in days if states[d] == STATE_DONE),
+            "assumed_cnt": a_cnt,
         })
     past = {d: d < today for d in days}
     # 按日小计只算"今天及以后"：已过去的日子不构成可用人力
     free_cnt = {d: (0 if past[d] else col_free[d]) for d in days}
     none_cnt = {d: col_none[d] for d in days}
+    default_cnt = {d: (0 if past[d] else col_default[d]) for d in days}
+    # default_all：本期还有"今天及以后"的日子，且已过登记截止日（整期已过去的历史半月不算）
+    default_all = today > deadline and end >= today
     return {"key": key, "start": start, "end": end, "deadline": deadline,
             "label": period_label(key), "today": today, "overdue": today > deadline,
+            "default_all": default_all,
             "days": days, "past": past, "rows": rows,
-            "free_cnt": free_cnt, "none_cnt": none_cnt,
+            "free_cnt": free_cnt, "none_cnt": none_cnt, "default_cnt": default_cnt,
             "unsubmitted": [r["person_code"] for r in rows if not r["submitted"]],
+            "assumed_people": [r["person_code"] for r in rows if r["assumed"]],
             "total": len(rows)}
 
 
@@ -390,13 +452,22 @@ def plan_xlsx(db, key: str, today=None):
         ws.column_dimensions[c.column_letter].width = 12 if i <= 3 else 7
     ws.append(head)
     for r in m["rows"]:
-        ws.append([r["person_code"], r["name"],
-                   "已登记" if r["submitted"] else "未登记"] +
+        flag = ("已登记" if r["submitted"]
+                else ("未登记（默认出勤）" if r["assumed"] else "未登记"))
+        ws.append([r["person_code"], r["name"], flag] +
                   [r["marks"][d] for d in days])
     ws.append([""] * len(head))
     ws.append(["可出勤人数（今天及以后）", ""] +
               [(m["free_cnt"][d] if not m["past"][d] else "") for d in days])
+    ws.append(["　其中默认出勤（未登记）", ""] +
+              [(m["default_cnt"][d] if not m["past"][d] else "") for d in days])
     ws.append(["未登记人数", ""] + [m["none_cnt"][d] for d in days])
+    ws.append([""] * len(head))
+    ws.append(["图例", "○ 可出勤　× 不出勤　□ 已出勤（已自报）　– 未登记"] +
+              [""] * (len(head) - 2))
+    if m["default_all"]:
+        ws.append(["说明", "超过登记截止日仍未登记的日期，今天及以后按“默认全部出勤”显示（按 ○ 计）"]
+                  + [""] * (len(head) - 2))
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue(), "date_plan_%s.xlsx" % key

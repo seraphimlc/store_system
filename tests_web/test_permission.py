@@ -20,7 +20,8 @@ def test_staff_blocked_from_other_data(client):
                 follow_redirects=False)
     r = client.get("/files", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"] == "/my/perf"
+    # 员工首页 = 待填报出勤计划 /my/plan，否则每日自报 /my/report（date_plan.staff_home）
+    assert r.headers["location"].startswith(("/my/plan", "/my/report", "/my/perf"))
     r = client.get("/perf", follow_redirects=False)
     assert r.status_code == 302
 

@@ -84,7 +84,9 @@ def test_export_blocked_for_staff(client):
     _mk(client, "empA", "员工A", "PA")
     _login(client, "empA")
     r = client.get("/staff-admin/accounts-export", follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"] == "/my/perf"
+    # 员工首页 = 待填报出勤计划 /my/plan，否则每日自报 /my/report（date_plan.staff_home）
+    assert r.status_code == 302 and r.headers["location"].startswith(
+        ("/my/plan", "/my/report", "/my/perf"))
 
 
 # ---------- 首登强制改密 ----------

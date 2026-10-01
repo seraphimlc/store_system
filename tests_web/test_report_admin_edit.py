@@ -158,7 +158,9 @@ def test_admin_edit_requires_admin(client):
     csrf = _login(client, "emp1")
     r = _admin_save(client, csrf, person_code="P1", report_date="2026-09-20",
                     area="x", p1_cnt="1", p2_cnt="1")
-    assert r.status_code == 302 and r.headers["location"] == "/my/perf"
+    # 员工首页 = 待填报出勤计划 /my/plan，否则每日自报 /my/report（date_plan.staff_home）
+    assert r.status_code == 302 and r.headers["location"].startswith(
+        ("/my/plan", "/my/report", "/my/perf"))
 
 
 def test_admin_edit_refreshes_materialized(client):

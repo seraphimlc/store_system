@@ -91,33 +91,29 @@ def create_app() -> FastAPI:
         from app.db import SessionLocal as _SL
         from app.models import User as _User
         path = request.url.path
-        # 已登录员工且「待改密」（首登/口令被重置）：除改密页与登出外一律拦到改密页
+        # 模板统一读 request.state.plan_pending（员工端"待填报出勤计划"弹窗），默认置空
+        request.state.plan_pending = None
         token = request.cookies.get("ss")
-        if token:
+        if token and not path.startswith("/static"):
             data = _read(token)
             if data:
                 s = _SL()
                 try:
                     u = s.get(_User, data["uid"])
-                    if (u is not None and u.role == "staff"
-                            and u.must_change_password):
-                        if not (path.startswith("/my/password")
-                                or path == "/logout"):
-                            return _RR("/my/password?must=1", status_code=302)
+                    if u is not None and u.role == "staff":
+                        # 已登录员工且「待改密」（首登/口令被重置）：除改密页与登出外一律拦到改密页
+                        if u.must_change_password:
+                            if not (path.startswith("/my/password")
+                                    or path == "/logout"):
+                                return _RR("/my/password?must=1", status_code=302)
+                        # 待填报出勤计划 → 员工端提示；员工越权访问非白名单页 → 回员工首页
+                        from app.services import date_plan as _dp
+                        request.state.plan_pending = _dp.needs_plan(
+                            s, u.person_code) or None
+                        if not path.startswith(STAFF_ALLOWED):
+                            return _RR(_dp.staff_home(s, u), status_code=302)
                 finally:
                     s.close()
-        if not path.startswith(STAFF_ALLOWED):
-            token = request.cookies.get("ss")
-            if token:
-                data = _read(token)
-                if data:
-                    s = _SL()
-                    try:
-                        u = s.get(_User, data["uid"])
-                        if u is not None and u.role == "staff":
-                            return _RR("/my/perf", status_code=302)
-                    finally:
-                        s.close()
         return await call_next(request)
 
     @app.get("/healthz")

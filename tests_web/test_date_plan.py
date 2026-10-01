@@ -30,7 +30,8 @@ def _person(db, code="P1", name="甲"):
     return code
 
 
-def _staff(client, username="emp1", code="P1", name="甲", password="pw123456"):
+def _mk_staff(client, username="emp1", code="P1", name="甲", password="pw123456"):
+    """只建账号（不登录）——用来观察登录落点。"""
     db = appdb.SessionLocal()
     _person(db, code, name)
     if db.query(User).filter(User.username == username).first() is None:
@@ -39,10 +40,18 @@ def _staff(client, username="emp1", code="P1", name="甲", password="pw123456"):
                     is_active=True, status="active", must_change_password=False))
         db.commit()
     db.close()
-    from fastapi.testclient import TestClient  # noqa: F401
-    client.post("/login", data={"username": username, "password": password},
-                follow_redirects=False)
-    return read_session_token(client.cookies.get(SESSION_COOKIE))["csrf"]
+
+
+def _login_raw(client, username="emp1", password="pw123456"):
+    """登录并返回 (响应, csrf)——响应里能看落点 location。"""
+    r = client.post("/login", data={"username": username, "password": password},
+                    follow_redirects=False)
+    return r, read_session_token(client.cookies.get(SESSION_COOKIE))["csrf"]
+
+
+def _staff(client, username="emp1", code="P1", name="甲", password="pw123456"):
+    _mk_staff(client, username, code, name, password)
+    return _login_raw(client, username, password)[1]
 
 
 def _admin(client, username="admin", password="pw123456"):
@@ -143,6 +152,25 @@ def test_lock_of_rules():
     assert date_plan.lock_of(date(2026, 10, 20), today, False) == date_plan.LOCK_NONE
     # 已自报优先于"已过去"（提示语更有信息量）
     assert date_plan.lock_of(date(2026, 10, 9), today, True) == date_plan.LOCK_REPORTED
+
+
+def test_assumed_default_rules():
+    """超过登记截止日 + 今天及以后 → 未登记按"默认全部出勤"。"""
+    dl, today = date(2026, 10, 18), date(2026, 10, 20)
+    assert date_plan.assumed_default(today, today, dl) is True
+    assert date_plan.assumed_default(date(2026, 10, 31), today, dl) is True
+    assert date_plan.assumed_default(date(2026, 10, 19), today, dl) is False  # 已过去不追认
+    # 截止日当天仍算按时 → 不启用默认
+    assert date_plan.assumed_default(dl, dl, dl) is False
+    assert date_plan.assumed_default(date(2026, 10, 19), date(2026, 10, 17), dl) is False
+
+
+def test_cell_state_assumed_priority():
+    """默认出勤的优先级最低：已自报 > 已登记的计划 > 默认。"""
+    assert date_plan.cell_state(None, False, assumed=True) == date_plan.STATE_ON
+    assert date_plan.cell_state(None, False) == date_plan.STATE_NONE
+    assert date_plan.cell_state(False, False, assumed=True) == date_plan.STATE_OFF
+    assert date_plan.cell_state(None, True, assumed=True) == date_plan.STATE_DONE
 
 
 # ---------------- 数据层 ----------------
@@ -331,6 +359,43 @@ def test_admin_matrix_states_counts_and_unsubmitted(client):
     assert m["past"][d16] is False
 
 
+def test_admin_matrix_default_all_after_deadline(client):
+    """超过 18 号仍未登记 → **今天及以后**按"默认全部出勤"显示（过去的日子不追认）。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)                       # P1/P2 都没登记
+    before = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 16))
+    assert before["default_all"] is False
+    assert {r["states"][date(2026, 10, 16)] for r in before["rows"]} == {
+        date_plan.STATE_NONE}               # 没到截止日 → 未登记还是"–"
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 20))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    d_past, d_today, d_future = (date(2026, 10, 19), date(2026, 10, 20),
+                                 date(2026, 10, 25))
+    assert m["default_all"] is True
+    assert rows["P1"]["states"][d_past] == date_plan.STATE_NONE   # 过去不追认
+    assert rows["P1"]["states"][d_today] == date_plan.STATE_ON    # 今天起默认可出勤
+    assert rows["P1"]["states"][d_future] == date_plan.STATE_ON
+    assert rows["P1"]["assumed"] is True and rows["P1"]["submitted"] is False
+    assert m["free_cnt"][d_future] == 2 and m["default_cnt"][d_future] == 2
+    assert m["none_cnt"][d_past] == 2
+    assert sorted(m["assumed_people"]) == ["P1", "P2"]
+
+
+def test_admin_matrix_default_does_not_override_submitted_plan(client):
+    """登记过的人不受"默认出勤"影响：他标的不出勤仍是不出勤。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    date_plan.save_plan(db, _U("P1"), "2026-10-H2", ["2026-10-20"],
+                        today=date(2026, 10, 17))
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 20))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    assert rows["P1"]["states"][date(2026, 10, 20)] == date_plan.STATE_OFF
+    assert rows["P1"]["states"][date(2026, 10, 25)] == date_plan.STATE_ON
+    assert rows["P1"]["assumed"] is False and rows["P1"]["assumed_cnt"] == 0
+    assert rows["P2"]["assumed"] is True                 # 没登记的按默认
+    assert m["free_cnt"][date(2026, 10, 20)] == 1        # 只有 P2（默认）
+
+
 def test_admin_matrix_excludes_past_days_from_free_count(client):
     """已经过去的日子不构成可用人力 → 小计置 0，但格子照旧显示三态。"""
     db = appdb.SessionLocal()
@@ -342,8 +407,11 @@ def test_admin_matrix_excludes_past_days_from_free_count(client):
     assert m["past"][past] is True
     assert m["free_cnt"][past] == 0
     assert rows["P1"]["states"][past] == date_plan.STATE_ON    # 格子照旧显示三态
+    # 未来：P1 登记过（○）+ P2 已过截止日未登记（按默认出勤 ○）= 2
     future = date(2026, 10, 25)
-    assert m["past"][future] is False and m["free_cnt"][future] == 1
+    assert m["past"][future] is False and m["free_cnt"][future] == 2
+    assert m["default_cnt"][future] == 1
+    assert rows["P2"]["assumed"] is True
 
 
 def test_admin_matrix_hides_inactive_staff_without_plan(client):
@@ -411,6 +479,99 @@ def test_my_plan_submit_and_resubmit(client):
     assert len(rows) == len(days)
 
 
+# ---------------- 待填报判定 / 登录落点 / 弹窗提示（2026-10-01 用户要求） ----------------
+
+def _submit_current(client, csrf):
+    """登记本期计划（空勾选 = 全部可出勤）。"""
+    key = date_plan.current_period(date_plan.jst_today())
+    r = client.post("/my/plan", data={
+        "period": key, "csrf_token": csrf, "_ft": form_token(client, "/my/plan")},
+        follow_redirects=False)
+    assert r.status_code == 303
+    return key
+
+
+def test_needs_plan_and_staff_home(client):
+    """本期未登记 = 需要填报；落点随之切换。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    u = _U()
+    today = date(2026, 10, 2)
+    info = date_plan.needs_plan(db, "P1", today=today)
+    assert info["key"] == "2026-10-H1" and info["overdue"] is False
+    assert date_plan.staff_home(db, u) == "/my/plan"        # 未登记 → 先填计划
+    date_plan.save_plan(db, u, "2026-10-H1", [], today=today)
+    assert date_plan.needs_plan(db, "P1", today=today) == {}
+    assert date_plan.staff_home(db, u) == "/my/report"      # 已登记 → 每日自报
+
+
+def test_needs_plan_edge_cases(client):
+    db = appdb.SessionLocal()
+    _person(db)
+    # 没绑定编号：既不提示也回不到这两个页面 → 保持历史落点
+    assert date_plan.needs_plan(db, None) == {}
+    assert date_plan.needs_plan(db, "") == {}
+    assert date_plan.staff_home(db, _U(code=None)) == "/my/perf"
+    # 逾期未登记：仍然需要填报（只是文案变成"已逾期"）
+    info = date_plan.needs_plan(db, "P1", today=date(2026, 10, 20))
+    assert info["overdue"] is True
+    db.close()
+
+
+def test_staff_login_landing_plan_then_report(client):
+    """登录后第一个页面：待填报 → /my/plan；登记完 → /my/report。"""
+    _mk_staff(client)
+    r, csrf = _login_raw(client)
+    assert r.headers["location"] == "/my/plan"
+    _submit_current(client, csrf)
+    client.post("/logout", data={"csrf_token": csrf}, follow_redirects=False)
+    r2, _ = _login_raw(client)
+    assert r2.headers["location"] == "/my/report"
+
+
+def test_staff_root_redirect_uses_staff_home(client):
+    """访问 / 也走同一落点规则（管理员仍是数据看板）。"""
+    _mk_staff(client)
+    _login_raw(client)
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/my/plan"
+
+
+def test_plan_prompt_popup_shown_until_submitted(client):
+    """待填报 → 员工端弹窗 + tab 角标；正在填的计划页不弹；登记后消失。"""
+    csrf = _staff(client)
+    r = client.get("/my/report")
+    assert 'data-testid="plan-prompt"' in r.text
+    assert 'data-testid="go-plan"' in r.text and 'data-testid="plan-later"' in r.text
+    assert 'class="dot"' in r.text                      # tab 角标
+    assert 'data-testid="plan-prompt"' not in client.get("/my/plan").text
+    _submit_current(client, csrf)
+    after = client.get("/my/report")
+    assert 'data-testid="plan-prompt"' not in after.text
+    assert 'class="dot"' not in after.text
+
+
+def test_plan_prompt_not_shown_to_admin(client):
+    _admin(client)
+    r = client.get("/staff-plans")
+    assert r.status_code == 200
+    assert 'data-testid="plan-prompt"' not in r.text
+
+
+def test_plan_prompt_shows_overdue_wording(client):
+    """逾期时弹窗文案提示"未登记的日子今天起按默认全部出勤计算"。"""
+    _staff(client)
+    # 本期截止日已过（真实今天 ≥ 10 月 3 日之后）——用服务层确认后再断言界面
+    from app.services import date_plan as dp
+    today = dp.jst_today()
+    info = dp.needs_plan(appdb.SessionLocal(), "P1")
+    html = client.get("/my/report").text
+    if info["overdue"]:
+        assert "默认全部出勤" in html
+    else:
+        assert today <= info["deadline"]
+
+
 def test_my_plan_past_period_is_readonly(client):
     """已完全过去的半月：只读展示，不给保存按钮（避免点了才报错）。"""
     _staff(client)
@@ -467,10 +628,12 @@ def test_my_plan_rejects_other_period_dates(client):
 # ---------------- 路由：管理端 ----------------
 
 def test_staff_blocked_from_admin_plan_page(client):
+    """员工访问管理端矩阵 → 拦回**员工首页**（待填报时 = /my/plan，否则 /my/report）。"""
     _staff(client)
     r = client.get("/staff-plans", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"].startswith(("/my/perf", "/login"))
+    assert r.headers["location"].startswith(("/my/plan", "/my/report",
+                                             "/my/perf", "/login"))
 
 
 def test_admin_plan_other_period_does_not_show_zero_for_today(client):

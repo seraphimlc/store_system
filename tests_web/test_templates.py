@@ -27,7 +27,9 @@ def _req():
 
     class _QP(dict):
         items = dict.items
-    return SN(state=SN(csrf="tok"), query_params=_QP(), cookies={})
+    # plan_pending：中间件写入的「待填报出勤计划」（真实请求里该属性一定存在）
+    return SN(state=SN(csrf="tok", plan_pending=None), query_params=_QP(),
+              cookies={})
 
 
 def test_base_template_renders_logged_in():
