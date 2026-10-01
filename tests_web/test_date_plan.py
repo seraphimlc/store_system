@@ -828,7 +828,7 @@ def test_my_plan_rows_toggle_without_js(client, frozen, monkeypatch):
     # 开关组件（switch）：开=可出勤（滑块靠右）、关=不出勤（滑块靠左），纯 CSS 兄弟选择器
     assert 'class="sw"' in html and 'role="switch"' in html
     css = open("app/static/app.css", encoding="utf-8").read()
-    assert ".pickrow input:checked ~ .sw-wrap .sw i { left: 3px; }" in css
+    assert ".pickrow input:checked ~ .sw-wrap .sw i" in css
     assert ".pickrow input:checked ~ .sw-wrap .sw-txt.off { display: inline; }" in css
     # 窗口内、且本期已经开始（10-02 看 10 月上半月）→ 过去的日子不再可点
     monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 2))

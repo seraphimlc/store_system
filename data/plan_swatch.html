@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>员工端开关配色候选（挑一个）</title>
+<style>
+  :root { --ink:#1c2333; --muted:#66708a; --line:#e3e8f0; --surface:#fff; --bg:#f3f5f9; --radius:10px; }
+  body { margin:0; padding:22px; background:var(--bg); color:var(--ink);
+    font:15px/1.5 -apple-system, "PingFang SC", "Hiragino Sans GB", sans-serif; }
+  h1 { font-size:1.05rem; margin:0 0 .2rem; }
+  p.sub { color:var(--muted); font-size:.86rem; margin:0 0 1.1rem; }
+  h2 { font-size:.92rem; margin:1.2rem 0 .4rem; }
+  h2 small { color:var(--muted); font-weight:400; }
+  .plan-list { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:0 1px 2px rgba(20,30,60,.05); overflow:hidden; max-width:520px; }
+  .pickrow { display:flex; align-items:center; gap:.8rem; padding:.7rem .85rem;
+    border-bottom:1px solid #eef1f7; }
+  .plan-list > .pickrow:last-child { border-bottom:0; }
+  .pickrow input { position:absolute; width:1px; height:1px; opacity:0; }
+  .pickrow .bar { width:3px; align-self:stretch; min-height:26px; border-radius:3px; }
+  .pickrow .d { display:flex; flex-direction:column; line-height:1.15; font-variant-numeric:tabular-nums; }
+  .pickrow .d small { color:var(--muted); font-size:.76rem; }
+  .pickrow .sw-wrap { margin-left:auto; display:inline-flex; align-items:center; gap:.5rem; }
+  .pickrow .sw-txt { font-size:.86rem; font-weight:650; white-space:nowrap; }
+  .pickrow .sw-txt.off { display:none; }
+  .pickrow input:checked ~ .sw-wrap .sw-txt.on { display:none; }
+  .pickrow input:checked ~ .sw-wrap .sw-txt.off { display:inline; }
+  .pickrow .sw { position:relative; flex:none; width:44px; height:24px; border-radius:999px;
+    border:1px solid transparent; transition:background .16s, border-color .16s; }
+  .pickrow .sw i { position:absolute; top:2px; left:22px; width:18px; height:18px; border-radius:50%;
+    box-shadow:0 1px 2px rgba(20,30,60,.18); transition:left .16s, background .16s; }
+  .pickrow input:checked ~ .sw-wrap .sw i { left:2px; }
+
+  /* A 软绿 / 灰（当前线上） */
+  .va .bar { background:#5fbb92; } .va input:checked ~ .bar { background:#c3cbda; }
+  .va .sw-txt.on { color:#12805c; } .va .sw-txt.off { color:var(--muted); }
+  .va .sw { background:#e9f7f1; border-color:#c8ead9; } .va .sw i { background:#12805c; }
+  .va input:checked ~ .sw-wrap .sw { background:#eff1f6; border-color:#dfe4ee; }
+  .va input:checked ~ .sw-wrap .sw i { background:#97a1b6; }
+
+  /* B 软绿 / 淡红 */
+  .vb .bar { background:#5fbb92; } .vb input:checked ~ .bar { background:#e8a1a6; }
+  .vb .sw-txt.on { color:#12805c; } .vb .sw-txt.off { color:#c0505a; }
+  .vb .sw { background:#e9f7f1; border-color:#c8ead9; } .vb .sw i { background:#12805c; }
+  .vb input:checked ~ .sw-wrap .sw { background:#fdeef0; border-color:#f2ccd1; }
+  .vb input:checked ~ .sw-wrap .sw i { background:#cf6b74; }
+
+  /* C 蓝 / 灰（跟顶栏同一个主色） */
+  .vc .bar { background:#7f9bf3; } .vc input:checked ~ .bar { background:#c3cbda; }
+  .vc .sw-txt.on { color:#2f5bea; } .vc .sw-txt.off { color:var(--muted); }
+  .vc .sw { background:#eaf0ff; border-color:#cdd9fb; } .vc .sw i { background:#2f5bea; }
+  .vc input:checked ~ .sw-wrap .sw { background:#eff1f6; border-color:#dfe4ee; }
+  .vc input:checked ~ .sw-wrap .sw i { background:#97a1b6; }
+
+  /* D 实心绿 / 实心灰（滑块白色） */
+  .vd .bar { background:#12805c; } .vd input:checked ~ .bar { background:#b9c1d1; }
+  .vd .sw-txt.on { color:#12805c; } .vd .sw-txt.off { color:var(--muted); }
+  .vd .sw { background:#12805c; border-color:#12805c; } .vd .sw i { background:#fff; top:2px; left:21px; }
+  .vd input:checked ~ .sw-wrap .sw { background:#c8cfdb; border-color:#c8cfdb; }
+  .vd input:checked ~ .sw-wrap .sw i { background:#fff; left:2px; }
+</style>
+</head>
+<body>
+<h1>员工端「出勤计划」开关 · 配色候选</h1>
+<p class="sub">现在线上是 A。看中哪个告诉我字母，我改过去（结构/交互都一样，只换颜色）。</p>
+
+<h2>A <small>软绿 + 灰（当前线上）—— 最克制，整页没有红</small></h2>
+<div class="plan-list va">
+  <div class="pickrow"><input type="checkbox"><span class="bar"></span>
+    <span class="d">10-03<small>周三</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+  <div class="pickrow"><input type="checkbox" checked><span class="bar"></span>
+    <span class="d">10-04<small>周四</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+</div>
+
+<h2>B <small>软绿 + 淡红 —— 保留"不出勤=红"的直觉，但不刺眼</small></h2>
+<div class="plan-list vb">
+  <div class="pickrow"><input type="checkbox"><span class="bar"></span>
+    <span class="d">10-03<small>周三</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+  <div class="pickrow"><input type="checkbox" checked><span class="bar"></span>
+    <span class="d">10-04<small>周四</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+</div>
+
+<h2>C <small>蓝 + 灰 —— 跟顶栏/按钮同一个主色（#2f5bea）</small></h2>
+<div class="plan-list vc">
+  <div class="pickrow"><input type="checkbox"><span class="bar"></span>
+    <span class="d">10-03<small>周三</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+  <div class="pickrow"><input type="checkbox" checked><span class="bar"></span>
+    <span class="d">10-04<small>周四</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+</div>
+
+<h2>D <small>实心绿 / 实心灰（白色滑块）—— 最像系统开关，对比最强</small></h2>
+<div class="plan-list vd">
+  <div class="pickrow"><input type="checkbox"><span class="bar"></span>
+    <span class="d">10-03<small>周三</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+  <div class="pickrow"><input type="checkbox" checked><span class="bar"></span>
+    <span class="d">10-04<small>周四</small></span>
+    <span class="sw-wrap"><span class="sw-txt on">可出勤</span><span class="sw-txt off">不出勤</span><span class="sw"><i></i></span></span></div>
+</div>
+</body>
+</html>
