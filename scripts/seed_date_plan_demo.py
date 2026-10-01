@@ -164,9 +164,11 @@ def report(db, today=None) -> None:
                 tag = "演示账号"
             print(_line(tag, [r["marks"][d] for d in m["days"]])
                   + ("   [未提交计划]" if not r["submitted"] else ""))
-        print(_line("可出勤/默认", ["%s/%s" % (
-            (m["free_cnt"][d] if not m["past"][d] else "-"),
-            (m["default_cnt"][d] if not m["past"][d] else "-")) for d in m["days"]]))
+        print(_line("计划出勤", [str(m["plan_cnt"][d]) for d in m["days"]]))
+        print(_line("实际出勤", [("—" if m["actual_cnt"][d] is None
+                                else str(m["actual_cnt"][d])) for d in m["days"]]))
+        print(_line("　默认出勤", [(str(m["default_cnt"][d]) if not m["past"][d] else "—")
+                                for d in m["days"]]))
         print("  未提交计划 %d / %d 人；未登记人数(今天起) %s"
               % (len(m["unsubmitted"]), m["total"],
                  [m["none_cnt"][d] for d in m["days"] if not m["past"][d]]))

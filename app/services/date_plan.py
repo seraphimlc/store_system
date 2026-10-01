@@ -572,6 +572,8 @@ def admin_matrix(db, key: str, today=None) -> dict:
     col_free = {d: 0 for d in days}
     col_none = {d: 0 for d in days}
     col_default = {d: 0 for d in days}
+    col_actual = {d: 0 for d in days}      # 实际出勤（有自报）人数
+    col_plan = {d: 0 for d in days}        # 计划出勤人数
     for code in codes:
         states, assumed = {}, {}
         for d in days:
@@ -580,12 +582,18 @@ def admin_matrix(db, key: str, today=None) -> dict:
             states[d] = cell_state(av, rep, assumed=asm, past=d < today)
             assumed[d] = bool(asm and av is None)        # 这一格是"默认出勤"
         for d in days:
+            # 注意：这里必须重新取本格的 (av, rep)，不能沿用上一个循环的残留值
+            av, rep = plan_map.get((code, d), (None, False))
             if states[d] in (STATE_ON, STATE_DONE):
                 col_free[d] += 1
             elif states[d] == STATE_NONE:
                 col_none[d] += 1
             if assumed[d]:
                 col_default[d] += 1
+            if rep:                                      # □ = 实际来了
+                col_actual[d] += 1
+            if av is True or assumed[d]:                 # 计划里标了可出勤（含默认出勤）
+                col_plan[d] += 1
         a_cnt = sum(1 for d in days if assumed[d])
         rows.append({
             "person_code": code, "name": cand[code]["name"] or code,
@@ -601,10 +609,13 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "assumed_cnt": a_cnt,
         })
     past = {d: d < today for d in days}
-    # 按日小计只算"今天及以后"：已过去的日子不构成可用人力
+    # free_cnt：今天及以后"能派活"的人数（○/□）——顶部信息条用
     free_cnt = {d: (0 if past[d] else col_free[d]) for d in days}
     none_cnt = {d: col_none[d] for d in days}
     default_cnt = {d: (0 if past[d] else col_default[d]) for d in days}
+    # 两个按日统计行（2026-10-01 用户要求）：计划出勤（含默认出勤）/ 实际出勤（有自报）
+    plan_cnt = dict(col_plan)
+    actual_cnt = {d: (col_actual[d] if d <= today else None) for d in days}
     # default_all：本期还有"今天及以后"的日子，且已过登记截止日（整期已过去的历史半月不算）
     default_all = today > deadline and end >= today
     open_at, close_at = period_window(key)
@@ -615,6 +626,8 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "default_all": default_all,
             "days": days, "past": past, "rows": rows,
             "free_cnt": free_cnt, "none_cnt": none_cnt, "default_cnt": default_cnt,
+            # 计划出勤（按日，含"默认出勤"）/ 实际出勤（按日，未来日为 None → 显示"—"）
+            "plan_cnt": plan_cnt, "actual_cnt": actual_cnt,
             "unsubmitted": [r["person_code"] for r in rows if not r["submitted"]],
             "assumed_people": [r["person_code"] for r in rows if r["assumed"]],
             "total": len(rows)}
@@ -683,12 +696,13 @@ def plan_xlsx(db, key: str, today=None):
         row([r["name"], r["short_code"], free, *vals])
 
     row([""] * ncol)
-    row(["可出勤人数（今天起）", "", "",
-         *[(m["free_cnt"][d] if not m["past"][d] else "") for d in days]],
-        is_bold=True)
+    row(["计划出勤", "", "", *[m["plan_cnt"][d] for d in days]], is_bold=True)
     if m["default_all"]:
         row(["　其中默认出勤（未登记）", "", "",
              *[(m["default_cnt"][d] if not m["past"][d] else "") for d in days]])
+    row(["实际出勤", "", "",
+         *[(m["actual_cnt"][d] if m["actual_cnt"][d] is not None else "") for d in days]],
+        is_bold=True)
     row(["未登记人数", "", "", *[m["none_cnt"][d] for d in days]])
     bio = io.BytesIO()
     wb.save(bio)

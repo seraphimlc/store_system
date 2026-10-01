@@ -628,6 +628,12 @@ def test_admin_matrix_past_day_with_report_is_done(client):
     assert rows["P2"]["submitted"] is False                     # 但不算"登记过计划"
     assert all(m["past"][d] for d in (d1, d2, d3))
     assert m["free_cnt"][d2] == 0                               # 过去的日期不计入可用人力
+    # 两个统计行（2026-10-01 用户要求）：计划出勤按计划值算（甲登记过 → 10-01/10-02 都是 1）
+    assert m["plan_cnt"][d1] == 1 and m["plan_cnt"][d3] == 1
+    # 实际出勤：10-02 两人都自报过 → 2；今天(10-04) 0；未来(10-05) 还没到 → None
+    assert m["actual_cnt"][d2] == 2
+    assert m["actual_cnt"][date(2026, 10, 4)] == 0
+    assert m["actual_cnt"][date(2026, 10, 5)] is None
 
 
 def test_today_keeps_plan_until_next_day(client):
@@ -929,12 +935,12 @@ def test_admin_plan_other_period_does_not_show_zero_for_today(client, monkeypatc
     _admin(client)
     monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 1))
     this_view = client.get("/staff-plans").text
-    assert "人可出勤" in this_view                        # 本期（今天在里面）→ 显示
+    assert "计划出勤" in this_view and "实际出勤" in this_view   # 本期（今天在里面）→ 显示
     other = date_plan.shift_period(
         date_plan.current_period(date(2026, 10, 1)), halves=2)
     r = client.get("/staff-plans?period=" + other)
     assert r.status_code == 200
-    assert "人可出勤" not in r.text                       # 非本期 → 整段不显示
+    assert "今天 计划出勤" not in r.text                  # 非本期 → "今天"那段不显示
     # 顶部只有一条信息条（不再有统计卡片墙，也不再有那几段说明废话）
     assert 'data-testid="plan-bar"' in r.text
     assert "stat-card" not in r.text
@@ -954,7 +960,9 @@ def test_admin_plan_matrix_page(client):
     assert r.status_code == 200
     assert "甲" in r.text and "乙" in r.text
     assert 'data-testid="plan-matrix"' in r.text
-    assert "可出勤人数（今天及以后）" in r.text
+    # 底部两行统计：计划出勤 / 实际出勤（2026-10-01 用户要求）
+    assert "计划出勤" in r.text and "实际出勤" in r.text
+    assert 'data-testid="cell-P1-2026-10-16"' in r.text
     # 登记状态靠表格里的标记体现：不再有登记列，也不再罗列未提交的人名
     assert 'data-testid="unsubmitted"' not in r.text
     assert "<th>登记</th>" not in r.text
@@ -1012,4 +1020,12 @@ def test_admin_plan_export_xlsx(client):
     assert by_name["甲"][3] == "○"              # 10-16：可出勤
     assert by_name["乙"][3] == ""               # 未登记 → 留空
     assert by_name["甲"][2] == 15               # 可出动天数：整期 16 天 − 1 天不出勤
-    assert any(str(row[0]).startswith("可出勤人数") for row in grid)
+    # 底部两行统计（2026-10-01 用户要求）：计划出勤 / 实际出勤
+    totals = {str(row[0]): row for row in grid}
+    assert "计划出勤" in totals and "实际出勤" in totals
+    assert "可出勤人数（今天起）" not in totals
+    # 计划出勤：甲登记了（10-16~10-19 可出勤 + 10-20 不出勤）→ 该日 1 人；乙未登记 → 不计
+    assert totals["计划出勤"][3] == 1              # 10-16
+    # 实际出勤：这一期全在未来（今天 10-10）→ 整行留空（那天还没到）
+    assert totals["实际出勤"][3] == ""
+    assert totals["实际出勤"][-1] == ""

@@ -20,13 +20,14 @@
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
 
-{# 顶部只留两行：一行信息（填报期 / 未提交 / 今天可出勤）+ 一行图例；其余靠表格自己说话 #}
+{# 顶部只留两行：一行信息（填报期 / 未提交 / 今天计划出勤）+ 一行图例；其余靠表格自己说话 #}
 {% set in_period = m.start <= m.today <= m.end %}
 <div class="plan-bar" data-testid="plan-bar">
   <span class="plan-meta">
     {{ t('填报期') }} <b>{{ m.open_at }} ~ {{ m.close_at }}</b>
     · {{ t('未提交计划') }} <b {% if m.unsubmitted %}class="warn-txt"{% endif %}>{{ m.unsubmitted|length }}</b>/{{ m.total }}
-    {%- if in_period %} · {{ t('今天') }} <b>{{ m.free_cnt.get(m.today, 0) }}</b> {{ t('人可出勤') }}{% endif %}
+    {%- if in_period %} · {{ t('今天') }} {{ t('计划出勤') }} <b>{{ m.plan_cnt.get(m.today, 0) }}</b>
+      / {{ t('实际出勤') }} <b>{{ m.actual_cnt.get(m.today) or 0 }}</b>{% endif %}
   </span>
   <span class="plan-legend">
     <span><span class="pm on">○</span>{{ t('可出勤') }}</span>
@@ -59,10 +60,8 @@
   <tr><td colspan="{{ m.days|length + 1 }}" class="empty">{{ t('没有可显示的员工') }}</td></tr>
   {% endfor %}
   <tr class="totals">
-    <td>{{ t('可出勤人数（今天及以后）') }}</td>
-    {% for d in m.days %}
-    <td class="num">{{ m.free_cnt[d] if not m.past[d] else '—' }}</td>
-    {% endfor %}
+    <td>{{ t('计划出勤') }}</td>
+    {% for d in m.days %}<td class="num">{{ m.plan_cnt[d] }}</td>{% endfor %}
   </tr>
   {% if m.default_all %}
   <tr class="totals">
@@ -72,6 +71,12 @@
     {% endfor %}
   </tr>
   {% endif %}
+  <tr class="totals">
+    <td>{{ t('实际出勤') }}</td>
+    {% for d in m.days %}
+    <td class="num">{{ m.actual_cnt[d] if m.actual_cnt[d] is not none else '—' }}</td>
+    {% endfor %}
+  </tr>
   <tr class="totals">
     <td>{{ t('未登记人数') }}</td>
     {% for d in m.days %}<td class="num">{{ m.none_cnt[d] }}</td>{% endfor %}
