@@ -41,17 +41,17 @@
     <span><span class="pm off">×</span> {{ t('不出勤') }}</span>
     <span><span class="pm done">□</span> {{ t('已出勤（已自报）') }}</span>
     <span><span class="pm none">–</span> {{ t('未登记') }}</span>
+    <span><span class="pm on" style="color:#b9c1d1">○</span> {{ t('未登记（按默认全部出勤）') }}</span>
     <span class="hint">{{ t('实际出勤以员工自报为准；灰色日期为已过去的日子。') }}</span>
   </div>
+  <p class="hint" style="margin:.3rem 0 0" data-testid="window-hint">
+    {% if m.window_state == 'open' %}{{ t('填报期：') }}{{ m.open_at }} ~ {{ m.close_at }}（{{ t('截止日当天仍可提交') }}）
+    {% elif m.window_state == 'before' %}{{ t('填报期自') }} {{ m.open_at }} {{ t('起开放（提前 7 天开放）。') }}
+    {% else %}{{ t('填报期已结束：') }}{{ m.open_at }} ~ {{ m.close_at }}。{{ t('未登记的日子按「默认全部出勤」计算。') }}{% endif %}
+  </p>
   {% if m.default_all %}
   <p class="hint" style="margin:.3rem 0 0" data-testid="default-hint">
-    {{ t('已过登记截止日（3 号 / 18 号）仍未登记的人，今天及以后按「默认全部出勤」显示（不算已登记）。') }}
-  </p>
-  {% endif %}
-  {% if m.unsubmitted %}
-  <p class="hint" style="margin:.3rem 0 0" data-testid="unsubmitted">
-    {{ t('未提交计划：') }}
-    {% for r in m.rows %}{% if not r.submitted %}{{ r.name }}（{{ r.person_code }}）{% if not loop.last %}、{% endif %}{% endif %}{% endfor %}
+    {{ t('已过登记截止日（3 号 / 18 号）仍未登记的人，今天及以后按「默认全部出勤」显示（浅色 ○）。') }}
   </p>
   {% endif %}
 </div>
@@ -60,7 +60,6 @@
 <table class="grid-tbl plan-matrix" data-testid="plan-matrix">
   <tr>
     <th>{{ t('员工') }}</th>
-    <th>{{ t('登记') }}</th>
     {% for d in m.days %}
     <th class="{% if m.past[d] %}past{% endif %}">{{ d.strftime('%m-%d') }}
       <span class="hint">{{ t(wd_labels[d.weekday()]) }}</span></th>
@@ -69,34 +68,31 @@
   {% for r in m.rows %}
   <tr>
     <td>{{ r.name }}<span class="hint">（{{ r.person_code }}）</span></td>
-    <td>{% if r.submitted %}<span class="pill ok">{{ t('已登记') }}</span>
-        {% elif r.assumed %}<span class="pill warn" title="{{ t('超过登记截止日仍未登记，今天及以后按默认全部出勤计算') }}">{{ t('未登记（默认出勤）') }}</span>
-        {% else %}<span class="pill warn">{{ t('未登记') }}</span>{% endif %}</td>
     {% for d in m.days %}
-    <td class="c {{ r.states[d] }}{% if m.past[d] %} past{% endif %}"
+    <td class="c {{ r.states[d] }}{% if r.assumed_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
         data-testid="cell-{{ r.person_code }}-{{ d }}"
-        title="{{ r.name }} {{ d }} {{ r.marks[d] }}">{{ r.marks[d] }}</td>
+        title="{{ r.name }} {{ d }} {{ r.marks[d] }}{% if r.assumed_days[d] %}（未登记→默认出勤）{% endif %}">{{ r.marks[d] }}</td>
     {% endfor %}
   </tr>
   {% else %}
-  <tr><td colspan="{{ m.days|length + 2 }}" class="empty">{{ t('没有可显示的员工') }}</td></tr>
+  <tr><td colspan="{{ m.days|length + 1 }}" class="empty">{{ t('没有可显示的员工') }}</td></tr>
   {% endfor %}
   <tr class="totals">
-    <td colspan="2">{{ t('可出勤人数（今天及以后）') }}</td>
+    <td>{{ t('可出勤人数（今天及以后）') }}</td>
     {% for d in m.days %}
     <td class="num">{{ m.free_cnt[d] if not m.past[d] else '—' }}</td>
     {% endfor %}
   </tr>
   {% if m.default_all %}
   <tr class="totals">
-    <td colspan="2">{{ t('　其中默认出勤（未登记）') }}</td>
+    <td>{{ t('　其中默认出勤（未登记）') }}</td>
     {% for d in m.days %}
     <td class="num">{{ m.default_cnt[d] if not m.past[d] else '—' }}</td>
     {% endfor %}
   </tr>
   {% endif %}
   <tr class="totals">
-    <td colspan="2">{{ t('未登记人数') }}</td>
+    <td>{{ t('未登记人数') }}</td>
     {% for d in m.days %}<td class="num">{{ m.none_cnt[d] }}</td>{% endfor %}
   </tr>
 </table>

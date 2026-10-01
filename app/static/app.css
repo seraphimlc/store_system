@@ -292,6 +292,8 @@ table.plan-matrix td.c.on { color: var(--ok); }
 table.plan-matrix td.c.off { color: var(--err); background: #fff7f7; }
 table.plan-matrix td.c.done { color: var(--brand); background: #f2f6ff; }
 table.plan-matrix td.c.none { color: #c3cad8; }
+/* 浅色 ○ = 未登记（超期按默认全部出勤算），与本人登记的实色 ○ 区分 */
+table.plan-matrix td.c.assumed { color: #b9c1d1; background: transparent; font-weight: 400; }
 table.plan-matrix td.past, table.plan-matrix th.past { background: #f4f5f8; }
 table.plan-matrix td.past.on, table.plan-matrix td.past.done { color: #9aa6bd; }
 table.plan-matrix th .hint { font-weight: 400; }

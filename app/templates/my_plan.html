@@ -18,17 +18,30 @@
 {% if saved %}<div class="msg ok">{{ t('已保存出勤计划') }}</div>{% endif %}
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
-{% if view.overdue %}
-<div class="msg warn" data-testid="overdue-hint">
-  {{ t('本期的登记截止日是') }} {{ view.deadline }}，{{ t('已逾期（仍可登记，请尽快补上）。') }}
-  {% if not view.submitted %}{{ t('未登记的日子今天起按「默认全部出勤」计算。') }}{% endif %}
+{% if view.window_state == 'open' %}
+<div class="msg ok" data-testid="window-open">
+  {{ t('填报期进行中：') }} {{ view.open_at }} ~ {{ view.close_at }}（{{ t('截止日当天仍可提交') }}）
+</div>
+{% elif view.window_state == 'before' %}
+<div class="msg warn" data-testid="window-before">
+  {{ t('填报期还没开始：') }} {{ view.open_at }} {{ t('起开放（提前 7 天开放）。') }}
+</div>
+{% else %}
+<div class="msg warn" data-testid="window-closed">
+  {{ t('本期填报期已结束：') }} {{ view.open_at }} ~ {{ view.close_at }}。
+  {{ t('未登记的日子按「默认全部出勤」计算。') }}
+</div>
+{% endif %}
+{% if next_win and view.window_state != 'open' and next_win.key != view.key %}
+<div class="hint" style="margin:.2rem 0 .6rem" data-testid="next-window">
+  {{ t('下个填报期：') }} {{ next_win.open_at }} {{ t('开放') }}（{{ next_win.start }} ~ {{ next_win.end }}）。
 </div>
 {% endif %}
 
 <div class="card" data-testid="plan-summary">
   <div class="stat-row">
     <div><span class="hint">{{ t('本期') }}</span><b>{{ view.start }} ~ {{ view.end }}</b></div>
-    <div><span class="hint">{{ t('登记截止') }}</span><b>{{ view.deadline }}</b></div>
+    <div><span class="hint">{{ t('填报期') }}</span><b>{{ view.open_at }} ~ {{ view.close_at }}</b></div>
     <div><span class="hint">{{ t('登记状态') }}</span>
       {% if view.submitted %}
       <span class="pill ok">{{ t('已登记') }}</span>
@@ -94,7 +107,11 @@
     <button class="btn" type="submit" data-testid="save-plan">{{ t('保存出勤计划') }}</button>
     <span class="hint">{{ t('本期共') }} {{ view.days|length }} {{ t('天') }}，{{ t('可修改') }} {{ view.editable_cnt }} {{ t('天') }}（{{ t('已过去或已自报的日期不会被改动') }}）</span>
     {% else %}
-    <span class="hint" data-testid="plan-locked">{{ t('本期已无可以登记的日期（已过去或已自报）。') }}</span>
+    <span class="hint" data-testid="plan-locked">
+      {% if view.window_state == 'before' %}{{ t('填报期还没开始，暂时不能登记。') }}
+      {% elif view.window_state == 'closed' %}{{ t('填报期已结束，不能再修改。') }}
+      {% else %}{{ t('本期已无可以登记的日期（已过去或已自报）。') }}{% endif %}
+    </span>
     {% endif %}
   </div>
 </form>

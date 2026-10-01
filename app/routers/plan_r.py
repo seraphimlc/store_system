@@ -35,12 +35,12 @@ def _admin_guard(user):
 
 
 def _resolve_period(period: str, today, keys: List[str]) -> str:
-    """未传/非法 → 本期（下拉里只列可选半月）。"""
+    """未传/非法 → **正在填报的那一期**（否则本期）；下拉里只列可选半月。"""
     from app.services import date_plan
     p = (period or "").strip().upper()
     if p in keys:
         return p
-    return date_plan.current_period(today)
+    return date_plan.default_period(today)
 
 
 # ---------------- 员工端 ----------------
@@ -62,6 +62,7 @@ def my_plan_page(request: Request,
         "request": request, "current_user": user,
         "today": today, "view": view, "period": key, "periods": options,
         "wd_labels": date_plan.WD_LABELS, "marks": date_plan.MARKS,
+        "next_win": date_plan.next_window(today),
         "jst_delta": timedelta(hours=9),
         "saved": saved, "msg": msg, "err": err,
     })
@@ -82,6 +83,12 @@ def my_plan_submit(request: Request,
     from app.services import date_plan
     try:
         date_plan.save_plan(db, user, period, unavailable or ())
+    except date_plan.WindowClosed:
+        # 具体窗口日期由页面上的状态条给出（这里只给一句可翻译的静态文案）
+        return RedirectResponse(
+            "/my/plan?period=%s&err=%s" % (quote(period),
+                                           quote("填报期未开放或已结束，不能提交")),
+            status_code=303)
     except date_plan.AllLocked:
         return RedirectResponse(
             "/my/plan?period=%s&err=%s" % (quote(period),

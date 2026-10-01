@@ -2,10 +2,11 @@
 """日期计划（半月出勤登记）测试：规格 `docs/specs-date-plan.md`。
 
 口径（与用户确认）：
-- 自然半月 1–15 / 16–月末，登记截止 3 号 / 18 号；
+- 自然半月 1–15 / 16–月末；**填报窗口 = 期首前 7 天 ~ 登记截止日**（3 号 / 18 号）；
 - 默认每天都出勤，只把"不出勤"的日子落库；
 - 三态：○ 可出勤 / × 不出勤 / □ 已出勤（已自报；**已自报覆盖计划**）；
-- 锁定：已过去的日期、已有自报的日期不可再改（逾期只提示不拦）。
+- 锁定：窗口没开/已关不能改；窗口内已过去、已自报的日期也不可改；
+- 窗口关了还没登记 → 今天及以后按"默认全部出勤"（浅色 ○）。
 """
 from datetime import date
 
@@ -18,7 +19,15 @@ from app.models import Person, StaffDailyReport, StaffDatePlan, User
 from app.services import date_plan
 from tests.helpers import form_token
 
-TODAY = date(2026, 10, 10)      # 服务层用的固定"今天"（H2 尚未到）
+TODAY = date(2026, 10, 10)      # H2 窗口内（10-09 ~ 10-18）
+FROZEN = date(2026, 9, 25)      # 2026-10-H1 的窗口开放首日（其 15 天全在未来）
+
+
+@pytest.fixture
+def frozen(monkeypatch):
+    """把"日期计划的今天"固定成 2026-09-25，让落点/弹窗/提交测试与真实运行日期无关。"""
+    monkeypatch.setattr(date_plan, "jst_today", lambda: FROZEN)
+    return FROZEN
 
 
 # ---------------- 工具 ----------------
@@ -225,24 +234,25 @@ def test_save_plan_is_upsert_not_append(client):
 
 
 def test_save_plan_skips_past_days(client):
-    """已过去的日期不动：既不新增默认行，也不被后续提交重置。"""
+    """窗口内已过去的日期不动：既不新增默认行，也不被后续提交重置。"""
     db = appdb.SessionLocal()
     _person(db)
-    date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-10", "2026-10-12"],
-                        today=date(2026, 10, 10))
+    # 10-02 在 H1 窗口（09-25 ~ 10-03）内 → 只有 10-01 已过去
+    date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-02", "2026-10-12"],
+                        today=date(2026, 10, 2))
     rows = {x.plan_date: x.available for x in db.query(StaffDatePlan).all()}
-    assert min(rows) == date(2026, 10, 10)          # 10 号之前没有行
-    assert len(rows) == 6                           # 10–15
-    assert rows[date(2026, 10, 10)] is False and rows[date(2026, 10, 12)] is False
-    # 第二天再提交：10 号已过去 → 不进表单、不被重置（仍是不出勤）
-    r = date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-11"],
-                            today=date(2026, 10, 11))
-    assert r["skipped"] == 10 and r["written"] == 5
+    assert min(rows) == date(2026, 10, 2)           # 10-01 没有行
+    assert len(rows) == 14                          # 02–15
+    assert rows[date(2026, 10, 2)] is False and rows[date(2026, 10, 12)] is False
+    # 第二天（10-03，窗口最后一天）再提交：10-02 已过去 → 不进表单、不被重置
+    r = date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-03"],
+                            today=date(2026, 10, 3))
+    assert r["skipped"] == 2 and r["written"] == 13
     rows2 = {x.plan_date: x.available for x in db.query(StaffDatePlan).all()}
-    assert rows2[date(2026, 10, 10)] is False       # 锁定的过去日期保持原值
-    assert rows2[date(2026, 10, 11)] is False       # 今天：本次勾选生效
+    assert rows2[date(2026, 10, 2)] is False        # 锁定的过去日期保持原值
+    assert rows2[date(2026, 10, 3)] is False        # 今天：本次勾选生效
     assert rows2[date(2026, 10, 12)] is True        # 未来：取消勾选 → 恢复可出勤
-    assert len(rows2) == 6                          # 10 号之前仍然没有行
+    assert len(rows2) == 14                         # 10-01 仍然没有行
 
 
 def test_save_plan_keeps_reported_days_untouched(client):
@@ -253,22 +263,67 @@ def test_save_plan_keeps_reported_days_untouched(client):
                             p1_cnt=1, p2_cnt=0, total_cnt=1))
     db.commit()
     date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-12"],
-                        today=date(2026, 10, 5))
+                        today=date(2026, 10, 2))
     assert (db.query(StaffDatePlan)
             .filter(StaffDatePlan.plan_date == date(2026, 10, 12)).first()) is None
-    view = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 5))
+    view = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 2))
     day = [d for d in view["days"] if d["date"] == date(2026, 10, 12)][0]
     assert day["state"] == date_plan.STATE_DONE and day["mark"] == "□"
     assert day["editable"] is False and day["lock"] == date_plan.LOCK_REPORTED
 
 
 def test_save_plan_all_locked_raises(client):
-    """整个半月都已过去 → 报错，且不留下半条数据。"""
+    """窗口开着但整期都锁定（已过去/已自报）→ 报错，且不留下半条数据。"""
     db = appdb.SessionLocal()
     _person(db)
+    for day in date_plan.period_days("2026-10-H1"):
+        db.add(StaffDailyReport(person_code="P1", report_date=day,
+                                p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
     with pytest.raises(date_plan.AllLocked):
-        date_plan.save_plan(db, _U(), "2026-09-H1", [], today=date(2026, 10, 10))
+        date_plan.save_plan(db, _U(), "2026-10-H1", [], today=date(2026, 10, 2))
     assert db.query(StaffDatePlan).count() == 0
+
+
+def test_save_plan_rejects_outside_window(client):
+    """窗口没开或已关 → WindowClosed（用户口径：提前 7 天开放，到 3/18 号为止）。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    # H1 窗口 = 期首前 7 天 ~ 截止日 = 09-24 ~ 10-03
+    assert date_plan.period_window("2026-10-H1") == (
+        date(2026, 9, 24), date(2026, 10, 3))
+    assert date_plan.period_window("2026-10-H2") == (
+        date(2026, 10, 9), date(2026, 10, 18))
+    for day in (date(2026, 9, 24), date(2026, 10, 3)):      # 首尾当天都算开放
+        assert date_plan.is_window_open("2026-10-H1", day) is True
+    for day, state in ((date(2026, 10, 4), "closed"),
+                       (date(2026, 9, 23), "before")):
+        with pytest.raises(date_plan.WindowClosed) as e:
+            date_plan.save_plan(db, _U(), "2026-10-H1", [], today=day)
+        assert e.value.state == state
+    with pytest.raises(date_plan.WindowClosed):        # H2 窗口 10-09 才开
+        date_plan.save_plan(db, _U(), "2026-10-H2", [], today=date(2026, 10, 8))
+    assert db.query(StaffDatePlan).count() == 0
+
+
+def test_window_open_period_and_next_window():
+    """同一时刻最多一期可填；4–8 号 / 19–24 号是"没有可填报期"的间隙。"""
+    assert date_plan.open_period(date(2026, 10, 1)) == "2026-10-H1"      # 本期窗口
+    assert date_plan.default_period(date(2026, 10, 1)) == "2026-10-H1"
+    # 10-05：H1 已关、H2 未开 → 没有可填的期，默认展示本期；提示下个窗口
+    assert date_plan.open_period(date(2026, 10, 5)) == ""
+    assert date_plan.default_period(date(2026, 10, 5)) == "2026-10-H1"
+    assert date_plan.next_window(date(2026, 10, 5))["open_at"] == date(2026, 10, 9)
+    # 10-10：H2 窗口开着 → 管理员默认也看这一期（"未来两周"）
+    assert date_plan.open_period(date(2026, 10, 10)) == "2026-10-H2"
+    assert date_plan.default_period(date(2026, 10, 10)) == "2026-10-H2"
+    assert date_plan.next_window(date(2026, 10, 10)) is None
+    # 10-25：H2 已关、下月 H1 开着（月中就把下个月排好）
+    assert date_plan.open_period(date(2026, 10, 25)) == "2026-11-H1"
+    assert date_plan.default_period(date(2026, 10, 25)) == "2026-11-H1"
+    # 10-20：间隙（H2 关了、11-H1 还没开）
+    assert date_plan.open_period(date(2026, 10, 20)) == ""
+    assert date_plan.next_window(date(2026, 10, 20))["key"] == "2026-11-H1"
 
 
 def test_save_plan_requires_person_code(client):
@@ -304,10 +359,13 @@ def test_plan_days_defaults_and_marks(client):
     assert future["state"] == date_plan.STATE_NONE and future["mark"] == "○"
     assert view["editable_cnt"] == 14          # 2–15
     assert view["free_cnt"] == 15
-    assert view["overdue"] is False
-    # 逾期只提示不拦：10/5 再看，仍然可改
-    late = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 5))
-    assert late["overdue"] is True and late["editable_cnt"] == 11
+    assert view["overdue"] is False and view["window_state"] == "open"
+    # 窗口内最后一天（10-03）仍可改：只剩 03–15 可编辑
+    last = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 3))
+    assert last["window_state"] == "open" and last["editable_cnt"] == 13
+    # 窗口一关（10-04）→ 一律不可改
+    closed = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 4))
+    assert closed["window_state"] == "closed" and closed["editable_cnt"] == 0
 
 
 def test_plan_days_counts_after_save(client):
@@ -400,7 +458,7 @@ def test_admin_matrix_excludes_past_days_from_free_count(client):
     """已经过去的日子不构成可用人力 → 小计置 0，但格子照旧显示三态。"""
     db = appdb.SessionLocal()
     _seed_matrix(db)
-    date_plan.save_plan(db, _U("P1"), "2026-10-H2", [], today=date(2026, 10, 19))
+    date_plan.save_plan(db, _U("P1"), "2026-10-H2", [], today=date(2026, 10, 18))
     m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 22))
     rows = {r["person_code"]: r for r in m["rows"]}
     past = date(2026, 10, 20)
@@ -452,10 +510,11 @@ def test_my_plan_page_renders_three_states(client):
     assert r.text.count("pm done") >= 1                 # 今天已自报 → 方框
 
 
-def test_my_plan_submit_and_resubmit(client):
+def test_my_plan_submit_and_resubmit(client, frozen):
+    """窗口内提交 → 覆盖式再提交（frozen = 2026-09-25，正是 10 月上半月的窗口期）。"""
     csrf = _staff(client)
-    today = date_plan.jst_today()
-    key = date_plan.shift_period(date_plan.current_period(today), halves=1)
+    key = date_plan.open_period(frozen)
+    assert key == "2026-10-H1"
     days = date_plan.period_days(key)
     off = [str(days[0]), str(days[1])]
     r = client.post("/my/plan", data={
@@ -482,23 +541,25 @@ def test_my_plan_submit_and_resubmit(client):
 # ---------------- 待填报判定 / 登录落点 / 弹窗提示（2026-10-01 用户要求） ----------------
 
 def _submit_current(client, csrf):
-    """登记本期计划（空勾选 = 全部可出勤）。"""
-    key = date_plan.current_period(date_plan.jst_today())
+    """登记**当前正在填报的那一期**（空勾选 = 全部可出勤）。"""
+    key = date_plan.open_period(date_plan.jst_today())
+    assert key, "当前没有开放中的填报窗口"
     r = client.post("/my/plan", data={
         "period": key, "csrf_token": csrf, "_ft": form_token(client, "/my/plan")},
         follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
     return key
 
 
 def test_needs_plan_and_staff_home(client):
-    """本期未登记 = 需要填报；落点随之切换。"""
+    """窗口开着且未登记 = 需要填报；落点随之切换。"""
     db = appdb.SessionLocal()
     _person(db)
     u = _U()
     today = date(2026, 10, 2)
     info = date_plan.needs_plan(db, "P1", today=today)
     assert info["key"] == "2026-10-H1" and info["overdue"] is False
+    assert info["close_at"] == date(2026, 10, 3)            # 窗口到截止日为止
     assert date_plan.staff_home(db, u) == "/my/plan"        # 未登记 → 先填计划
     date_plan.save_plan(db, u, "2026-10-H1", [], today=today)
     assert date_plan.needs_plan(db, "P1", today=today) == {}
@@ -512,13 +573,15 @@ def test_needs_plan_edge_cases(client):
     assert date_plan.needs_plan(db, None) == {}
     assert date_plan.needs_plan(db, "") == {}
     assert date_plan.staff_home(db, _U(code=None)) == "/my/perf"
-    # 逾期未登记：仍然需要填报（只是文案变成"已逾期"）
-    info = date_plan.needs_plan(db, "P1", today=date(2026, 10, 20))
-    assert info["overdue"] is True
+    # 窗口开着、没登记 → 需要填报
+    assert date_plan.needs_plan(db, "P1", today=date(2026, 10, 10))["key"] == "2026-10-H2"
+    # 窗口间隙（10-05 / 10-20 既没有开着的期）→ 不需要填报，也就不会弹窗催办
+    assert date_plan.needs_plan(db, "P1", today=date(2026, 10, 5)) == {}
+    assert date_plan.needs_plan(db, "P1", today=date(2026, 10, 20)) == {}
     db.close()
 
 
-def test_staff_login_landing_plan_then_report(client):
+def test_staff_login_landing_plan_then_report(client, frozen):
     """登录后第一个页面：待填报 → /my/plan；登记完 → /my/report。"""
     _mk_staff(client)
     r, csrf = _login_raw(client)
@@ -529,7 +592,15 @@ def test_staff_login_landing_plan_then_report(client):
     assert r2.headers["location"] == "/my/report"
 
 
-def test_staff_root_redirect_uses_staff_home(client):
+def test_staff_login_lands_on_report_when_no_window(client, frozen, monkeypatch):
+    """窗口间隙（没有可填报的期）→ 登录直接进每日自报页。"""
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 20))
+    _mk_staff(client)
+    r, _ = _login_raw(client)
+    assert r.headers["location"] == "/my/report"
+
+
+def test_staff_root_redirect_uses_staff_home(client, frozen):
     """访问 / 也走同一落点规则（管理员仍是数据看板）。"""
     _mk_staff(client)
     _login_raw(client)
@@ -558,37 +629,30 @@ def test_plan_prompt_not_shown_to_admin(client):
     assert 'data-testid="plan-prompt"' not in r.text
 
 
-def test_plan_prompt_shows_overdue_wording(client):
-    """逾期时弹窗文案提示"未登记的日子今天起按默认全部出勤计算"。"""
+def test_plan_prompt_shows_window_deadline(client, frozen):
+    """弹窗里给出填报窗口（到截止日为止），不再有"已逾期仍可补登记"的说法。"""
     _staff(client)
-    # 本期截止日已过（真实今天 ≥ 10 月 3 日之后）——用服务层确认后再断言界面
-    from app.services import date_plan as dp
-    today = dp.jst_today()
-    info = dp.needs_plan(appdb.SessionLocal(), "P1")
     html = client.get("/my/report").text
-    if info["overdue"]:
-        assert "默认全部出勤" in html
-    else:
-        assert today <= info["deadline"]
+    assert "填报期到" in html and "2026-10-03" in html    # 10 月上半月窗口 = 09-24 ~ 10-03
+    assert "已过登记截止日" not in html
 
 
-def test_my_plan_past_period_is_readonly(client):
-    """已完全过去的半月：只读展示，不给保存按钮（避免点了才报错）。"""
+def test_my_plan_past_period_is_readonly(client, frozen):
+    """窗口已关的半月：只读展示，不给保存按钮（避免点了才报错）。"""
     _staff(client)
-    prev = date_plan.shift_period(
-        date_plan.current_period(date_plan.jst_today()), halves=-1)
+    prev = date_plan.shift_period(date_plan.current_period(frozen), halves=-1)
     r = client.get("/my/plan?period=" + prev)
     assert r.status_code == 200
+    assert 'data-testid="window-closed"' in r.text        # 页面自带状态条
     assert 'data-testid="plan-locked"' in r.text
     assert 'data-testid="save-plan"' not in r.text
-    assert 'name="unavailable"' not in r.text        # 没有任何可勾选的日期
+    assert 'name="unavailable"' not in r.text             # 没有任何可勾选的日期
 
 
-def test_my_plan_post_past_period_reports_all_locked(client):
-    """整期已锁 → 报错提示，不写任何数据。"""
+def test_my_plan_post_outside_window_reports_error(client, frozen):
+    """窗口已关 → 提交被拒（err），不写任何数据。"""
     csrf = _staff(client)
-    prev = date_plan.shift_period(
-        date_plan.current_period(date_plan.jst_today()), halves=-1)
+    prev = date_plan.shift_period(date_plan.current_period(frozen), halves=-1)
     r = client.post("/my/plan", data={
         "period": prev, "csrf_token": csrf, "_ft": form_token(client, "/my/plan")},
         follow_redirects=False)
@@ -598,11 +662,30 @@ def test_my_plan_post_past_period_reports_all_locked(client):
     db.close()
 
 
-def test_my_plan_form_token_is_single_use(client):
+def test_my_plan_shows_window_banners(client, monkeypatch):
+    """三种窗口状态各有状态条：开放中 / 还没开始 / 已结束。"""
+    _staff(client)
+    # 1) 开放中：2026-10-01（H1 窗口 09-24 ~ 10-03 内）
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 1))
+    r = client.get("/my/plan")
+    assert 'data-testid="window-open"' in r.text and "2026-09-24" in r.text
+    assert 'name="unavailable"' in r.text
+    # 2) 还没开始 / 3) 已结束：10-05 是窗口间隙（H1 已关、H2 10-09 才开）
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 5))
+    r2 = client.get("/my/plan?period=2026-10-H2")
+    assert 'data-testid="window-before"' in r2.text and "2026-10-09" in r2.text
+    assert 'name="unavailable"' not in r2.text
+    r3 = client.get("/my/plan?period=2026-10-H1")
+    assert 'data-testid="window-closed"' in r3.text and "2026-10-03" in r3.text
+    assert 'name="unavailable"' not in r3.text
+    # 间隙里页面提示下一个填报期
+    assert 'data-testid="next-window"' in r3.text and "2026-10-09" in r3.text
+
+
+def test_my_plan_form_token_is_single_use(client, frozen):
     """同一令牌重复提交被拒（全站防重复提交机制）。"""
     csrf = _staff(client)
-    today = date_plan.jst_today()
-    key = date_plan.shift_period(date_plan.current_period(today), halves=1)
+    key = date_plan.open_period(frozen)
     ft = form_token(client, "/my/plan")
     data = {"period": key, "csrf_token": csrf, "_ft": ft}
     assert client.post("/my/plan", data=data,
@@ -611,7 +694,7 @@ def test_my_plan_form_token_is_single_use(client):
     assert r.status_code == 400
 
 
-def test_my_plan_rejects_other_period_dates(client):
+def test_my_plan_rejects_other_period_dates(client, frozen):
     """表单里塞别半月/别月份的日期 → 报错而不是静默写坏。"""
     csrf = _staff(client)
     today = date_plan.jst_today()
@@ -636,17 +719,18 @@ def test_staff_blocked_from_admin_plan_page(client):
                                              "/my/perf", "/login"))
 
 
-def test_admin_plan_other_period_does_not_show_zero_for_today(client):
+def test_admin_plan_other_period_does_not_show_zero_for_today(client, frozen):
     """看非本期时，"今天可出勤人数"显示 0 会误导（今天是别的半月）→ 显示 —。"""
     _admin(client)
-    nxt = date_plan.shift_period(
-        date_plan.current_period(date_plan.jst_today()), halves=1)
-    r = client.get("/staff-plans?period=" + nxt)
+    monkeypatch_next = date_plan.shift_period(
+        date_plan.current_period(frozen), halves=2)          # 确保"今天"不在这一期
+    r = client.get("/staff-plans?period=" + monkeypatch_next)
     assert r.status_code == 200
     assert "今天不在本期" in r.text
 
 
 def test_admin_plan_matrix_page(client):
+    """矩阵：行=员工、列=日期；**没有"登记"列**，也没用人名清单（2026-10-01 用户要求）。"""
     _admin(client)
     db = appdb.SessionLocal()
     _seed_matrix(db)
@@ -657,17 +741,23 @@ def test_admin_plan_matrix_page(client):
     assert r.status_code == 200
     assert "甲" in r.text and "乙" in r.text
     assert 'data-testid="plan-matrix"' in r.text
-    assert "未提交计划：" in r.text                    # 乙没登记
     assert "可出勤人数（今天及以后）" in r.text
-    # 乙整行都是"未登记"
-    assert r.text.count("未登记") >= 3
+    # 登记状态靠表格里的标记体现：不再有登记列，也不再罗列未提交的人名
+    assert 'data-testid="unsubmitted"' not in r.text
+    assert "<th>登记</th>" not in r.text
+    assert "未提交计划：" not in r.text
+    assert "未提交计划" in r.text                     # 顶部计数卡还在（催办用）
+    # 甲登记过（虚线可出勤 + 20 号不出勤），乙没登记 → 乙整行 –
+    assert 'data-testid="cell-P1-2026-10-20"' in r.text
+    assert r.text.count("未登记") >= 2
 
 
-def test_admin_plan_page_defaults_to_current_period(client):
+def test_admin_plan_page_defaults_to_open_period(client, frozen):
+    """管理员默认看**正在填报的那一期**（= 未来两周），没有开放期时退回本期。"""
     _admin(client)
     r = client.get("/staff-plans")
     assert r.status_code == 200
-    assert date_plan.current_period(date_plan.jst_today())[:7] in r.text
+    assert "2026-10-01" in r.text                     # frozen = 09-25 → 默认 2026-10-H1
 
 
 def test_admin_plan_export_xlsx(client):

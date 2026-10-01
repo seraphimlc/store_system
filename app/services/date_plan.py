@@ -37,6 +37,9 @@ LOCK_REPORTED = "reported"   # 当天已有自报
 
 WD_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
+# 填报窗口：提前 7 天开放（用户口径 2026-10-01）；窗口结束 = 登记截止日
+OPEN_DAYS_BEFORE = 7
+
 
 class AllLocked(Exception):
     """该半月的日期都已过去或已自报 → 没有可登记的日期。"""
@@ -44,6 +47,15 @@ class AllLocked(Exception):
     def __init__(self, key: str):
         self.key = key
         super().__init__("该半月的日期都已过去或已自报，无需再登记")
+
+
+class WindowClosed(Exception):
+    """填报窗口未开放或已结束（提前 7 天开放，到截止日为止）。"""
+
+    def __init__(self, key: str, state: str):
+        self.key = key
+        self.state = state          # before / closed
+        super().__init__("填报期未开放或已结束")
 
 
 # ---------------- 半月划分 ----------------
@@ -109,16 +121,19 @@ def current_period(today=None) -> str:
 
 
 def period_options(today=None, back: int = 2, fwd: int = 1) -> List[dict]:
-    """可选半月列表（默认含上两期、本期、下一期）：本期可提前登记下一期。"""
+    """可选半月列表（默认含上两期、本期、下一期）：可提前登记下一期。"""
     today = today or jst_today()
     cur = current_period(today)
     out = []
     for i in range(-back, fwd + 1):
         key = shift_period(cur, halves=i)
         s, e, dl = period_bounds(key)
+        o, c = period_window(key)
         out.append({"key": key, "start": s, "end": e, "deadline": dl,
+                    "open_at": o, "close_at": c,
                     "half": H1 if key.endswith(H1) else H2,
                     "current": key == cur,
+                    "window_state": window_state(key, today),
                     "overdue": today > dl,
                     "label": period_label(key)})
     return out
@@ -127,6 +142,68 @@ def period_options(today=None, back: int = 2, fwd: int = 1) -> List[dict]:
 def period_days(key: str) -> List[date]:
     start, end, _ = period_bounds(key)
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
+
+
+# ---------------- 填报窗口（提前 7 天开放，到截止日为止） ----------------
+
+def period_window(key: str) -> Tuple[date, date]:
+    """填报窗口 = (**期首 − 7 天**, **登记截止日**)。
+
+    用户口径（2026-10-01）："每个周期的计划表提前 7 天开放填报入口，一直到 3/18 号"
+    —— 即 H1（1–15）窗口 = 上月 25 日 ~ 当月 3 日；H2（16–月末）窗口 = 当月 9 日 ~ 18 日。
+    窗口结束 = 截止日 → 之后不再接受登记（未登记的一律按"默认全部出勤"处理）。
+    """
+    start, _end, deadline = period_bounds(key)
+    return start - timedelta(days=OPEN_DAYS_BEFORE), deadline
+
+
+def window_state(key: str, today=None) -> str:
+    """填报窗口状态：`before`（未开放）/ `open`（开放中）/ `closed`（已结束）。"""
+    today = today or jst_today()
+    open_at, close_at = period_window(key)
+    if today < open_at:
+        return "before"
+    return "open" if today <= close_at else "closed"
+
+
+def is_window_open(key: str, today=None) -> bool:
+    return window_state(key, today) == "open"
+
+
+def open_period(today=None) -> str:
+    """当前**可填报**的半月（窗口开着的那一期）；没有 → ""。
+
+    窗口互不重叠（3 日关 → 9 日开；18 日关 → 25 日开），所以最多一期可填；
+    4–8 号、19–24 号是"没有可填报期"的间隙。
+    """
+    today = today or jst_today()
+    cur = current_period(today)
+    for key in (cur, shift_period(cur, halves=1)):
+        if is_window_open(key, today):
+            return key
+    return ""
+
+
+def default_period(today=None) -> str:
+    """页面默认展示的半月：优先**正在填报的那一期**（管理员关心的"未来两周"），否则本期。"""
+    today = today or jst_today()
+    return open_period(today) or current_period(today)
+
+
+def next_window(today=None) -> Optional[dict]:
+    """下一个填报窗口（用于"下个填报期 X 开放"提示）；没有可预见的 → None。"""
+    today = today or jst_today()
+    cur = current_period(today)
+    for i in range(0, 3):
+        key = shift_period(cur, halves=i)
+        st = window_state(key, today)
+        if st == "open":
+            return None                      # 当前正开着 → 不需要提示"下一个"
+        if st == "before":
+            open_at, close_at = period_window(key)
+            return {"key": key, "open_at": open_at, "close_at": close_at,
+                    "label": period_label(key)}
+    return None
 
 
 # ---------------- 三态与锁定 ----------------
@@ -197,19 +274,22 @@ def is_submitted(db, person_code: str, key: str) -> bool:
 # ---------------- 待填报判定与员工落点 ----------------
 
 def needs_plan(db, person_code: Optional[str], today=None) -> dict:
-    """**本期是否还需要填报出勤计划**（未登记即需要）。
+    """**现在是否还需要填报出勤计划**：当期填报窗口开着 且 还没登记。
 
-    返回 {} = 不需要；否则给出本期信息（含是否逾期）。
+    返回 {} = 不需要（没窗口／已登记）；否则给出该期信息（窗口起止）。
     用于：员工登录落点、员工端弹窗提示（用户 2026-10-01 要求）。
+    窗口一关（截止日过了）就不再催办 —— 那一期已按"默认全部出勤"处理。
     """
     if not person_code:
         return {}
     today = today or jst_today()
-    key = current_period(today)
-    if is_submitted(db, person_code, key):
+    key = open_period(today)
+    if not key or is_submitted(db, person_code, key):
         return {}
     start, end, deadline = period_bounds(key)
+    open_at, close_at = period_window(key)
     return {"key": key, "start": start, "end": end, "deadline": deadline,
+            "open_at": open_at, "close_at": close_at,
             "overdue": today > deadline, "label": period_label(key)}
 
 
@@ -237,6 +317,9 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     """
     today = today or jst_today()
     start, end, deadline = period_bounds(key)
+    open_at, close_at = period_window(key)
+    wstate = window_state(key, today)
+    window_open = wstate == "open"
     plans = _plan_map(db, person_code, start, end)
     reps = _reported_dates(db, person_code, start, end)
     days = []
@@ -246,7 +329,7 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
         asm = assumed_default(d, today, deadline)
         state = cell_state(plans.get(d), rep, assumed=asm)
         lock = lock_of(d, today, rep)
-        editable = lock == LOCK_NONE
+        editable = window_open and lock == LOCK_NONE     # 窗口没开/已关 → 一律不可改
         off = (d in plans) and not plans[d]
         mark = MARKS[STATE_ON] if (editable and state == STATE_NONE) else MARKS[state]
         days.append({"date": d, "wd": d.weekday(), "state": state, "mark": mark,
@@ -261,6 +344,8 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     last = max([(r[0] or r[1]) for r in stamps], default=None)
     return {"key": key, "start": start, "end": end, "deadline": deadline,
             "label": period_label(key), "today": today,
+            "open_at": open_at, "close_at": close_at,
+            "window_state": wstate, "window_open": window_open,
             "overdue": today > deadline, "default_all": today > deadline,
             "submitted": bool(plans), "last_at": last,
             "days": days,
@@ -294,12 +379,16 @@ def save_plan(db, user, key: str, unavailable: Iterable = (), today=None,
 
     **只写未锁定的日期**：已过去、已自报的日期既不新增也不改写（用户明确"历史事实不覆盖"）。
     表单只提交"不出勤"的日期集合，其余日期落 `available=True`（默认每天都出勤）。
+    **窗口校验**：填报窗口 = 期首前 7 天 ~ 登记截止日；窗口没开或已关 → `WindowClosed`。
     """
     code = getattr(user, "person_code", None)
     if not code:
         raise ValueError("账号未绑定员工编号，无法登记出勤计划")
     today = today or jst_today()
     start, end, _ = period_bounds(key)
+    wstate = window_state(key, today)
+    if wstate != "open":
+        raise WindowClosed(key, wstate)
     off = _parse_dates(unavailable, start, end)
     reps = _reported_dates(db, code, start, end)
     existing = {r.plan_date: r for r in db.query(StaffDatePlan).filter(
@@ -404,6 +493,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "person_code": code, "name": cand[code]["name"] or code,
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
+            "assumed_days": assumed,       # 逐日：这一格是"未登记→默认出勤"（浅色显示）
             "submitted": code in with_plan,
             "assumed": a_cnt > 0,          # 该人本期真有"默认出勤"的格子
             "on_cnt": sum(1 for d in days if states[d] == STATE_ON),
@@ -418,8 +508,11 @@ def admin_matrix(db, key: str, today=None) -> dict:
     default_cnt = {d: (0 if past[d] else col_default[d]) for d in days}
     # default_all：本期还有"今天及以后"的日子，且已过登记截止日（整期已过去的历史半月不算）
     default_all = today > deadline and end >= today
+    open_at, close_at = period_window(key)
     return {"key": key, "start": start, "end": end, "deadline": deadline,
             "label": period_label(key), "today": today, "overdue": today > deadline,
+            "open_at": open_at, "close_at": close_at,
+            "window_state": window_state(key, today),
             "default_all": default_all,
             "days": days, "past": past, "rows": rows,
             "free_cnt": free_cnt, "none_cnt": none_cnt, "default_cnt": default_cnt,
