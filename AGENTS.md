@@ -104,6 +104,14 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - 表：`staff_daily_reports`（`(person_code, report_date)` 唯一）/ `staff_report_analyses`（`summary` 数字 + `payload` 评语）；
   另有物化表 `staff_report_compare_person`（人×区间）/ `staff_report_compare_day`（人×日）、
   防重复提交的 `form_tokens`；迁移 `b8c9d0e1f2a3` → `c9d0e1f2a3b4` → `d0e1f2a3b4c5` → `a2b3c4d5e6f7`（正式表日期索引）→ `b3c4d5e6f7a8`（逐日单日准确率列）；**现有业务表一行未改**（只加表/列/索引）。
+- **看板 AI 分析（公司 + 每人）的样本门槛（2026-10-01 用户口径）**：入口 `/dashboard`（公司分析走
+  `/dashboard/analysis`、每人走 `/dashboard/staff`），存 `staff_analyses`
+  （`COMPANY/ALL` = 公司；`编号/YYYY-MM` = 每人，**按月**）。
+  生成时机：上传入表后（`flow.py` 后台）+ 点「算工资」后（`payroll_settle_generate` 后台线程）
+  + 打开某人模块时懒生成；公司分析在打开看板时按需生成并缓存（数据指纹变了才重算）。
+  **门槛 = 当期有数据 且 有效店合计 ≥5**（`staff_sample_ok`）——**不再要求"至少 2 个月"**
+  （用户："自报数据只是一个分析项，没有自报数据也能分析出来"）；没有上月数据时 prompt 不做环比、
+  只跟全公司比。历史月份**不会自动补**（只按当月生成），需要时手动补跑。
 - **报告生成结点 = 文件入表后自动**（`flow.auto_finalize_pipeline` → `report_ai.auto_for_import`）：
   自报在时间上先于系统数据，文件入表完成才是两边齐备的时刻；同数据指纹复用、AI 未配置/文件无正式记录则跳过。
 - **物化与失效**：报告生成时把对比结果落物化表（员工端只读，避免实时重算与并发写）；
@@ -219,7 +227,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   回归测试 `test_resync_repairs_reports_missing_plan_rows` / `test_rebuild_reported_clears_stale_flags`。
 - **下载防连点**：导出链接带 `download` 属性 + `base.html` 对 `a[download]` 做 2 秒吞点击
   （用户 2026-10-01："一次下载了两个文件" = 双击触发两次请求，线上日志可见同端口两次 GET）。
-- 测试 `tests_web/test_date_plan.py`（70 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
+- 测试 `tests_web/test_date_plan.py`（71 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
   默认全出勤/新人入职补登/待填报与登录落点/弹窗与角标/窗口状态条/整行点选无 JS/矩阵无登记列与按日小计/越权/导出）；
   **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
   `test_migrations.py` 已把新表列入 schema 校验。

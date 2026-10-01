@@ -1257,3 +1257,27 @@ def test_matrix_hides_rows_entirely_before_roster_start(client):
     assert "LATER1" not in codes
     assert all(date_plan.STATE_NA not in r["states"].values() for r in m["rows"])
     db.close()
+
+
+# ---------------- 看板"员工分析"的样本门槛（2026-10-01 用户口径） ----------------
+# "这个分析报告里，自报数据只是一个分析项，没有自报数据也能分析出来。"
+# → 不再要求"至少 2 个月"：当期有数据、有效店 ≥5 就给分析（没有上月就不做环比）。
+
+
+def test_staff_analysis_sample_accepts_single_month(client):
+    from app.models import MonthPerfRecord
+    from app.services import dashboard as D
+
+    db = appdb.SessionLocal()
+    _person(db, "S1", "单月员工")          # 只有一个月的数据
+    _person(db, "S2", "店太少")
+    _person(db, "S3", "完全没数据")
+    db.add(MonthPerfRecord(month="2026-09", person_code="S1", records=42,
+                           p1=30, p2=12, points=54, salary=13500))
+    db.add(MonthPerfRecord(month="2026-09", person_code="S2", records=3,
+                           p1=3, p2=0, points=3, salary=750))
+    db.commit()
+    assert D.staff_sample_ok(db, "S1", "2026-09") is True     # 单月 + 有效店 42 → 可以分析
+    assert D.staff_sample_ok(db, "S2", "2026-09") is False    # 有效店不到 5 家 → 样本确实不足
+    assert D.staff_sample_ok(db, "S3", "2026-09") is False    # 一条数据都没有
+    db.close()
