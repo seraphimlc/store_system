@@ -1281,3 +1281,29 @@ def test_staff_analysis_sample_accepts_single_month(client):
     assert D.staff_sample_ok(db, "S2", "2026-09") is False    # 有效店不到 5 家 → 样本确实不足
     assert D.staff_sample_ok(db, "S3", "2026-09") is False    # 一条数据都没有
     db.close()
+
+
+def test_single_month_employee_gets_analysis(client, monkeypatch):
+    """单月员工也能生成分析（AI 打桩）：落一行 staff_analyses；没有上月 → prompt 不做环比。"""
+    from app.models import MonthPerfRecord, StaffAnalysis
+    from app.services import ai_chat, dashboard as D
+
+    seen = {}
+
+    def fake_chat(prompt, **kw):
+        seen["prompt"] = prompt
+        return "**结论**：表现一般"
+
+    monkeypatch.setattr(ai_chat, "configured", lambda: True)
+    monkeypatch.setattr(ai_chat, "chat", fake_chat)
+    db = appdb.SessionLocal()
+    _person(db, "S9", "单月员工")
+    db.add(MonthPerfRecord(month="2026-09", person_code="S9", records=42,
+                           p1=30, p2=12, points=54, salary=13500))
+    db.commit()
+    out = D.ensure_staff_analysis(db, "S9", "2026-09")
+    assert out == "**结论**：表现一般"
+    row = db.query(StaffAnalysis).filter_by(person_code="S9").one()
+    assert row.month == "2026-09"
+    assert "不要编造环比" in seen["prompt"]        # 没有上月 → 不要求跟上月比
+    db.close()
