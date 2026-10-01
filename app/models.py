@@ -777,6 +777,31 @@ class StaffReportCompareDay(Base):
     created_at = Column(DateTime, nullable=False, default=_now)
 
 
+class StaffDatePlan(Base):
+    """**日期计划（半月出勤登记）**：员工在每个半月的未来日期上勾"可出勤/不出勤"。
+
+    规格 `docs/specs-date-plan.md`：
+
+    - 自然半月：上半月 1–15（H1，截止 3 号）/ 下半月 16–月末（H2，截止 18 号）；
+    - **一天一条**（`(person_code, plan_date)` 唯一），默认 `available=True`（默认每天都出勤），
+      员工只勾"不出勤"的那些天；
+    - 计划只是**预报**，**实际出勤以自报为准**（`staff_daily_reports` 有记录 = 已出勤）；
+    - 不存 period_key：半月归属由 `plan_date` 现算，规则调整不会让历史数据产生歧义；
+      "该半月是否已登记" = 该人在 `[start, end]` 内是否存在行。
+    """
+    __tablename__ = "staff_date_plans"
+    __table_args__ = (UniqueConstraint("person_code", "plan_date",
+                                       name="uq_sdp_person_date"),
+                      Index("ix_sdp_date", "plan_date"))
+    id = Column(Integer, primary_key=True)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    plan_date = Column(Date, nullable=False)                # JST 业务日
+    available = Column(Boolean, nullable=False, default=True)   # True=可出勤 / False=不出勤
+    source = Column(String(16), nullable=False, default="web", server_default="web")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now, onupdate=_now)
+
+
 class FormToken(Base):
     """**一次性提交令牌**（防重复提交）。
 

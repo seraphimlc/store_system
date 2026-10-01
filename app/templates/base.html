@@ -26,6 +26,7 @@
   <a class="nav" href="/stores">{{ t('店铺主档') }}</a>
   <a class="nav" href="/staff-admin">{{ t('员工管理') }}</a>
   <a class="nav" href="/staff-reports">{{ t('填报与对比') }}</a>
+  <a class="nav" href="/staff-plans">{{ t('日期计划') }}</a>
   <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
   {% endif %}
   <span class="spacer"></span>
@@ -65,6 +66,11 @@
      href="/my/report/feedback" data-testid="tab-feedback">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
     <span>{{ t('核对结果') }}</span>
+  </a>
+  <a class="tab {% if _p.startswith('/my/plan') %}on{% endif %}"
+     href="/my/plan" data-testid="tab-plan">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>
+    <span>{{ t('出勤计划') }}</span>
   </a>
 </nav>
 {% endif %}

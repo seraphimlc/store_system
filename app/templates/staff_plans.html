@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ t('日期计划') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('日期计划') }}</h1>
+  <div class="actions">
+    <form method="get" action="/staff-plans">
+      <select name="period" onchange="this.form.submit()" data-testid="period-select">
+        {% for p in periods %}
+        <option value="{{ p.key }}" {% if p.key == period %}selected{% endif %}>
+          {{ p.start.strftime('%Y-%m-%d') }} ~ {{ p.end.strftime('%Y-%m-%d') }}（{{ t('上半月') if p.half == 'H1' else t('下半月') }}）{% if p.current %} · {{ t('本期') }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a class="btn ghost" href="/staff-plans/export?period={{ period }}"
+       data-testid="export-plan">{{ t('导出 Excel') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+<div class="stat-grid">
+  <div class="stat-card hl"><p class="k">{{ t('本期') }}</p>
+    <div class="v">{{ m.start.strftime('%m-%d') }} ~ {{ m.end.strftime('%m-%d') }}
+      <small>{{ t('截止') }} {{ m.deadline.strftime('%m-%d') }}</small></div></div>
+  <div class="stat-card"><p class="k">{{ t('员工数') }}</p>
+    <div class="v">{{ m.total }}</div></div>
+  <div class="stat-card {% if m.unsubmitted %}warnk{% else %}okk{% endif %}">
+    <p class="k">{{ t('未提交计划') }}</p>
+    <div class="v">{{ m.unsubmitted|length }}<small> / {{ m.total }}</small></div></div>
+  <div class="stat-card"><p class="k">{{ t('今天') }} {{ m.today.strftime('%m-%d') }} {{ t('可出勤人数') }}</p>
+    {% set in_period = m.start <= m.today <= m.end %}
+    <div class="v">{% if in_period %}{{ m.free_cnt.get(m.today, 0) }}
+      {% else %}—<small>{{ t('今天不在本期') }}</small>{% endif %}</div></div>
+</div>
+
+<div class="card">
+  <div class="plan-legend">
+    <span><span class="pm on">○</span> {{ t('可出勤') }}</span>
+    <span><span class="pm off">×</span> {{ t('不出勤') }}</span>
+    <span><span class="pm done">□</span> {{ t('已出勤（已自报）') }}</span>
+    <span><span class="pm none">–</span> {{ t('未登记') }}</span>
+    <span class="hint">{{ t('实际出勤以员工自报为准；灰色日期为已过去的日子。') }}</span>
+  </div>
+  {% if m.unsubmitted %}
+  <p class="hint" style="margin:.3rem 0 0" data-testid="unsubmitted">
+    {{ t('未提交计划：') }}
+    {% for r in m.rows %}{% if not r.submitted %}{{ r.name }}（{{ r.person_code }}）{% if not loop.last %}、{% endif %}{% endif %}{% endfor %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="tbl-wrap" style="margin-top:1rem">
+<table class="grid-tbl plan-matrix" data-testid="plan-matrix">
+  <tr>
+    <th>{{ t('员工') }}</th>
+    <th>{{ t('登记') }}</th>
+    {% for d in m.days %}
+    <th class="{% if m.past[d] %}past{% endif %}">{{ d.strftime('%m-%d') }}
+      <span class="hint">{{ t(wd_labels[d.weekday()]) }}</span></th>
+    {% endfor %}
+  </tr>
+  {% for r in m.rows %}
+  <tr>
+    <td>{{ r.name }}<span class="hint">（{{ r.person_code }}）</span></td>
+    <td>{% if r.submitted %}<span class="pill ok">{{ t('已登记') }}</span>
+        {% else %}<span class="pill warn">{{ t('未登记') }}</span>{% endif %}</td>
+    {% for d in m.days %}
+    <td class="c {{ r.states[d] }}{% if m.past[d] %} past{% endif %}"
+        data-testid="cell-{{ r.person_code }}-{{ d }}"
+        title="{{ r.name }} {{ d }} {{ r.marks[d] }}">{{ r.marks[d] }}</td>
+    {% endfor %}
+  </tr>
+  {% else %}
+  <tr><td colspan="{{ m.days|length + 2 }}" class="empty">{{ t('没有可显示的员工') }}</td></tr>
+  {% endfor %}
+  <tr class="totals">
+    <td colspan="2">{{ t('可出勤人数（今天及以后）') }}</td>
+    {% for d in m.days %}
+    <td class="num">{{ m.free_cnt[d] if not m.past[d] else '—' }}</td>
+    {% endfor %}
+  </tr>
+  <tr class="totals">
+    <td colspan="2">{{ t('未登记人数') }}</td>
+    {% for d in m.days %}<td class="num">{{ m.none_cnt[d] }}</td>{% endfor %}
+  </tr>
+</table>
+</div>
+{% endblock %}

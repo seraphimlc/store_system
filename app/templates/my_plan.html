@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ t('出勤计划') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('出勤计划') }}</h1>
+  <div class="actions">
+    <form method="get" action="/my/plan">
+      <select name="period" onchange="this.form.submit()" data-testid="period-select">
+        {% for p in periods %}
+        <option value="{{ p.key }}" {% if p.key == period %}selected{% endif %}>
+          {{ p.start.strftime('%Y-%m-%d') }} ~ {{ p.end.strftime('%Y-%m-%d') }}（{{ t('上半月') if p.half == 'H1' else t('下半月') }}）{% if p.current %} · {{ t('本期') }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+{% if saved %}<div class="msg ok">{{ t('已保存出勤计划') }}</div>{% endif %}
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+{% if view.overdue %}
+<div class="msg warn" data-testid="overdue-hint">
+  {{ t('本期的登记截止日是') }} {{ view.deadline }}，{{ t('已逾期（仍可登记，请尽快补上）。') }}
+</div>
+{% endif %}
+
+<div class="card" data-testid="plan-summary">
+  <div class="stat-row">
+    <div><span class="hint">{{ t('本期') }}</span><b>{{ view.start }} ~ {{ view.end }}</b></div>
+    <div><span class="hint">{{ t('登记截止') }}</span><b>{{ view.deadline }}</b></div>
+    <div><span class="hint">{{ t('登记状态') }}</span>
+      {% if view.submitted %}
+      <span class="pill ok">{{ t('已登记') }}</span>
+      {% if view.last_at %}<span class="hint">{{ (view.last_at + jst_delta).strftime('%m-%d %H:%M') }}</span>{% endif %}
+      {% else %}<span class="pill warn">{{ t('未登记') }}</span>{% endif %}
+    </div>
+    <div><span class="hint">{{ t('可出勤') }}</span><b>{{ view.free_cnt }}</b>
+      <span class="hint">/ {{ view.days|length }} {{ t('天') }}</span></div>
+    <div><span class="hint">{{ t('已自报出勤') }}</span><b>{{ view.done_cnt }}</b>
+      <span class="hint">{{ t('天') }}</span></div>
+  </div>
+  <div class="plan-legend">
+    <span><span class="pm on">○</span> {{ t('可出勤') }}</span>
+    <span><span class="pm off">×</span> {{ t('不出勤') }}</span>
+    <span><span class="pm done">□</span> {{ t('已出勤（已自报）') }}</span>
+    <span class="hint">{{ t('默认每天都出勤，点选不出勤的日子即可。') }}</span>
+  </div>
+  <p class="hint" style="margin:.3rem 0 0">{{ t('计划只是预报，实际出勤以每日填报为准；已过去或已自报的日期不会再改动。') }}</p>
+</div>
+
+<form method="post" action="/my/plan" data-testid="plan-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="period" value="{{ period }}">
+  <div class="tbl-wrap">
+    <table class="grid-tbl plan-tbl" data-testid="my-plan-tbl">
+      <tr>
+        <th>{{ t('日期') }}</th>
+        <th>{{ t('出勤') }}</th>
+        <th>{{ t('登记（点选不出勤）') }}</th>
+      </tr>
+      {% for d in view.days %}
+      <tr {% if not d.editable %}class="locked"{% endif %}
+          {% if d.editable %}x-data="{off: {{ 'true' if d.off else 'false' }}}"{% endif %}>
+        <td>{{ d.date.strftime('%m-%d') }}<span class="hint">（{{ t(wd_labels[d.wd]) }}）</span>
+          {% if d.date == view.today %}<span class="pill run">{{ t('今天') }}</span>{% endif %}</td>
+        {% if d.editable %}
+        <td><span class="pm" :class="off ? 'off' : 'on'"
+                  x-text="off ? '×' : '○'">{{ '×' if d.off else '○' }}</span></td>
+        <td>
+          <label class="pick">
+            <input type="checkbox" name="unavailable" value="{{ d.date }}"
+                   x-model="off" data-testid="pick-{{ d.date }}">
+            <span x-text="off ? '{{ t('不出勤') }}' : '{{ t('可出勤') }}'">{{ t('不出勤') if d.off else t('可出勤') }}</span>
+          </label>
+        </td>
+        {% else %}
+        <td><span class="pm {{ d.state }}">{{ d.mark }}</span></td>
+        <td class="hint">
+          {% if d.reported %}{{ t('已出勤（已自报）') }}{% else %}{{ t('已过去') }}{% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="form-actions" style="margin-top:.8rem">
+    {% if view.editable_cnt %}
+    <button class="btn" type="submit" data-testid="save-plan">{{ t('保存出勤计划') }}</button>
+    <span class="hint">{{ t('本期共') }} {{ view.days|length }} {{ t('天') }}，{{ t('可修改') }} {{ view.editable_cnt }} {{ t('天') }}（{{ t('已过去或已自报的日期不会被改动') }}）</span>
+    {% else %}
+    <span class="hint" data-testid="plan-locked">{{ t('本期已无可以登记的日期（已过去或已自报）。') }}</span>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

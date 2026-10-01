@@ -119,6 +119,26 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   `tests_web/test_form_token.py`（一次性令牌）、`tests_web/test_migrations.py`（迁移冒烟 + schema 一致性）；
   AI 全程 mock 不连外网。i18n 巡检：`scripts/i18n_audit.py`（缺日文/死键）、`scripts/i18n_prune.py`（清死键）。
 
+## 日期计划（半月出勤登记，2026-10 交付 · 分支 feat/date-plan）
+- **需求**：员工在每个半月开始时登记未来半个月的出勤（每月 **3 号 / 18 号前**），管理员据此分配任务；
+  **计划只是预报，实际出勤以自报为准**。规格 `docs/specs-date-plan.md`。
+- **半月口径（用户确认）**：自然半月 `1–15`（H1，截止 3 号）/ `16–月末`（H2，截止 18 号）；
+  H2 天数 13–16 随月份变，**不写死 15**；H1/H2 不跨月。
+- **三态（唯一来源 `date_plan.cell_state`）**：**□ 已出勤（已自报）> 计划值（○ 可出勤 / × 不出勤）> – 未登记**。
+  员工端对"可改且未登记"的日子按"**默认每天都出勤**"显示 ○；管理端显示 –（**未登记 ≠ 可出勤**，
+  否则管理员会把没登记的人当成能派活）。
+- **数据**：`staff_date_plans`（`(person_code, plan_date)` 唯一，`available=True` 默认）；只落"不出勤"的例外，
+  其余按默认落库；**重复提交 = 覆盖**；**不存 period_key**（半月归属由 plan_date 现算，规则改了历史不歧义）。
+- **锁定**：`< 今天` 与**已有自报**的日期不可改；**逾期只提示不拦**（临时请假是常态）；
+  保存时**跳过锁定日期**（不新增、不改写），全锁 → `AllLocked`。
+  ⚠️ 与每日填报的锁定规则**不同**（自报锁在"已对账"，计划锁在"已过去/已自报"），别互相套用。
+- **管理端** `/staff-plans`：行=员工（在岗/请假 ∪ 本期有登记记录的人；停用离职但登记过的不隐去）× 列=日期，
+  含**未提交名单**、**按日可出勤小计**（只算今天及以后）与未登记人数；`/staff-plans/export` 流式导出 xlsx。
+- **入口**：员工端底部 tabbar 第 4 项「出勤计划」（`/my/plan` 已进 `STAFF_ALLOWED`）；管理端顶栏「日期计划」。
+- 迁移 `c1d2e3f4a5b6`（**只加表**，现有业务表一行未改）；**本地库要手工补表**（`create_all`，本地不跑 alembic）。
+- 测试 `tests_web/test_date_plan.py`（31 项：半月划分/闰年大小月/逾期/三态优先级/锁定/默认全出勤/
+  矩阵未提交与按日小计/越权/导出）；`test_migrations.py` 已把新表列入 schema 校验。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；

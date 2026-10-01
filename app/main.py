@@ -10,7 +10,7 @@ def create_app() -> FastAPI:
 
     from app.routers import (auth_r, files_r, perf_r,
                         stores_r, accounts_r, info_r, settle_r, tokens_r,
-                        oauth_r, report_r)
+                        oauth_r, report_r, plan_r)
     app.include_router(auth_r.router)
     app.include_router(files_r.router)
     app.include_router(perf_r.router)
@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
     app.include_router(tokens_r.router)
     app.include_router(oauth_r.router)
     app.include_router(report_r.router)
+    app.include_router(plan_r.router)
 
     # 多语言：模板全局函数已在 app/templating.get_templates() 统一注册（t/LANG_NAMES/lang_url）
 
@@ -32,7 +33,7 @@ def create_app() -> FastAPI:
 
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
-                     "/my/appeal", "/my/perf", "/my/report",
+                     "/my/appeal", "/my/perf", "/my/report", "/my/plan",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")
 
