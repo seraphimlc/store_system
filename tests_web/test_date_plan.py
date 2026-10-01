@@ -591,30 +591,52 @@ def test_admin_matrix_states_counts_and_unsubmitted(client):
     assert m["past"][d16] is False
 
 
+def test_unfilled_default_old_staff_off_new_hire_on():
+    """没填计划时按什么算（用户 2026-10-01）：老员工 → 不出勤；本期新入职 → 可出勤；没过截止日 → 不猜。"""
+    today = date(2026, 10, 20)
+    assert date_plan.unfilled_default("2026-10-H2", date(2026, 10, 16)) == ""      # 还没过截止
+    assert date_plan.unfilled_default("2026-10-H2", today,
+                                      date(2026, 9, 1)) == "off"                   # 老员工
+    assert date_plan.unfilled_default("2026-10-H2", today,
+                                      date(2026, 10, 19)) == "on"                  # 本期新入职（窗口 10-18 关的）
+    assert date_plan.unfilled_default("2026-10-H2", today, None) == "off"          # 不知道名册起点 → 保守
+
+
 def test_admin_matrix_default_all_after_deadline(client):
-    """超过 18 号仍未登记 → **今天及以后**按"默认全部出勤"显示（过去的日子不追认）。"""
+    """超过 18 号仍未登记：**老员工按不出勤 ×**，**本期新入职按可出勤 ○**（过去都不追认）。"""
     db = appdb.SessionLocal()
-    _seed_matrix(db)                       # P1/P2 都没登记
+    _seed_matrix(db)                       # P1/P2 都是老员工（名册起点 2026-09-01）
+    _hire(db, "NEW9", "10-19 入职", date(2026, 10, 19))
     before = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 16))
     assert before["default_all"] is False
-    assert {r["states"][date(2026, 10, 16)] for r in before["rows"]} == {
-        date_plan.STATE_NONE}               # 没到截止日 → 未登记还是"–"
+    others = [r for r in before["rows"] if r["person_code"] != "NEW9"]
+    assert {r["states"][date(2026, 10, 16)] for r in others} == {
+        date_plan.STATE_NONE}               # 没到截止日 → 老员工还是"–"（NEW9 那天还没入职 → 空）
     m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 20))
     rows = {r["person_code"]: r for r in m["rows"]}
     d_past, d_today, d_future = (date(2026, 10, 19), date(2026, 10, 20),
                                  date(2026, 10, 25))
     assert m["default_all"] is True
     assert rows["P1"]["states"][d_past] == date_plan.STATE_OFF    # 过去看事实：没自报＝×
-    assert rows["P1"]["states"][d_today] == date_plan.STATE_ON    # 今天起默认可出勤
-    assert rows["P1"]["states"][d_future] == date_plan.STATE_ON
-    assert rows["P1"]["assumed"] is True and rows["P1"]["submitted"] is False
-    assert m["free_cnt"][d_future] == 2 and m["default_cnt"][d_future] == 2
-    assert m["none_cnt"][d_past] == 0          # 过去的格子已经没有"未登记"这一态
-    assert sorted(m["assumed_people"]) == ["P1", "P2"]
+    assert rows["P1"]["states"][d_today] == date_plan.STATE_OFF   # 老员工没填 → 默认不出勤
+    assert rows["P1"]["states"][d_future] == date_plan.STATE_OFF
+    assert rows["P1"]["assumed_off_days"][d_future] is True       # 但标成"浅色 ×"
+    assert rows["P1"]["assumed"] is False and rows["P1"]["assumed_off"] is True
+    assert rows["P1"]["submitted"] is False
+    # 本期新入职没填 → 默认可出勤（他还能补填）
+    assert rows["NEW9"]["states"][d_today] == date_plan.STATE_ON
+    assert rows["NEW9"]["assumed_days"][d_future] is True
+    assert m["free_cnt"][d_future] == 1 and m["default_cnt"][d_future] == 1
+    # 未登记人数 = 那天还没填计划的人（老员工 + 新入职都算），过去的格子没有这一态
+    assert m["none_cnt"][d_future] == 3
+    assert m["none_cnt"][d_past] == 0
+    assert sorted(m["assumed_people"]) == ["NEW9"]            # 只有新入职按"默认出勤"
+    assert sorted(m["assumed_off_people"]) == ["P1", "P2"]    # 老员工没填 → 按"默认不出勤"
+    db.close()
 
 
 def test_admin_matrix_default_does_not_override_submitted_plan(client):
-    """登记过的人不受"默认出勤"影响：他标的不出勤仍是不出勤。"""
+    """登记过的人不受"没填默认"影响：他标的不出勤仍是不出勤，标的出勤仍是出勤。"""
     db = appdb.SessionLocal()
     _seed_matrix(db)
     date_plan.save_plan(db, _U("P1"), "2026-10-H2", ["2026-10-20"],
@@ -624,8 +646,11 @@ def test_admin_matrix_default_does_not_override_submitted_plan(client):
     assert rows["P1"]["states"][date(2026, 10, 20)] == date_plan.STATE_OFF
     assert rows["P1"]["states"][date(2026, 10, 25)] == date_plan.STATE_ON
     assert rows["P1"]["assumed"] is False and rows["P1"]["assumed_cnt"] == 0
-    assert rows["P2"]["assumed"] is True                 # 没登记的按默认
-    assert m["free_cnt"][date(2026, 10, 20)] == 1        # 只有 P2（默认）
+    assert rows["P2"]["assumed"] is False                # 没登记的老员工不再按"默认出勤"
+    assert rows["P2"]["states"][date(2026, 10, 25)] == date_plan.STATE_OFF
+    assert m["free_cnt"][date(2026, 10, 25)] == 1        # 只有登记过的 P1
+    assert m["default_cnt"][date(2026, 10, 25)] == 0
+    db.close()
 
 
 def test_admin_matrix_excludes_past_days_from_free_count(client):
@@ -639,11 +664,12 @@ def test_admin_matrix_excludes_past_days_from_free_count(client):
     assert m["past"][past] is True
     assert m["free_cnt"][past] == 0
     assert rows["P1"]["states"][past] == date_plan.STATE_OFF   # 计划可出勤但那天没自报 → ×
-    # 未来：P1 登记过（○）+ P2 已过截止日未登记（按默认出勤 ○）= 2
+    # 未来：只有登记过的 P1 算可出勤（P2 没填且是老员工 → 按不出勤 ×）
     future = date(2026, 10, 25)
-    assert m["past"][future] is False and m["free_cnt"][future] == 2
-    assert m["default_cnt"][future] == 1
-    assert rows["P2"]["assumed"] is True
+    assert m["past"][future] is False and m["free_cnt"][future] == 1
+    assert m["default_cnt"][future] == 0
+    assert rows["P2"]["states"][future] == date_plan.STATE_OFF
+    assert rows["P2"]["assumed_off_days"][future] is True
 
 
 def test_admin_matrix_past_day_with_report_is_done(client):
@@ -1210,13 +1236,14 @@ def test_inactive_employee_future_days_all_off(client):
     for d in (date(2026, 10, 4), date(2026, 10, 10), date(2026, 10, 15)):
         assert r["states"][d] == date_plan.STATE_OFF                  # 今天及以后：一律 ×
         assert r["marks"][d] == "×"
-    # 计划出勤只剩在职的乙（窗口已关 → 默认出勤）；离职的甲不算
-    assert m["plan_cnt"][date(2026, 10, 10)] == 1
-    assert m["none_cnt"][date(2026, 10, 10)] == 0                     # 也不算"未登记"
-    # 在职的人不受影响：乙没登记、窗口已关 → 浅色"默认出勤"（不是 ×，也不是 –）
+    # 计划出勤：离职的甲不算、没填的乙也不算 → 0
+    assert m["plan_cnt"][date(2026, 10, 10)] == 0
+    # 未登记人数 = 那天还没填计划的人：只有乙（在职没填）；离职的甲不算
+    assert m["none_cnt"][date(2026, 10, 10)] == 1
+    # 在职但没填计划的老员工也一样：窗口已关 → 默认不出勤（浅色 ×），不算可出勤
     p2 = {x["person_code"]: x for x in m["rows"]}["P2"]
-    assert p2["states"][date(2026, 10, 10)] == date_plan.STATE_ON
-    assert p2["assumed_days"][date(2026, 10, 10)] is True
+    assert p2["states"][date(2026, 10, 10)] == date_plan.STATE_OFF
+    assert p2["assumed_off_days"][date(2026, 10, 10)] is True
     db.close()
 
 

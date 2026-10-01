@@ -34,7 +34,8 @@
     <span><span class="pm off">×</span>{{ t('不出勤') }}</span>
     <span><span class="pm done">□</span>{{ t('已出勤（已自报）') }}</span>
     <span><span class="pm none">–</span>{{ t('未登记') }}</span>
-    <span><span class="pm on dim">○</span>{{ t('未登记（默认出勤）') }}</span>
+    <span><span class="pm on dim">○</span>{{ t('未填·按可出勤（新入职）') }}</span>
+    <span><span class="pm off dim">×</span>{{ t('未填·按不出勤（老员工）') }}</span>
   </span>
 </div>
 
@@ -51,9 +52,9 @@
   <tr{% if r.inactive %} class="row-inactive"{% endif %}>
     <td title="{{ r.person_code }}{% if r.inactive %} · {{ t('停用/离职：今天及以后按不出勤') }}{% endif %}">{{ r.name }}<span class="hint">（{{ r.short_code }}）</span></td>
     {% for d in m.days %}
-    <td class="c {{ r.states[d] }}{% if r.assumed_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
+    <td class="c {{ r.states[d] }}{% if r.assumed_days[d] or r.assumed_off_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
         data-testid="cell-{{ r.person_code }}-{{ d }}"
-        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% else %}{{ r.marks[d] }}{% if r.assumed_days[d] %}（未登记→默认出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
+        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% else %}{{ r.marks[d] }}{% if r.assumed_days[d] %}（没填计划→按可出勤）{% elif r.assumed_off_days[d] %}（没填计划→按不出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
     {% endfor %}
   </tr>
   {% else %}
@@ -78,7 +79,7 @@
     {% endfor %}
   </tr>
   <tr class="totals">
-    <td>{{ t('未登记人数') }}</td>
+    <td title="{{ t('当天还没填计划的人数（含按默认算的）') }}">{{ t('未登记人数') }}</td>
     {% for d in m.days %}<td class="num">{{ m.none_cnt[d] }}</td>{% endfor %}
   </tr>
 </table>

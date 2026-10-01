@@ -165,6 +165,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **新入职员工（2026-10-01 用户口径："不用关心入职日，就以填报当天为入职日"）**：
   **名册起点** `roster_start_map()` = 账号创建日 / 人员记录创建日 / **首次计划日** 三者取最早（JST，不人工维护）；
   **入职前的格子留空**（`STATE_NA="na"`，不计 计划出勤/实际出勤/未登记 任何统计；以前显示成 × = 把没入职算旷工）；
+  **他没填时按"可出勤"算**（`unfilled_default` 返回 `on`，浅色 ○）；
   **新人可补登当期**（`personal_window_state()`：起点晚于该期窗口关闭日 → 该期对他开放到期末，
   `save_plan` 与 `needs_plan` 都认 → 登录就催填）；老员工照旧 `WindowClosed`。
   员工页状态条「你是本期新入职的…」，默认期 = 本期（`default_period_for()`）。
@@ -193,9 +194,16 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **导出照着"排班计划"参考表（`万总/排班计划.png`）排，去掉区域标识行**：
   `说明行 → 标题行（期间·填报期）→ 表头（姓名/员工编号/可出动天数/MM/DD…）→ 七曜行 → 数据 → 按日小计`；
   **没有登记列**，未登记且未默认出勤的格子**留空**；`freeze_panes="D3"`。
-- **窗口关了还没登记 → 默认全部出勤（2026-10-01 用户补充）**：`assumed_default(d, today, deadline)` =
-  **`d >= 今天` 且 `今天 > 截止日`**；**只对今天及以后生效**（过去的日期是既成事实，不追认默认），
-  登记过的人不受影响（默认优先级最低）；整期已过去的历史半月不启用（`default_all` 需 `end >= 今天`）。
+- **窗口关了还没填 → "未填默认"（2026-10-01 用户口径，同日改过一次）**：
+  最初是"默认全部出勤"，用户改成"**老员工漏填 → 默认全部不出勤**"（理由："可能要离职了；
+  正常的员工都是会填报的"），同时保留"**本期新入职 → 默认可出勤**"（他还能补填，见下一条）。
+  实现：`unfilled_default(key, today, roster_start)` → `""` / `"on"` / `"off"`；
+  生效区间 = **今天及以后 + 已过截止日**（`assumed_default` 作底层日期判定）；
+  **过去不追认**、**登记过的人不受影响**（默认优先级最低）；整期已过去的历史半月不启用。
+  显示：`on` → **浅色 ○**、`off` → **浅色 ×**（都和"亲手填的"区分得开）。
+  统计：**「计划出勤」不含默认不出勤的老员工**；**「未登记人数」= 那天还没填计划的人数**
+  （今天及以后，含按默认算的）→"谁没填"的信号永远在，管理员据此催办。
+  测试 `test_unfilled_default_old_staff_off_new_hire_on` / `test_admin_matrix_default_all_after_deadline`。
 - **待填报提示 + 员工落点（2026-10-01 用户补充）**：`needs_plan`（**窗口开着且未登记**才需要）、
   `staff_home`（**唯一来源**：待填报 → `/my/plan`，否则 → `/my/report`，无编号 → `/my/perf`）；
   用在 ① 登录 POST ② `GET /` ③ 中间件拦回员工时（三处同源，勿各写一遍）。
@@ -211,7 +219,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   回归测试 `test_resync_repairs_reports_missing_plan_rows` / `test_rebuild_reported_clears_stale_flags`。
 - **下载防连点**：导出链接带 `download` 属性 + `base.html` 对 `a[download]` 做 2 秒吞点击
   （用户 2026-10-01："一次下载了两个文件" = 双击触发两次请求，线上日志可见同端口两次 GET）。
-- 测试 `tests_web/test_date_plan.py`（68 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
+- 测试 `tests_web/test_date_plan.py`（70 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
   默认全出勤/新人入职补登/待填报与登录落点/弹窗与角标/窗口状态条/整行点选无 JS/矩阵无登记列与按日小计/越权/导出）；
   **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
   `test_migrations.py` 已把新表列入 schema 校验。
