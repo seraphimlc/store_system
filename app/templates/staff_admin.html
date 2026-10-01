@@ -2,7 +2,7 @@
 {% block title %}{{ t('员工管理') }}{% endblock %}
 {% block content %}
 <div class="page-title"><h1>{{ t('员工管理') }}</h1>
-  <span class="sub">{{ t('员工账号随数据导入自动开通：文件里出现新的人员编号即自动开户（登录名按姓名自动生成）。这里只做改状态、设置语言与重置口令；员工永不删除——离职也只改状态，历史与核算数据完整保留。') }}</span></div>
+  <span class="sub">{{ t('员工账号随数据导入自动开通：文件里出现新的人员编号即自动开户（登录名按姓名自动生成）。点每行的「编辑」在弹窗里改姓名/登录名/状态/界面语言/重置口令（人员编号是身份键，只读）；员工永不删除——离职也只改状态，历史与核算数据完整保留。') }}</span></div>
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if new_token %}
 <div class="card" style="border-color:var(--ok)">
@@ -98,38 +98,11 @@
     <td>{{ u.person_code or '—' }}</td>
     <td><span class="{{ pill(u.status) }}">{{ t(labels.get(u.status, u.status)) }}</span></td>
     <td>
-      <form method="post" action="/staff-admin/{{ u.id }}/lang"
-            style="display:inline-flex;gap:.3rem;align-items:center">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-        <input type="hidden" name="_ft" value="{{ form_token() }}">
-        <select name="lang" style="padding:.2rem .4rem">
-          {% for lv, ln in langs.items() %}
-          <option value="{{ lv }}" {% if lv == u.lang %}selected{% endif %}>{{ ln }}</option>
-          {% endfor %}
-        </select>
-        <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('设置') }}</button>
-      </form>
-    </td>
-    <td>
-      <form method="post" action="/staff-admin/{{ u.id }}/status"
-            style="display:inline-flex;gap:.4rem;align-items:center">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-        <input type="hidden" name="_ft" value="{{ form_token() }}">
-        <select name="new_status" style="padding:.2rem .4rem">
-          {% for s, label in labels.items() %}
-          <option value="{{ s }}" {% if s == u.status %}selected{% endif %}>{{ t(label) }}</option>
-          {% endfor %}
-        </select>
-        <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('改状态') }}</button>
-      </form>
-      <form method="post" action="/staff-admin/{{ u.id }}/reset"
-            style="display:inline-flex;gap:.3rem;margin-left:.4rem">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-        <input type="hidden" name="_ft" value="{{ form_token() }}">
-        <input name="password" placeholder="{{ t('新口令（不填用系统默认）') }}"
-               style="width:150px;padding:.2rem .4rem">
-        <button class="btn ghost" style="padding:.2rem .6rem" type="submit">{{ t('重置口令') }}</button>
-      </form>
+      <button class="btn ghost" type="button" style="padding:.2rem .7rem"
+              data-testid="edit-{{ u.id }}" onclick="openStaffEdit(this)"
+              data-uid="{{ u.id }}" data-code="{{ u.person_code or '' }}"
+              data-name="{{ u.display_name or '' }}" data-username="{{ u.username }}"
+              data-status="{{ u.status }}" data-lang="{{ u.lang or '' }}">{{ t('编辑') }}</button>
     </td>
     <td>
       {% set toks = tokens_by_user.get(u.id, []) %}
@@ -190,4 +163,52 @@
     <li>{{ t('界面语言：可给每人指定（中文/日本語/自动）。自动=跟随浏览器语言；日本员工可设「日本語」后默认日文界面。') }}</li>
   </ul>
 </div>
+
+<dialog id="edit-dlg" class="edit-dlg" data-testid="staff-edit-dialog">
+  <form method="post" id="edit-form" action="">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <h3>{{ t('编辑员工') }}<span class="hint" id="edit-who"></span></h3>
+    <label>{{ t('员工编号') }}
+      <input id="ed-code" readonly data-testid="ed-code"
+             style="background:#f5f7fb;color:var(--muted)"></label>
+    <p class="hint" style="margin:.15rem 0 .5rem">
+      {{ t('编号是身份键（对账/绩效/工资都靠它认人），这里只读；要改编号请联系维护人员。') }}
+    </p>
+    <label>{{ t('姓名') }}<input name="name" id="ed-name" maxlength="64" required></label>
+    <label>{{ t('登录名') }}<input name="username" id="ed-username" maxlength="64"></label>
+    <label>{{ t('状态') }}
+      <select name="status" id="ed-status">
+        {% for sv, label in labels.items() %}
+        <option value="{{ sv }}">{{ t(label) }}</option>
+        {% endfor %}
+      </select></label>
+    <label>{{ t('界面语言') }}
+      <select name="lang" id="ed-lang">
+        {% for lv, ln in langs.items() %}<option value="{{ lv }}">{{ ln }}</option>{% endfor %}
+      </select></label>
+    <label>{{ t('重置口令') }}
+      <input name="password" id="ed-pwd" maxlength="64" placeholder="{{ t('留空 = 不改') }}"></label>
+    <div class="form-actions">
+      <button class="btn" type="submit" data-testid="edit-save">{{ t('保存') }}</button>
+      <button class="btn ghost" type="button" onclick="document.getElementById('edit-dlg').close()">{{ t('取消') }}</button>
+    </div>
+  </form>
+</dialog>
+<script>
+function openStaffEdit(btn) {
+  var d = btn.dataset;
+  document.getElementById('edit-form').action = '/staff-admin/' + d.uid + '/edit';
+  document.getElementById('ed-code').value = d.code || '';
+  document.getElementById('ed-name').value = d.name || '';
+  document.getElementById('ed-username').value = d.username || '';
+  document.getElementById('ed-status').value = d.status || 'active';
+  document.getElementById('ed-lang').value = d.lang || '';
+  document.getElementById('ed-pwd').value = '';
+  document.getElementById('edit-who').textContent =
+    '　' + (d.name || '') + '（' + (d.username || '') + '）';
+  var dlg = document.getElementById('edit-dlg');
+  if (dlg.showModal) { dlg.showModal(); } else { dlg.setAttribute('open', ''); }
+}
+</script>
 {% endblock %}

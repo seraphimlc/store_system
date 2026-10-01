@@ -376,3 +376,16 @@ table.plan-matrix th .hint { font-weight: 400; }
 .modal h3 { margin: 0 0 .5rem; font-size: 1.05rem; }
 .modal p { margin: .35rem 0 .6rem; font-size: .93rem; line-height: 1.6; }
 .modal .form-actions { margin-top: .8rem; }
+
+/* 员工编辑弹窗（原生 <dialog>，不依赖脚本库） */
+.edit-dlg { border: 0; border-radius: 12px; padding: 1.1rem 1.2rem 1.2rem;
+  width: min(460px, 94vw); box-shadow: 0 18px 40px rgba(15, 25, 50, .28);
+  color: var(--ink); background: var(--surface); }
+.edit-dlg::backdrop { background: rgba(16, 24, 44, .45); }
+.edit-dlg h3 { margin: 0 0 .6rem; font-size: 1.05rem; }
+.edit-dlg label { display: flex; flex-direction: column; gap: .15rem;
+  font-size: .85rem; color: var(--muted); margin-bottom: .5rem; }
+.edit-dlg input, .edit-dlg select { width: 100%; padding: .3rem .5rem;
+  font-size: .95rem; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; }
+.edit-dlg .form-actions { display: flex; gap: .5rem; margin-top: .7rem; }
