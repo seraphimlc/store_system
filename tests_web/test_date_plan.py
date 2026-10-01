@@ -630,6 +630,25 @@ def test_admin_matrix_past_day_with_report_is_done(client):
     assert m["free_cnt"][d2] == 0                               # 过去的日期不计入可用人力
 
 
+def test_today_keeps_plan_until_next_day(client):
+    """口径（2026-10-01 用户确认）：**今天**显示计划值（当天还没过完，自报多半傍晚才交），
+    次日 0 点后才按事实（有自报 □ / 没自报 ×）。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    date_plan.save_plan(db, _U("P1"), "2026-10-H1", [], today=date(2026, 10, 1))
+    # 站在 10-01 当天看：10-01 还是计划 ○（哪怕还没自报）
+    today_view = date_plan.admin_matrix(db, "2026-10-H1", today=date(2026, 10, 1))
+    r = {x["person_code"]: x for x in today_view["rows"]}["P1"]
+    assert r["states"][date(2026, 10, 1)] == date_plan.STATE_ON
+    # 站在 10-02 看：10-01 变成事实 —— 没自报 → ×；10-02 仍看计划 ○
+    next_view = date_plan.admin_matrix(db, "2026-10-H1", today=date(2026, 10, 2))
+    r2 = {x["person_code"]: x for x in next_view["rows"]}["P1"]
+    assert r2["states"][date(2026, 10, 1)] == date_plan.STATE_OFF
+    assert r2["states"][date(2026, 10, 2)] == date_plan.STATE_ON
+    assert next_view["past"][date(2026, 10, 1)] is True
+    db.close()
+
+
 def test_admin_matrix_hides_inactive_staff_without_plan(client):
     """停用账号且本期没登记的人不进矩阵；登记过的人必须显示（否则数据被静默吞掉）。"""
     db = appdb.SessionLocal()
