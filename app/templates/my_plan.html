@@ -61,7 +61,7 @@
     <span><span class="pm on">○</span> {{ t('可出勤') }}</span>
     <span><span class="pm off">×</span> {{ t('不出勤') }}</span>
     <span><span class="pm done">□</span> {{ t('已出勤（已自报）') }}</span>
-    <span class="hint">{{ t('默认每天都出勤，点选不出勤的日子即可。') }}</span>
+    <span class="hint">{{ t('默认每天都出勤，点一下那天就变成不出勤，再点一下变回来；从上到下点完保存即可。') }}</span>
   </div>
   <p class="hint" style="margin:.3rem 0 0">{{ t('计划只是预报，实际出勤以每日填报为准；已过去或已自报的日期不会再改动。') }}</p>
 </div>
@@ -71,31 +71,35 @@
   <input type="hidden" name="_ft" value="{{ form_token() }}">
   <input type="hidden" name="period" value="{{ period }}">
   <div class="tbl-wrap">
-    <table class="grid-tbl plan-tbl" data-testid="my-plan-tbl">
+    <table class="grid-tbl plan-tbl pick-tbl" data-testid="my-plan-tbl">
       <tr>
         <th>{{ t('日期') }}</th>
-        <th>{{ t('出勤') }}</th>
-        <th>{{ t('登记（点选不出勤）') }}</th>
+        <th>{{ t('出勤状态（点一下切换）') }}</th>
       </tr>
       {% for d in view.days %}
-      <tr {% if not d.editable %}class="locked"{% endif %}
-          {% if d.editable %}x-data="{off: {{ 'true' if d.off else 'false' }}}"{% endif %}>
-        <td>{{ d.date.strftime('%m-%d') }}<span class="hint">（{{ t(wd_labels[d.wd]) }}）</span>
-          {% if d.date == view.today %}<span class="pill run">{{ t('今天') }}</span>{% endif %}</td>
+      <tr class="dayrow {% if not d.editable %}locked{% endif %}">
         {% if d.editable %}
-        <td><span class="pm" :class="off ? 'off' : 'on'"
-                  x-text="off ? '×' : '○'">{{ '×' if d.off else '○' }}</span></td>
-        <td>
-          <label class="pick">
+        {# 整行都是一个 label：点哪都切换 ○↔×（纯 CSS，无 JS 也能用） #}
+        <td colspan="2" class="pickcell">
+          <label class="pickrow">
             <input type="checkbox" name="unavailable" value="{{ d.date }}"
-                   x-model="off" data-testid="pick-{{ d.date }}">
-            <span x-text="off ? '{{ t('不出勤') }}' : '{{ t('可出勤') }}'">{{ t('不出勤') if d.off else t('可出勤') }}</span>
+                   {% if d.off %}checked{% endif %}
+                   data-testid="pick-{{ d.date }}">
+            <span class="d">{{ d.date.strftime('%m-%d') }}<span class="hint">（{{ t(wd_labels[d.wd]) }}）</span>
+              {% if d.date == view.today %}<span class="pill run">{{ t('今天') }}</span>{% endif %}</span>
+            <span class="sym" aria-hidden="true"></span>
+            <span class="lbl on">{{ t('可出勤') }}</span>
+            <span class="lbl off">{{ t('不出勤') }}</span>
           </label>
         </td>
         {% else %}
-        <td><span class="pm {{ d.state }}">{{ d.mark }}</span></td>
-        <td class="hint">
-          {% if d.reported %}{{ t('已出勤（已自报）') }}{% else %}{{ t('已过去') }}{% endif %}
+        <td>{{ d.date.strftime('%m-%d') }}<span class="hint">（{{ t(wd_labels[d.wd]) }}）</span>
+          {% if d.date == view.today %}<span class="pill run">{{ t('今天') }}</span>{% endif %}</td>
+        <td>
+          <span class="pm {{ d.state }}">{{ d.mark }}</span>
+          <span class="hint">{% if d.reported %}{{ t('已出勤（已自报）') }}
+            {% elif d.past %}{{ t('未自报（按不出勤）') }}
+            {% else %}{{ t('填报期已结束') }}{% endif %}</span>
         </td>
         {% endif %}
       </tr>

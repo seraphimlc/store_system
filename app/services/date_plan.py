@@ -36,6 +36,12 @@ LOCK_PAST = "past"           # 日期已过去
 LOCK_REPORTED = "reported"   # 当天已有自报
 
 WD_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+# 导出用的单字星期（日本七曜，与"排班计划"参考表头一致）
+WD_SHORT = ["月", "火", "水", "木", "金", "土", "日"]
+
+SOURCE_WEB = "web"           # 员工登记的整期计划行
+SOURCE_ADMIN = "admin"       # 管理员写入
+SOURCE_REPORT = "report"     # 由每日填报写透的行（**不算"已登记"**）
 
 # 填报窗口：提前 7 天开放（用户口径 2026-10-01）；窗口结束 = 登记截止日
 OPEN_DAYS_BEFORE = 7
@@ -209,15 +215,19 @@ def next_window(today=None) -> Optional[dict]:
 # ---------------- 三态与锁定 ----------------
 
 def cell_state(plan_available: Optional[bool], reported: bool,
-               assumed: bool = False) -> str:
-    """三态口径（唯一来源）：**已自报 > 计划 > 默认**；没有计划行 = 未登记。
+               assumed: bool = False, past: bool = False) -> str:
+    """格状态口径（**唯一来源**）：**已自报 > 已过去 > 计划值 > 默认出勤 > 未登记**。
 
-    `assumed=True` = **超过登记截止日仍未登记** → 按用户口径"**默认全部出勤**"处理（显示 ○）。
-    只对**今天及以后**的日子生效（`assumed_default`）：已经过去的日期是既成事实，
-    不追认默认出勤（有自报就是方框，没自报就是未登记）。
+    - `reported=True` → **□** 已出勤（已自报；事实，覆盖一切）；
+    - `past=True`（日期 < 今天）→ **×** 没自报就是**没出勤**（用户 2026-10-01 明确：
+      "过去的日期里，有自报显示方框，没自报显示叉"，计划值不参与 —— 预报不改变既成事实）；
+    - 今天及以后：有计划行 → ○ / ×；没计划行 → **默认出勤 ○**（`assumed`，窗口关闭后）
+      或 **–** 未登记（窗口未关）。
     """
     if reported:
         return STATE_DONE
+    if past:
+        return STATE_OFF
     if plan_available is None:
         return STATE_ON if assumed else STATE_NONE
     return STATE_ON if plan_available else STATE_OFF
@@ -237,38 +247,109 @@ def lock_of(d: date, today: date, reported: bool) -> str:
     return LOCK_NONE
 
 
-def _reported_dates(db, person_code: str, start: date, end: date) -> Set[date]:
-    rows = (db.query(StaffDailyReport.report_date)
-            .filter(StaffDailyReport.person_code == person_code,
-                    StaffDailyReport.report_date >= start,
-                    StaffDailyReport.report_date <= end).all())
-    return {r[0] for r in rows}
+def _plan_map(db, person_code: str, start: date, end: date) -> Dict[date, tuple]:
+    """该人某区间的计划行 → `{日期: (available, reported)}`。
 
-
-def _plan_map(db, person_code: str, start: date, end: date) -> Dict[date, bool]:
-    rows = (db.query(StaffDatePlan.plan_date, StaffDatePlan.available)
+    **只读 `staff_date_plans` 这一张表**（用户 2026-10-01 口径："避免关联查询"）：
+    "已自报"由每日填报**写透**到本表 `reported` 列（见 `mark_reported`），
+    渲染时不再查 `staff_daily_reports`。
+    """
+    rows = (db.query(StaffDatePlan.plan_date, StaffDatePlan.available,
+                     StaffDatePlan.reported)
             .filter(StaffDatePlan.person_code == person_code,
                     StaffDatePlan.plan_date >= start,
                     StaffDatePlan.plan_date <= end).all())
-    return {d: bool(a) for d, a in rows}
+    return {d: (bool(a), bool(r)) for d, a, r in rows}
+
+
+def _row_of(db, person_code: str, d: date):
+    return (db.query(StaffDatePlan)
+            .filter(StaffDatePlan.person_code == person_code,
+                    StaffDatePlan.plan_date == d).first())
 
 
 def is_locked(db, person_code: str, d: date, today=None) -> Optional[str]:
-    """该日期是否锁定（返回原因 'reported'/'past'，未锁定 → None）。"""
+    """该日期是否锁定（返回原因 'reported'/'past'，未锁定 → None）。单表判定。"""
     today = today or jst_today()
-    rep = (db.query(StaffDailyReport.id)
-           .filter(StaffDailyReport.person_code == person_code,
-                   StaffDailyReport.report_date == d).first()) is not None
-    return lock_of(d, today, rep) or None
+    row = _row_of(db, person_code, d)
+    return lock_of(d, today, bool(row and row.reported)) or None
 
 
 def is_submitted(db, person_code: str, key: str) -> bool:
-    """该半月是否登记过（有任意一行计划即算登记）。"""
+    """该半月是否**登记过整期计划**。
+
+    注意：`source='report'` 的行（员工只自报、没登记计划时写透进来的）**不算登记**，
+    否则"只自报没登记"的人会被误判成已登记、连催办弹窗都不弹（2026-10-01 评审）。
+    """
     start, end, _ = period_bounds(key)
     return (db.query(StaffDatePlan.id)
             .filter(StaffDatePlan.person_code == person_code,
                     StaffDatePlan.plan_date >= start,
-                    StaffDatePlan.plan_date <= end).first()) is not None
+                    StaffDatePlan.plan_date <= end,
+                    StaffDatePlan.source != SOURCE_REPORT).first()) is not None
+
+
+# ---------------- 自报写透（单表渲染的关键） ----------------
+
+def mark_reported(db, person_code: str, ref_date: date, flag: bool = True,
+                  commit: bool = True) -> bool:
+    """把"当天已自报出勤"**写进计划表**（每日填报的提交/修改/删除时调用）。
+
+    - 已有计划行 → 只改 `reported`（保留 `available`，删自报后能回到原计划值）；
+    - 没有计划行（没登记就自报）→ 插一行 `source='report'`（不算"已登记"）；
+    - `flag=False`（删除自报）→ 置回 False。
+
+    这样管理端矩阵 / 员工页**只读计划表**就能显示 □，不用关联 `staff_daily_reports`。
+    """
+    if not person_code or ref_date is None:
+        return False
+    row = _row_of(db, person_code, ref_date)
+    if row is None:
+        if not flag:
+            return False
+        db.add(StaffDatePlan(person_code=person_code, plan_date=ref_date,
+                             available=True, reported=True,
+                             source=SOURCE_REPORT))
+    else:
+        if bool(row.reported) == bool(flag):
+            return False
+        row.reported = bool(flag)
+    if commit:
+        db.commit()
+    return True
+
+
+def rebuild_reported(db, person_code: Optional[str] = None,
+                     start: Optional[date] = None, end: Optional[date] = None,
+                     commit: bool = True) -> int:
+    """按 `staff_daily_reports` **重建** `reported`（写路径修复工具，不在渲染路径上）。
+
+    用于：迁移回填、清理脚本批量删自报之后。返回改动行数。
+    """
+    q = db.query(StaffDailyReport.person_code, StaffDailyReport.report_date)
+    if person_code:
+        q = q.filter(StaffDailyReport.person_code == person_code)
+    if start is not None:
+        q = q.filter(StaffDailyReport.report_date >= start)
+    if end is not None:
+        q = q.filter(StaffDailyReport.report_date <= end)
+    truth = {(c, d) for c, d in q.all()}
+    rows = db.query(StaffDatePlan)
+    if person_code:
+        rows = rows.filter(StaffDatePlan.person_code == person_code)
+    if start is not None:
+        rows = rows.filter(StaffDatePlan.plan_date >= start)
+    if end is not None:
+        rows = rows.filter(StaffDatePlan.plan_date <= end)
+    changed = 0
+    for row in rows.all():
+        want = (row.person_code, row.plan_date) in truth
+        if bool(row.reported) != want:
+            row.reported = want
+            changed += 1
+    if commit and changed:
+        db.commit()
+    return changed
 
 
 # ---------------- 待填报判定与员工落点 ----------------
@@ -321,20 +402,21 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     wstate = window_state(key, today)
     window_open = wstate == "open"
     plans = _plan_map(db, person_code, start, end)
-    reps = _reported_dates(db, person_code, start, end)
     days = []
     d = start
     while d <= end:
-        rep = d in reps
+        avail, rep = plans.get(d, (None, False))
         asm = assumed_default(d, today, deadline)
-        state = cell_state(plans.get(d), rep, assumed=asm)
+        past = d < today
+        state = cell_state(avail, rep, assumed=asm, past=past)
         lock = lock_of(d, today, rep)
         editable = window_open and lock == LOCK_NONE     # 窗口没开/已关 → 一律不可改
-        off = (d in plans) and not plans[d]
+        off = (avail is False)
+        # 未登记且可改 → 显示"默认可出勤"的 ○（员工要看到默认值，不是空白）
         mark = MARKS[STATE_ON] if (editable and state == STATE_NONE) else MARKS[state]
         days.append({"date": d, "wd": d.weekday(), "state": state, "mark": mark,
                      "reported": rep, "off": off, "available": not off,
-                     "assumed": asm and (d not in plans) and not rep,
+                     "past": past, "assumed": asm and (d not in plans),
                      "editable": editable, "lock": lock})
         d += timedelta(days=1)
     stamps = (db.query(StaffDatePlan.updated_at, StaffDatePlan.created_at)
@@ -390,24 +472,24 @@ def save_plan(db, user, key: str, unavailable: Iterable = (), today=None,
     if wstate != "open":
         raise WindowClosed(key, wstate)
     off = _parse_dates(unavailable, start, end)
-    reps = _reported_dates(db, code, start, end)
     existing = {r.plan_date: r for r in db.query(StaffDatePlan).filter(
         StaffDatePlan.person_code == code,
         StaffDatePlan.plan_date >= start,
         StaffDatePlan.plan_date <= end).all()}
     written = skipped = 0
     for d in period_days(key):
-        if lock_of(d, today, d in reps):
+        row = existing.get(d)
+        # 锁定判定只看本行（reported 已由每日填报写透）：已自报 / 已过去 → 不动
+        if lock_of(d, today, bool(row and row.reported)):
             skipped += 1
             continue
         val = d not in off
-        row = existing.get(d)
         if row is None:
             db.add(StaffDatePlan(person_code=code, plan_date=d,
                                  available=val, source=source))
         else:
             row.available = val
-            row.source = source
+            row.source = source        # 只自报没登记的行 → 这次算正式登记
         written += 1
     if not written:
         db.rollback()
@@ -419,7 +501,9 @@ def save_plan(db, user, key: str, unavailable: Iterable = (), today=None,
         raise ValueError("保存冲突，请刷新页面重试")
     return {"key": key, "written": written, "skipped": skipped,
             "off_cnt": len([d for d in period_days(key)
-                            if d in off and not lock_of(d, today, d in reps)])}
+                            if d in off
+                            and not lock_of(d, today, bool(existing.get(d)
+                                                          and existing[d].reported))])}
 
 
 # ---------------- 管理端矩阵与导出 ----------------
@@ -446,20 +530,20 @@ def _matrix_people(db) -> List[dict]:
 
 
 def admin_matrix(db, key: str, today=None) -> dict:
-    """管理端矩阵：行=员工，列=日期（三态），另给未提交标记与按日可出勤小计。"""
+    """管理端矩阵：行=员工，列=日期（三态），另给未提交标记与按日可出勤小计。
+
+    **只查一张表**（`staff_date_plans`）拿全部格子状态：`reported` 已由每日填报写透，
+    所以这里**不查 `staff_daily_reports`、不做关联**（用户 2026-10-01 明确要求）。
+    """
     today = today or jst_today()
     start, end, deadline = period_bounds(key)
     days = period_days(key)
     plan_rows = (db.query(StaffDatePlan.person_code, StaffDatePlan.plan_date,
-                          StaffDatePlan.available)
+                          StaffDatePlan.available, StaffDatePlan.reported)
                  .filter(StaffDatePlan.plan_date >= start,
                          StaffDatePlan.plan_date <= end).all())
-    plan_map = {(c, d): bool(a) for c, d, a in plan_rows}
-    rep_rows = (db.query(StaffDailyReport.person_code, StaffDailyReport.report_date)
-                .filter(StaffDailyReport.report_date >= start,
-                        StaffDailyReport.report_date <= end).all())
-    rep_set = {(c, d) for c, d in rep_rows}
-    with_plan = {c for c, _ in plan_map}
+    plan_map = {(c, d): (bool(a), bool(r)) for c, d, a, r in plan_rows}
+    with_plan = {c for c, _ in plan_map}          # 有行 = 登记过（含只自报的行，下面再判）
 
     cand = _matrix_people(db)
     for code in sorted(with_plan - set(cand)):
@@ -468,6 +552,12 @@ def admin_matrix(db, key: str, today=None) -> dict:
     codes = sorted((c for c, e in cand.items()
                     if e["can_login"] or c in with_plan),
                    key=lambda c: (cand[c]["name"] or c, c))
+    # "已登记" = 该期存在 source != 'report' 的行（只自报没填计划的不算）
+    submitted = {c for (c,) in db.query(StaffDatePlan.person_code)
+                 .filter(StaffDatePlan.plan_date >= start,
+                         StaffDatePlan.plan_date <= end,
+                         StaffDatePlan.source != SOURCE_REPORT)
+                 .distinct().all()}
 
     rows = []
     col_free = {d: 0 for d in days}
@@ -476,11 +566,10 @@ def admin_matrix(db, key: str, today=None) -> dict:
     for code in codes:
         states, assumed = {}, {}
         for d in days:
-            av = plan_map.get((code, d))
-            rep = (code, d) in rep_set
+            av, rep = plan_map.get((code, d), (None, False))
             asm = assumed_default(d, today, deadline)
-            states[d] = cell_state(av, rep, assumed=asm)
-            assumed[d] = bool(asm and av is None and not rep)   # 这一格是"默认出勤"
+            states[d] = cell_state(av, rep, assumed=asm, past=d < today)
+            assumed[d] = bool(asm and av is None)        # 这一格是"默认出勤"
         for d in days:
             if states[d] in (STATE_ON, STATE_DONE):
                 col_free[d] += 1
@@ -494,7 +583,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
             "assumed_days": assumed,       # 逐日：这一格是"未登记→默认出勤"（浅色显示）
-            "submitted": code in with_plan,
+            "submitted": code in submitted,
             "assumed": a_cnt > 0,          # 该人本期真有"默认出勤"的格子
             "on_cnt": sum(1 for d in days if states[d] == STATE_ON),
             "off_cnt": sum(1 for d in days if states[d] == STATE_OFF),
@@ -522,9 +611,23 @@ def admin_matrix(db, key: str, today=None) -> dict:
 
 
 def plan_xlsx(db, key: str, today=None):
-    """管理端导出（员工 × 日期，符号与页面一致）。返回 (xlsx 字节, 文件名)。
+    """管理端导出：**照"排班计划"参考表排**（用户 2026-10-01 提供样例）。
 
-    用 `Workbook(write_only=True)` 流式写（与 report_export 同一写法）。
+    版式（**没有"区域标识"那一行**）：
+
+    ```
+    说明：○=可出勤；×=不出勤；□=已出勤（已自报）；空=未登记/未提供。可出动天数=今天起可出勤（○/□）天数。
+    出勤计划 2026-09-01 ~ 2026-09-15（上半月）· 填报期 2026-08-24 ~ 2026-09-03
+    姓名  员工编号  可出动天数  09/01 09/02 ... 09/15
+                                月    火        日      ← 七曜单字
+    敬斐然 2188…      12        ○    ×    …
+    可出勤人数（今天起） …
+      其中默认出勤（未登记） …
+    未登记人数 …
+    ```
+
+    用 `Workbook(write_only=True)` 流式写（与 report_export 同一写法）；
+    首两行与前三列冻结（`freeze_panes="D3"`）。
     """
     import io
 
@@ -534,33 +637,49 @@ def plan_xlsx(db, key: str, today=None):
 
     m = admin_matrix(db, key, today)
     days = m["days"]
+    ncol = 3 + len(days)
     wb = Workbook(write_only=True)
     ws = wb.create_sheet(title=(key[:31] or "plan"))
-    head = []
-    for i, h in enumerate(["员工编号", "姓名", "登记"] +
-                          [d.strftime("%m-%d") for d in days], 1):
-        c = WriteOnlyCell(ws, value=h)
-        c.font = Font(bold=True)
-        head.append(c)
-        ws.column_dimensions[c.column_letter].width = 12 if i <= 3 else 7
-    ws.append(head)
-    for r in m["rows"]:
-        flag = ("已登记" if r["submitted"]
-                else ("未登记（默认出勤）" if r["assumed"] else "未登记"))
-        ws.append([r["person_code"], r["name"], flag] +
-                  [r["marks"][d] for d in days])
-    ws.append([""] * len(head))
-    ws.append(["可出勤人数（今天及以后）", ""] +
-              [(m["free_cnt"][d] if not m["past"][d] else "") for d in days])
-    ws.append(["　其中默认出勤（未登记）", ""] +
-              [(m["default_cnt"][d] if not m["past"][d] else "") for d in days])
-    ws.append(["未登记人数", ""] + [m["none_cnt"][d] for d in days])
-    ws.append([""] * len(head))
-    ws.append(["图例", "○ 可出勤　× 不出勤　□ 已出勤（已自报）　– 未登记"] +
-              [""] * (len(head) - 2))
+    ws.freeze_panes = "D3"
+    bold = Font(bold=True)
+
+    def row(values, is_bold=False):
+        cells = []
+        for v in values:
+            c = WriteOnlyCell(ws, value=v)
+            if is_bold:
+                c.font = bold
+            cells.append(c)
+        ws.append(cells)
+
+    note = ("说明：○=可出勤；×=不出勤；□=已出勤（已自报）；空=未登记/未提供。"
+            "可出动天数=今天起可出勤（○/□）的天数。")
     if m["default_all"]:
-        ws.append(["说明", "超过登记截止日仍未登记的日期，今天及以后按“默认全部出勤”显示（按 ○ 计）"]
-                  + [""] * (len(head) - 2))
+        note += "填报期已结束仍未登记的人，今天起按默认可出勤（○）计。"
+    row([note])
+    row(["出勤计划 %s ~ %s（%s）· 填报期 %s ~ %s"
+         % (m["start"], m["end"], "上半月" if key.endswith(H1) else "下半月",
+            m["open_at"], m["close_at"])])
+    row(["姓名", "员工编号", "可出动天数", *[d.strftime("%m/%d") for d in days]],
+        is_bold=True)
+    row(["", "", "", *[WD_SHORT[d.weekday()] for d in days]], is_bold=True)
+
+    for r in m["rows"]:
+        # 未登记且未触发默认出勤 → 留空（与参考表"空白=未提供"一致）
+        vals = [("" if r["states"][d] == STATE_NONE else r["marks"][d])
+                for d in days]
+        free = sum(1 for d in days
+                   if not m["past"][d] and r["states"][d] in (STATE_ON, STATE_DONE))
+        row([r["name"], r["person_code"], free, *vals])
+
+    row([""] * ncol)
+    row(["可出勤人数（今天起）", "", "",
+         *[(m["free_cnt"][d] if not m["past"][d] else "") for d in days]],
+        is_bold=True)
+    if m["default_all"]:
+        row(["　其中默认出勤（未登记）", "", "",
+             *[(m["default_cnt"][d] if not m["past"][d] else "") for d in days]])
+    row(["未登记人数", "", "", *[m["none_cnt"][d] for d in days]])
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue(), "date_plan_%s.xlsx" % key

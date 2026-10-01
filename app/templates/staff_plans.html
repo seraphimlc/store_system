@@ -42,8 +42,10 @@
     <span><span class="pm done">□</span> {{ t('已出勤（已自报）') }}</span>
     <span><span class="pm none">–</span> {{ t('未登记') }}</span>
     <span><span class="pm on" style="color:#b9c1d1">○</span> {{ t('未登记（按默认全部出勤）') }}</span>
-    <span class="hint">{{ t('实际出勤以员工自报为准；灰色日期为已过去的日子。') }}</span>
   </div>
+  <p class="hint" style="margin:.3rem 0 0" data-testid="past-rule">
+    {{ t('已经过去的日期看事实：有自报是 □，没自报是 ×（计划值不再显示）；灰色日期为已过去的日子。') }}
+  </p>
   <p class="hint" style="margin:.3rem 0 0" data-testid="window-hint">
     {% if m.window_state == 'open' %}{{ t('填报期：') }}{{ m.open_at }} ~ {{ m.close_at }}（{{ t('截止日当天仍可提交') }}）
     {% elif m.window_state == 'before' %}{{ t('填报期自') }} {{ m.open_at }} {{ t('起开放（提前 7 天开放）。') }}

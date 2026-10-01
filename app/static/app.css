@@ -276,6 +276,26 @@ table.plan-tbl tr.locked td { color: var(--muted); background: #fbfcfe; }
 .pick input { width: 17px; height: 17px; margin: 0; accent-color: var(--brand); }
 .pick:has(input:checked) { border-color: var(--err); color: var(--err); background: #fff5f5; }
 
+/* ---------- 员工端填报：15 天顺序表，整行点一下切换 ○↔×（纯 CSS，无 JS 也能用） ---------- */
+table.pick-tbl { font-size: .95rem; }
+table.pick-tbl td.pickcell { padding: 0; }
+.pickrow { display: flex; align-items: center; gap: .7rem; width: 100%;
+  box-sizing: border-box; padding: .62rem .7rem; cursor: pointer; user-select: none; }
+.pickrow:hover { background: #f6f9ff; }
+.pickrow:active { background: #eef3ff; }
+.pickrow input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.pickrow .d { font-variant-numeric: tabular-nums; }
+.pickrow .sym::after { content: "○"; color: var(--ok); font-weight: 700;
+  font-size: 1.35rem; line-height: 1; }
+.pickrow input:checked ~ .sym::after { content: "×"; color: var(--err); }
+.pickrow .lbl { font-size: .9rem; color: var(--ok); font-weight: 600; }
+.pickrow .lbl.off { display: none; color: var(--err); }
+.pickrow input:checked ~ .lbl.on { display: none; }
+.pickrow input:checked ~ .lbl.off { display: inline; }
+.pickrow input:focus-visible ~ .sym::after { outline: 2px solid #c6d4ff;
+  outline-offset: 3px; border-radius: 3px; }
+table.pick-tbl tr.dayrow.locked td { background: #fbfcfe; color: var(--muted); }
+
 .plan-legend { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
   font-size: .86rem; margin-top: .5rem; }
 .plan-legend .pm { font-size: 1rem; }

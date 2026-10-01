@@ -255,17 +255,77 @@ def test_save_plan_skips_past_days(client):
     assert len(rows2) == 14                         # 10-01 仍然没有行
 
 
+def _report(db, code, d, mark=True):
+    """模拟"员工自报"：写一条每日填报 + **写透到计划表**（真实链路见 daily_report）。"""
+    db.add(StaffDailyReport(person_code=code, report_date=d,
+                            p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    if mark:
+        date_plan.mark_reported(db, code, d, True)
+
+
+def test_mark_reported_writes_through(client):
+    """自报写透：有计划行就改 reported（保留 available），没行就插一行 source=report。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    # 先登记计划（10-12 标为不出勤）
+    date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-12"],
+                        today=date(2026, 10, 2))
+    assert date_plan.mark_reported(db, "P1", date(2026, 10, 12)) is True
+    row = db.query(StaffDatePlan).filter(
+        StaffDatePlan.plan_date == date(2026, 10, 12)).one()
+    assert row.reported is True and row.available is False   # 计划值保留
+    assert row.source == date_plan.SOURCE_WEB                # 仍是登记行
+    # 没登记的日子（10-01 在计划里被跳过）→ 自报插一行，且**不算已登记**
+    assert date_plan.mark_reported(db, "P1", date(2026, 10, 1)) is True
+    r1 = db.query(StaffDatePlan).filter(
+        StaffDatePlan.plan_date == date(2026, 10, 1)).one()
+    assert r1.source == date_plan.SOURCE_REPORT and r1.reported is True
+    # 删除自报 → reported 撤回
+    assert date_plan.mark_reported(db, "P1", date(2026, 10, 12), False) is True
+    assert db.query(StaffDatePlan).filter(
+        StaffDatePlan.plan_date == date(2026, 10, 12)).one().reported is False
+    db.close()
+
+
+def test_is_submitted_ignores_report_only_rows(client):
+    """只自报没登记计划的人 → **不算已登记**（`source='report'` 的行不算）。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    date_plan.mark_reported(db, "P1", date(2026, 10, 20))      # 只自报
+    assert date_plan.is_submitted(db, "P1", "2026-10-H2") is False
+    assert date_plan.needs_plan(db, "P1", today=date(2026, 10, 10))["key"] == \
+        "2026-10-H2"
+    db.close()
+
+
+def test_admin_matrix_reads_only_plan_table(client):
+    """**设计守门**：矩阵只读 `staff_date_plans`；没写透的自报**不会**显示方框。
+
+    这是用户 2026-10-01 明确的口径（"避免关联查询"、"自报了就直接改计划表里的状态"）：
+    写路径（`daily_report` 的 4 个入口）负责把自报写透，渲染路径不做 join。
+    """
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 10, 16),
+                            p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()                                   # 只写自报表、不写透
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 10))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    assert rows["P1"]["states"][date(2026, 10, 16)] == date_plan.STATE_NONE
+
+
 def test_save_plan_keeps_reported_days_untouched(client):
     """已有自报的日子：计划值不被覆盖（自报是事实，计划只是预报）。"""
     db = appdb.SessionLocal()
     _person(db)
-    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 10, 12),
-                            p1_cnt=1, p2_cnt=0, total_cnt=1))
-    db.commit()
+    _report(db, "P1", date(2026, 10, 12))
     date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-12"],
                         today=date(2026, 10, 2))
-    assert (db.query(StaffDatePlan)
-            .filter(StaffDatePlan.plan_date == date(2026, 10, 12)).first()) is None
+    row = db.query(StaffDatePlan).filter(
+        StaffDatePlan.plan_date == date(2026, 10, 12)).one()
+    assert row.source == date_plan.SOURCE_REPORT     # 只自报的行没被登记覆盖
+    assert row.reported is True
     view = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 2))
     day = [d for d in view["days"] if d["date"] == date(2026, 10, 12)][0]
     assert day["state"] == date_plan.STATE_DONE and day["mark"] == "□"
@@ -277,12 +337,11 @@ def test_save_plan_all_locked_raises(client):
     db = appdb.SessionLocal()
     _person(db)
     for day in date_plan.period_days("2026-10-H1"):
-        db.add(StaffDailyReport(person_code="P1", report_date=day,
-                                p1_cnt=1, p2_cnt=0, total_cnt=1))
-    db.commit()
+        _report(db, "P1", day)
     with pytest.raises(date_plan.AllLocked):
         date_plan.save_plan(db, _U(), "2026-10-H1", [], today=date(2026, 10, 2))
-    assert db.query(StaffDatePlan).count() == 0
+    assert db.query(StaffDatePlan).filter(
+        StaffDatePlan.source == date_plan.SOURCE_WEB).count() == 0
 
 
 def test_save_plan_rejects_outside_window(client):
@@ -346,15 +405,17 @@ def test_save_plan_rejects_out_of_range_and_bad_dates(client):
 # ---------------- 员工端视图 ----------------
 
 def test_plan_days_defaults_and_marks(client):
-    """未登记的可改日期按"默认每天都出勤"显示 ○；已过去且无登记显示 –。"""
+    """未登记的可改日期按"默认每天都出勤"显示 ○；**过去的日期看事实**（没自报 = ×）。"""
     db = appdb.SessionLocal()
     _person(db)
-    today = date(2026, 10, 2)                  # H1 截止 10/3 → 尚未逾期
+    today = date(2026, 10, 2)                  # H1 窗口内（09-24~10-03）
     view = date_plan.plan_days(db, "P1", "2026-10-H1", today=today)
     assert view["submitted"] is False and view["overdue"] is False
     past, future = view["days"][0], view["days"][1]
     assert past["date"] == date(2026, 10, 1) and past["editable"] is False
-    assert past["state"] == date_plan.STATE_NONE and past["mark"] == "–"
+    # 10-01 已过去且没自报 → ×（用户口径："没自报显示叉"）
+    assert past["state"] == date_plan.STATE_OFF and past["mark"] == "×"
+    assert past["past"] is True
     assert future["date"] == date(2026, 10, 2) and future["editable"] is True
     assert future["state"] == date_plan.STATE_NONE and future["mark"] == "○"
     assert view["editable_cnt"] == 14          # 2–15
@@ -366,6 +427,21 @@ def test_plan_days_defaults_and_marks(client):
     # 窗口一关（10-04）→ 一律不可改
     closed = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 4))
     assert closed["window_state"] == "closed" and closed["editable_cnt"] == 0
+
+
+def test_plan_days_past_shows_fact(client):
+    """员工端同口径：过去有自报 → □，没自报 → ×（哪怕计划里写的是可出勤）。"""
+    db = appdb.SessionLocal()
+    _person(db)
+    date_plan.save_plan(db, _U(), "2026-10-H1", ["2026-10-03"],
+                        today=date(2026, 10, 2))
+    _report(db, "P1", date(2026, 10, 2))            # 10-02 自报了
+    view = date_plan.plan_days(db, "P1", "2026-10-H1", today=date(2026, 10, 4))
+    by = {d["date"]: d for d in view["days"]}
+    assert by[date(2026, 10, 1)]["state"] == date_plan.STATE_OFF    # 计划可出勤，但没自报
+    assert by[date(2026, 10, 2)]["state"] == date_plan.STATE_DONE   # 自报了 → □
+    assert by[date(2026, 10, 3)]["state"] == date_plan.STATE_OFF    # 计划不出勤
+    assert by[date(2026, 10, 4)]["state"] == date_plan.STATE_ON     # 今天之后照计划
 
 
 def test_plan_days_counts_after_save(client):
@@ -397,10 +473,8 @@ def test_admin_matrix_states_counts_and_unsubmitted(client):
     _seed_matrix(db)
     # 甲登记了（20 号不出勤），乙没登记
     date_plan.save_plan(db, _U("P1"), "2026-10-H2", ["2026-10-20"], today=TODAY)
-    # 甲 16 号已自报 → 方框（覆盖计划）
-    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 10, 16),
-                            p1_cnt=2, p2_cnt=1, total_cnt=3))
-    db.commit()
+    # 甲 16 号已自报 → 方框（覆盖计划）；自报写透进计划表（真实链路见 daily_report）
+    _report(db, "P1", date(2026, 10, 16))
     m = date_plan.admin_matrix(db, "2026-10-H2", today=TODAY)
     rows = {r["person_code"]: r for r in m["rows"]}
     assert set(rows) == {"P1", "P2"}
@@ -430,12 +504,12 @@ def test_admin_matrix_default_all_after_deadline(client):
     d_past, d_today, d_future = (date(2026, 10, 19), date(2026, 10, 20),
                                  date(2026, 10, 25))
     assert m["default_all"] is True
-    assert rows["P1"]["states"][d_past] == date_plan.STATE_NONE   # 过去不追认
+    assert rows["P1"]["states"][d_past] == date_plan.STATE_OFF    # 过去看事实：没自报＝×
     assert rows["P1"]["states"][d_today] == date_plan.STATE_ON    # 今天起默认可出勤
     assert rows["P1"]["states"][d_future] == date_plan.STATE_ON
     assert rows["P1"]["assumed"] is True and rows["P1"]["submitted"] is False
     assert m["free_cnt"][d_future] == 2 and m["default_cnt"][d_future] == 2
-    assert m["none_cnt"][d_past] == 2
+    assert m["none_cnt"][d_past] == 0          # 过去的格子已经没有"未登记"这一态
     assert sorted(m["assumed_people"]) == ["P1", "P2"]
 
 
@@ -455,7 +529,7 @@ def test_admin_matrix_default_does_not_override_submitted_plan(client):
 
 
 def test_admin_matrix_excludes_past_days_from_free_count(client):
-    """已经过去的日子不构成可用人力 → 小计置 0，但格子照旧显示三态。"""
+    """过去的日子不构成可用人力（小计置 0），且**看事实**：没自报＝×。"""
     db = appdb.SessionLocal()
     _seed_matrix(db)
     date_plan.save_plan(db, _U("P1"), "2026-10-H2", [], today=date(2026, 10, 18))
@@ -464,12 +538,33 @@ def test_admin_matrix_excludes_past_days_from_free_count(client):
     past = date(2026, 10, 20)
     assert m["past"][past] is True
     assert m["free_cnt"][past] == 0
-    assert rows["P1"]["states"][past] == date_plan.STATE_ON    # 格子照旧显示三态
+    assert rows["P1"]["states"][past] == date_plan.STATE_OFF   # 计划可出勤但那天没自报 → ×
     # 未来：P1 登记过（○）+ P2 已过截止日未登记（按默认出勤 ○）= 2
     future = date(2026, 10, 25)
     assert m["past"][future] is False and m["free_cnt"][future] == 2
     assert m["default_cnt"][future] == 1
     assert rows["P2"]["assumed"] is True
+
+
+def test_admin_matrix_past_day_with_report_is_done(client):
+    """用户例子（今天 10-04）：10-03 计划出勤但没自报 → ×；有自报 → □。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    # 甲整期登记（默认全可出勤）；乙没登记计划，只在 10-02 自报过
+    date_plan.save_plan(db, _U("P1"), "2026-10-H1", [], today=date(2026, 9, 30))
+    _report(db, "P1", date(2026, 10, 2))
+    _report(db, "P2", date(2026, 10, 2))
+    m = date_plan.admin_matrix(db, "2026-10-H1", today=date(2026, 10, 4))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    d1, d2, d3 = date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 3)
+    assert rows["P1"]["states"][d1] == date_plan.STATE_OFF      # 计划出勤 + 没自报 → ×
+    assert rows["P1"]["states"][d2] == date_plan.STATE_DONE     # 自报了 → □
+    assert rows["P1"]["states"][d3] == date_plan.STATE_OFF      # 计划出勤 + 没自报 → ×
+    assert rows["P2"]["states"][d1] == date_plan.STATE_OFF      # 没登记 + 没自报 → ×
+    assert rows["P2"]["states"][d2] == date_plan.STATE_DONE     # 只自报也显示 □
+    assert rows["P2"]["submitted"] is False                     # 但不算"登记过计划"
+    assert all(m["past"][d] for d in (d1, d2, d3))
+    assert m["free_cnt"][d2] == 0                               # 过去的日期不计入可用人力
 
 
 def test_admin_matrix_hides_inactive_staff_without_plan(client):
@@ -629,6 +724,34 @@ def test_plan_prompt_not_shown_to_admin(client):
     assert 'data-testid="plan-prompt"' not in r.text
 
 
+def test_my_plan_rows_toggle_without_js(client, frozen, monkeypatch):
+    """员工端：15 天顺序表，**整行点一下就切 ○↔×**，纯 CSS（不依赖 JS）。"""
+    _staff(client)
+    html = client.get("/my/plan").text
+    # 顺序表：一期就是一条一条往下排（不写死 15，H2 可能 16 条）
+    assert html.count('class="pickrow"') == 15          # 2026-10-H1 = 15 天
+    assert html.count('name="unavailable"') == 15
+    # 表单区不依赖 Alpine（顶栏汉堡菜单的 x-data 在 base.html 里，与本表无关）
+    form = html.split('data-testid="plan-form"')[1].split("</form>")[0]
+    assert "x-model" not in form and "x-data" not in form
+    # 符号由 CSS 画：默认 ○，勾上后 ×（`.pickrow input:checked ~ .sym::after`）
+    assert ".pickrow .sym::after { content:" in open("app/static/app.css",
+                                                     encoding="utf-8").read()
+    # 窗口内、且本期已经开始（10-02 看 10 月上半月）→ 过去的日子不再可点
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 2))
+    html2 = client.get("/my/plan").text
+    assert html2.count('name="unavailable"') == 14
+    assert "未自报（按不出勤）" in html2                  # 10-01 过去且没自报 → ×
+    # 自报写透后 → □（同样不可点）
+    db = appdb.SessionLocal()
+    date_plan.mark_reported(db, "P1", date(2026, 10, 1))
+    db.close()
+    html3 = client.get("/my/plan").text
+    assert html3.count('name="unavailable"') == 14
+    assert "已出勤（已自报）" in html3
+    assert 'class="pm done"' in html3
+
+
 def test_plan_prompt_shows_window_deadline(client, frozen):
     """弹窗里给出填报窗口（到截止日为止），不再有"已逾期仍可补登记"的说法。"""
     _staff(client)
@@ -761,6 +884,8 @@ def test_admin_plan_page_defaults_to_open_period(client, frozen):
 
 
 def test_admin_plan_export_xlsx(client):
+    """导出照"排班计划"参考表排版：说明行 + 标题行 + 表头 + 七曜行 + 数据；
+    **没有区域标识行**、**没有登记列**。"""
     _admin(client)
     import io
 
@@ -775,15 +900,23 @@ def test_admin_plan_export_xlsx(client):
     assert "spreadsheetml" in r.headers["content-type"]
     wb = load_workbook(io.BytesIO(r.content))
     ws = wb.active
-    head = [c.value for c in ws[1]]
-    assert head[:3] == ["员工编号", "姓名", "登记"]
-    assert head[3:] == ["10-16", "10-17", "10-18", "10-19", "10-20", "10-21",
-                        "10-22", "10-23", "10-24", "10-25", "10-26", "10-27",
-                        "10-28", "10-29", "10-30", "10-31"]
-    grid = [[c.value for c in row] for row in ws.iter_rows(min_row=2)]
-    by_code = {row[0]: row for row in grid if row[0] in ("P1", "P2")}
-    assert by_code["P1"][2] == "已登记" and by_code["P2"][2] == "未登记"
-    assert by_code["P1"][head.index("10-20")] == "×"
-    assert by_code["P1"][head.index("10-16")] == "○"
-    assert by_code["P2"][head.index("10-16")] == "–"
+    grid = [["" if c.value is None else c.value for c in row]
+            for row in ws.iter_rows()]
+    # 第 1 行：说明图例；第 2 行：期间/填报期标题；第 3 行：表头；第 4 行：七曜
+    assert str(grid[0][0]).startswith("说明：○=可出勤")
+    assert "区域" not in str(grid[1][0]) and "名古屋" not in str(grid[1][0])
+    assert str(grid[1][0]).startswith("出勤计划 2026-10-16")
+    assert grid[2][:3] == ["姓名", "员工编号", "可出动天数"]
+    assert grid[2][3:] == ["10/16", "10/17", "10/18", "10/19", "10/20", "10/21",
+                           "10/22", "10/23", "10/24", "10/25", "10/26", "10/27",
+                           "10/28", "10/29", "10/30", "10/31"]
+    # 七曜行（10-16 是周五 → 金）
+    assert grid[3][3:] == ["金", "土", "日", "月", "火", "水", "木", "金", "土",
+                           "日", "月", "火", "水", "木", "金", "土"]
+    by_name = {row[0]: row for row in grid if row[0] in ("甲", "乙")}
+    assert set(by_name) == {"甲", "乙"}
+    assert by_name["甲"][3 + 4] == "×"          # 10-20：自己标的不出勤
+    assert by_name["甲"][3] == "○"              # 10-16：可出勤
+    assert by_name["乙"][3] == ""               # 未登记 → 留空
+    assert by_name["甲"][2] == 15               # 可出动天数：整期 16 天 − 1 天不出勤
     assert any(str(row[0]).startswith("可出勤人数") for row in grid)

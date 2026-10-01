@@ -56,7 +56,7 @@
   让管理员看清楚"这是没登记所以默认算能来"，而不是"他确认能来"。
 - 整期都已经过去的半月（历史半月）**不启用**该默认（`default_all` 需要 `end >= 今天`）。
 
-## 4. 数据模型
+## 4. 数据模型（**单表设计：矩阵渲染不做关联查询**）
 
 `staff_date_plans`（新增表，**不改任何现有业务表**）
 
@@ -65,14 +65,40 @@
 | id | Integer PK | |
 | person_code | String(32) FK persons.code | 员工编号（身份键，与每日填报一致） |
 | plan_date | Date | 计划日（JST 业务日） |
-| available | Boolean | `1`=可出勤（圈）/ `0`=不出勤（叉） |
-| source | String(16) | `web`（员工自助）/ `admin`（预留） |
+| available | Boolean | 计划值：`1`=可出勤（圈）/ `0`=不出勤（叉） |
+| **reported** | Boolean | **该日已自报出勤**（□）；由每日填报**写透**进来（见 §4.1） |
+| source | String(16) | `web`=员工登记的整期计划行 / `report`=由自报写透的行 / `admin` |
 | created_at / updated_at | DateTime | |
 
 - 唯一约束 `uq_sdp_person_date`：`(person_code, plan_date)`（一天一条，重复提交=覆盖）。
 - 索引 `ix_sdp_date`：`plan_date`（管理端按日期段取全员）。
 - **不存 period_key**：半月归属由 `plan_date` 现算（规则若调整，历史数据不产生歧义）。
-- 「该半月是否已登记」= 该人在 `[start, end]` 内是否存在计划行（无需单独的提交表）。
+- 「该半月是否已登记」= 该期存在 **`source != 'report'`** 的行
+  （只自报、没登记计划的人**不算已登记**，否则催办弹窗不会弹）。
+- **格状态 = f(同一行的 available, reported) + 今天/窗口**（`cell_state`）：
+  一行就够，**不需要 join `staff_daily_reports`**。
+
+### 4.1 自报写透（2026-10-01 用户口径："自报了就直接改计划表里的状态"）
+
+- `date_plan.mark_reported(db, person_code, date, flag)`：已有计划行 → 只改 `reported`
+  （**保留 `available`**，删自报后能回到原计划值）；没有行（没登记就自报）→ 插一行
+  `source='report'`；`flag=False`（删自报）→ 置回 False。
+- **调用点（写路径 4 处，都在 `app/services/daily_report.py`）**：员工提交填报 / 当天修改 /
+  管理员补录 / 删除自报（`force` 清理脚本走同一入口）。失败**不影响填报本身**（best-effort）。
+- **读路径（渲染）绝不查 `staff_daily_reports`**：管理端矩阵、员工页、导出都只读计划表一张表。
+- 取舍：这是**有意的反范式**（用写路径换读路径）。代价 = 直接改 `staff_daily_reports` 的旁路
+  （历史脚本/手工 SQL）不会自动同步 → 提供 `date_plan.rebuild_reported(...)` 重建工具，
+  迁移 `c2d3e4f5a6b7` 也做了**历史数据回填**。测试 `test_admin_matrix_reads_only_plan_table`
+  是这条设计的守门测试（没写透的自报不会显示 □）。
+
+### 4.2 过去的日子看事实（2026-10-01 用户口径）
+
+- 用户例子："今天是 10-04，小川逸 10-03 计划出勤但没自报 → 那一天显示 ×"。
+- 规则：`d < 今天` → **有自报 □，没自报 ×**（**计划值不再参与显示**；
+  过去也**不启用**"默认全部出勤"）。
+- 影响：过去的格子**不存在**"未登记 `–`"这一态，也不计入"未登记人数"；
+  "未登记人数"因此只统计今天及以后（`none_cnt`）。
+- 员工端同口径（同一 `cell_state`），行内提示"未自报（按不出勤）"，避免两端显示打架。
 
 ## 5. 服务层 `app/services/date_plan.py`
 
@@ -83,21 +109,23 @@
 | **`window_state(key, today)` / `is_window_open`** | `before` / `open` / `closed` |
 | **`open_period(today)` / `default_period(today)` / `next_window(today)`** | 正在可填报的那一期 / 页面默认展示的那一期 / 下一个窗口 |
 | `current_period(today)` / `period_options(today, back=2, fwd=1)` | 本期 / 可选半月列表（含窗口状态） |
-| `is_locked(db, person_code, d, today)` | 过去了 或 已自报 → 锁定，返回原因（`past` / `reported`） |
+| `is_locked(db, person_code, d, today)` | 过去了 或 已自报 → 锁定，返回原因（`past` / `reported`）——**单表判定** |
 | `plan_days(db, person_code, key, today)` | 员工端逐日视图（三态 + 窗口状态 + 可改/锁定原因 + 星期） |
 | `save_plan(db, user, key, unavailable_dates, today)` | 提交/修改：**先查窗口**，再**只写未锁定的日期** |
-| `is_submitted(db, person_code, key)` | 该半月是否有登记行 |
+| `is_submitted(db, person_code, key)` | 该半月是否有**登记行**（`source != 'report'`） |
+| **`mark_reported(db, code, date, flag)`** | **自报写透**：改/插计划行的 `reported`（每日填报调用） |
+| **`rebuild_reported(db, ...)`** | 按 `staff_daily_reports` 重建 `reported`（修复工具，迁移/清理脚本用） |
 | `needs_plan(db, person_code, today)` | **现在是否还需要填报**（窗口开着 且 未登记）；返回该期信息或 `{}` |
 | `staff_home(db, user)` | **员工登录后第一个页面**（单一来源）：待填报 → `/my/plan`，否则 → `/my/report`，无编号 → `/my/perf` |
 | `assumed_default(d, today, deadline)` | 该日是否走"窗口关了未登记 → 默认全部出勤"（今天及以后 + 已过截止日） |
-| `admin_matrix(db, key, today)` | 管理端矩阵：逐员工逐日三态 + 逐日"是否默认出勤" + 按日可出勤小计（含「其中默认出勤」） |
-| `plan_xlsx(db, key, today)` | Excel 导出（员工 × 日期，符号与页面一致） |
+| `admin_matrix(db, key, today)` | 管理端矩阵：**只查计划表**，逐员工逐日状态 + 逐日"是否默认出勤" + 按日小计 |
+| `plan_xlsx(db, key, today)` | Excel 导出（照"排班计划"版式，见 §6.2） |
 
 关键实现约定：
 
 - `save_plan` **先查窗口、再锁定、后写入**：窗口没开/已关 → `WindowClosed`；
   窗口内已过去/已自报的日期既不新增也不改写（用户明确"历史与已自报的事实不覆盖"）；
-  整期都锁定时报错 `AllLocked`。
+  整期都锁定时报错 `AllLocked`。锁定判定只看**本行**的 `reported`（不查自报表）。
 - 表单只提交**不出勤**的日期集合（`unavailable` 多值），其余按默认 `available=1` 落库；
   这样"默认每天都出勤"是数据层事实，不靠前端 JS 兜底。
 
@@ -117,6 +145,37 @@
 - **管理端表格只有两列文字**（员工、日期）：**没有「登记」列、不罗列未提交人名**
   （2026-10-01 用户明确「看不动」）；未提交靠"整行没有实色标记"体现，
   顶部 `未提交计划 N / M` 计数卡保留（催办用）。
+
+### 6.0 员工端交互：15 天顺序表，点一下就切（2026-10-01 用户口径）
+
+- 员工页就是**一条一天、从上到下排的半月表**（H1 15 条、H2 13–16 条，条数按 `period_bounds` 现算）。
+- **默认全是 ○（可出勤）**；**点一下那天 → ×（不出勤）**；**再点一下 → 变回 ○**；点完直接保存。
+- 实现是**纯 CSS**（不依赖 JS，CDN 不可达也能用）：
+  `<label class="pickrow">` 包住整行 → 点行内任何位置都切换；
+  `<input type="checkbox" name="unavailable">` 用 `position:absolute; opacity:0` 隐藏但**仍在表单里**；
+  符号用 `.pickrow .sym::after{content:"○"}` / `input:checked ~ .sym::after{content:"×"}`
+  与 `~ .lbl.on/.off` 的显隐切换文字。
+- 不可点的行（已过去 / 已自报 / 窗口未开或已关）**不渲染 checkbox**，只显示静态符号 + 原因文字。
+- 保存按钮在表格下方（"从上到下点完拉倒"）；窄屏按钮自动占满整行（既有 H5 规范）。
+
+### 6.2 Excel 导出（照"排班计划"参考表，**去掉区域标识行**）
+
+参考图：`万总/排班计划.png`（用户 2026-10-01 提供）。它有两行表头之外的 **"开始日期 2026/9/1 · 名古屋 · 京都 · 神户"
+区域标识行** —— 用户明确**不需要**。本系统导出为：
+
+```
+说明：○=可出勤；×=不出勤；□=已出勤（已自报）；空=未登记/未提供。可出动天数=今天起可出勤（○/□）的天数。
+出勤计划 2026-10-01 ~ 2026-10-15（上半月）· 填报期 2026-09-24 ~ 2026-10-03
+姓名   员工编号   可出动天数   10/01 10/02 …
+                              木    金    …          ← 七曜单字（与参考表一致）
+小川逸 2188…         13        □     ○    …
+可出勤人数（今天起）   …
+　其中默认出勤（未登记） …
+未登记人数 …
+```
+
+- **没有登记列**（与页面一致）；未登记且未触发默认出勤的格子留**空**（参考表"空白=未提供"的读法）。
+- 首两行 + 前三列冻结（`freeze_panes="D3"`）；`Workbook(write_only=True)` 流式写。
 
 ### 6.1 员工落点与待填报提示（2026-10-01 用户补充）
 
@@ -152,26 +211,37 @@
   不弹窗、登录直接进自报页，员工页/管理端提示"下个填报期 X 开放"。
 - **路由测试要冻结"日期计划的今天"**（`frozen` fixture：`monkeypatch.setattr(date_plan,
   "jst_today", ...)`），否则落点/弹窗用例会随真实运行日期（尤其间隙日）飘红。
+- **反范式的代价**：`reported` 是自报的副本 —— 直接改 `staff_daily_reports` 的旁路
+  （历史脚本 / 手工 SQL）不会自动同步；要么走 `daily_report` 的 4 个入口，要么跑
+  `date_plan.rebuild_reported(...)`。渲染路径**故意不查自报表**（用户要求避免关联查询）。
+- **过去的日子没有 `–`**：`none_cnt` 只统计今天及以后，别拿它当"历史未登记"用。
+- **写透是 best-effort**：同步失败只 rollback 计划表那一步（`_sync_plan_reported` 捕获异常），
+  填报本身照常成功 —— 代价是极端情况下会漏一次 □，可用 `rebuild_reported` 补。
 
 ## 8. 测试
 
-`tests_web/test_date_plan.py`（49 项）：
+`tests_web/test_date_plan.py`（55 项）：
 
 - 半月划分：月初/月末/2 月/闰年/大小月/H2 天数/截止日；key 往返与跨年移动。
 - **填报窗口**：`period_window` 边界（首尾当天算开放）、`window_state` 三态、
   `open_period` / `default_period` / `next_window`（含 4–8 号、19–23 号的间隙）、
   窗口外提交 → `WindowClosed`（before/closed 各一次）。
 - 数据层：`(person_code, plan_date)` 唯一。
-- 三态优先级：自报覆盖计划值；**默认出勤优先级最低**；未登记 = `none`。
+- **写透**：`mark_reported` 改/插/撤回；只自报不算"已登记"（`source='report'`）；
+  `test_admin_matrix_reads_only_plan_table` 是"矩阵不 join 自报表"的守门测试。
+- 状态口径：自报 □ 覆盖一切；**过去看事实**（没自报 = ×，计划值不参与）；
+  默认出勤优先级最低；未登记 = `none`。
 - 锁定：窗口内过去的日期不改、已自报的日期不改、未来日期可改；整期都锁 → `AllLocked`。
 - 默认值：只提交"不出勤"集合时其余全为可出勤；重复提交=覆盖（不产生重复行）。
-- 默认出勤：`assumed_default` 边界（今天/过去/截止日当天）；矩阵里"今天及以后 ○、过去仍 –"、
+- 默认出勤：`assumed_default` 边界（今天/过去/截止日当天）；矩阵里"今天及以后 ○、过去 ×"、
   「其中默认出勤」小计、登记过的人不被默认覆盖、整期已过去的历史半月不启用。
 - 待填报与落点：`needs_plan`（窗口开着才需要）/ `staff_home`、登录落点（待填报 → `/my/plan`，
   登记后或有窗口间隙 → `/my/report`）、`GET /` 同规则、
   弹窗与角标（自报页有、计划页没有、登记后消失）、弹窗写明填报期、管理员不弹。
-- 员工页窗口状态条：开放中 / 还没开始 / 已结束 + 间隙提示下个窗口；非开放期无勾选框、无保存按钮。
+- 员工页：15 条顺序表 + 整行点选（`pickrow`）+ **表单区不用 Alpine**；窗口状态条三态与间隙提示；
+  非开放期无勾选框、无保存按钮；过去行显示"未自报（按不出勤）"。
 - 管理端矩阵：**没有"登记"列、没有未提交人名清单**、按日可出勤小计、过去日期不计入统计、
-  其他半月不显示"今天 0 人"、默认看正在填报的那一期。
-- 路由：员工页渲染 / 提交 / 未登录跳登录 / 员工访问管理页被拦 / 管理员访问正常；
-  导出 xlsx 内容与矩阵一致（含图例与默认出勤说明行）。
+  其他半月不显示"今天 0 人"、默认看正在填报的那一期、过去"有自报 □ / 没自报 ×"。
+- 路由：员工页渲染 / 提交 / 未登录跳登录 / 员工访问管理页被拦 / 管理员访问正常。
+- 导出 xlsx：**说明行 + 标题行 + 表头（姓名/员工编号/可出动天数/日期）+ 七曜行**、
+  无区域标识行、无登记列、未登记留空、可出动天数正确、底部按日小计。
