@@ -84,9 +84,10 @@ def test_employee_self_service_token_page_removed(client):
     _login(client, "emp1")
     # 导航里没有入口
     assert "我的 Token" not in client.get("/my/perf").text
-    # 员工访问 → 中间件按白名单拦到 /my/perf（不再放行到自助页）
+    # 员工访问 → 中间件按白名单拦到员工首页（不再放行到自助页）
     r = client.get("/my/token", follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"].startswith("/my/perf")
+    assert r.status_code == 302 and r.headers["location"].startswith(
+        ("/my/plan", "/my/report", "/my/perf"))
     # 路由本身已删除：管理员绕过员工白名单 → 404 / 405
     client.get("/logout")
     _login(client, "admin")

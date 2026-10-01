@@ -232,7 +232,7 @@ input[type=number] { border: 1px solid var(--line); border-radius: 7px;
   display: flex; background: var(--surface); border-top: 1px solid var(--line);
   box-shadow: 0 -2px 10px rgba(20,30,60,.06);
   padding-bottom: env(safe-area-inset-bottom, 0px); }
-.tabbar .tab { position: relative; flex: 1 1 33%; display: flex; flex-direction: column;
+.tabbar .tab { position: relative; flex: 1 1 25%; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: .15rem; padding: .5rem .2rem;
   color: var(--muted); font-size: .78rem; text-decoration: none; min-height: 56px; }
 .tabbar .tab svg { width: 22px; height: 22px; fill: none; stroke: currentColor;
@@ -257,3 +257,76 @@ table.kv tr:last-child th, table.kv tr:last-child td { border-bottom: 0; }
 table.kv tr.tot th, table.kv tr.tot td { font-weight: 650; color: var(--ink); }
 table.kv input { width: 100%; box-sizing: border-box; }
 @media (max-width: 460px) { table.kv th { width: 7em; font-size: .9rem; } }
+
+/* ---------- 日期计划（半月出勤登记）：三态符号 ○ / × / □ / – ---------- */
+/* 符号口径见 docs/specs-date-plan.md：○ 可出勤 / × 不出勤 / □ 已出勤（已自报）/ – 未登记 */
+.pm { display: inline-block; min-width: 1.4em; text-align: center; font-size: 1.05rem;
+  font-weight: 700; line-height: 1.2; color: var(--muted); }
+.pm.on { color: var(--ok); }
+.pm.off { color: var(--err); }
+.pm.done { color: var(--brand); }
+.pm.none { color: #b9c1d1; }
+
+table.plan-tbl td { vertical-align: middle; }
+table.plan-tbl tr.locked td { color: var(--muted); background: #fbfcfe; }
+.pick { display: inline-flex; align-items: center; gap: .45rem; cursor: pointer;
+  padding: .25rem .55rem; border: 1px solid var(--line); border-radius: 999px;
+  font-size: .9rem; user-select: none; }
+.pick:hover { background: #f5f7fb; }
+.pick input { width: 17px; height: 17px; margin: 0; accent-color: var(--brand); }
+.pick:has(input:checked) { border-color: var(--err); color: var(--err); background: #fff5f5; }
+
+/* ---------- 员工端填报：15 天顺序表，整行点一下切换 ○↔×（纯 CSS，无 JS 也能用） ---------- */
+table.pick-tbl { font-size: .95rem; }
+table.pick-tbl td.pickcell { padding: 0; }
+.pickrow { display: flex; align-items: center; gap: .7rem; width: 100%;
+  box-sizing: border-box; padding: .62rem .7rem; cursor: pointer; user-select: none; }
+.pickrow:hover { background: #f6f9ff; }
+.pickrow:active { background: #eef3ff; }
+.pickrow input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.pickrow .d { font-variant-numeric: tabular-nums; }
+.pickrow .sym::after { content: "○"; color: var(--ok); font-weight: 700;
+  font-size: 1.35rem; line-height: 1; }
+.pickrow input:checked ~ .sym::after { content: "×"; color: var(--err); }
+.pickrow .lbl { font-size: .9rem; color: var(--ok); font-weight: 600; }
+.pickrow .lbl.off { display: none; color: var(--err); }
+.pickrow input:checked ~ .lbl.on { display: none; }
+.pickrow input:checked ~ .lbl.off { display: inline; }
+.pickrow input:focus-visible ~ .sym::after { outline: 2px solid #c6d4ff;
+  outline-offset: 3px; border-radius: 3px; }
+table.pick-tbl tr.dayrow.locked td { background: #fbfcfe; color: var(--muted); }
+
+.plan-legend { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
+  font-size: .86rem; margin-top: .5rem; }
+.plan-legend .pm { font-size: 1rem; }
+.stat-row { display: flex; gap: 1.4rem; flex-wrap: wrap; align-items: baseline;
+  font-size: .92rem; }
+.stat-row b { font-variant-numeric: tabular-nums; }
+
+/* 管理端矩阵：一格一天，列多 → .tbl-wrap 横向滚动（≤760px 首列吸附见上） */
+table.plan-matrix th, table.plan-matrix td { padding: .4rem .5rem; text-align: center; }
+table.plan-matrix th:first-child, table.plan-matrix td:first-child,
+table.plan-matrix th:nth-child(2), table.plan-matrix td:nth-child(2) { text-align: left; }
+table.plan-matrix td.c { font-size: 1.02rem; font-weight: 700; min-width: 2.1em; }
+table.plan-matrix td.c.on { color: var(--ok); }
+table.plan-matrix td.c.off { color: var(--err); background: #fff7f7; }
+table.plan-matrix td.c.done { color: var(--brand); background: #f2f6ff; }
+table.plan-matrix td.c.none { color: #c3cad8; }
+/* 浅色 ○ = 未登记（超期按默认全部出勤算），与本人登记的实色 ○ 区分 */
+table.plan-matrix td.c.assumed { color: #b9c1d1; background: transparent; font-weight: 400; }
+table.plan-matrix td.past, table.plan-matrix th.past { background: #f4f5f8; }
+table.plan-matrix td.past.on, table.plan-matrix td.past.done { color: #9aa6bd; }
+table.plan-matrix th .hint { font-weight: 400; }
+
+/* ---------- 待填报提示：tab 角标 + 员工端弹窗（无 JS 也能看到，只是关不掉） ---------- */
+.tabbar .tab .dot { position: absolute; top: 8px; right: 22%; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--err); box-shadow: 0 0 0 2px var(--surface); }
+
+.modal-mask { position: fixed; inset: 0; z-index: 60; display: flex;
+  align-items: center; justify-content: center; padding: 1rem;
+  background: rgba(16, 24, 44, .45); }
+.modal { background: var(--surface); border-radius: 12px; width: min(420px, 94vw);
+  padding: 1.1rem 1.2rem 1.2rem; box-shadow: 0 18px 40px rgba(15, 25, 50, .28); }
+.modal h3 { margin: 0 0 .5rem; font-size: 1.05rem; }
+.modal p { margin: .35rem 0 .6rem; font-size: .93rem; line-height: 1.6; }
+.modal .form-actions { margin-top: .8rem; }

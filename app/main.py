@@ -10,7 +10,7 @@ def create_app() -> FastAPI:
 
     from app.routers import (auth_r, files_r, perf_r,
                         stores_r, accounts_r, info_r, settle_r, tokens_r,
-                        oauth_r, report_r)
+                        oauth_r, report_r, plan_r)
     app.include_router(auth_r.router)
     app.include_router(files_r.router)
     app.include_router(perf_r.router)
@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
     app.include_router(tokens_r.router)
     app.include_router(oauth_r.router)
     app.include_router(report_r.router)
+    app.include_router(plan_r.router)
 
     # 多语言：模板全局函数已在 app/templating.get_templates() 统一注册（t/LANG_NAMES/lang_url）
 
@@ -32,7 +33,7 @@ def create_app() -> FastAPI:
 
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
-                     "/my/appeal", "/my/perf", "/my/report",
+                     "/my/appeal", "/my/perf", "/my/report", "/my/plan",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")
 
@@ -90,33 +91,29 @@ def create_app() -> FastAPI:
         from app.db import SessionLocal as _SL
         from app.models import User as _User
         path = request.url.path
-        # 已登录员工且「待改密」（首登/口令被重置）：除改密页与登出外一律拦到改密页
+        # 模板统一读 request.state.plan_pending（员工端"待填报出勤计划"弹窗），默认置空
+        request.state.plan_pending = None
         token = request.cookies.get("ss")
-        if token:
+        if token and not path.startswith("/static"):
             data = _read(token)
             if data:
                 s = _SL()
                 try:
                     u = s.get(_User, data["uid"])
-                    if (u is not None and u.role == "staff"
-                            and u.must_change_password):
-                        if not (path.startswith("/my/password")
-                                or path == "/logout"):
-                            return _RR("/my/password?must=1", status_code=302)
+                    if u is not None and u.role == "staff":
+                        # 已登录员工且「待改密」（首登/口令被重置）：除改密页与登出外一律拦到改密页
+                        if u.must_change_password:
+                            if not (path.startswith("/my/password")
+                                    or path == "/logout"):
+                                return _RR("/my/password?must=1", status_code=302)
+                        # 待填报出勤计划 → 员工端提示；员工越权访问非白名单页 → 回员工首页
+                        from app.services import date_plan as _dp
+                        request.state.plan_pending = _dp.needs_plan(
+                            s, u.person_code) or None
+                        if not path.startswith(STAFF_ALLOWED):
+                            return _RR(_dp.staff_home(s, u), status_code=302)
                 finally:
                     s.close()
-        if not path.startswith(STAFF_ALLOWED):
-            token = request.cookies.get("ss")
-            if token:
-                data = _read(token)
-                if data:
-                    s = _SL()
-                    try:
-                        u = s.get(_User, data["uid"])
-                        if u is not None and u.role == "staff":
-                            return _RR("/my/perf", status_code=302)
-                    finally:
-                        s.close()
         return await call_next(request)
 
     @app.get("/healthz")
