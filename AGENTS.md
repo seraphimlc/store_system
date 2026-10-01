@@ -98,12 +98,28 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **漏填汇总**（规格 §7 漏填标记）：管理端列表按人给出 应填天数/实填天数/漏填天数 + 漏填日期。
 - 数据指纹**含逐人逐日 Δ**：只看合计的话，"同样合计换个日子" 会误判为同数据而复用旧报告。
 - Excel 导出用 `Workbook(write_only=True)` **流式写**（不在内存里保留整份工作簿）。
+- **员工管理页编辑方式（2026-10-01 用户要求）**：`/staff-admin` 每行只留一个「编辑」按钮 →
+  打开**原生 `<dialog>` 弹窗**（不依赖脚本库），里面改**姓名 / 登录名 / 状态 / 界面语言 / 重置口令**
+  （`POST /staff-admin/{uid}/edit`，服务层 `staff_accounts.update_staff`）。
+  行内的"改状态/设语言/重置口令"表单已撤掉；旧端点 `/{uid}/status`、`/{uid}/lang`、`/{uid}/reset`
+  保留（测试与脚本仍可用）。登录名重复 → 明确拒绝（**不自动加后缀**）；改名会同步 `persons.display_name`。
+  ⚠️ **人员编号不支持修改**（用户 2026-10-01 决定："太重了，先别做"）：编号是身份键，
+  改它要级联 `persons` + 近 20 张引用表（计划/自报/绩效/工资/分析/对账），风险大于收益；
+  弹窗里编号是**只读**展示。真要做时的实现思路与风险清单见本条（级联写法：插新 Person → 改子表 → 删旧行）。
 - **手工建号（编号即身份键）**：`/staff-admin` 新增「新建员工」——**编号必填**（NFKC 归一）、
   重复只提示不覆盖；导入时**按编号判定**（有→用系统里的，无→创建），命中手工建号的人时补写
   `first_seen_import_id`。**不做身份合并**：不同编号 = 不同的人（用户明确）。
 - 表：`staff_daily_reports`（`(person_code, report_date)` 唯一）/ `staff_report_analyses`（`summary` 数字 + `payload` 评语）；
   另有物化表 `staff_report_compare_person`（人×区间）/ `staff_report_compare_day`（人×日）、
   防重复提交的 `form_tokens`；迁移 `b8c9d0e1f2a3` → `c9d0e1f2a3b4` → `d0e1f2a3b4c5` → `a2b3c4d5e6f7`（正式表日期索引）→ `b3c4d5e6f7a8`（逐日单日准确率列）；**现有业务表一行未改**（只加表/列/索引）。
+- **看板 AI 分析（公司 + 每人）的样本门槛（2026-10-01 用户口径）**：入口 `/dashboard`（公司分析走
+  `/dashboard/analysis`、每人走 `/dashboard/staff`），存 `staff_analyses`
+  （`COMPANY/ALL` = 公司；`编号/YYYY-MM` = 每人，**按月**）。
+  生成时机：上传入表后（`flow.py` 后台）+ 点「算工资」后（`payroll_settle_generate` 后台线程）
+  + 打开某人模块时懒生成；公司分析在打开看板时按需生成并缓存（数据指纹变了才重算）。
+  **门槛 = 当期有数据 且 有效店合计 ≥5**（`staff_sample_ok`）——**不再要求"至少 2 个月"**
+  （用户："自报数据只是一个分析项，没有自报数据也能分析出来"）；没有上月数据时 prompt 不做环比、
+  只跟全公司比。历史月份**不会自动补**（只按当月生成），需要时手动补跑。
 - **报告生成结点 = 文件入表后自动**（`flow.auto_finalize_pipeline` → `report_ai.auto_for_import`）：
   自报在时间上先于系统数据，文件入表完成才是两边齐备的时刻；同数据指纹复用、AI 未配置/文件无正式记录则跳过。
 - **物化与失效**：报告生成时把对比结果落物化表（员工端只读，避免实时重算与并发写）；
@@ -118,6 +134,111 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   `tests_web/test_report_robustness.py`（物化失效/状态机/重试护栏/可见月/编号归一/导出白名单）、
   `tests_web/test_form_token.py`（一次性令牌）、`tests_web/test_migrations.py`（迁移冒烟 + schema 一致性）；
   AI 全程 mock 不连外网。i18n 巡检：`scripts/i18n_audit.py`（缺日文/死键）、`scripts/i18n_prune.py`（清死键）。
+
+## 日期计划（半月出勤登记，2026-10 交付 · 分支 feat/date-plan）
+- **需求**：员工在每个半月开始时登记未来半个月的出勤（每月 **3 号 / 18 号前**），管理员据此分配任务；
+  **计划只是预报，实际出勤以自报为准**。规格 `docs/specs-date-plan.md`。
+- **半月口径（用户确认）**：自然半月 `1–15`（H1，截止 3 号）/ `16–月末`（H2，截止 18 号）；
+  H2 天数 13–16 随月份变，**不写死 15**；H1/H2 不跨月。
+- **填报窗口（2026-10-01 用户补充）**：**提前 7 天开放 → 到截止日为止**。`period_window(key)` =
+  `(期首 − 7 天, 截止日)` → H1 = 上月 **24 号**~本月 3 号（不是 25 号！），H2 = 本月 9 号~18 号。
+  窗口外提交 → `WindowClosed`（没开/已关）；`open_period` 同一时刻最多一期（窗口互不重叠），
+  4–8 号、19–23 号是**间隙**（没有可填报期 → 不催办、登录直进自报页）；
+  `default_period` = 正在填报的那一期，否则本期（管理员默认看"未来两周"）。
+- **格状态（唯一来源 `date_plan.cell_state`）优先级**：**□ 已出勤（已自报）> 过去看事实（×）>
+  计划值（○ / ×）> 默认出勤（浅色 ○）> – 未登记**。
+  员工端对"可改且未登记"的日子按"**默认每天都出勤**"显示 ○；管理端显示 –（**未登记 ≠ 可出勤**，
+  否则管理员会把没登记的人当成能派活）；**默认出勤的 ○ 是浅色**（`.c.assumed`），与本人登记的实色 ○ 区分。
+- **数据**：`staff_date_plans`（`(person_code, plan_date)` 唯一，`available=True` 默认）；只落"不出勤"的例外，
+  其余按默认落库；**重复提交 = 覆盖**；**不存 period_key**（半月归属由 plan_date 现算，规则改了历史不歧义）。
+- **锁定**：窗口内 `< 今天` 与**已有自报**的日期不可改；保存时**跳过锁定日期**（不新增、不改写），
+  整期都锁 → `AllLocked`。
+  ⚠️ 与每日填报的锁定规则**不同**（自报锁在"已对账"，计划锁在"已过去/已自报"），别互相套用。
+- **单表设计（2026-10-01 用户口径："避免关联查询"、"自报了就直接改计划表里的状态"）**：
+  `staff_date_plans` 一行 = 一人一天，**格状态全在这一行里**：
+  `available`（计划值）+ **`reported`（该日已自报，□）** → `cell_state()` 直接算出来。
+  - **自报写透** `date_plan.mark_reported(db, code, date, flag)`：由 `app/services/daily_report.py`
+    的 **4 个写入口**调用（员工提交/当天修改/管理员补录/删除自报）；有计划行只改 `reported`
+    （保留 `available`，删自报能回原值），没行就插一行 `source='report'`（**不算"已登记"**）。
+  - **渲染路径绝不查 `staff_daily_reports`**（矩阵/员工页/导出都只读计划表）。
+    守门测试：`test_admin_matrix_reads_only_plan_table`。修复工具：`date_plan.rebuild_reported()`。
+  - `is_submitted` = 该期存在 `source != 'report'` 的行（只自报没登记的人仍会被催办）。
+  - ⚠️ 反范式的代价：绕过 `daily_report` 直改自报表不会同步 `reported`（历史脚本/手工 SQL 要跑 rebuild）。
+- **过去的日子看事实（2026-10-01 用户口径）**：`d < 今天` → **有自报 □ / 没自报 ×**，
+  **计划值不参与显示**（用户例子：今天 10-04，10-03 计划出勤但没自报 → ×）。
+  过去**没有 `–` 这一态**，`none_cnt`（未登记人数）只统计今天及以后；员工端同口径
+  （行内写"未自报（按不出勤）"）。
+- **"今天"这一列仍显示计划值**（2026-10-01 用户明确选"保持现状"）：当天不按事实，**次日 0 点起**才变 ×。
+  依据：线上实测自报集中在 **JST 16:16–22:54** 提交，当天上午若按事实会整列 ×、被误读成"今天没人来"。
+  锁定测试 `test_today_keeps_plan_until_next_day`（不要改成"当天即事实"）。
+- **员工端交互（2026-10-01 用户口径）**：半月**顺序列表**（一天一条，从上到下），**默认可出勤**，
+  **点行内任何位置切换"可出勤 ⇄ 不出勤"**，点完保存。版式（用户："不太好看呢" 后改的）：
+  左**状态色条**（绿/红）+ 日期星期 + 右侧**开关组件**（开=可出勤·绿滑块靠右 / 关=不出勤·红滑块靠左，
+  文字随状态变，"做成一个开关组件"是用户 2026-10-01 的要求）；
+  **"今天"不打标记**；顶部只留窗口状态条 + 一行摘要（不再堆图例/长句）。
+  **纯 CSS 实现**（表单区不用 Alpine，CDN 挂了也能填）：`<label class="pickrow">` 包整行
+  + 隐藏 checkbox（仍在表单里，带 `role="switch"`）+ 兄弟选择器驱动滑块与文字。
+- **新入职员工（2026-10-01 用户口径："不用关心入职日，就以填报当天为入职日"）**：
+  **名册起点** `roster_start_map()` = 账号创建日 / 人员记录创建日 / **首次计划日** 三者取最早（JST，不人工维护）；
+  **入职前的格子留空**（`STATE_NA="na"`，不计 计划出勤/实际出勤/未登记 任何统计；以前显示成 × = 把没入职算旷工）；
+  **他没填时按"可出勤"算**（`unfilled_default` 返回 `on`，浅色 ○）；
+  **新人可补登当期**（`personal_window_state()`：起点晚于该期窗口关闭日 → 该期对他开放到期末，
+  `save_plan` 与 `needs_plan` 都认 → 登录就催填）；老员工照旧 `WindowClosed`。
+  员工页状态条「你是本期新入职的…」，默认期 = 本期（`default_period_for()`）。
+  测试：`test_roster_start_takes_earliest_appearance` / `test_matrix_blanks_days_before_roster_start` /
+  `test_new_hire_can_backfill_current_period` / `test_employee_page_late_join_banner_and_na_rows` /
+  `test_matrix_marks_before_start_blank_in_export`。
+- **不在职（停用/离职）员工（2026-10-01 用户口径）**：不在职 = 有账号但 `can_login=False`
+  （`resigned`/`disabled`）。**本期一条数据都没有 → 不进矩阵**（过滤掉）；**有数据 → 过去按事实（□/×）、
+  今天及以后一律 ×**（`cell_state(..., inactive=True)`），且**不计入「计划出勤」/「未登记」**；
+  行名淡色 + tooltip「停用/离职：今天及以后按不出勤」。
+  另：整行都落在"入职前（`na`）"的人（这一期与他无关）也不显示。
+  测试 `test_matrix_hides_inactive_without_period_data` / `test_inactive_employee_future_days_all_off` /
+  `test_matrix_hides_rows_entirely_before_roster_start`。
+- **管理端** `/staff-plans`：行=员工（在岗/请假 ∪ 本期有登记记录的人；停用离职但登记过的不隐去）× 列=日期。
+  **只有两列文字（员工、日期）——没有「登记」列、不罗列未提交人名**（2026-10-01 用户："看不动"）；
+  **员工编号只显示后 5 位**（`date_plan.short_code`，2026-10-01 用户："员工编号取后5位就行"），
+  完整编号挂在单元格 `title` 上；**页面与导出同一口径**；
+  未提交靠"整行没有实色标记"体现。
+  **顶部只有两行**（2026-10-01 用户："顶部的几个模块太丑了，还都是废话"）：信息条 `.plan-bar`
+  （`填报期 X~Y · 未提交计划 N/M · 今天 N 人可出勤`）+ 一行图例；**已删 4 个统计卡片与 3 段说明文字**
+  （原 `window-hint`/`past-rule`/`default-hint` 三个 testid 不再存在，测试反向断言它们不在）。
+  底部**三个按日统计行**（2026-10-01 用户要求）：**计划出勤**（`plan_cnt`：计划标了可出勤的格子
+  + 窗口已关未登记按默认出勤的格子；原「可出勤人数（今天及以后）」改名，去掉"今天及以后"限制，
+  过去的日子也给出计划值，便于与"实际出勤"对比）、**实际出勤**（`actual_cnt`：当天有自报的格子数，
+  未来日期留空）、**未登记人数**；「其中默认出勤（未登记）」作为计划出勤的子行照旧保留。
+- **导出照着"排班计划"参考表（`万总/排班计划.png`）排，去掉区域标识行**：
+  `说明行 → 标题行（期间·填报期）→ 表头（姓名/员工编号/可出动天数/MM/DD…）→ 七曜行 → 数据 → 按日小计`；
+  **没有登记列**，未登记且未默认出勤的格子**留空**；`freeze_panes="D3"`。
+- **窗口关了还没填 → "未填默认"（2026-10-01 用户口径，同日改过一次）**：
+  最初是"默认全部出勤"，用户改成"**老员工漏填 → 默认全部不出勤**"（理由："可能要离职了；
+  正常的员工都是会填报的"），同时保留"**本期新入职 → 默认可出勤**"（他还能补填，见下一条）。
+  实现：`unfilled_default(key, today, roster_start)` → `""` / `"on"` / `"off"`；
+  生效区间 = **今天及以后 + 已过截止日**（`assumed_default` 作底层日期判定）；
+  **过去不追认**、**登记过的人不受影响**（默认优先级最低）；整期已过去的历史半月不启用。
+  显示：`on` → **浅色 ○**、`off` → **浅色 ×**（都和"亲手填的"区分得开）。
+  统计：**「计划出勤」不含默认不出勤的老员工**；**「未登记人数」= 那天还没填计划的人数**
+  （今天及以后，含按默认算的）→"谁没填"的信号永远在，管理员据此催办。
+  测试 `test_unfilled_default_old_staff_off_new_hire_on` / `test_admin_matrix_default_all_after_deadline`。
+- **待填报提示 + 员工落点（2026-10-01 用户补充）**：`needs_plan`（**窗口开着且未登记**才需要）、
+  `staff_home`（**唯一来源**：待填报 → `/my/plan`，否则 → `/my/report`，无编号 → `/my/perf`）；
+  用在 ① 登录 POST ② `GET /` ③ 中间件拦回员工时（三处同源，勿各写一遍）。
+  弹窗在 `base.html`（中间件写 `request.state.plan_pending`，写明填报期到哪天；**计划页自身不弹**；
+  **不用 `x-cloak`**，无 JS 也要能看见）+「出勤计划」tab 红点。首登改密优先 → `/my/password?must=1`。
+  ⚠️ 改了落点会连带影响"员工访问管理端被拦到哪"的历史断言（多个测试已放宽为「员工首页之一」）。
+- **入口**：员工端底部 tabbar 第 4 项「出勤计划」（`/my/plan` 已进 `STAFF_ALLOWED`）；管理端顶栏「日期计划」。
+- 迁移 `c1d2e3f4a5b6`（建表）+ `c2d3e4f5a6b7`（加 `reported` 并回填历史自报）；**本地库要手工补列/补表**
+  （本地不跑 alembic：`create_all` 建表 + `ALTER TABLE staff_date_plans ADD COLUMN reported ...`）。
+- **写透上线前的自报要对齐一次**：`scripts/resync_plan_reported.py`（默认 dry-run，`--apply` 才写；
+  线上：`docker cp` 进容器后 `docker exec deploy-web-1 python scripts/resync_plan_reported.py --from 2026-09-17 --apply`）。
+  线上 2026-10-01 实测踩过：20 条自报里 11 条没有计划行 → 矩阵把"报了的人"显示成 `–`。
+  回归测试 `test_resync_repairs_reports_missing_plan_rows` / `test_rebuild_reported_clears_stale_flags`。
+- **下载防连点**：导出链接带 `download` 属性 + `base.html` 对 `a[download]` 做 2 秒吞点击
+  （用户 2026-10-01："一次下载了两个文件" = 双击触发两次请求，线上日志可见同端口两次 GET）。
+- 测试 `tests_web/test_date_plan.py`（71 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
+  默认全出勤/新人入职补登/待填报与登录落点/弹窗与角标/窗口状态条/整行点选无 JS/矩阵无登记列与按日小计/越权/导出）；
+  **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
+  `test_migrations.py` 已把新表列入 schema 校验。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

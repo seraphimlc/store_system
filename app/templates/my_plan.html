@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}{{ t('出勤计划') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('出勤计划') }}</h1>
+  <div class="actions">
+    <form method="get" action="/my/plan">
+      <select name="period" onchange="this.form.submit()" data-testid="period-select">
+        {% for p in periods %}
+        <option value="{{ p.key }}" {% if p.key == period %}selected{% endif %}>
+          {{ p.start.strftime('%Y-%m-%d') }} ~ {{ p.end.strftime('%Y-%m-%d') }}（{{ t('上半月') if p.half == 'H1' else t('下半月') }}）{% if p.current %} · {{ t('本期') }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+{% if saved %}<div class="msg ok">{{ t('已保存出勤计划') }}</div>{% endif %}
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+{% if view.window_state == 'open' and view.late_join %}
+<div class="msg ok" data-testid="window-late-join">
+  {{ t('你是本期新入职的：可以补登本期到') }} <b>{{ view.end }}</b>
+  {{ t('为止（本期正常填报期已过）。') }}
+</div>
+{% elif view.window_state == 'open' %}
+<div class="msg ok" data-testid="window-open">
+  {{ t('填报期进行中：') }} {{ view.open_at }} ~ {{ view.close_at }}（{{ t('截止日当天仍可提交') }}）
+</div>
+{% elif view.window_state == 'before' %}
+<div class="msg warn" data-testid="window-before">
+  {{ t('填报期还没开始：') }} {{ view.open_at }} {{ t('起开放（提前 7 天开放）。') }}
+</div>
+{% else %}
+<div class="msg warn" data-testid="window-closed">
+  {{ t('本期填报期已结束：') }} {{ view.open_at }} ~ {{ view.close_at }}。
+  {{ t('未登记的日子按「默认全部出勤」计算。') }}
+</div>
+{% endif %}
+{% if next_win and view.window_state != 'open' and next_win.key != view.key %}
+<div class="hint" style="margin:.2rem 0 .6rem" data-testid="next-window">
+  {{ t('下个填报期：') }} {{ next_win.open_at }} {{ t('开放') }}（{{ next_win.start }} ~ {{ next_win.end }}）。
+</div>
+{% endif %}
+
+{# 一行摘要（不再堆图例和长句）：状态 + 计划出勤天数 + 已自报天数 #}
+<div class="plan-bar" data-testid="plan-summary">
+  <span class="plan-meta">
+    {{ t('期内') }} <b>{{ view.start.strftime('%m-%d') }} ~ {{ view.end.strftime('%m-%d') }}</b>
+    · {% if view.submitted %}<b>{{ t('已登记') }}</b>{% if view.last_at %}
+        <span class="hint">{{ (view.last_at + jst_delta).strftime('%m-%d %H:%M') }}</span>{% endif %}
+      {% else %}<b class="warn-txt">{{ t('未登记') }}</b>{% endif %}
+    · {{ t('计划出勤') }} <b>{{ view.free_cnt }}</b>/{{ view.days|length }} {{ t('天') }}
+    {%- if view.done_cnt %} · {{ t('已自报出勤') }} <b>{{ view.done_cnt }}</b>{% endif %}
+    {%- if view.assumed_cnt %} · {{ t('默认出勤（未登记）') }} <b>{{ view.assumed_cnt }}</b>{% endif %}
+  </span>
+  <span class="hint">{{ t('默认每天都出勤，点一下那天就变成不出勤。') }}</span>
+</div>
+
+<form method="post" action="/my/plan" data-testid="plan-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="period" value="{{ period }}">
+  <div class="plan-list" data-testid="my-plan-list">
+    {% for d in view.days %}
+    {% if d.editable %}
+    {# 整行一个 label：点行内任何位置都切换开关「可出勤 ⇄ 不出勤」（纯 CSS，无 JS 也能用） #}
+    <label class="pickrow">
+      <input type="checkbox" role="switch" name="unavailable" value="{{ d.date }}"
+             {% if d.off %}checked{% endif %} data-testid="pick-{{ d.date }}">
+      <span class="bar" aria-hidden="true"></span>
+      <span class="d">{{ d.date.strftime('%m-%d') }}<small>{{ t(wd_labels[d.wd]) }}</small></span>
+      <span class="sw-wrap">
+        <span class="sw-txt on">{{ t('可出勤') }}</span>
+        <span class="sw-txt off">{{ t('不出勤') }}</span>
+        <span class="sw" aria-hidden="true"><i></i></span>
+      </span>
+    </label>
+    {% elif d.before_start %}
+    {# 入职（名册起点）之前：不属于他的日子，留空不留痕 #}
+    <div class="pickrow static na">
+      <span class="bar" aria-hidden="true"></span>
+      <span class="d">{{ d.date.strftime('%m-%d') }}<small>{{ t(wd_labels[d.wd]) }}</small></span>
+      <span class="st"><span class="hint">{{ t('不在职（入职前）') }}</span></span>
+    </div>
+    {% else %}
+    {# 锁定的行（已过去 / 已自报 / 窗口未开或已关）：只读展示 #}
+    <div class="pickrow static">
+      <span class="bar" aria-hidden="true"></span>
+      <span class="d">{{ d.date.strftime('%m-%d') }}<small>{{ t(wd_labels[d.wd]) }}</small></span>
+      <span class="st">
+        <span class="pm {{ d.state }}">{{ d.mark }}</span>
+        <span class="hint">{% if d.reported %}{{ t('已出勤（已自报）') }}
+          {% elif d.past %}{{ t('未自报（按不出勤）') }}
+          {% else %}{{ t('填报期已结束') }}{% endif %}</span>
+      </span>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div class="form-actions" style="margin-top:.8rem">
+    {% if view.editable_cnt %}
+    <button class="btn" type="submit" data-testid="save-plan">{{ t('保存出勤计划') }}</button>
+    <span class="hint">{{ t('本期共') }} {{ view.days|length }} {{ t('天') }}，{{ t('可修改') }} {{ view.editable_cnt }} {{ t('天') }}（{{ t('已过去或已自报的日期不会被改动') }}）</span>
+    {% else %}
+    <span class="hint" data-testid="plan-locked">
+      {% if view.window_state == 'before' %}{{ t('填报期还没开始，暂时不能登记。') }}
+      {% elif view.window_state == 'closed' %}{{ t('填报期已结束，不能再修改。') }}
+      {% else %}{{ t('本期已无可以登记的日期（已过去或已自报）。') }}{% endif %}
+    </span>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

@@ -131,6 +131,44 @@ def staff_create(request: Request, code: str = Form(""), name: str = Form(""),
                                 status_code=303)
 
 
+@router.post("/staff-admin/{uid}/edit")
+def staff_edit(uid: int, request: Request,
+               name: str = Form(""), username: str = Form(""),
+               status: str = Form(""), lang: str = Form(""),
+               password: str = Form(""),
+               csrf_token: str = Form(...),
+               user: Optional[User] = Depends(require_login),
+               db: Session = Depends(get_db)):
+    """弹窗里一次提交的员工编辑：姓名 / 登录名 / 状态 / 界面语言 / 重置口令。
+
+    **人员编号不在这里改**（身份键 + 近 20 张引用表，2026-10-01 用户决定先不做）。
+    """
+    from urllib.parse import quote as _q
+    if user is None or user.role != "admin":
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    target = db.get(User, uid)
+    if target is None or target.role != "staff":
+        raise HTTPException(404, "员工不存在")
+    if status and status not in STATUS_ALLOW:
+        raise HTTPException(400, f"未知状态: {status}")
+    if lang not in ("", "zh", "ja"):
+        raise HTTPException(400, f"未知语言: {lang}")
+    from app.services import staff_accounts as SA
+    try:
+        res = SA.update_staff(db, target, name=name, username=username,
+                              status=status, lang=lang, password=password)
+    except SA.UsernameExists:
+        return RedirectResponse("/staff-admin?err=" + _q(
+            "该登录名已被占用，没有做任何修改"), status_code=303)
+    except ValueError as e:  # noqa: BLE001
+        return RedirectResponse("/staff-admin?err=" + _q(str(e)), status_code=303)
+    note = "；".join(res["changed"]) if res["changed"] else "没有改动"
+    return RedirectResponse("/staff-admin?msg=" + _q("已保存：" + note),
+                            status_code=303)
+
+
 @router.post("/staff-admin/suggest-username")
 def staff_suggest_username(name: str = Form(""), code: str = Form(""),
                            user: Optional[User] = Depends(require_login),

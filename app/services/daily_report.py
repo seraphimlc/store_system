@@ -87,6 +87,7 @@ def update_today(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0) -> StaffDailyR
     row.p2_cnt = to_count(p2_cnt, "2点店铺数")
     row.total_cnt = row.p1_cnt + row.p2_cnt
     db.commit()
+    _sync_plan_reported(db, code, row.report_date)  # 计划表写透：□ 已出勤
     _refresh_materialized(db, row.report_date)      # 数据变了 → 刷新核对页物化行
     return row
 
@@ -115,6 +116,7 @@ def submit_report(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
             raise AlreadySubmitted(today_report(db, code))
         # 其它完整性错误（如编号悬空、正文违反约束）：**不能**谎报"今天已填报"
         raise ValueError("保存失败：数据不合法（%s）" % str(getattr(e, "orig", e))[:80])
+    _sync_plan_reported(db, code, today)  # 计划表写透：□ 已出勤
     _refresh_materialized(db, today)  # 数据变了 → 刷新核对页物化行
     return row
 
@@ -183,6 +185,7 @@ def save_by_admin(db, *, person_code: str, report_date, area: str = "",
         if is_duplicate_error(e):     # 并发补同一天 → 唯一约束兜底
             raise AlreadySubmitted(today_report(db, code))
         raise ValueError("保存失败：数据不合法（%s）" % str(getattr(e, "orig", e))[:80])
+    _sync_plan_reported(db, code, report_date)    # 计划表写透：□ 已出勤
     _refresh_materialized(db, report_date)
     return row
 
@@ -201,8 +204,23 @@ def delete_by_admin(db, *, person_code: str, report_date,
         raise Locked(report_date)
     db.delete(row)
     db.commit()
+    _sync_plan_reported(db, person_code, report_date, False)  # 计划表写透：撤回 □
     _refresh_materialized(db, report_date)
     return True
+
+
+def _sync_plan_reported(db, person_code, ref_date, flag=True) -> None:
+    """把"当天已自报出勤"**写透**到日期计划表（best-effort，失败不影响填报）。
+
+    用户口径（2026-10-01）："如果员工自报了，可以直接改这个计划表里的状态" ——
+    这样管理端矩阵只读 `staff_date_plans` 一张表就能显示 □，不做关联查询。
+    写入口共 4 处：提交 / 当天修改 / 管理员补录 / 删除自报（本模块内统一调用）。
+    """
+    from app.services import date_plan
+    try:
+        date_plan.mark_reported(db, person_code, ref_date, flag)
+    except Exception:  # noqa: BLE001  计划表同步失败不影响填报本身
+        db.rollback()
 
 
 def _refresh_materialized(db, ref_date) -> None:

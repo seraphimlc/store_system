@@ -87,7 +87,16 @@ def login_submit(username: str = Form(...), password: str = Form(...),
                                            "error": "该账号当前不可登录（停用/离职），请联系管理员",
                                            "next": next},
                                           status_code=401)
-    resp = RedirectResponse(_safe_next(next), status_code=302)
+    target = _safe_next(next)
+    if user.role == "staff":
+        if user.must_change_password:
+            # 首登/口令被重置：第一个页面就是改密页（不必先跳一次再被中间件拦住）
+            target = "/my/password?must=1"
+        elif target in ("", "/"):
+            # 员工第一个页面：待填报出勤计划 → /my/plan，否则 → /my/report（每日自报）
+            from app.services import date_plan as _dp
+            target = _dp.staff_home(db, user)
+    resp = RedirectResponse(target, status_code=302)
     _set_session(resp, user.id)
     return resp
 
@@ -107,11 +116,13 @@ def root_redirect(request: Request):
     if data:
         from app.db import SessionLocal
         from app.models import User
+        from app.services import date_plan as _dp
         s = SessionLocal()
         try:
             u = s.get(User, data.get("uid"))
             if u is not None and u.role == "staff":
-                return RedirectResponse("/my/perf", status_code=302)
+                # 员工首页 = 待填报出勤计划 / 每日自报（date_plan.staff_home 单一来源）
+                return RedirectResponse(_dp.staff_home(s, u), status_code=302)
         finally:
             s.close()
     # 首页 = 数据看板（管理员）

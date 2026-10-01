@@ -26,6 +26,7 @@
   <a class="nav" href="/stores">{{ t('店铺主档') }}</a>
   <a class="nav" href="/staff-admin">{{ t('员工管理') }}</a>
   <a class="nav" href="/staff-reports">{{ t('填报与对比') }}</a>
+  <a class="nav" href="/staff-plans">{{ t('日期计划') }}</a>
   <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
   {% endif %}
   <span class="spacer"></span>
@@ -48,8 +49,11 @@
 <main class="wrap">{% block content %}{% endblock %}</main>
 {# agent 友好：结构化页面状态注入，浏览器自动化直接读取（替代截图 OCR） #}
 {% if current_user and current_user.role == 'staff' %}
-{# 员工端底部主导航：两项常驻，不再藏在汉堡菜单里（窄屏尤其重要） #}
+{# 员工端底部主导航：四项常驻，不再藏在汉堡菜单里（窄屏尤其重要） #}
 {% set _p = (request.url.path if request.url is defined else "") %}
+{# 待填报出勤计划：中间件写入 request.state.plan_pending（无则 None） #}
+{% set _pp = (request.state.plan_pending
+              if request.state.plan_pending is defined else none) %}
 <nav class="tabbar" aria-label="{{ t('主导航') }}">
   <a class="tab {% if _p.startswith('/my/perf') %}on{% endif %}" href="/my/perf"
      data-testid="tab-perf">
@@ -66,7 +70,30 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
     <span>{{ t('核对结果') }}</span>
   </a>
+  <a class="tab {% if _p.startswith('/my/plan') %}on{% endif %}"
+     href="/my/plan" data-testid="tab-plan">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>
+    <span>{{ t('出勤计划') }}</span>
+    {% if _pp %}<i class="dot" title="{{ t('待填报') }}"></i>{% endif %}
+  </a>
 </nav>
+{% endif %}
+{# 员工端：本期出勤计划还没登记 → 弹窗提示（不是硬拦截，「稍后再说」可关掉） #}
+{% if current_user and current_user.role == 'staff' and _pp and _p != '/my/plan' %}
+<div class="modal-mask" x-data="{open: true}" x-show="open"
+     data-testid="plan-prompt" data-period="{{ _pp.key }}">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="plan-prompt-t">
+    <h3 id="plan-prompt-t">{{ t('出勤计划还没登记') }}</h3>
+    <p>{{ t('填报期到') }} <b>{{ _pp.close_at }}</b> {{ t('为止，请登记') }}
+       {{ _pp.start }} ~ {{ _pp.end }} {{ t('这半个月的出勤计划。') }}</p>
+    <p class="hint">{{ t('默认每天都出勤，点选不出勤的日子即可。') }}</p>
+    <div class="form-actions">
+      <a class="btn" href="/my/plan" data-testid="go-plan">{{ t('去登记') }}</a>
+      <button class="btn ghost" type="button" @click="open = false"
+              data-testid="plan-later">{{ t('稍后再说') }}</button>
+    </div>
+  </div>
+</div>
 {% endif %}
 <script>
 /* 防重复提交（客户端层）：提交按钮点过一次就禁用，4 秒或校验失败后恢复。
@@ -97,6 +124,16 @@
     delete f.dataset.submitted;
     var b = btnOf(f);
     if (b) b.disabled = false;
+  }, true);
+  /* 下载链接防连点：双击/连点会让浏览器**下两次**（用户 2026-10-01 反馈"一次下载了两个文件"）。
+     2 秒内第二次点击直接吞掉，之后自动恢复。 */
+  document.addEventListener('click', function (e) {
+    if (!canUse(e.target)) return;
+    var a = e.target.closest('a[download]');
+    if (!a) return;
+    if (a.dataset.busy === '1') { e.preventDefault(); e.stopPropagation(); return; }
+    a.dataset.busy = '1';
+    setTimeout(function () { delete a.dataset.busy; }, 2000);
   }, true);
 })();
 </script>

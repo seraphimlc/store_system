@@ -37,8 +37,10 @@ def test_staff_blocked_from_admin_pages(client):
                  "/payroll-settle/export?month=2026-08"):
         r = client.get(path, follow_redirects=False)
         assert r.status_code == 302, f"{path} 应被拦(302)，实际 {r.status_code}"
+        # 员工首页 = 待填报出勤计划 /my/plan，否则每日自报 /my/report（date_plan.staff_home）
         assert r.headers["location"].startswith(
-            ("/my/perf", "/login")), f"{path} 应拦到员工首页/登录，实际 {r.headers['location']}"
+            ("/my/plan", "/my/report", "/my/perf", "/login")), \
+            f"{path} 应拦到员工首页/登录，实际 {r.headers['location']}"
 
 
 def test_admin_can_access_admin_pages(client):

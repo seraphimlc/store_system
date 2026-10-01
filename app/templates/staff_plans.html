@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ t('日期计划') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('日期计划') }}</h1>
+  <div class="actions">
+    <form method="get" action="/staff-plans">
+      <select name="period" onchange="this.form.submit()" data-testid="period-select">
+        {% for p in periods %}
+        <option value="{{ p.key }}" {% if p.key == period %}selected{% endif %}>
+          {{ p.start.strftime('%Y-%m-%d') }} ~ {{ p.end.strftime('%Y-%m-%d') }}（{{ t('上半月') if p.half == 'H1' else t('下半月') }}）{% if p.current %} · {{ t('本期') }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a class="btn ghost" href="/staff-plans/export?period={{ period }}" download
+       data-testid="export-plan">{{ t('导出 Excel') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+{# 顶部只留两行：一行信息（填报期 / 未提交 / 今天计划出勤）+ 一行图例；其余靠表格自己说话 #}
+{% set in_period = m.start <= m.today <= m.end %}
+<div class="plan-bar" data-testid="plan-bar">
+  <span class="plan-meta">
+    {{ t('填报期') }} <b>{{ m.open_at }} ~ {{ m.close_at }}</b>
+    · {{ t('未提交计划') }} <b {% if m.unsubmitted %}class="warn-txt"{% endif %}>{{ m.unsubmitted|length }}</b>/{{ m.total }}
+    {%- if in_period %} · {{ t('今天') }} {{ t('计划出勤') }} <b>{{ m.plan_cnt.get(m.today, 0) }}</b>
+      / {{ t('实际出勤') }} <b>{{ m.actual_cnt.get(m.today) or 0 }}</b>{% endif %}
+  </span>
+  <span class="plan-legend">
+    <span><span class="pm on">○</span>{{ t('可出勤') }}</span>
+    <span><span class="pm off">×</span>{{ t('不出勤') }}</span>
+    <span><span class="pm done">□</span>{{ t('已出勤（已自报）') }}</span>
+    <span><span class="pm none">–</span>{{ t('未登记') }}</span>
+    <span><span class="pm on dim">○</span>{{ t('未填·按可出勤（新入职）') }}</span>
+    <span><span class="pm off dim">×</span>{{ t('未填·按不出勤（老员工）') }}</span>
+  </span>
+</div>
+
+<div class="tbl-wrap" style="margin-top:.6rem">
+<table class="grid-tbl plan-matrix" data-testid="plan-matrix">
+  <tr>
+    <th>{{ t('员工') }}</th>
+    {% for d in m.days %}
+    <th class="{% if m.past[d] %}past{% endif %}">{{ d.strftime('%m-%d') }}
+      <span class="hint">{{ t(wd_labels[d.weekday()]) }}</span></th>
+    {% endfor %}
+  </tr>
+  {% for r in m.rows %}
+  <tr{% if r.inactive %} class="row-inactive"{% endif %}>
+    <td title="{{ r.person_code }}{% if r.inactive %} · {{ t('停用/离职：今天及以后按不出勤') }}{% endif %}">{{ r.name }}<span class="hint">（{{ r.short_code }}）</span></td>
+    {% for d in m.days %}
+    <td class="c {{ r.states[d] }}{% if r.assumed_days[d] or r.assumed_off_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
+        data-testid="cell-{{ r.person_code }}-{{ d }}"
+        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% else %}{{ r.marks[d] }}{% if r.assumed_days[d] %}（没填计划→按可出勤）{% elif r.assumed_off_days[d] %}（没填计划→按不出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
+    {% endfor %}
+  </tr>
+  {% else %}
+  <tr><td colspan="{{ m.days|length + 1 }}" class="empty">{{ t('没有可显示的员工') }}</td></tr>
+  {% endfor %}
+  <tr class="totals">
+    <td>{{ t('计划出勤') }}</td>
+    {% for d in m.days %}<td class="num">{{ m.plan_cnt[d] }}</td>{% endfor %}
+  </tr>
+  {% if m.default_all %}
+  <tr class="totals">
+    <td>{{ t('　其中默认出勤（未登记）') }}</td>
+    {% for d in m.days %}
+    <td class="num">{{ m.default_cnt[d] if not m.past[d] else '—' }}</td>
+    {% endfor %}
+  </tr>
+  {% endif %}
+  <tr class="totals">
+    <td>{{ t('实际出勤') }}</td>
+    {% for d in m.days %}
+    <td class="num">{{ m.actual_cnt[d] if m.actual_cnt[d] is not none else '—' }}</td>
+    {% endfor %}
+  </tr>
+  <tr class="totals">
+    <td title="{{ t('当天还没填计划的人数（含按默认算的）') }}">{{ t('未登记人数') }}</td>
+    {% for d in m.days %}<td class="num">{{ m.none_cnt[d] }}</td>{% endfor %}
+  </tr>
+</table>
+</div>
+{% endblock %}

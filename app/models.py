@@ -777,6 +777,40 @@ class StaffReportCompareDay(Base):
     created_at = Column(DateTime, nullable=False, default=_now)
 
 
+class StaffDatePlan(Base):
+    """**日期计划（半月出勤登记）**：一行 = 一个人一天，**整格状态都在这一行里**。
+
+    规格 `docs/specs-date-plan.md`：
+
+    - 自然半月：上半月 1–15（H1，截止 3 号）/ 下半月 16–月末（H2，截止 18 号）；
+    - **一天一条**（`(person_code, plan_date)` 唯一），默认 `available=True`（默认每天都出勤），
+      员工只勾"不出勤"的那些天；
+    - **`reported` = 该日已自报出勤**（用户 2026-10-01 口径："员工自报了就直接改这个计划表里的状态"）：
+      每日填报提交/修改/删除时**写透**到本表（`date_plan.mark_reported`），
+      所以管理端矩阵**只读这一张表即可渲染三态，不需要关联 `staff_daily_reports`**
+      （= 不做 join、不做第二条查询）；
+    - 单元格状态 = `cell_state(available, reported)`（同一行内计算）：
+      `reported` → □ 已出勤 / `available` → ○ 可出勤 / 否则 × 不出勤；没有行 = 未登记；
+    - 计划只是**预报**，`reported` 才是事实（实际出勤以自报为准）；
+    - **`source`**：`web` = 员工登记的整期计划行；`report` = 由每日填报写入的行（不算"已登记"）；
+      `admin` = 管理员写入。**"该半月是否已登记" = 该期存在 `source != 'report'` 的行**
+      （否则只自报没登记的人会被误判成登记过）；
+    - 不存 period_key：半月归属由 `plan_date` 现算，规则调整不会让历史数据产生歧义。
+    """
+    __tablename__ = "staff_date_plans"
+    __table_args__ = (UniqueConstraint("person_code", "plan_date",
+                                       name="uq_sdp_person_date"),
+                      Index("ix_sdp_date", "plan_date"))
+    id = Column(Integer, primary_key=True)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    plan_date = Column(Date, nullable=False)                # JST 业务日
+    available = Column(Boolean, nullable=False, default=True)   # True=可出勤 / False=不出勤
+    reported = Column(Boolean, nullable=False, default=False)   # True=当天已自报出勤（□）
+    source = Column(String(16), nullable=False, default="web", server_default="web")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now, onupdate=_now)
+
+
 class FormToken(Base):
     """**一次性提交令牌**（防重复提交）。
 

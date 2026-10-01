@@ -27,7 +27,9 @@ def _req():
 
     class _QP(dict):
         items = dict.items
-    return SN(state=SN(csrf="tok"), query_params=_QP(), cookies={})
+    # plan_pending：中间件写入的「待填报出勤计划」（真实请求里该属性一定存在）
+    return SN(state=SN(csrf="tok", plan_pending=None), query_params=_QP(),
+              cookies={})
 
 
 def test_base_template_renders_logged_in():
@@ -44,6 +46,14 @@ def test_base_staff_nav():
         current_user=SimpleNamespace(display_name="甲", role="staff"),
         request=_req())
     assert "我的绩效" in html
+
+
+def test_base_has_download_double_click_guard():
+    """下载链接防连点（用户 2026-10-01："一次下载了两个文件"）。"""
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req())
+    assert "a[download]" in html and "busy" in html
 
 
 def test_base_mobile_hamburger_menu():

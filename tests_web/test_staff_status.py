@@ -51,8 +51,13 @@ def test_admin_page_lists_status(client):
     assert "员工管理" in page
     assert "在岗" in page and "离职" in page
     assert "不提供删除员工" in page
-    # 每个员工有改状态下拉
-    assert 'name="new_status"' in page
+    # 每行只留一个「编辑」按钮；状态/语言/口令都挪进了弹窗（2026-10-01 用户要求）
+    assert 'data-testid="staff-edit-dialog"' in page
+    assert 'data-testid="edit-' in page and "openStaffEdit" in page
+    assert 'name="new_status"' not in page          # 行内不再有改状态下拉
+    # 语言/状态下拉各只剩弹窗里那一个（行内表单已全部撤掉）
+    assert page.count('name="lang"') == 1
+    assert page.count('name="status"') == 1
 
 
 def test_set_leave_still_logs_in_and_confirms(client):
@@ -186,3 +191,52 @@ def test_no_delete_endpoint(client):
     r = client.post(f"/staff-admin/{uid}/delete",
                     data={"_ft": form_token(client), "csrf_token": _csrf(client)}, follow_redirects=False)
     assert r.status_code == 404 or r.status_code == 405 or r.status_code == 400
+
+
+# ---------------- 员工编辑弹窗（2026-10-01 用户要求） ----------------
+# "员工编辑单独做一个弹出框，别在这一行记录上改了"；编号（身份键）不支持在这里改。
+
+def test_edit_via_dialog_updates_fields(client):
+    _seed()
+    _login(client, "admin", "pw123456")
+    uid = _uid("emp111")
+    r = client.post(f"/staff-admin/{uid}/edit",
+                    data={"name": "新名字", "username": "emp1new", "status": "leave",
+                          "lang": "ja", "password": "",
+                          "csrf_token": _csrf(client), "_ft": form_token(client)},
+                    follow_redirects=False)
+    from urllib.parse import unquote
+    assert r.status_code == 303
+    assert "已保存" in unquote(r.headers["location"])
+    db = appdb.SessionLocal()
+    u = db.get(User, uid)
+    assert u.display_name == "新名字" and u.username == "emp1new"
+    assert u.status == "leave" and u.is_active is True and u.lang == "ja"
+    p = db.get(Person, u.person_code)
+    assert p.display_name == "新名字"          # 人员表姓名一起改（矩阵/导出用的是它）
+    db.close()
+
+
+def test_edit_rejects_duplicate_username_and_keeps_code(client):
+    """登录名重复 → 拒绝且不改动；**编号字段不再参与编辑**（传了也不理）。"""
+    _seed()
+    _login(client, "admin", "pw123456")
+    uid = _uid("emp111")
+    db = appdb.SessionLocal()
+    db.add(User(username="other", display_name="别人", role="staff",
+                person_code="P9", password_hash="x", is_active=True, status="active"))
+    db.commit()
+    old_code = db.get(User, uid).person_code
+    db.close()
+    r = client.post(f"/staff-admin/{uid}/edit",
+                    data={"name": "改名失败", "username": "other", "status": "active",
+                          "lang": "", "code": "HACKED",
+                          "csrf_token": _csrf(client), "_ft": form_token(client)},
+                    follow_redirects=False)
+    assert r.status_code == 303 and "err=" in r.headers["location"]
+    db = appdb.SessionLocal()
+    u = db.get(User, uid)
+    assert u.username != "other" and u.display_name != "改名失败"
+    assert u.person_code == old_code           # 编号没被改
+    assert db.get(Person, "HACKED") is None    # 也没有偷偷建一个新编号
+    db.close()

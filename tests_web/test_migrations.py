@@ -14,7 +14,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NEW_TABLES = ("staff_daily_reports", "staff_report_analyses",
               "staff_report_compare_person", "staff_report_compare_day",
-              "form_tokens")
+              "form_tokens", "staff_date_plans")
 # 也校验正式表：本轮给它加了 ix_formal_japan_date（曾因文件名撞车漏掉迁移）
 CHECK_TABLES = NEW_TABLES + ("formal_records",)
 

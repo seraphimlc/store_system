@@ -128,3 +128,54 @@ def accounts_xlsx(db, *, only_active: bool = False, base_url: str = ""):
     from datetime import date
     return bio.getvalue(), "员工登录名_%s%s.xlsx" % (
         date.today().isoformat(), "_仅在岗" if only_active else "")
+
+
+# ---------------- 编辑员工（弹窗一次提交） ----------------
+
+class UsernameExists(Exception):
+    """登录名已被占用。"""
+
+
+def update_staff(db, user, *, name: str = None, username: str = None,
+                 status: str = None, lang: str = None,
+                 password: str = None) -> dict:
+    """编辑员工（弹窗一次提交）：**姓名 / 登录名 / 状态 / 界面语言 / 重置口令**。
+
+    只传需要改的字段（None = 不改）。返回改动说明，用于页面提示。
+
+    ⚠️ **人员编号不支持在这里改**（2026-10-01 用户决定）：编号是身份键，改它要级联改
+    `persons` + 近 20 张引用表（计划/自报/绩效/工资/分析/对账），风险远大于收益，先不做。
+    """
+    from app.auth import hash_password
+    from app.models import Person
+
+    changed = []
+    if name is not None and name.strip() and name.strip() != (user.display_name or ""):
+        nm = name.strip()
+        user.display_name = nm
+        p = db.get(Person, user.person_code) if user.person_code else None
+        if p is not None:
+            p.display_name = nm
+        changed.append("姓名 → %s" % nm)
+    if username is not None and (username or "").strip():
+        uname = clean_username(username)
+        if not uname:
+            raise ValueError("登录名只能用字母、数字和连字符")
+        if uname != user.username:
+            if db.query(User).filter(User.username == uname).first() is not None:
+                raise UsernameExists(uname)      # 明确拒绝，不自动加后缀
+            changed.append("登录名 %s → %s" % (user.username, uname))
+            user.username = uname
+    if status is not None and status != user.status:
+        user.status = status
+        user.is_active = status in ("active", "leave")
+        changed.append("状态 → %s" % status)
+    if lang is not None and lang != (user.lang or ""):
+        user.lang = lang
+        changed.append("语言 → %s" % (lang or "自动"))
+    if password:
+        user.password_hash = hash_password(password)
+        user.must_change_password = True
+        changed.append("口令已重置（首登须改密）")
+    db.commit()
+    return {"changed": changed}

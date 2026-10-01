@@ -17,7 +17,7 @@
   <div style="font-weight:600;margin-bottom:.3rem">{{ t('员工分析') }}</div>
   {{ analysis|safe }}
   {% elif not sample_ok %}
-  <p class="hint">{{ t('该员工数据样本不足（至少需 2 个月且有足够有效店），不生成分析。') }}</p>
+  <p class="hint">{{ t('该员工有效店太少（不到 5 家），样本不足，不生成分析。') }}</p>
   {% else %}
   <p class="hint">{{ t('分析生成中') }}…（{{ t('首次约 10-30 秒，完成后保存，之后秒开）') }}</p>
   {% endif %}
