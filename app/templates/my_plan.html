@@ -59,15 +59,16 @@
   <div class="plan-list" data-testid="my-plan-list">
     {% for d in view.days %}
     {% if d.editable %}
-    {# 整行一个 label：点行内任何位置都切换「可出勤 ⇄ 不出勤」（纯 CSS，无 JS 也能用） #}
+    {# 整行一个 label：点行内任何位置都切换开关「可出勤 ⇄ 不出勤」（纯 CSS，无 JS 也能用） #}
     <label class="pickrow">
-      <input type="checkbox" name="unavailable" value="{{ d.date }}"
+      <input type="checkbox" role="switch" name="unavailable" value="{{ d.date }}"
              {% if d.off %}checked{% endif %} data-testid="pick-{{ d.date }}">
       <span class="bar" aria-hidden="true"></span>
       <span class="d">{{ d.date.strftime('%m-%d') }}<small>{{ t(wd_labels[d.wd]) }}</small></span>
-      <span class="seg" aria-hidden="true">
-        <span class="opt on">○ {{ t('可出勤') }}</span>
-        <span class="opt off">× {{ t('不出勤') }}</span>
+      <span class="sw-wrap">
+        <span class="sw-txt on">{{ t('可出勤') }}</span>
+        <span class="sw-txt off">{{ t('不出勤') }}</span>
+        <span class="sw" aria-hidden="true"><i></i></span>
       </span>
     </label>
     {% else %}

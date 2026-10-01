@@ -303,23 +303,33 @@ table.plan-tbl tr.locked td { color: var(--muted); background: #fbfcfe; }
 .pickrow .d { display: flex; flex-direction: column; line-height: 1.15;
   font-variant-numeric: tabular-nums; }
 .pickrow .d small { color: var(--muted); font-size: .76rem; }
-/* 右侧分段选择：当前状态高亮，看起来像"两个选项里选了一个" */
-.pickrow .seg { margin-left: auto; display: inline-flex; border: 1px solid var(--line);
-  border-radius: 999px; overflow: hidden; background: #fff; }
-.pickrow .seg .opt { padding: .26rem .62rem; font-size: .85rem; color: var(--muted);
-  white-space: nowrap; }
-.pickrow input:not(:checked) ~ .seg .opt.on { background: var(--ok-bg); color: var(--ok);
-  font-weight: 700; }
-.pickrow input:checked ~ .seg .opt.off { background: var(--err-bg); color: var(--err);
-  font-weight: 700; }
-.pickrow input:focus-visible ~ .seg { outline: 2px solid #c6d4ff; outline-offset: 2px; }
+/* 右侧开关（switch）：开=可出勤（绿、滑块靠右），关=不出勤（红、滑块靠左） */
+.pickrow .sw-wrap { margin-left: auto; display: inline-flex; align-items: center;
+  gap: .5rem; }
+.pickrow .sw-txt { font-size: .86rem; font-weight: 650; white-space: nowrap; }
+.pickrow .sw-txt.on { color: var(--ok); }
+.pickrow .sw-txt.off { display: none; color: var(--err); }
+.pickrow input:checked ~ .sw-wrap .sw-txt.on { display: none; }
+.pickrow input:checked ~ .sw-wrap .sw-txt.off { display: inline; }
+.pickrow .sw { position: relative; flex: none; width: 44px; height: 24px;
+  border-radius: 999px; background: var(--ok); transition: background .15s ease; }
+.pickrow .sw i { position: absolute; top: 3px; left: 23px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(20, 30, 60, .3);
+  transition: left .15s ease; }
+.pickrow input:checked ~ .sw-wrap .sw { background: var(--err); }
+.pickrow input:checked ~ .sw-wrap .sw i { left: 3px; }
+.pickrow input:focus-visible ~ .sw-wrap .sw { outline: 2px solid #c6d4ff;
+  outline-offset: 2px; }
 /* 只读行（已过去 / 已自报 / 窗口未开或已关） */
 .pickrow.static { cursor: default; background: #fbfcfe; color: var(--muted); }
 .pickrow.static:hover, .pickrow.static:active { background: #fbfcfe; }
 .pickrow.static .bar { background: #d8dee9; }
 .pickrow .st { margin-left: auto; display: flex; align-items: center; gap: .4rem; }
 @media (max-width: 420px) {
-  .pickrow .seg .opt { padding: .24rem .5rem; font-size: .8rem; }
+  .pickrow .sw-txt { font-size: .8rem; }
+  .pickrow .sw { width: 40px; height: 22px; }
+  .pickrow .sw i { width: 16px; height: 16px; left: 21px; }
+  .pickrow input:checked ~ .sw-wrap .sw i { left: 3px; }
 }
 
 .plan-legend { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
