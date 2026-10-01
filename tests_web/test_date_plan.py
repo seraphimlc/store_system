@@ -842,14 +842,22 @@ def test_staff_blocked_from_admin_plan_page(client):
                                              "/my/perf", "/login"))
 
 
-def test_admin_plan_other_period_does_not_show_zero_for_today(client, frozen):
-    """看非本期时，"今天可出勤人数"显示 0 会误导（今天是别的半月）→ 显示 —。"""
+def test_admin_plan_other_period_does_not_show_zero_for_today(client, monkeypatch):
+    """看非本期时**不显示"今天可出勤人数"**（今天是别的半月，显示 0 会误导）。"""
     _admin(client)
-    monkeypatch_next = date_plan.shift_period(
-        date_plan.current_period(frozen), halves=2)          # 确保"今天"不在这一期
-    r = client.get("/staff-plans?period=" + monkeypatch_next)
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 1))
+    this_view = client.get("/staff-plans").text
+    assert "人可出勤" in this_view                        # 本期（今天在里面）→ 显示
+    other = date_plan.shift_period(
+        date_plan.current_period(date(2026, 10, 1)), halves=2)
+    r = client.get("/staff-plans?period=" + other)
     assert r.status_code == 200
-    assert "今天不在本期" in r.text
+    assert "人可出勤" not in r.text                       # 非本期 → 整段不显示
+    # 顶部只有一条信息条（不再有统计卡片墙，也不再有那几段说明废话）
+    assert 'data-testid="plan-bar"' in r.text
+    assert "stat-card" not in r.text
+    for gone in ("window-hint", "past-rule", "default-hint"):
+        assert 'data-testid="%s"' % gone not in r.text
 
 
 def test_admin_plan_matrix_page(client):

@@ -276,6 +276,16 @@ table.plan-tbl tr.locked td { color: var(--muted); background: #fbfcfe; }
 .pick input { width: 17px; height: 17px; margin: 0; accent-color: var(--brand); }
 .pick:has(input:checked) { border-color: var(--err); color: var(--err); background: #fff5f5; }
 
+/* ---------- 管理端日期计划：顶部信息条（一行信息 + 一行图例，别堆卡片） ---------- */
+.plan-bar { display: flex; align-items: baseline; gap: 1.4rem; flex-wrap: wrap;
+  margin: .2rem 0 .2rem; font-size: .86rem; color: var(--muted); }
+.plan-meta { white-space: nowrap; }
+.plan-meta b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.plan-meta .warn-txt { color: var(--err); }
+.plan-bar .plan-legend { margin: 0; gap: 1rem; font-size: .86rem; }
+.plan-bar .plan-legend .pm { margin-right: .15rem; }
+.pm.dim { color: #b9c1d1; font-weight: 400; }
+
 /* ---------- 员工端填报：15 天顺序表，整行点一下切换 ○↔×（纯 CSS，无 JS 也能用） ---------- */
 table.pick-tbl { font-size: .95rem; }
 table.pick-tbl td.pickcell { padding: 0; }
@@ -307,11 +317,16 @@ table.pick-tbl tr.dayrow.locked td { background: #fbfcfe; color: var(--muted); }
 table.plan-matrix th, table.plan-matrix td { padding: .4rem .5rem; text-align: center; }
 table.plan-matrix th:first-child, table.plan-matrix td:first-child,
 table.plan-matrix th:nth-child(2), table.plan-matrix td:nth-child(2) { text-align: left; }
+/* 隔行浅底：宽表一行一行看下来不串行 */
+table.plan-matrix tbody tr:nth-child(even) { background: #fcfdff; }
+table.plan-matrix tbody tr:hover { background: #f4f8ff; }
+table.plan-matrix td:first-child { font-weight: 600; }
 table.plan-matrix td.c { font-size: 1.02rem; font-weight: 700; min-width: 2.1em; }
 table.plan-matrix td.c.on { color: var(--ok); }
 table.plan-matrix td.c.off { color: var(--err); background: #fff7f7; }
 table.plan-matrix td.c.done { color: var(--brand); background: #f2f6ff; }
 table.plan-matrix td.c.none { color: #c3cad8; }
+table.plan-matrix tr.totals td { font-variant-numeric: tabular-nums; }
 /* 浅色 ○ = 未登记（超期按默认全部出勤算），与本人登记的实色 ○ 区分 */
 table.plan-matrix td.c.assumed { color: #b9c1d1; background: transparent; font-weight: 400; }
 table.plan-matrix td.past, table.plan-matrix th.past { background: #f4f5f8; }
