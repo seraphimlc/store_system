@@ -104,6 +104,30 @@
   若当天就按事实显示，上午整列会是 ×，管理员会误以为"今天没人能来"。
   锁定测试：`test_today_keeps_plan_until_next_day`（10-01 看=○，10-02 看=×）。
 
+### 4.3 新入职员工（2026-10-01 用户口径）
+
+用户口径："不用关心入职日，就以填报当天为入职日就行。之前的日期也不需要计划。
+如果入职日[是]未来的某一天，那今天愿意咋填就咋填。这个只是个计划而已。"
+
+- **名册起点**（≈入职日，`roster_start_map()`）= 他**最早在系统里出现的那天**（JST）：
+  员工账号创建日 / 人员记录创建日 / **首次计划日** 三者取最早。**不人工维护、不加字段**。
+  报过自报的人一定有计划行（自报写透），所以**不用查 `staff_daily_reports`**（"渲染路径只读计划表"
+  的约定不破）；查询全是单表聚合，**无 join**。
+- **入职前的格子留空**（新状态 `STATE_NA = "na"`，"不在职"）：既不算"没出勤 ×"也不算"未登记 –"，
+  且**不计入** 计划出勤 / 实际出勤 / 未登记 三个统计行
+  （改之前会显示成 × ——等于把没入职的日子算他旷工，是错的）。
+  员工端那一行写"不在职（入职前）"；导出留空；矩阵格子 title 写"不在职（X 起）"。
+- **新人补登当期**（`personal_window_state()` / `is_late_join()`）：名册起点**晚于该期窗口关闭日**的人，
+  该期对他**重新开放到期末**（10-06 入职 → 可填 10-06 ~ 10-15）；期已过完则不特批。
+  `save_plan` 走这个"个人窗口"，`needs_plan` 也认这条 →
+  **登录就弹窗催他填本期**；员工页状态条显示「你是本期新入职的：可以补登本期到 X 为止」，
+  页面默认期 = 本期（`default_period_for()`）。
+- **老员工不受影响**：窗口关了照旧 `WindowClosed`；入职后的过去日子照样按事实（□/×）显示。
+- 锁定测试：`test_roster_start_takes_earliest_appearance`、
+  `test_matrix_blanks_days_before_roster_start`、`test_new_hire_can_backfill_current_period`、
+  `test_employee_page_late_join_banner_and_na_rows`、
+  `test_matrix_marks_before_start_blank_in_export`。
+
 ## 5. 服务层 `app/services/date_plan.py`
 
 | 函数 | 作用 |

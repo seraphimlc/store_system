@@ -29,7 +29,9 @@ STATE_ON = "on"      # ○ 计划可出勤（默认）
 STATE_OFF = "off"    # × 计划不出勤
 STATE_DONE = "done"  # □ 已出勤（已自报）
 STATE_NONE = "none"  # – 未登记
-MARKS = {STATE_ON: "○", STATE_OFF: "×", STATE_DONE: "□", STATE_NONE: "–"}
+STATE_NA = "na"      # 空白：入职（名册起点）之前，不属于他的日子，不计任何统计
+MARKS = {STATE_ON: "○", STATE_OFF: "×", STATE_DONE: "□", STATE_NONE: "–",
+         STATE_NA: ""}
 
 LOCK_NONE = ""
 LOCK_PAST = "past"           # 日期已过去
@@ -216,7 +218,8 @@ def next_window(today=None) -> Optional[dict]:
 # ---------------- 三态与锁定 ----------------
 
 def cell_state(plan_available: Optional[bool], reported: bool,
-               assumed: bool = False, past: bool = False) -> str:
+               assumed: bool = False, past: bool = False,
+               before_start: bool = False) -> str:
     """格状态口径（**唯一来源**）：**已自报 > 已过去 > 计划值 > 默认出勤 > 未登记**。
 
     - `reported=True` → **□** 已出勤（已自报；事实，覆盖一切）；
@@ -225,6 +228,8 @@ def cell_state(plan_available: Optional[bool], reported: bool,
     - 今天及以后：有计划行 → ○ / ×；没计划行 → **默认出勤 ○**（`assumed`，窗口关闭后）
       或 **–** 未登记（窗口未关）。
     """
+    if before_start:
+        return STATE_NA              # 他还没进名册：空白，不算"没出勤"也不算"未登记"
     if reported:
         return STATE_DONE
     if past:
@@ -355,24 +360,121 @@ def rebuild_reported(db, person_code: Optional[str] = None,
 
 # ---------------- 待填报判定与员工落点 ----------------
 
-def needs_plan(db, person_code: Optional[str], today=None) -> dict:
-    """**现在是否还需要填报出勤计划**：当期填报窗口开着 且 还没登记。
+# ---------------- 名册起点（≈入职日）与"新人补登" ----------------
 
-    返回 {} = 不需要（没窗口／已登记）；否则给出该期信息（窗口起止）。
+def _jst_date(ts) -> Optional[date]:
+    """UTC naive 时间戳 → JST 日期（业务日）。"""
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        return (ts + timedelta(hours=9)).date()
+    return ts
+
+
+def roster_start_map(db, codes: Optional[List[str]] = None) -> Dict[str, date]:
+    """每个员工"名册起点"（≈入职日，JST）= **他最早在系统里出现的那天**。
+
+    用户口径（2026-10-01）："不用关心入职日，就以填报当天为入职日就行。之前的日期也不需要计划。"
+    → 不人工维护，取三者最早：员工账号创建日 / 人员记录创建日 / **首次计划日**。
+    （报过自报的人一定有计划行——自报会写透——所以不用去查 `staff_daily_reports`，
+    渲染路径"只读计划表"的约定不受影响；查询全是单表聚合，没有 join。）
+    """
+    from sqlalchemy import func
+    out: Dict[str, date] = {}
+    q1 = (db.query(User.person_code, func.min(User.created_at))
+          .filter(User.role == "staff", User.person_code.isnot(None)))
+    if codes:
+        q1 = q1.filter(User.person_code.in_(list(codes)))
+    for code, ts in q1.group_by(User.person_code).all():
+        d = _jst_date(ts)
+        if code and d and (code not in out or d < out[code]):
+            out[code] = d
+    q2 = db.query(Person.code, Person.created_at)
+    if codes:
+        q2 = q2.filter(Person.code.in_(list(codes)))
+    for code, ts in q2.all():
+        d = _jst_date(ts)
+        if code and d and (code not in out or d < out[code]):
+            out[code] = d
+    q3 = (db.query(StaffDatePlan.person_code, func.min(StaffDatePlan.plan_date))
+          .group_by(StaffDatePlan.person_code))
+    if codes:
+        q3 = q3.filter(StaffDatePlan.person_code.in_(list(codes)))
+    for code, d in q3.all():
+        if code and d and (code not in out or d < out[code]):
+            out[code] = d
+    return out
+
+
+def roster_start(db, person_code: Optional[str]) -> Optional[date]:
+    if not person_code:
+        return None
+    return roster_start_map(db, [person_code]).get(person_code)
+
+
+def personal_window_state(db, person_code: Optional[str], key: str,
+                          today=None, starts: Optional[dict] = None) -> str:
+    """**该员工这一期**的填报窗口状态（在全局窗口之上多一条"新人补登"）。
+
+    - 正常窗口（open/closed/before）照旧；
+    - **名册起点晚于该期窗口关闭日**的新人：该期对他**重新开放到期末**
+      （用户 2026-10-01：新入职的也要能填这一期；"入职前的日期不需要计划"）。
+    """
+    today = today or jst_today()
+    base = window_state(key, today)
+    if base == "open":
+        return "open"
+    _start, end, _dl = period_bounds(key)
+    if today > end:
+        return base                       # 这一期已经过完了，不特批
+    st = (starts if starts is not None else roster_start_map(db, [person_code])
+          ).get(person_code or "")
+    _open_at, close_at = period_window(key)
+    if st and st > close_at and today >= st:
+        return "open"                     # 入职补登
+    return base
+
+
+def is_late_join(db, person_code: Optional[str], key: str, today=None,
+                 starts: Optional[dict] = None) -> bool:
+    """该员工这一期是不是"入职补登"（正常窗口已关、因为他新入职才开放）。"""
+    return (personal_window_state(db, person_code, key, today, starts) == "open"
+            and window_state(key, today) != "open")
+
+
+def needs_plan(db, person_code: Optional[str], today=None) -> dict:
+    """**现在是否还需要填报出勤计划**：有一期窗口开着（含新人补登）且 还没登记。
+
+    返回 {} = 不需要；否则给出该期信息（窗口起止）。
     用于：员工登录落点、员工端弹窗提示（用户 2026-10-01 要求）。
-    窗口一关（截止日过了）就不再催办 —— 那一期已按"默认全部出勤"处理。
+    优先**本期**（新入职的人最急的是把剩下这半个月排好），再下一期。
     """
     if not person_code:
         return {}
     today = today or jst_today()
-    key = open_period(today)
-    if not key or is_submitted(db, person_code, key):
-        return {}
-    start, end, deadline = period_bounds(key)
-    open_at, close_at = period_window(key)
-    return {"key": key, "start": start, "end": end, "deadline": deadline,
-            "open_at": open_at, "close_at": close_at,
-            "overdue": today > deadline, "label": period_label(key)}
+    starts = roster_start_map(db, [person_code])
+    cur = current_period(today)
+    for key in (cur, shift_period(cur, halves=1)):
+        if personal_window_state(db, person_code, key, today, starts) != "open":
+            continue
+        if is_submitted(db, person_code, key):
+            continue
+        start, end, deadline = period_bounds(key)
+        open_at, close_at = period_window(key)
+        return {"key": key, "start": start, "end": end, "deadline": deadline,
+                "open_at": open_at, "close_at": close_at,
+                "overdue": today > deadline, "label": period_label(key),
+                "late_join": is_late_join(db, person_code, key, today, starts)}
+    return {}
+
+
+def default_period_for(db, person_code: Optional[str], today=None) -> str:
+    """**该员工页面默认展示的那一期**：本期补登（新人）> 正在填报的那一期 > 本期。"""
+    today = today or jst_today()
+    cur = current_period(today)
+    if person_code and personal_window_state(db, person_code, cur, today) == "open":
+        return cur
+    return open_period(today) or cur
 
 
 def staff_home(db, user) -> str:
@@ -400,8 +502,10 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     today = today or jst_today()
     start, end, deadline = period_bounds(key)
     open_at, close_at = period_window(key)
-    wstate = window_state(key, today)
+    my_start = roster_start(db, person_code)
+    wstate = personal_window_state(db, person_code, key, today)
     window_open = wstate == "open"
+    late = is_late_join(db, person_code, key, today)
     plans = _plan_map(db, person_code, start, end)
     days = []
     d = start
@@ -409,15 +513,17 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
         avail, rep = plans.get(d, (None, False))
         asm = assumed_default(d, today, deadline)
         past = d < today
-        state = cell_state(avail, rep, assumed=asm, past=past)
+        before = my_start is not None and d < my_start
+        state = cell_state(avail, rep, assumed=asm, past=past, before_start=before)
         lock = lock_of(d, today, rep)
-        editable = window_open and lock == LOCK_NONE     # 窗口没开/已关 → 一律不可改
+        editable = window_open and not before and lock == LOCK_NONE
         off = (avail is False)
         # 未登记且可改 → 显示"默认可出勤"的 ○（员工要看到默认值，不是空白）
         mark = MARKS[STATE_ON] if (editable and state == STATE_NONE) else MARKS[state]
         days.append({"date": d, "wd": d.weekday(), "state": state, "mark": mark,
                      "reported": rep, "off": off, "available": not off,
-                     "past": past, "assumed": asm and (d not in plans),
+                     "past": past, "before_start": before,
+                     "assumed": asm and (d not in plans) and not before,
                      "editable": editable, "lock": lock})
         d += timedelta(days=1)
     stamps = (db.query(StaffDatePlan.updated_at, StaffDatePlan.created_at)
@@ -429,8 +535,9 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
             "label": period_label(key), "today": today,
             "open_at": open_at, "close_at": close_at,
             "window_state": wstate, "window_open": window_open,
+            "late_join": late, "roster_start": my_start,
             "overdue": today > deadline, "default_all": today > deadline,
-            "submitted": bool(plans), "last_at": last,
+            "submitted": any(plans.get(d) for d in period_days(key)), "last_at": last,
             "days": days,
             "off_cnt": sum(1 for x in days if x["off"]),
             "free_cnt": sum(1 for x in days if not x["off"]),
@@ -469,7 +576,7 @@ def save_plan(db, user, key: str, unavailable: Iterable = (), today=None,
         raise ValueError("账号未绑定员工编号，无法登记出勤计划")
     today = today or jst_today()
     start, end, _ = period_bounds(key)
-    wstate = window_state(key, today)
+    wstate = personal_window_state(db, code, key, today)
     if wstate != "open":
         raise WindowClosed(key, wstate)
     off = _parse_dates(unavailable, start, end)
@@ -562,6 +669,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
     codes = sorted((c for c, e in cand.items()
                     if e["can_login"] or c in with_plan),
                    key=lambda c: (cand[c]["name"] or c, c))
+    starts = roster_start_map(db, codes)      # 名册起点（≈入职日）：之前的格子留空
     # "已登记" = 该期存在 source != 'report' 的行（只自报没填计划的不算）
     submitted = {c for (c,) in db.query(StaffDatePlan.person_code)
                  .filter(StaffDatePlan.plan_date >= start,
@@ -577,14 +685,19 @@ def admin_matrix(db, key: str, today=None) -> dict:
     col_plan = {d: 0 for d in days}        # 计划出勤人数
     for code in codes:
         states, assumed = {}, {}
+        my_start = starts.get(code)
         for d in days:
             av, rep = plan_map.get((code, d), (None, False))
             asm = assumed_default(d, today, deadline)
-            states[d] = cell_state(av, rep, assumed=asm, past=d < today)
-            assumed[d] = bool(asm and av is None)        # 这一格是"默认出勤"
+            before = my_start is not None and d < my_start
+            states[d] = cell_state(av, rep, assumed=asm, past=d < today,
+                                   before_start=before)
+            assumed[d] = bool(asm and av is None and not before)   # 这一格是"默认出勤"
         for d in days:
             # 注意：这里必须重新取本格的 (av, rep)，不能沿用上一个循环的残留值
             av, rep = plan_map.get((code, d), (None, False))
+            if states[d] == STATE_NA:                    # 入职前：不计任何统计
+                continue
             if states[d] in (STATE_ON, STATE_DONE):
                 col_free[d] += 1
             elif states[d] == STATE_NONE:
@@ -602,6 +715,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
             "assumed_days": assumed,       # 逐日：这一格是"未登记→默认出勤"（浅色显示）
+            "roster_start": starts.get(code),
             "submitted": code in submitted,
             "assumed": a_cnt > 0,          # 该人本期真有"默认出勤"的格子
             "on_cnt": sum(1 for d in days if states[d] == STATE_ON),
@@ -689,8 +803,8 @@ def plan_xlsx(db, key: str, today=None):
     row(["", "", "", *[WD_SHORT[d.weekday()] for d in days]], is_bold=True)
 
     for r in m["rows"]:
-        # 未登记且未触发默认出勤 → 留空（与参考表"空白=未提供"一致）
-        vals = [("" if r["states"][d] == STATE_NONE else r["marks"][d])
+        # 入职前 = 空白（不属于他）；未登记且未触发默认出勤 = 也留空
+        vals = [("" if r["states"][d] in (STATE_NONE, STATE_NA) else r["marks"][d])
                 for d in days]
         free = sum(1 for d in days
                    if not m["past"][d] and r["states"][d] in (STATE_ON, STATE_DONE))

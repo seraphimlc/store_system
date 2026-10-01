@@ -34,12 +34,18 @@ def _admin_guard(user):
     return None
 
 
-def _resolve_period(period: str, today, keys: List[str]) -> str:
-    """未传/非法 → **正在填报的那一期**（否则本期）；下拉里只列可选半月。"""
+def _resolve_period(period: str, today, keys: List[str], db=None,
+                    person_code: str = "") -> str:
+    """未传/非法 → **正在填报的那一期**（否则本期）；下拉里只列可选半月。
+
+    员工端多一层：**新入职的人优先落"本期"**（那是他需要补登的那一期）。
+    """
     from app.services import date_plan
     p = (period or "").strip().upper()
     if p in keys:
         return p
+    if db is not None and person_code:
+        return date_plan.default_period_for(db, person_code, today)
     return date_plan.default_period(today)
 
 
@@ -56,7 +62,8 @@ def my_plan_page(request: Request,
     from app.services import date_plan
     today = date_plan.jst_today()
     options = date_plan.period_options(today)
-    key = _resolve_period(period, today, [o["key"] for o in options])
+    key = _resolve_period(period, today, [o["key"] for o in options],
+                          db=db, person_code=user.person_code)
     view = date_plan.plan_days(db, user.person_code, key, today=today)
     return templates.TemplateResponse("my_plan.html", {
         "request": request, "current_user": user,

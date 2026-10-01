@@ -18,7 +18,12 @@
 {% if saved %}<div class="msg ok">{{ t('已保存出勤计划') }}</div>{% endif %}
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
-{% if view.window_state == 'open' %}
+{% if view.window_state == 'open' and view.late_join %}
+<div class="msg ok" data-testid="window-late-join">
+  {{ t('你是本期新入职的：可以补登本期到') }} <b>{{ view.end }}</b>
+  {{ t('为止（本期正常填报期已过）。') }}
+</div>
+{% elif view.window_state == 'open' %}
 <div class="msg ok" data-testid="window-open">
   {{ t('填报期进行中：') }} {{ view.open_at }} ~ {{ view.close_at }}（{{ t('截止日当天仍可提交') }}）
 </div>
@@ -71,6 +76,13 @@
         <span class="sw" aria-hidden="true"><i></i></span>
       </span>
     </label>
+    {% elif d.before_start %}
+    {# 入职（名册起点）之前：不属于他的日子，留空不留痕 #}
+    <div class="pickrow static na">
+      <span class="bar" aria-hidden="true"></span>
+      <span class="d">{{ d.date.strftime('%m-%d') }}<small>{{ t(wd_labels[d.wd]) }}</small></span>
+      <span class="st"><span class="hint">{{ t('不在职（入职前）') }}</span></span>
+    </div>
     {% else %}
     {# 锁定的行（已过去 / 已自报 / 窗口未开或已关）：只读展示 #}
     <div class="pickrow static">

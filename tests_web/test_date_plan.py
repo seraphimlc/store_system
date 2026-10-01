@@ -8,7 +8,7 @@
 - 锁定：窗口没开/已关不能改；窗口内已过去、已自报的日期也不可改；
 - 窗口关了还没登记 → 今天及以后按"默认全部出勤"（浅色 ○）。
 """
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -81,6 +81,37 @@ class _U:
     def __init__(self, code="P1", uid=1):
         self.person_code = code
         self.id = uid
+
+
+def _hire(db, code="NEW1", name="新人", hired_on=date(2026, 10, 6), username=None):
+    """建一个"hired_on 当天入职"的人：账号/人员记录的创建时间就是那天（JST）。
+
+    `created_at` 存的是 UTC naive，`hired_on` 当天 JST 12:00 = UTC 03:00。
+    """
+    ts = datetime(hired_on.year, hired_on.month, hired_on.day, 3, 0)
+    if db.get(Person, code) is None:
+        db.add(Person(code=code, display_name=name, created_at=ts))
+    db.add(User(username=username or ("u" + code), display_name=name, role="staff",
+                person_code=code, password_hash="x", is_active=True,
+                status="active", created_at=ts))
+    db.commit()
+    return code
+
+
+def _hire_login(db, client, code="NEW1", name="新人", hired_on=date(2026, 10, 6),
+                username="newbie", password="pw123456"):
+    """入职新人 + 可登录账号（列表页测试用）。"""
+    ts = datetime(hired_on.year, hired_on.month, hired_on.day, 3, 0)
+    if db.get(Person, code) is None:
+        db.add(Person(code=code, display_name=name, created_at=ts))
+    db.add(User(username=username, display_name=name, role="staff",
+                person_code=code, password_hash=hash_password(password),
+                is_active=True, status="active", created_at=ts))
+    db.commit()
+    db.close()
+    r = client.post("/login", data={"username": username, "password": password},
+                    follow_redirects=False)
+    return read_session_token(client.cookies.get(SESSION_COOKIE))["csrf"]
 
 
 # ---------------- 半月划分 ----------------
@@ -1035,3 +1066,95 @@ def test_admin_plan_export_xlsx(client):
     # 实际出勤：这一期全在未来（今天 10-10）→ 整行留空（那天还没到）
     assert totals["实际出勤"][3] == ""
     assert totals["实际出勤"][-1] == ""
+
+
+# ---------------- 新入职员工（2026-10-01 用户口径） ----------------
+# "不用关心入职日，就以填报当天为入职日就行。之前的日期也不需要计划。"
+# → 名册起点 = 他最早在系统里出现的那天（账号/人员创建日 与 首次计划日取最早）；
+#   起点之前的格子**留空**（不在职），不计任何统计；**新人可补登当期到该期结束并催办**。
+
+
+def test_roster_start_takes_earliest_appearance(client):
+    db = appdb.SessionLocal()
+    _hire(db, "NEW1", "新人", date(2026, 10, 6))
+    _person(db, "OLD1", "老人")                      # 创建时间是真实"现在"
+    date_plan.mark_reported(db, "OLD1", date(2026, 9, 20))   # 首次进表比建号还早
+    starts = date_plan.roster_start_map(db, ["NEW1", "OLD1"])
+    assert starts["NEW1"] == date(2026, 10, 6)
+    assert starts["OLD1"] == date(2026, 9, 20)        # 取最早的那个
+    db.close()
+
+
+def test_matrix_blanks_days_before_roster_start(client):
+    """入职前的日子留空、不计统计（以前会显示成 ×＝旷工，是错的）。"""
+    db = appdb.SessionLocal()
+    _hire(db, "NEW1", "新人", date(2026, 10, 6))
+    m = date_plan.admin_matrix(db, "2026-10-H1", today=date(2026, 10, 8))
+    r = {x["person_code"]: x for x in m["rows"]}["NEW1"]
+    assert r["roster_start"] == date(2026, 10, 6)
+    before = [d for d in m["days"] if d < date(2026, 10, 6)]
+    assert before and all(r["states"][d] == date_plan.STATE_NA for d in before)
+    assert r["marks"][date(2026, 10, 5)] == ""               # 空白，不是 ×
+    assert r["states"][date(2026, 10, 7)] == date_plan.STATE_OFF   # 入职后已过去 → ×
+    assert r["states"][date(2026, 10, 8)] == date_plan.STATE_ON    # 今天 → 默认出勤
+    for d in before:                                          # 三个统计行都不算他
+        assert m["none_cnt"][d] == 0
+        assert m["plan_cnt"][d] == 0
+        assert m["actual_cnt"][d] == 0
+    assert m["plan_cnt"][date(2026, 10, 8)] == 1
+    db.close()
+
+
+def test_new_hire_can_backfill_current_period(client):
+    """10-06 入职：10-H1 窗口早关了，但对他重新开放到期末，并弹窗催办。"""
+    db = appdb.SessionLocal()
+    _hire(db, "NEW1", "新人", date(2026, 10, 6))
+    today = date(2026, 10, 6)
+    assert date_plan.window_state("2026-10-H1", today) == "closed"      # 全局已关
+    assert date_plan.personal_window_state(db, "NEW1", "2026-10-H1", today) == "open"
+    assert date_plan.is_late_join(db, "NEW1", "2026-10-H1", today) is True
+    info = date_plan.needs_plan(db, "NEW1", today=today)
+    assert info["key"] == "2026-10-H1" and info["late_join"] is True
+    assert date_plan.default_period_for(db, "NEW1", today) == "2026-10-H1"
+    # 真能补登：写进去，且**入职前的日子不落库**
+    date_plan.save_plan(db, _U("NEW1"), "2026-10-H1", ["2026-10-10"], today=today)
+    got = {r.plan_date: r for r in
+           db.query(StaffDatePlan).filter_by(person_code="NEW1").all()}
+    assert got[date(2026, 10, 10)].available is False
+    assert date(2026, 10, 5) not in got
+    # 老员工照旧：窗口关了就不能改
+    _person(db, "OLD1", "老人")
+    with pytest.raises(date_plan.WindowClosed):
+        date_plan.save_plan(db, _U("OLD1"), "2026-10-H1", [], today=today)
+    db.close()
+
+
+def test_employee_page_late_join_banner_and_na_rows(client, monkeypatch):
+    """员工页：新人看到"入职补登"横幅，入职前的行写"不在职（入职前）"。"""
+    monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 6))
+    db = appdb.SessionLocal()
+    _hire_login(db, client, code="P1", name="新人", hired_on=date(2026, 10, 6))
+    r = client.get("/my/plan")
+    assert r.status_code == 200
+    assert 'data-testid="window-late-join"' in r.text
+    assert "不在职（入职前）" in r.text
+    # 入职前的 5 天不可点、入职当天的 10 天可点
+    assert r.text.count('class="pickrow"') == 10
+    assert r.text.count('name="unavailable"') == 10
+
+
+def test_matrix_marks_before_start_blank_in_export(client):
+    """导出里入职前的格子也留空（不是 ×、不是 –）。"""
+    db = appdb.SessionLocal()
+    _hire(db, "NEW1", "新人", date(2026, 10, 6))
+    db.close()
+    _admin(client)
+    r = client.get("/staff-plans/export?period=2026-10-H1")
+    import io as _io
+    from openpyxl import load_workbook
+    ws = load_workbook(_io.BytesIO(r.content)).active
+    grid = [["" if c.value is None else c.value for c in row]
+            for row in ws.iter_rows()]
+    row = {str(x[0]): x for x in grid if str(x[0]).startswith("新人")}["新人"]
+    assert row[3] == ""          # 10-01（入职前）
+    assert row[3 + 5] == ""      # 10-06（入职当天，未来 → 默认出勤不算"计划"）
