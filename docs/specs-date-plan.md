@@ -128,6 +128,23 @@
   `test_employee_page_late_join_banner_and_na_rows`、
   `test_matrix_marks_before_start_blank_in_export`。
 
+### 4.4 不在职（停用/离职）员工（2026-10-01 用户口径）
+
+用户口径："对于不在职的员工：1. 如果没有本期数据的就过滤掉，不需要出现。
+2. 有本期数据，过去的日期该啥样是啥样，往后的日期全部是叉。"
+
+- **不在职 = 有员工账号但 `can_login == False`**（`status` 不是 `active`/`leave`，即 `resigned` 离职 /
+  `disabled` 停用）。没账号的人（只有计划行）**不当作不在职**，避免误判。
+- **规则 1（过滤）**：不在职且**本期一条数据都没有**（没有计划行/自报行）→ **不进矩阵**
+  （`_matrix_people` 本来就只把"在岗/请假"放进候选，有数据的才补进来；现已被测试钉住）。
+- **规则 2（今天及以后全 ×）**：不在职的人**过去**的格子照旧按事实（□ 有自报 / × 没自报），
+  **今天及以后一律 ×**（`cell_state(..., inactive=True)`；不再显示"默认出勤 ○"，也不再是 `–`）；
+  他们**不计入「计划出勤」**，也不算「未登记」。行名淡色 + 悬停提示「停用/离职：今天及以后按不出勤」。
+- **顺手修的相关项**：整行都落在"入职前（`na`）"的人 = 这一期跟他毫无关系 → 整行不显示
+  （否则 9 月视图里会挂着一排 10 月才入职的空行）。
+- 测试：`test_matrix_hides_inactive_without_period_data`、
+  `test_inactive_employee_future_days_all_off`、`test_matrix_hides_rows_entirely_before_roster_start`。
+
 ## 5. 服务层 `app/services/date_plan.py`
 
 | 函数 | 作用 |

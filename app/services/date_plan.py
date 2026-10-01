@@ -219,7 +219,7 @@ def next_window(today=None) -> Optional[dict]:
 
 def cell_state(plan_available: Optional[bool], reported: bool,
                assumed: bool = False, past: bool = False,
-               before_start: bool = False) -> str:
+               before_start: bool = False, inactive: bool = False) -> str:
     """格状态口径（**唯一来源**）：**已自报 > 已过去 > 计划值 > 默认出勤 > 未登记**。
 
     - `reported=True` → **□** 已出勤（已自报；事实，覆盖一切）；
@@ -234,6 +234,8 @@ def cell_state(plan_available: Optional[bool], reported: bool,
         return STATE_DONE
     if past:
         return STATE_OFF
+    if inactive:
+        return STATE_OFF             # 停用/离职：今天及以后一律 ×（不可能来上班）
     if plan_available is None:
         return STATE_ON if assumed else STATE_NONE
     return STATE_ON if plan_available else STATE_OFF
@@ -628,8 +630,9 @@ def short_code(code: Optional[str], n: int = SHORT_CODE_LEN) -> str:
 def _matrix_people(db) -> List[dict]:
     """矩阵里的"员工"= 有账号的在岗/请假员工 ∪ 本期有登记记录的人。
 
-    停用/离职员工的账号进不来（`can_login=False`），但**只要本期登记过就仍然显示**，
-    否则他们的登记会被静默吞掉（数据在库里却没人看得见）。
+    **不在职（停用/离职）**的账号：**一期数据都没有就不进矩阵**（用户 2026-10-01："没有本期数据的
+    就过滤掉"）；只要本期有数据（登记/自报过）就仍然显示——否则他们的数据会被静默吞掉。
+    行里带 `status` / `can_login`，矩阵据此把他们的"今天及以后"一律画成 ×。
     """
     users = db.query(User).filter(User.role == "staff").all()
     names = dict(db.query(Person.code, Person.display_name).all())
@@ -639,8 +642,11 @@ def _matrix_people(db) -> List[dict]:
         if not code:
             continue
         e = cand.setdefault(code, {"person_code": code, "name": "",
-                                   "can_login": False, "user_id": u.id})
+                                   "can_login": False, "user_id": u.id,
+                                   "status": ""})
         e["can_login"] = e["can_login"] or bool(u.can_login)
+        if not e.get("status") or u.can_login:      # 取"更在职"的那个账号状态
+            e["status"] = u.status or ""
         if not e["name"]:
             e["name"] = names.get(code) or u.display_name or code
     return cand
@@ -665,7 +671,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
     cand = _matrix_people(db)
     for code in sorted(with_plan - set(cand)):
         cand[code] = {"person_code": code, "name": "", "can_login": False,
-                      "user_id": None}
+                      "user_id": None, "status": ""}
     codes = sorted((c for c, e in cand.items()
                     if e["can_login"] or c in with_plan),
                    key=lambda c: (cand[c]["name"] or c, c))
@@ -686,13 +692,18 @@ def admin_matrix(db, key: str, today=None) -> dict:
     for code in codes:
         states, assumed = {}, {}
         my_start = starts.get(code)
+        # 不在职（停用/离职）= 有账号但账号不能登录（status 不是 active/leave）
+        inactive = bool(cand[code].get("user_id")) and not cand[code].get("can_login")
+        gone = {}                       # 逐日：这一格是"不在职"导致的 ×（统计要排除）
         for d in days:
             av, rep = plan_map.get((code, d), (None, False))
             asm = assumed_default(d, today, deadline)
             before = my_start is not None and d < my_start
             states[d] = cell_state(av, rep, assumed=asm, past=d < today,
-                                   before_start=before)
-            assumed[d] = bool(asm and av is None and not before)   # 这一格是"默认出勤"
+                                   before_start=before, inactive=inactive)
+            assumed[d] = bool(asm and av is None and not before
+                              and not inactive)                  # 这一格是"默认出勤"
+            gone[d] = bool(inactive and not before and d >= today)   # 今天及以后的不在职格子
         for d in days:
             # 注意：这里必须重新取本格的 (av, rep)，不能沿用上一个循环的残留值
             av, rep = plan_map.get((code, d), (None, False))
@@ -706,7 +717,9 @@ def admin_matrix(db, key: str, today=None) -> dict:
                 col_default[d] += 1
             if rep:                                      # □ = 实际来了
                 col_actual[d] += 1
-            if av is True or assumed[d]:                 # 计划里标了可出勤（含默认出勤）
+            # 计划出勤 = 计划标了可出勤（含默认出勤）；**不在职的格子不算**
+            # （过去按"看事实"画成 × 的仍要计入，否则过去那几列的计划值全成 0 了）
+            if (av is True or assumed[d]) and not gone.get(d):
                 col_plan[d] += 1
         a_cnt = sum(1 for d in days if assumed[d])
         rows.append({
@@ -717,12 +730,15 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "assumed_days": assumed,       # 逐日：这一格是"未登记→默认出勤"（浅色显示）
             "roster_start": starts.get(code),
             "submitted": code in submitted,
+            "inactive": inactive,          # 停用/离职：今天及以后一律 ×
             "assumed": a_cnt > 0,          # 该人本期真有"默认出勤"的格子
             "on_cnt": sum(1 for d in days if states[d] == STATE_ON),
             "off_cnt": sum(1 for d in days if states[d] == STATE_OFF),
             "done_cnt": sum(1 for d in days if states[d] == STATE_DONE),
             "assumed_cnt": a_cnt,
         })
+    rows = [r for r in rows
+            if not all(r["states"][d] == STATE_NA for d in days)]   # 整期都在入职前 → 无意义，不显示
     past = {d: d < today for d in days}
     # free_cnt：今天及以后"能派活"的人数（○/□）——顶部信息条用
     free_cnt = {d: (0 if past[d] else col_free[d]) for d in days}

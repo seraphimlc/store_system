@@ -32,9 +32,14 @@ def frozen(monkeypatch):
 
 # ---------------- 工具 ----------------
 
+# 测试人物的"名册起点"固定成 2026-09-01（早于所有测试用的半月）：
+# 否则 created_at 取真实时间，跑到 JST 午夜前后会飘。
+ROSTER = datetime(2026, 9, 1, 3, 0)
+
+
 def _person(db, code="P1", name="甲"):
     if db.get(Person, code) is None:
-        db.add(Person(code=code, display_name=name))
+        db.add(Person(code=code, display_name=name, created_at=ROSTER))
         db.commit()
     return code
 
@@ -46,7 +51,8 @@ def _mk_staff(client, username="emp1", code="P1", name="甲", password="pw123456
     if db.query(User).filter(User.username == username).first() is None:
         db.add(User(username=username, display_name=name, role="staff",
                     person_code=code, password_hash=hash_password(password),
-                    is_active=True, status="active", must_change_password=False))
+                    is_active=True, status="active", must_change_password=False,
+                    created_at=ROSTER))
         db.commit()
     db.close()
 
@@ -533,7 +539,7 @@ def _seed_matrix(db):
     for code, name in (("P1", "甲"), ("P2", "乙")):
         db.add(User(username="u" + code, display_name=name, role="staff",
                     person_code=code, password_hash="x", is_active=True,
-                    status="active"))
+                    status="active", created_at=ROSTER))
     db.commit()
 
 
@@ -1075,13 +1081,15 @@ def test_admin_plan_export_xlsx(client):
 
 
 def test_roster_start_takes_earliest_appearance(client):
+    """名册起点取"最早出现"：建号日与首次计划日里更早的那个。"""
     db = appdb.SessionLocal()
     _hire(db, "NEW1", "新人", date(2026, 10, 6))
-    _person(db, "OLD1", "老人")                      # 创建时间是真实"现在"
-    date_plan.mark_reported(db, "OLD1", date(2026, 9, 20))   # 首次进表比建号还早
-    starts = date_plan.roster_start_map(db, ["NEW1", "OLD1"])
+    # 建号是 10-01，但 9-20 就已经有计划行了（例：导入先带出数据、账号后建）
+    _hire(db, "BACK1", "补数据的人", date(2026, 10, 1))
+    date_plan.mark_reported(db, "BACK1", date(2026, 9, 20))
+    starts = date_plan.roster_start_map(db, ["NEW1", "BACK1"])
     assert starts["NEW1"] == date(2026, 10, 6)
-    assert starts["OLD1"] == date(2026, 9, 20)        # 取最早的那个
+    assert starts["BACK1"] == date(2026, 9, 20)       # 取更早的
     db.close()
 
 
@@ -1158,3 +1166,67 @@ def test_matrix_marks_before_start_blank_in_export(client):
     row = {str(x[0]): x for x in grid if str(x[0]).startswith("新人")}["新人"]
     assert row[3] == ""          # 10-01（入职前）
     assert row[3 + 5] == ""      # 10-06（入职当天，未来 → 默认出勤不算"计划"）
+
+
+# ---------------- 不在职（停用/离职）员工（2026-10-01 用户口径） ----------------
+# "对于不在职的员工：1. 没有本期数据的就过滤掉；2. 有本期数据，过去的日期该啥样是啥样，
+#  往后的日期全部是叉。"
+
+
+def _set_status(db, code, status):
+    u = db.query(User).filter(User.person_code == code).one()
+    u.status = status
+    u.is_active = status in ("active", "leave")
+    db.commit()
+
+
+def test_matrix_hides_inactive_without_period_data(client):
+    """规则 1：停用/离职且本期一条数据都没有 → 不进矩阵。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    _set_status(db, "P2", "resigned")            # 乙离职且没登记过
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=TODAY)
+    assert [r["person_code"] for r in m["rows"]] == ["P1"]
+    # 但他只要本期有数据（这里补一条自报）就仍然显示，不能把数据吞掉
+    date_plan.mark_reported(db, "P2", date(2026, 10, 20))
+    m2 = date_plan.admin_matrix(db, "2026-10-H2", today=TODAY)
+    assert {r["person_code"] for r in m2["rows"]} == {"P1", "P2"}
+    assert {r["person_code"]: r for r in m2["rows"]}["P2"]["inactive"] is True
+    db.close()
+
+
+def test_inactive_employee_future_days_all_off(client):
+    """规则 2：离职的人——过去按事实，今天及以后全部 ×，且不算进计划出勤。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    # 甲登记了整期可出勤，然后在 10-01 自报了一次（10-01 是过去的日期）
+    date_plan.save_plan(db, _U("P1"), "2026-10-H1", [], today=date(2026, 10, 1))
+    date_plan.mark_reported(db, "P1", date(2026, 10, 1), True)
+    _set_status(db, "P1", "resigned")            # 离职
+    m = date_plan.admin_matrix(db, "2026-10-H1", today=date(2026, 10, 4))
+    r = {x["person_code"]: x for x in m["rows"]}["P1"]
+    assert r["states"][date(2026, 10, 1)] == date_plan.STATE_DONE     # 过去：有自报 → □
+    assert r["states"][date(2026, 10, 2)] == date_plan.STATE_OFF      # 过去：没自报 → ×
+    for d in (date(2026, 10, 4), date(2026, 10, 10), date(2026, 10, 15)):
+        assert r["states"][d] == date_plan.STATE_OFF                  # 今天及以后：一律 ×
+        assert r["marks"][d] == "×"
+    # 计划出勤只剩在职的乙（窗口已关 → 默认出勤）；离职的甲不算
+    assert m["plan_cnt"][date(2026, 10, 10)] == 1
+    assert m["none_cnt"][date(2026, 10, 10)] == 0                     # 也不算"未登记"
+    # 在职的人不受影响：乙没登记、窗口已关 → 浅色"默认出勤"（不是 ×，也不是 –）
+    p2 = {x["person_code"]: x for x in m["rows"]}["P2"]
+    assert p2["states"][date(2026, 10, 10)] == date_plan.STATE_ON
+    assert p2["assumed_days"][date(2026, 10, 10)] is True
+    db.close()
+
+
+def test_matrix_hides_rows_entirely_before_roster_start(client):
+    """整期都在这人入职之前（本期跟他毫无关系）→ 不显示，而不是给一整行空白。"""
+    db = appdb.SessionLocal()
+    _seed_matrix(db)
+    _hire(db, "LATER1", "10月才来的", date(2026, 10, 1))
+    m = date_plan.admin_matrix(db, "2026-09-H2", today=date(2026, 10, 1))
+    codes = [r["person_code"] for r in m["rows"]]
+    assert "LATER1" not in codes
+    assert all(date_plan.STATE_NA not in r["states"].values() for r in m["rows"])
+    db.close()

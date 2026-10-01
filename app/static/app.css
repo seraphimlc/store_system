@@ -349,6 +349,7 @@ table.plan-matrix th:nth-child(2), table.plan-matrix td:nth-child(2) { text-alig
 table.plan-matrix tbody tr:nth-child(even) { background: #fcfdff; }
 table.plan-matrix tbody tr:hover { background: #f4f8ff; }
 table.plan-matrix td:first-child { font-weight: 600; }
+table.plan-matrix tr.row-inactive td:first-child { color: var(--muted); font-weight: 500; }
 table.plan-matrix td.c { font-size: 1.02rem; font-weight: 700; min-width: 2.1em; }
 table.plan-matrix td.c.on { color: var(--ok); }
 table.plan-matrix td.c.off { color: var(--err); background: #fff7f7; }

@@ -171,6 +171,13 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   测试：`test_roster_start_takes_earliest_appearance` / `test_matrix_blanks_days_before_roster_start` /
   `test_new_hire_can_backfill_current_period` / `test_employee_page_late_join_banner_and_na_rows` /
   `test_matrix_marks_before_start_blank_in_export`。
+- **不在职（停用/离职）员工（2026-10-01 用户口径）**：不在职 = 有账号但 `can_login=False`
+  （`resigned`/`disabled`）。**本期一条数据都没有 → 不进矩阵**（过滤掉）；**有数据 → 过去按事实（□/×）、
+  今天及以后一律 ×**（`cell_state(..., inactive=True)`），且**不计入「计划出勤」/「未登记」**；
+  行名淡色 + tooltip「停用/离职：今天及以后按不出勤」。
+  另：整行都落在"入职前（`na`）"的人（这一期与他无关）也不显示。
+  测试 `test_matrix_hides_inactive_without_period_data` / `test_inactive_employee_future_days_all_off` /
+  `test_matrix_hides_rows_entirely_before_roster_start`。
 - **管理端** `/staff-plans`：行=员工（在岗/请假 ∪ 本期有登记记录的人；停用离职但登记过的不隐去）× 列=日期。
   **只有两列文字（员工、日期）——没有「登记」列、不罗列未提交人名**（2026-10-01 用户："看不动"）；
   **员工编号只显示后 5 位**（`date_plan.short_code`，2026-10-01 用户："员工编号取后5位就行"），
@@ -204,7 +211,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   回归测试 `test_resync_repairs_reports_missing_plan_rows` / `test_rebuild_reported_clears_stale_flags`。
 - **下载防连点**：导出链接带 `download` 属性 + `base.html` 对 `a[download]` 做 2 秒吞点击
   （用户 2026-10-01："一次下载了两个文件" = 双击触发两次请求，线上日志可见同端口两次 GET）。
-- 测试 `tests_web/test_date_plan.py`（65 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
+- 测试 `tests_web/test_date_plan.py`（68 项：半月划分/闰年大小月/窗口边界与间隙/写透/对齐修复/过去看事实/
   默认全出勤/新人入职补登/待填报与登录落点/弹窗与角标/窗口状态条/整行点选无 JS/矩阵无登记列与按日小计/越权/导出）；
   **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
   `test_migrations.py` 已把新表列入 schema 校验。

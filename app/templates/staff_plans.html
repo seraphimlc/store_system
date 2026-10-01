@@ -48,8 +48,8 @@
     {% endfor %}
   </tr>
   {% for r in m.rows %}
-  <tr>
-    <td title="{{ r.person_code }}">{{ r.name }}<span class="hint">（{{ r.short_code }}）</span></td>
+  <tr{% if r.inactive %} class="row-inactive"{% endif %}>
+    <td title="{{ r.person_code }}{% if r.inactive %} · {{ t('停用/离职：今天及以后按不出勤') }}{% endif %}">{{ r.name }}<span class="hint">（{{ r.short_code }}）</span></td>
     {% for d in m.days %}
     <td class="c {{ r.states[d] }}{% if r.assumed_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
         data-testid="cell-{{ r.person_code }}-{{ d }}"
