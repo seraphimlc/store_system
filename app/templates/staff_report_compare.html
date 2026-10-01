@@ -103,6 +103,16 @@
 <div class="msg warn">{{ t('AI 报告已关闭（VISIT_REPORT_AI=0）：对比数字照常可用。') }}</div>
 {% endif %}
 
+{% if res.counts.both == 0 and (res.counts.missing_report or res.counts.missing_system) %}
+<div class="msg warn" data-testid="compare-empty-reason">
+  {% if res.counts.missing_report %}
+  {{ t('这段区间只有系统侧数据、员工一条自报都没有') }}：{{ t('准确率和 AI 分析需要同一天「系统 + 自报」两边都有数据，这段区间一天都没有（员工那时还没开始自报，或忘了报）。') }}
+  {% else %}
+  {{ t('这段区间只有员工自报、系统侧还没有数据') }}：{{ t('先上传并判定巡店文件，再回来看对比。') }}
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="tbl-wrap" style="margin-bottom:1rem"><table class="grid-tbl" data-testid="compare-persons">
   <tr><th>{{ t('员工') }}</th><th>{{ t('系统合计') }}</th><th>{{ t('自报合计') }}</th>
       <th>Δ{{ t('合计') }}</th><th>Δ{{ t('1点店铺数') }}</th><th>Δ{{ t('2点店铺数') }}</th>
@@ -120,7 +130,15 @@
     <td class="num">{% if p.gaps %}<span class="pill err">{{ p.gaps }}</span>{% else %}0{% endif %}</td>
     <td style="white-space:normal;max-width:340px">{% set blk = (report.per_person or {}).get(p.person_code) %}{% if blk %}{{ blk.comment }}{% if blk.off_days %}<div class="hint">{% for o in blk.off_days %}· {{ o.date }} {{ o.note }}　{% endfor %}</div>{% endif %}{% else %}<span class="hint">—</span>{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="10" class="empty">{{ t('该区间没有可对比的数据（先上传并判定文件）') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="10" class="empty">
+    {% if res.counts.missing_report and not res.counts.missing_system %}
+    {{ t('系统侧有数据，但这段时间员工一条自报都没有（算不出准确率和 AI 分析）。') }}
+    {% elif res.counts.missing_system and not res.counts.missing_report %}
+    {{ t('有员工自报，但系统侧没有数据（先上传并判定巡店文件）。') }}
+    {% else %}
+    {{ t('该区间没有可对比的数据（先上传并判定文件）') }}
+    {% endif %}
+  </td></tr>{% endfor %}
 </table></div>
 
 <div class="page-title"><h1 style="font-size:1.05rem;margin:0">{{ t('逐日明细') }}</h1>
