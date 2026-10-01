@@ -286,25 +286,41 @@ table.plan-tbl tr.locked td { color: var(--muted); background: #fbfcfe; }
 .plan-bar .plan-legend .pm { margin-right: .15rem; }
 .pm.dim { color: #b9c1d1; font-weight: 400; }
 
-/* ---------- 员工端填报：15 天顺序表，整行点一下切换 ○↔×（纯 CSS，无 JS 也能用） ---------- */
-table.pick-tbl { font-size: .95rem; }
-table.pick-tbl td.pickcell { padding: 0; }
-.pickrow { display: flex; align-items: center; gap: .7rem; width: 100%;
-  box-sizing: border-box; padding: .62rem .7rem; cursor: pointer; user-select: none; }
+/* ---------- 员工端填报：半月顺序表，整行点一下在「可出勤 ⇄ 不出勤」之间切（纯 CSS，无 JS 也能用） ---------- */
+.plan-list { background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.pickrow { display: flex; align-items: center; gap: .8rem; padding: .7rem .85rem;
+  cursor: pointer; user-select: none; border-bottom: 1px solid #eef1f7;
+  transition: background .12s ease; }
+.plan-list > .pickrow:last-child { border-bottom: 0; }
 .pickrow:hover { background: #f6f9ff; }
-.pickrow:active { background: #eef3ff; }
+.pickrow:active { background: #eaf1ff; }
 .pickrow input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.pickrow .d { font-variant-numeric: tabular-nums; }
-.pickrow .sym::after { content: "○"; color: var(--ok); font-weight: 700;
-  font-size: 1.35rem; line-height: 1; }
-.pickrow input:checked ~ .sym::after { content: "×"; color: var(--err); }
-.pickrow .lbl { font-size: .9rem; color: var(--ok); font-weight: 600; }
-.pickrow .lbl.off { display: none; color: var(--err); }
-.pickrow input:checked ~ .lbl.on { display: none; }
-.pickrow input:checked ~ .lbl.off { display: inline; }
-.pickrow input:focus-visible ~ .sym::after { outline: 2px solid #c6d4ff;
-  outline-offset: 3px; border-radius: 3px; }
-table.pick-tbl tr.dayrow.locked td { background: #fbfcfe; color: var(--muted); }
+/* 左侧状态色条：可出勤=绿，不出勤=红（跟随勾选状态，纯兄弟选择器） */
+.pickrow .bar { width: 4px; align-self: stretch; min-height: 26px; border-radius: 3px;
+  background: var(--ok); }
+.pickrow input:checked ~ .bar { background: var(--err); }
+.pickrow .d { display: flex; flex-direction: column; line-height: 1.15;
+  font-variant-numeric: tabular-nums; }
+.pickrow .d small { color: var(--muted); font-size: .76rem; }
+/* 右侧分段选择：当前状态高亮，看起来像"两个选项里选了一个" */
+.pickrow .seg { margin-left: auto; display: inline-flex; border: 1px solid var(--line);
+  border-radius: 999px; overflow: hidden; background: #fff; }
+.pickrow .seg .opt { padding: .26rem .62rem; font-size: .85rem; color: var(--muted);
+  white-space: nowrap; }
+.pickrow input:not(:checked) ~ .seg .opt.on { background: var(--ok-bg); color: var(--ok);
+  font-weight: 700; }
+.pickrow input:checked ~ .seg .opt.off { background: var(--err-bg); color: var(--err);
+  font-weight: 700; }
+.pickrow input:focus-visible ~ .seg { outline: 2px solid #c6d4ff; outline-offset: 2px; }
+/* 只读行（已过去 / 已自报 / 窗口未开或已关） */
+.pickrow.static { cursor: default; background: #fbfcfe; color: var(--muted); }
+.pickrow.static:hover, .pickrow.static:active { background: #fbfcfe; }
+.pickrow.static .bar { background: #d8dee9; }
+.pickrow .st { margin-left: auto; display: flex; align-items: center; gap: .4rem; }
+@media (max-width: 420px) {
+  .pickrow .seg .opt { padding: .24rem .5rem; font-size: .8rem; }
+}
 
 .plan-legend { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
   font-size: .86rem; margin-top: .5rem; }

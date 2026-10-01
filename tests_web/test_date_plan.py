@@ -682,12 +682,15 @@ def test_my_plan_page_renders_three_states(client):
     db.add(StaffDailyReport(person_code="P1", report_date=date.today(),
                             p1_cnt=1, p2_cnt=0, total_cnt=1))
     db.commit()
+    date_plan.mark_reported(db, "P1", date.today())      # 自报写透（真实链路）
     db.close()
     r = client.get("/my/plan")
     assert r.status_code == 200
     assert "出勤计划" in r.text
-    assert "默认每天都出勤" in r.text
+    assert "默认每天都出勤，点一下那天就变成不出勤。" in r.text   # 一行摘要里的提示
     assert "已出勤（已自报）" in r.text
+    # 不再在"今天"那行打标记（2026-10-01 用户要求）
+    assert '<span class="pill run">' not in r.text
     assert 'data-testid="plan-form"' in r.text
     assert 'name="unavailable"' in r.text               # 可改日期有勾选框
     assert r.text.count("pm done") >= 1                 # 今天已自报 → 方框
@@ -822,9 +825,10 @@ def test_my_plan_rows_toggle_without_js(client, frozen, monkeypatch):
     # 表单区不依赖 Alpine（顶栏汉堡菜单的 x-data 在 base.html 里，与本表无关）
     form = html.split('data-testid="plan-form"')[1].split("</form>")[0]
     assert "x-model" not in form and "x-data" not in form
-    # 符号由 CSS 画：默认 ○，勾上后 ×（`.pickrow input:checked ~ .sym::after`）
-    assert ".pickrow .sym::after { content:" in open("app/static/app.css",
-                                                     encoding="utf-8").read()
+    # 分段选择的样子：当前状态高亮由 CSS 决定（纯兄弟选择器，不依赖 JS）
+    css = open("app/static/app.css", encoding="utf-8").read()
+    assert ".pickrow input:checked ~ .seg .opt.off" in css
+    assert ".pickrow input:not(:checked) ~ .seg .opt.on" in css
     # 窗口内、且本期已经开始（10-02 看 10 月上半月）→ 过去的日子不再可点
     monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 2))
     html2 = client.get("/my/plan").text
@@ -838,6 +842,7 @@ def test_my_plan_rows_toggle_without_js(client, frozen, monkeypatch):
     assert html3.count('name="unavailable"') == 14
     assert "已出勤（已自报）" in html3
     assert 'class="pm done"' in html3
+    assert 'class="pickrow static"' in html3              # 只读行用静态样式
 
 
 def test_plan_prompt_shows_window_deadline(client, frozen):
