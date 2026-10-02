@@ -240,6 +240,33 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   **路由用例用 `frozen` fixture 冻结 `date_plan.jst_today`**（否则随真实日期飘红）；
   `test_migrations.py` 已把新表列入 schema 校验。
 
+## BD 作业域（片区/派活/待扫清单，2026-10-02 起 · 分支 feat/bd-ops-layer）
+> 设计全文 `docs/specs-bd-ops-layer.md`（含决策记录与实测数据）。**只做到 P0，未上线。**
+- **硬边界（最重要）**：作业域**只新增 `bd_*` 表**，**绝不向结算域四表加列**
+  （`formal_records`/`person_daily_stats`/`month_perf_records`/`payroll_period_rows`）；
+  **结算域永不读作业域**。守门测试 `test_p0_does_not_touch_settlement_tables`。
+- **模型（P0）**：`BdArea`（行政区划基底 pref/city/ward/town，官方编码只读同步）/
+  `BdStore`（门店宇宙，`store_key` 取既有 `raw_records.store_id_raw`）。
+- **P0 已做**：① 装官方行政区划 `bd_area`（総務省 全国地方公共団体コード → 一都三県 4/212/44）；
+  ② 从 `raw_records.original_row` 提取地址/业态 → `bd_store`（30,681 家，11,011 家有地址）。
+  入口一条命令：`DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/bd_init.py`。
+- **P0 的两条关键经验**：
+  1. **`store_id_raw` 是稳定的门店主键**（一个 id → 一个店名，基本 1:1；格式 `010104709`+注册日+序号）
+     → **做门店身份用它，不必依赖 Google place_id**。
+  2. ⚠️ **源文件列布局逐文件不同（50/39/34/7 列）→ 禁止按固定下标解析**，
+     必须按内容识别（`bd_store.find_address` 就是这么写的）。
+  3. ⚠️ 総務省 Excel **第 2 表里政令市自己也占一行**，解析时必须跳过；
+     区的父级靠"市级名前缀"反推（否则 `さいたま市` 会被当成区）。
+- **术语**：原设计叫「作业网格（grid）」，**2026-10-02 用户否决**，改为「**片区 zone**」：
+  片区=天然商圈/行政块、**大小不限**、**可由多个小队共管**（防撞下沉到**门店级待扫清单**）；
+  **只有两条硬规则**（成片 + 规模 5k–8k 家），不做负载均衡强制、不做六边形、不做路径优化。
+- **产能实测（2026-10-02，查 raw_data）**：正常外勤日 P50 = **128 家/人/天**（有效记录 60 家）；
+  疑似批量补录仅 **4%** → 原"数据注水"的判断**推翻**。规划取值 **80 家/人/天**。
+- **P1 待做（阻塞）**：门店坐标化需要 Google Places —— **API key 已配到 `.env`（`VISIT_GOOGLE_MAPS_KEY`），
+  但项目未开通结算 → Places 每天仅 100 次、Geocoding 直接不可用**。⚠️ 本机访问 Google
+  **必须用 Python（读 macOS 系统代理），curl 不通**（curl 不读系统代理，要显式 `-x`）。
+- **已知未修**：缺陷清单见 `docs/问题单-已核实缺陷.md`（含 `period.py:93` 结转符号错等 6 项，均未修）。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；

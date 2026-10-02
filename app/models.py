@@ -823,3 +823,84 @@ class FormToken(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=_now, index=True)
     used_at = Column(DateTime, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# BD 作业域（bd_*）：行政区划基底 / 门店宇宙
+# 设计见 docs/specs-bd-ops-layer.md
+#
+# ⚠️ 硬边界：本域**只新增表**，绝不向结算域表（formal_records /
+#    person_daily_stats / month_perf_records / payroll_*）加列；
+#    结算域永不读取本域数据。
+# ---------------------------------------------------------------------------
+
+class BdArea(Base):
+    """行政区划基底（作業域）：都道府県 / 市区町村 / 町丁目。
+
+    官方编码，**只读同步**（来源：総務省 全国地方公共団体コード；
+    町丁目层将来可用 e-Stat 小地域补全）。不自造坐标系 ——
+    片区（bd_zone，P2 建）由本表的丁目集合构成。
+
+    - `level`：pref / city / town
+    - `code`：pref=2 位、city=6 位（全国地方公共団体コード）、town=11 位
+    - `parent_code`：上级 code（city → pref、town → city）
+    """
+    __tablename__ = "bd_area"
+    __table_args__ = (
+        UniqueConstraint("level", "code", name="uq_bd_area_level_code"),
+        Index("ix_bd_area_parent", "parent_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    level = Column(String(8), nullable=False)                # pref/city/town
+    code = Column(String(16), nullable=False)
+    name = Column(String(128), nullable=False, default="")
+    name_kana = Column(String(128), nullable=False, default="",
+                       server_default="")
+    parent_code = Column(String(16), nullable=True)
+    pref_code = Column(String(4), nullable=False, default="",
+                       server_default="")
+    city_code = Column(String(8), nullable=False, default="",
+                       server_default="")
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStore(Base):
+    """门店宇宙（作業域）：回流累积的门店主档。
+
+    ⭐ `store_key` **优先取既有 `raw_records.store_id_raw`** ——
+    实测它是稳定的门店主键（一个 id → 一个店名，基本 1:1；
+    格式 `010104709` + 注册日 + 序号）。**不必依赖 Google place_id。**
+
+    - `area_code`：所属町丁目 code（靠地址地理编码回填，可空）
+    - `last_visit_date`：**60 天冷却的判定依据**
+    - `zone_id`：所属片区（冗余；片区表 P2 再建，此处不加 FK）
+    """
+    __tablename__ = "bd_store"
+    __table_args__ = (
+        UniqueConstraint("store_key", name="uq_bd_store_key"),
+        Index("ix_bd_store_area", "area_code"),
+        Index("ix_bd_store_zone", "zone_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    store_key = Column(String(64), nullable=False)
+    name_raw = Column(Text, nullable=False, default="")
+    name_norm = Column(Text, nullable=False, default="")
+    address = Column(Text, nullable=False, default="", server_default="")
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    area_code = Column(String(16), nullable=True)
+    zone_id = Column(Integer, nullable=True)
+    place_id = Column(String(64), nullable=True)
+    gyotai = Column(String(64), nullable=False, default="", server_default="")
+    first_seen_person_code = Column(String(32), nullable=True)
+    first_seen_date = Column(Date, nullable=True)
+    last_visit_date = Column(Date, nullable=True)
+    visit_count = Column(Integer, nullable=False, default=0)
+    source = Column(String(16), nullable=False, default="import",
+                    server_default="import")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
