@@ -99,7 +99,7 @@
       <td><a href="/tasks/{{ r.task.id }}" data-testid="task-link-{{ r.task.id }}"><b>{{ r.station_name }}</b></a>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>{{ r.team_leaders|join('、') or '—' }}</td>
-      <td>{% if r.assignees %}{{ r.assignees|map(attribute='name')|join('、') }}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
+      <td>{% if r.assignees %}{% for a in r.assignees %}{{ a.name }}{% if leave_map.get(a.code) %}<span class="pill warnk" data-testid="leave-{{ r.task.id }}-{{ a.code }}" title="{{ t('休假中（至') }} {{ leave_map[a.code].end_date.strftime('%Y-%m-%d') if leave_map[a.code].end_date else t('未定') }}）">{{ t('休') }}</span>{% endif %}{{ '、' if not loop.last }}{% endfor %}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
       <td>
         {% if r.state == 'unassigned' %}<span class="pill">{{ labels.unassigned }}</span>
         {% elif r.state == 'doing' %}<span class="pill warnk">{{ labels.doing }}</span>

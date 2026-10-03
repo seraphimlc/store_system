@@ -387,10 +387,28 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   `scripts/bd_backfill_lines.py` 回填 → 本地库 **422/515 站有线路（82%）**；⚠️ 陳偉鋒队**无 PDF** → 82 站留空。
   ⑨ **仍未定**：队员能否看任务备注（现在仍只有队长/管理员可见）；车站批量导入界面（往后放）。
   迁移 `d1e2f3a4b5c6`（2 张表 + 27 行能力种子）；本地库 `create_all` + `bd_perm.seed()`。
-  测试 `tests_web/test_team_task.py` **46 项**；全量 `tests_web` **373 passed**；i18n 0 缺失 0 死键。
-- 测试 `tests_web/test_team_task.py`（**46 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
-  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**）；
-  **全量 `tests_web` 373 passed**；i18n 巡检 0 缺失 0 死键。
+  测试 `tests_web/test_team_task.py` **46 项**；全量 `tests_web` **373 passed**；i18n 0 缺失 0 死键。（第四轮后：**56 项 / 383 passed**）
+- **第四轮增量（2026-10-03 假期模式 + 派工提醒）**：
+  ① **`bd_staff_leave`（休假期）**：`end_date` 空 = 未定；**一人同时只有一条 `active`**（新开→旧的自动
+  ended 并把 end_date 收到新开始日前一天）。员工端入口 = **出勤计划页顶部「假期模式」卡片**
+  （开启/结束；结束 = 从当天起不算休假）——**不做第 5 个 tab**（H5 底栏只有 4 项，且它与出勤计划同源）。
+  ② **可用性检查唯一入口** `bd_leave.availability_map(db, codes, date)`（**页面与写端点共用**）：
+  离职/停用 → **block**；休假期覆盖该日 / `users.status=请假` / `staff_date_plans` 该日不出勤 → **warn**。
+  ③ **只提醒不阻断**（用户原话："要有提醒，但不强制约束"）：`assign_members` 返回 `warnings`，
+  队长端分派后消息追加「⚠️ 汤静：休假中（至 X）」，**分派照旧成功**；只有离职/停用仍 raise。
+  ④ **提醒看哪一天 = `max(分配日期, 今天)`**（任务没开始看开始那天；已开始/过期看今天）——
+  否则拿过期分配日期判断，提醒永远落不到点上。
+  ⑤ 候选旁边打可翻译的 `休假/计划休/请假` 标签；管理端 `/tasks` 的担当后面标「休」；
+  员工端 `/my/tasks` 有「你现在处于休假状态」横幅。
+  ⑥ ⚠️ **顺带修真问题**：`/my/plan` 原 `role != "staff"` → **队长进不去出勤计划页**（与"队长也是员工"矛盾）
+  → 改为 staff/leader 都能用，并把 `/my/leave` 加进中间件白名单。
+  ⑦ **跨域只读**：作业域**只读** `staff_date_plans`/`users`（派工提醒），**绝不写**；写只写 `bd_staff_leave`。
+  守门测试 `test_availability_reads_never_write`（可用性检查**一个表都没碰**）。
+  迁移 `a3b4c5d6e7f8`（只加一张表）；开/结束都写 `bd_log`。
+  测试 `tests_web/test_team_task.py` **56 项**；全量 `tests_web` **383 passed**。
+- 测试 `tests_web/test_team_task.py`（**56 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
+  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**/假期模式开启结束与隔离/派工提醒四态；
+  **全量 `tests_web` 383 passed**；i18n 巡检 0 缺失 0 死键。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

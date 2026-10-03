@@ -1095,3 +1095,27 @@ class BdRoleCap(Base):
                       server_default="0")
     note = Column(Text, nullable=False, default="", server_default="")
     updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStaffLeave(Base):
+    """员工自己的**假期模式**（休假期，用户 2026-10-03 要求）。
+
+    - 员工在员工端 `/my/plan` 上自己开启/结束；管理员可代改（服务层支持）
+    - `end_date` 为空 = **未定结束日**（长期休假）
+    - **一人同时只有一条 `status='active'` 的休假期**（新开一条 → 旧的自动结束）
+    - 派工只看"目标日期是否落在休假期内" → **提醒，不强制约束**（用户明确）
+    """
+    __tablename__ = "bd_staff_leave"
+    __table_args__ = (
+        Index("ix_bd_staff_leave_person", "person_code", "start_date"),
+    )
+    id = Column(Integer, primary_key=True)
+    person_code = Column(String(64), nullable=False, index=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)          # 空 = 未定
+    reason = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")        # active / ended
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)

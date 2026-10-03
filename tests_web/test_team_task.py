@@ -7,7 +7,7 @@
 管理端任务总表（分配日期区间）、队员只读、硬边界（不碰结算域）。
 """
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -858,3 +858,177 @@ def test_progress_submission_only_writes_bd_tables(client, seeded):
     bad = sorted(t for t in touched if not t.startswith("bd_"))
     assert not bad, "上报进展写了非作业域的表：%s" % bad
     db.close()
+
+
+# ---------------- 假期模式 + 派工提醒（用户 2026-10-03 要求） ----------------
+
+def test_leave_start_and_end(seeded):
+    """假期模式：开启（可留空结束日=未定）→ 休假中；结束 → **从当天起不算休假**。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    row = bd_leave.start_leave(db, "P2", today, None, "回老家", by="tangjing")
+    db.commit()
+    assert row.status == "active" and row.end_date is None
+    assert bd_leave.is_on_leave(db, "P2", today) is True
+    assert bd_leave.is_on_leave(db, "P1", today) is False
+    # 结束 → 今天起不再是休假
+    bd_leave.end_leave(db, "P2", today, by="tangjing")
+    db.commit()
+    assert bd_leave.is_on_leave(db, "P2", today) is False
+    assert bd_leave.active_leave(db, "P2") is None
+    # 历史留痕（不是删行）
+    from app.models import BdStaffLeave
+    rows = db.query(BdStaffLeave).filter(BdStaffLeave.person_code == "P2").all()
+    assert len(rows) == 1 and rows[0].status == "ended"
+    db.close()
+
+
+def test_leave_new_one_ends_previous(seeded):
+    """同一个人同时只有一条 active：新开一条 → 旧的自动结束（不出现两段重叠）。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    t = bd_leave.today()
+    bd_leave.start_leave(db, "P2", t, None, "第一次", by="x")
+    db.commit()
+    bd_leave.start_leave(db, "P2", t + timedelta(days=10), None, "第二次", by="x")
+    db.commit()
+    assert bd_leave.active_leave(db, "P2").reason == "第二次"
+    first = [r for r in bd_leave.active_map.__globals__["BdStaffLeave"].__table__.c
+             and [] or []]
+    from app.models import BdStaffLeave
+    rows = (db.query(BdStaffLeave).filter(BdStaffLeave.person_code == "P2")
+            .order_by(BdStaffLeave.id.asc()).all())
+    assert len(rows) == 2
+    assert rows[0].status == "ended" and rows[1].status == "active"
+    assert rows[0].end_date == t + timedelta(days=9)
+    db.close()
+
+
+def test_assign_warns_on_leave_but_does_not_block(seeded):
+    """**休假中派工 → 提醒但成功**（用户明确"不强制约束"）。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    bd_leave.start_leave(db, "P2", today, today + timedelta(days=3), "休假",
+                         by="tangjing")
+    db.commit()
+    r = bd_tasks.assign_members(db, seeded["task"], ["P2"], by="ogawa",
+                                on_date=today)
+    db.commit()
+    assert r["n"] == 1, "休假不阻断派工"
+    assert any("休假中" in w for w in r["warnings"]), r["warnings"]
+    assert db.query(BdTaskAssign).count() == 1
+    db.close()
+
+
+def test_assign_warns_when_plan_says_off(seeded):
+    """出勤计划说该日不出勤 → 派工时提醒（仍然成功）。"""
+    from app.models import StaffDatePlan
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    db.add(StaffDatePlan(person_code="P2", plan_date=today, available=False,
+                         reported=False, source="staff"))
+    db.commit()
+    r = bd_tasks.assign_members(db, seeded["task"], ["P2"], by="ogawa",
+                                on_date=today)
+    db.commit()
+    assert r["n"] == 1
+    assert any("不出勤" in w for w in r["warnings"]), r["warnings"]
+    db.close()
+
+
+def test_assign_no_warning_when_available(seeded):
+    """正常在岗 → 不提醒（避免狼来了）。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    r = bd_tasks.assign_members(db, seeded["task"], ["P2"], by="ogawa",
+                                on_date=today)
+    db.commit()
+    assert r["warnings"] == []
+    db.close()
+
+
+def test_availability_reads_never_write(seeded):
+    """可用性检查（派工提醒的数据源）**只读不写** —— 别在派工前顺手改计划表。"""
+    from sqlalchemy import event
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    touched = set()
+
+    def _before_flush(session, ctx, instances):
+        for o in list(session.new) + list(session.dirty) + list(session.deleted):
+            touched.add(type(o).__tablename__)
+
+    event.listen(db, "before_flush", _before_flush)
+    try:
+        bd_leave.availability_map(db, ["P1", "P2"], bd_leave.today())
+        db.rollback()
+    finally:
+        event.remove(db, "before_flush", _before_flush)
+    assert touched == set(), "可用性检查写了表：%s" % touched
+    db.close()
+
+
+def test_leader_can_use_plan_page_and_leave(client, seeded):
+    """**队长也是员工**：出勤计划页 + 假期模式对 leader 也要开放。"""
+    _login(client, "ogawa")
+    p = client.get("/my/plan")
+    assert p.status_code == 200, "队长必须能登记出勤计划"
+    assert 'data-testid="leave-card"' in p.text
+    r = _post(client, "/my/leave",
+              {"start_date": date.today().isoformat(), "end_date": "",
+               "reason": "休假"}, from_path="/my/plan")
+    assert r.status_code == 303
+    p2 = client.get("/my/plan")
+    assert 'data-testid="leave-state"' in p2.text and "休假中" in p2.text
+    # 任务页有横幅
+    assert 'data-testid="my-leave-banner"' in client.get("/my/tasks").text
+    # 结束
+    r = _post(client, "/my/leave/end", {}, from_path="/my/plan")
+    assert r.status_code == 303
+    assert "未休假" in client.get("/my/plan").text
+
+
+def test_leave_cannot_be_set_for_someone_else(client, seeded):
+    """隔离：员工只能给自己开假（表单里的 person_code 被忽略）。"""
+    from app.services import bd_leave
+    _login(client, "tangjing")
+    r = _post(client, "/my/leave",
+              {"start_date": date.today().isoformat(), "end_date": "",
+               "reason": "试", "person_code": "P1"}, from_path="/my/plan")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert bd_leave.is_on_leave(db, "P2", bd_leave.today()) is True
+    assert bd_leave.is_on_leave(db, "P1", bd_leave.today()) is False, "不能替别人开假"
+    db.close()
+
+
+def test_leader_sees_leave_tag_on_assign_picker(client, seeded):
+    """队长派工时候选旁边能看到「休假」标签（提醒，不禁止勾选）。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    bd_leave.start_leave(db, "P2", bd_leave.today(), None, "休假", by="x")
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    p = client.get("/my/tasks?tab=unassigned")
+    assert p.status_code == 200
+    assert 'data-testid="avail-%d-P2"' % seeded["task"] in p.text
+    assert "休假" in p.text
+
+
+def test_admin_board_marks_assignee_on_leave(client, seeded):
+    """管理端任务总表：担当旁边标「休」。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    bd_leave.start_leave(db, "P2", bd_leave.today(), None, "休假", by="x")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    p = client.get("/tasks")
+    assert p.status_code == 200
+    assert 'data-testid="leave-%d-P2"' % seeded["task"] in p.text

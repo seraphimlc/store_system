@@ -15,6 +15,14 @@
 {% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ err }}</div>{% endif %}
 
+{% if my_leave %}
+<div class="msg" data-testid="my-leave-banner" style="background:#fff8e6">
+  {{ t('你现在处于休假状态（') }}{{ my_leave.start_date.strftime('%m-%d') }} ~
+  {{ my_leave.end_date.strftime('%m-%d') if my_leave.end_date else t('未定') }}）·
+  <a href="/my/plan">{{ t('去出勤计划页结束休假') }}</a>
+</div>
+{% endif %}
+
 {% if is_leader %}
 {% if not teams %}
 <div class="card"><p class="empty" data-testid="no-team">{{ t('你还没被指定为队长') }}</p></div>
@@ -83,11 +91,16 @@
       <input type="hidden" name="_ft" value="{{ form_token() }}">
       <input type="hidden" name="task_id" value="{{ r.task.id }}">
       {% set cur = r.assignees|map(attribute='code')|list %}
+      {% set tdate = ((r.assign_date if r.assign_date and r.assign_date > today else today)).isoformat() %}
       {% for m in members.get(r.team_id, []) %}
-      <label class="pick" style="margin-right:.8rem">
+      {% set a = avail.get(tdate ~ '|' ~ m.person_code, {}) %}
+      <label class="pick" style="margin-right:.8rem"
+             title="{{ a.reasons|join('；') if a.reasons else '' }}">
         <input type="checkbox" name="person" value="{{ m.person_code }}"
                {% if m.person_code in cur %}checked{% endif %}>
         {{ m.display_name }}
+        {% if a.level == 'warn' %}<span class="pill warnk"
+              data-testid="avail-{{ r.task.id }}-{{ m.person_code }}">{% for tg in a.tags %}{{ avail_tags.get(tg, tg) }}{{ '·' if not loop.last }}{% endfor %}</span>{% endif %}
       </label>
       {% endfor %}
       <button class="btn ghost" type="submit">{{ t('保存分派') }}</button>

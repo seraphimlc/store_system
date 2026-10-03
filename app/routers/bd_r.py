@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.forms import require_form_token as _dep_form_token
-from app.i18n import CURRENT_LANG
+from app.i18n import CURRENT_LANG, translate as _tr
 from app.models import User
 from app.routers.auth_r import csrf_ok, require_login
 from app.templating import get_templates
@@ -361,7 +361,7 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_teams, bd_tasks
+    from app.services import bd_leave, bd_teams, bd_tasks
     try:
         team_id = int(team) if str(team).strip() else None
     except ValueError:
@@ -373,12 +373,15 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
                             date_to=_parse_date(date_to), kw=kw,
                             stale_only=bool(stale),
                             limit=limit, offset=(page - 1) * limit)
+    # 当日休假中的人（担当旁边标出来 —— 管理端一眼看到"活派给休假的人了"）
+    leave_map = bd_leave.active_map(db)
     return templates.TemplateResponse("bd_tasks.html", {
         "request": request, "current_user": user,
         "rows": d["rows"], "total": d["total"], "page": page, "limit": limit,
         "team_id": team_id, "teams": bd_teams.team_options(db),
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
         "stale": stale, "stale_days": d["stale_days"],
+        "leave_map": leave_map,
         "sum": bd_tasks.board_summary(db),
         "by_team": bd_tasks.team_board_summary(db),
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
@@ -452,15 +455,17 @@ def my_tasks_page(request: Request,
     g = _staff_guard(user)
     if g:
         return g
-    from app.services import bd_teams, bd_tasks
+    from app.services import bd_leave, bd_teams, bd_tasks
     TAB_MINE = "mine"
     is_leader = user.role == "leader"
+    jst_today = bd_leave.today()
     teams = bd_teams.leader_teams(db, user.person_code) if is_leader else []
     team_ids = [t.id for t in teams]
     my_rows = bd_tasks.member_tasks(db, user.person_code)     # 我担当的（跨队）
     my_ids = {r["task"].id for r in my_rows}
     can_report_map, can_assign_map = {}, {}
     members = {}
+    avail = {}
     if is_leader:
         all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw)
         counts = {k: sum(1 for r in all_rows if r["state"] == k)
@@ -472,10 +477,19 @@ def my_tasks_page(request: Request,
             rows = [r for r in all_rows if r["state"] == tab]
         else:
             rows = all_rows
-        for t in teams:
+        for tm in teams:      # ⚠️ 别用 `t` 做循环变量（会覆盖全局 t() 翻译函数）
             # 派工候选：有账号**且在职**（离职/停用的人执行不了，不列出来）
-            members[t.id] = [m for m in bd_teams.team_members(db, t.id)
-                             if m["has_account"] and m["can_work"]]
+            members[tm.id] = [m for m in bd_teams.team_members(db, tm.id)
+                              if m["has_account"] and m["can_work"]]
+        # 出勤计划 / 假期模式 / 请假 → 候选旁边打标签（**只提醒不阻断**）
+        all_codes = sorted({m["person_code"] for lst in members.values()
+                            for m in lst})
+        dates = sorted({(max(r["task"].assign_date, jst_today)
+                         if r["task"].assign_date else jst_today)
+                        for r in rows})
+        for d in dates:
+            for code, a in bd_leave.availability_map(db, all_codes, d).items():
+                avail["%s|%s" % (d.isoformat(), code)] = a
     else:
         rows = my_rows
         counts = {k: sum(1 for r in rows if r["state"] == k)
@@ -484,15 +498,19 @@ def my_tasks_page(request: Request,
         tid = r["task"].id
         can_report_map[tid] = bd_tasks.can_report(db, user, r["task"])
         can_assign_map[tid] = bd_tasks.can_assign(db, user, r["task"])
+    my_leave = bd_leave.current(db, user.person_code, jst_today)
     return templates.TemplateResponse("my_tasks.html", {
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
         "can_report_map": can_report_map, "can_assign_map": can_assign_map,
         "tab_mine": TAB_MINE, "my_ids": my_ids, "n_mine": len(my_rows),
+        "avail": avail, "my_leave": my_leave,
+        "avail_tags": {w: _tr(w, CURRENT_LANG.get()) for w in
+                       ("休假", "计划休", "请假", "停用", "离职", "休")},
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "max_assign": bd_tasks.MAX_ASSIGN,
-        "today": date.today(), "msg": msg, "err": err,
+        "today": jst_today, "msg": msg, "err": err,
     })
 
 
@@ -521,9 +539,12 @@ def my_tasks_assign(request: Request, task_id: int = Form(0),
         r = bd_tasks.assign_members(db, task_id, person or (), by=user.username,
                                     actor_user=user)
         db.commit()
+        msg = "已分派 %d 人" % r["n"]
+        if r.get("warnings"):
+            # 出勤计划 / 假期模式 → **提醒但不阻断**（用户 2026-10-03 口径）
+            msg += "；⚠️ " + "；".join(r["warnings"])
         return RedirectResponse(
-            "/my/tasks?tab=%s&msg=%s" % (r["state"],
-                                         _q("已分派 %d 人" % r["n"])),
+            "/my/tasks?tab=%s&msg=%s" % (r["state"], _q(msg)),
             status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()

@@ -276,7 +276,8 @@ def set_task_team(db: Session, task_ids: Sequence[int],
 
 
 def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
-                   by: str = "", actor_user=None) -> dict:
+                   by: str = "", actor_user=None,
+                   on_date: Optional[date] = None) -> dict:
     """分派担当（**≤2 人**，必须是该队现役成员）。**谁进谁出都写日志。**
 
     ⚠️ 离职/停用的人**不能**被分派（他执行不了）；历史担当记录不受影响。
@@ -310,6 +311,25 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
                 gone.append(u.display_name or u.person_code)
         if gone:
             raise TaskError("这些人已离职/停用，不能派工：%s" % "、".join(gone))
+    # 出勤计划 / 假期模式 / 请假 → **提醒但不阻断**（用户 2026-10-03 口径）
+    warn_lines: List[str] = []
+    from app.services import bd_leave
+    d = on_date
+    if d is None:
+        # 看"任务的工作日"：分配日期与今天取**较晚**者 —— 任务还没开始就看开始那天，
+        # 已经开始/分配日期已过就看今天（否则拿过期日期判断，提醒永远落不到点上）
+        _base = bd_leave.today()
+        d = max(t.assign_date, _base) if t.assign_date else _base
+    if codes:
+        av = bd_leave.availability_map(db, codes, d)
+        names = {c: n for c, n in
+                 db.query(BdTeamMember.person_code, Person.display_name)
+                 .join(Person, Person.code == BdTeamMember.person_code)
+                 .filter(BdTeamMember.person_code.in_(codes)).all()}
+        for c in codes:
+            txt = bd_leave.warn_text(av.get(c) or {}, names.get(c) or c)
+            if txt:
+                warn_lines.append(txt)
     from app.services import bd_log
     old = db.query(BdTaskAssign).filter(BdTaskAssign.task_id == task_id).all()
     old_codes = [a.person_code for a in old]
@@ -330,7 +350,7 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
         if c not in old_codes:
             bd_log.log_op(db, actor_user, "task", "assign", ref_id=t.id,
                           ref_label=label, field="assignee", old="", new=c)
-    return {"n": len(codes), "state": t.state}
+    return {"n": len(codes), "state": t.state, "warnings": warn_lines}
 
 
 def save_progress(db: Session, task_id: int, pct: int, note: str = "",

@@ -36,6 +36,8 @@ def create_app() -> FastAPI:
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
                      "/my/appeal", "/my/perf", "/my/report", "/my/plan",
+                     # 假期模式（员工自己开/结束休假；派工时只提醒不阻断）
+                     "/my/leave",
                      # 车站任务：队员看"分给我的车站"，队长在**同一页**分派 + 提交每日进展
                      # （两处写端点 `/my/tasks/assign`、`/my/tasks/progress` 由路由内做角色校验）
                      "/my/tasks",

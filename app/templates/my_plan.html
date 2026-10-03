@@ -18,6 +18,48 @@
 {% if saved %}<div class="msg ok">{{ t('已保存出勤计划') }}</div>{% endif %}
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+{# 假期模式：休假期（**派工时只提醒、不强制约束**）—— 用户 2026-10-03 要求 #}
+<div class="card" style="padding:.7rem 1rem;margin-bottom:.7rem" data-testid="leave-card">
+  <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+    <b>{{ t('假期模式') }}</b>
+    {% if on_leave %}
+    <span class="pill warnk" data-testid="leave-state">{{ t('休假中') }}</span>
+    <span class="hint">
+      {{ on_leave.start_date.strftime('%Y-%m-%d') }} ~
+      {{ on_leave.end_date.strftime('%Y-%m-%d') if on_leave.end_date else t('未定') }}
+      {% if on_leave.reason %}· {{ on_leave.reason }}{% endif %}
+    </span>
+    <span class="spacer" style="flex:1"></span>
+    <form method="post" action="/my/leave/end" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <button class="btn ghost" type="submit" data-testid="leave-end">{{ t('结束休假') }}</button>
+    </form>
+    {% else %}
+    <span class="pill" data-testid="leave-state">{{ t('未休假') }}</span>
+    <form method="post" action="/my/leave"
+          style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:0">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <label class="f">{{ t('从') }}
+        <input type="date" name="start_date" value="{{ today }}" data-testid="leave-start">
+      </label>
+      <label class="f">{{ t('到（留空=未定）') }}
+        <input type="date" name="end_date" data-testid="leave-end-date">
+      </label>
+      <label class="f">{{ t('理由') }}
+        <input type="text" name="reason" style="width:9rem" data-testid="leave-reason">
+      </label>
+      <button class="btn" type="submit" data-testid="leave-submit">{{ t('开启假期模式') }}</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="hint" style="margin:.35rem 0 0">
+    {{ t('开启后，队长/管理员派工时会看到「休假中」提醒（只是提醒，不阻止派工）。') }}
+  </p>
+</div>
+
 {% if view.window_state == 'open' and view.late_join %}
 <div class="msg ok" data-testid="window-late-join">
   {{ t('你是本期新入职的：可以补登本期到') }} <b>{{ view.end }}</b>

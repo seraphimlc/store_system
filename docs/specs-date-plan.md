@@ -159,6 +159,10 @@
 
 | 页面 | 路由 | 说明 |
 |---|---|---|
+> ⚠️ 2026-10-03：`/my/plan` 页顶新增「**假期模式**」卡片（`POST /my/leave` 开启、`POST /my/leave/end` 结束；
+> 规格见 `docs/specs-station-tasks.md` §0.4），且**队长也能用本页**（原判权 `role != "staff"` →
+> 改为 `staff`/`leader`；用户口径"队长也是员工、页面跟员工一样"）。`/my/leave` 已进中间件白名单。
+
 | 员工端·出勤计划 | `GET /my/plan?period=` | 半月表格；`POST /my/plan` 提交（303 + `?saved/err`） |
 | 管理端·日期计划 | `GET /staff-plans?period=` | 员工×日期大表格；`GET /staff-plans/export?period=` 导出 xlsx |
 
