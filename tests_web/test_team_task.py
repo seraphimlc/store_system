@@ -810,3 +810,51 @@ def test_role_capability_table_drives_judgement(client, seeded):
         assert bd_perm.allowed(db, "staff", "task.report") is False
     bd_perm.clear_cache()
     db.close()
+
+
+def test_settlement_code_never_reads_ops_domain():
+    """**口径（用户 2026-10-03）：结算域与作业域各干各的，任务完成情况不影响绩效和工资。**
+
+    源码级守门：结算域的服务/路由**不得引用**作业域的任何模块或模型
+    （列级守门见 `test_station_tasks_does_not_touch_settlement_tables`；
+    行为级守门见 `test_progress_submission_only_writes_bd_tables`）。
+    """
+    import pathlib
+    import app as app_pkg
+    root = pathlib.Path(app_pkg.__file__).parent
+    ops_names = ("bd_tasks", "bd_teams", "bd_log", "bd_perm", "bd_station",
+                 "bd_store", "bd_area", "BdTask", "BdTaskAssign",
+                 "BdTaskProgress", "BdStation", "BdTeam", "BdTeamMember",
+                 "BdLog", "BdRoleCap", "bd_r")
+    offenders = []
+    for sub in ("services", "routers"):
+        for p in sorted((root / sub).glob("*.py")):
+            if p.name.startswith("bd_"):
+                continue                      # 作业域自己的文件
+            txt = p.read_text(encoding="utf-8")
+            for kw in ops_names:
+                if kw in txt:
+                    offenders.append("%s → %s" % (p.name, kw))
+    assert not offenders, "结算域引用了作业域（违反各干各的）：%s" % offenders
+
+
+def test_progress_submission_only_writes_bd_tables(client, seeded):
+    """**行为级守门**：上报进展只写 `bd_*` 表 —— 不会顺手改绩效/工资/结算任何表。"""
+    from sqlalchemy import event
+    db = appdb.SessionLocal()
+    touched = set()
+
+    def _before_flush(session, flush_context, instances):
+        for obj in list(session.new) + list(session.dirty) + list(session.deleted):
+            touched.add(type(obj).__tablename__)
+
+    event.listen(db, "before_flush", _before_flush)
+    try:
+        bd_tasks.save_progress(db, seeded["task"], 100, "完成", by="ogawa")
+        db.rollback()
+    finally:
+        event.remove(db, "before_flush", _before_flush)
+    assert touched, "没抓到 flush，测试本身失效"
+    bad = sorted(t for t in touched if not t.startswith("bd_"))
+    assert not bad, "上报进展写了非作业域的表：%s" % bad
+    db.close()

@@ -283,9 +283,11 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 
 ## BD 作业域（片区/派活/待扫清单，2026-10-02 起 · 分支 feat/bd-ops-layer）
 > 设计全文 `docs/specs-bd-ops-layer.md`（含决策记录与实测数据）。**只做到 P0，未上线。**
-- **硬边界（最重要）**：作业域**只新增 `bd_*` 表**，**绝不向结算域四表加列**
-  （`formal_records`/`person_daily_stats`/`month_perf_records`/`payroll_period_rows`）；
-  **结算域永不读作业域**。守门测试 `test_p0_does_not_touch_settlement_tables`。
+- **硬边界（最重要）**：**结算域与作业域各干各的**（用户 2026-10-03 确认：任务完成情况**不影响绩效、不影响工资**）。
+  作业域**只新增 `bd_*` 表**，**绝不向结算域四表加列**
+  （`formal_records`/`person_daily_stats`/`month_perf_records`/`payroll_period_rows`）；**结算域永不读作业域**。
+  守门测试三档：列级 `test_station_tasks_does_not_touch_settlement_tables`、
+  源码级 `test_settlement_code_never_reads_ops_domain`、行为级 `test_progress_submission_only_writes_bd_tables`。
 - **模型（P0）**：`BdArea`（行政区划基底 pref/city/ward/town，官方编码只读同步）/
   `BdStore`（门店宇宙，`store_key` 取既有 `raw_records.store_id_raw`）。
 - **P0 已做**：① 装官方行政区划 `bd_area`（総務省 全国地方公共団体コード → 一都三県 4/212/44）；
@@ -381,14 +383,14 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   ⑥ **离职/停用不能派工**（`assign_members` 拒绝 + 派工候选不列出）；**成员记录保留**，任务**可改派**。
   ⑦ **任务名先用车站名**（不加独立字段，用户："先这样定义，后面可以改"）。
   ⑧ **线路补全做了**（用户："有就加"）：5 份执行说明 PDF 页头有线路（`XC01 · 井の頭線`）→
-  `scripts/bd_extract_lines.py` 抽 **53 线 / 576 站** → `data/bd_station_lines.json`（**运行时不需要 pypdf**）→
+  `scripts/bd_extract_lines.py` 抽 **53 线 / 576 站** → `scripts/bd_station_lines.json`（**随发布走**；运行时不需要 pypdf）→
   `scripts/bd_backfill_lines.py` 回填 → 本地库 **422/515 站有线路（82%）**；⚠️ 陳偉鋒队**无 PDF** → 82 站留空。
   ⑨ **仍未定**：队员能否看任务备注（现在仍只有队长/管理员可见）；车站批量导入界面（往后放）。
   迁移 `d1e2f3a4b5c6`（2 张表 + 27 行能力种子）；本地库 `create_all` + `bd_perm.seed()`。
-  测试 `tests_web/test_team_task.py` **44 项**；全量 `tests_web` **371 passed**；i18n 0 缺失 0 死键。
-- 测试 `tests_web/test_team_task.py`（**44 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
-  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表）；
-  **全量 `tests_web` 371 passed**；i18n 巡检 0 缺失 0 死键。
+  测试 `tests_web/test_team_task.py` **46 项**；全量 `tests_web` **373 passed**；i18n 0 缺失 0 死键。
+- 测试 `tests_web/test_team_task.py`（**46 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
+  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**）；
+  **全量 `tests_web` 373 passed**；i18n 巡检 0 缺失 0 死键。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

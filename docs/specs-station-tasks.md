@@ -80,6 +80,26 @@
 
 ---
 
+
+### 0.3 域边界（用户 2026-10-03 确认：「结算域和作业域各干各的」）
+
+| 规则 | 守门 |
+|---|---|
+| **结算域与作业域完全解耦**：任务完成情况**不影响绩效、不影响工资** | 源码级 `test_settlement_code_never_reads_ops_domain`（`app/services/*`、`app/routers/*` 里除 `bd_*` 外**不得出现** `bd_tasks/bd_teams/bd_log/bd_perm/BdTask/...`） |
+| 上报进展**只写 `bd_*` 表**（不会顺手改绩效/工资/结算任何表） | 行为级 `test_progress_submission_only_writes_bd_tables`（监听 `before_flush`，断言碰到的表名全部以 `bd_` 开头） |
+| 结算域四表**不得出现 `bd_` 列** | 列级 `test_station_tasks_does_not_touch_settlement_tables` |
+
+**唯一允许的接触点（有意为之，不是耦合）**：
+1. **身份**：共用 `persons`/`users` + `person_code` —— 同一个人既是巡店员也是队员，不建第二套人；
+2. **角色**：`users.role` 多出 `leader`（由 `bd_teams.sync_account_roles` 同步）——
+   这是作业域**唯一**允许写的共享字段（**不碰 `persons`**，也只动 `staff`/`leader`，绝不动 `admin`）；
+3. **入口**：同一个员工端 tabbar / 登录落点。
+
+> 反过来：作业域**只读** `raw_records`（仅上游 P0 的 `bd_store`，做门店宇宙），**不写**结算域任何表。
+> ⚠️ 想"让任务完成率影响工资"时必须**先改这条口径并改测试**——现在是被守门测试挡住的。
+
+---
+
 ## 1. 需求（用户原话）
 
 > 「管理员会建一系列的任务，每个任务都是一个车站。然后将一组车站分配给一个团队。
