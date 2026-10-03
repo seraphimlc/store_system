@@ -99,16 +99,46 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - 数据指纹**含逐人逐日 Δ**：只看合计的话，"同样合计换个日子" 会误判为同数据而复用旧报告。
 - Excel 导出用 `Workbook(write_only=True)` **流式写**（不在内存里保留整份工作簿）。
 - **分数与比例（2026-10-02 用户要求，纯展示、不落库）**：自报只存 1点/2点店数，
-  **分数（点数）= 1点×1 + 2点×2**、**2点比例 = 2点店数 ÷ 总店数** —— 与结算侧
-  （`perf.py` 的 `points = p1 + p2*2`）和看板 `p2rate` **完全同一口径**，一律**现算**：
-  - 员工端 `/my/report`：填报表单**实时算**（Alpine `get pts()/get rate()`，`data-testid="live-points|live-rate"`）、
-    已报回显、历史表（逐日 + 本月合计）都有；
-  - 管理端 `/staff-reports` 列表：新增「分数（点数）」「2点比例」两列；
+  **分数（点数）= 1点×1 + 2点×2**（同结算侧 `perf.py` 的 `points = p1 + p2*2`）、
+  **2点分数占比 = 2点分数 ÷ 总分数 = (2点店数×2) ÷ (1点店数 + 2点店数×2)**
+  （用户 2026-10-02 明确"我要 2 点分数占比"；⚠️ **与看板 `p2rate`（2点店数占比）不是同一个数**：
+  1点6家/2点2家 → 分数占比 40%，店数占比 25%）。算法唯一来源 `report_compare.p2_score_share()`，
+  一律**现算**：
+  - 员工端 `/my/report`：**自动算 6 个数**（2026-10-02 用户要求）——**1点分数 / 2点分数 / 总分数 /
+    总店铺数 / 2点分数占比 / 2点店铺占比**；填报表单**实时算**（Alpine 计算属性，
+    `data-testid="live-p1pts|live-p2pts|live-points|live-stores|live-rate|live-store-rate"`）、
+    已报回显、历史表（逐日 + 本月合计）都有；`daily_report.month_days()` 逐日与合计都带这 6 个字段；
+  - 管理端 `/staff-reports` 列表：新增「分数（点数）」「2点分数占比」两列；
+    **顶部是「自报汇总」模块**（`data-testid="report-summary"`；2026-10-02 用户连续三次迭代：
+    "别只显示一行"→"做成正经模块"→"**做成 8 个小块分两行**，表格看着不好看"）：
+    **两行 × 四块**（`.sum-row` + `.sum-tile`；**不写行组名**——块标签本身已说明是店铺数还是分数，
+    2026-10-02 用户："这个组名去掉，多余"）——
+    第一行「店铺数」= 1点店铺数 / 2点店铺数 / 总店铺数 / **2点店铺占比**（=2点店÷总店）；
+    第二行「分数（点数）」= 1点分数 / 2点分数 / 总分数 / **2点分数占比**（=2点分数÷总分数）；
+    两个占比块用 `.hl` 高亮 + tooltip 说明口径；卡片右侧小字是 `区间 · 第 x/y 页 · 自报条数`；
+    数值由 `reports_summary()` 一次聚合查询给出、**不受分页影响**；
     对比页 `/staff-reports/compare` 逐人新增「系统分数」「自报分数」（比例在同格 hint 里），
     逐日在「系统/自报」格子的 hint 里带分数与比例；
-  - **导出**：自报明细加「分数(点数)」「2点比例%」；对比导出（按人/逐日）加「系统分数/自报分数/比例」。
-  - 实现位置：`report_compare.points_of()/p2_rate()`（唯一算法来源）、`_row_dict()`、`compare()`、
+  - **导出**：自报明细加「分数(点数)」「2点分数占比%」；对比导出（按人/逐日）加「系统分数/自报分数/占比」。
+  - 实现位置：`report_compare.points_of()/p2_score_share()`（唯一算法来源）、`_row_dict()`、`compare()`、
+    `reports_summary()`、
     `daily_report.month_days()`、`report_export.py`。测试 `test_points_and_rate_helpers` 等 4 项。
+- **员工下拉 = 可搜索 combobox（2026-10-02 用户要求）**：`app/static/emp_select.js`
+  （原生 JS、零依赖，`base.html` 全局引入）——给 `<select data-emp-filter>` 包成 combobox：
+  **点开面板里自带搜索框，输入即过滤**（用户第一版反馈："为什么不是下拉框弹出的时候可以输入内容？
+  你这样做还不如不做"→ **不要**在 select 上面另加一个输入框）。
+  - 原 `<select>` 留在 DOM 里但 `display:none`（`.emp-cb-native`）——**表单提交值 / htmx / onchange 全部不变**；
+    可见部分 = 按钮（显示当前项）+ 面板（搜索框 + 选项列表）；
+  - 匹配：**编号后 5 位**（选项文本含完整编号，子串即命中）、**姓名任一个字**，查询串 **NFKC 归一**；
+  - 键盘：↑/↓ 移动、Enter 选中、Esc 关闭、点面板外关闭；选中后**派发 `change`**（看板那种"change 即加载"直接出结果）；
+  - 无匹配显示「无匹配」；htmx 局部替换后自动重挂。
+  已挂 4 处：`/staff-reports`（筛选 + 补录卡片）、`/staff-reports/compare` 筛选、`/dashboard` 员工维度。
+  新增员工下拉时**记得加 `data-emp-filter`**；测试 `test_employee_selects_have_filter`（含 combobox 结构断言）。
+- **员工管理页不再展示 MCP Token（2026-10-02 用户："这块没有用，隐藏掉"）**：
+  整列（前缀/scope/状态/代发/吊销）已从 `/staff-admin` 移除，页面也不再查 token（省 N 次查询）；
+  **端点 `/{uid}/tokens/issue|revoke` 与 `mcp_service` 全部保留**（脚本/测试仍可用），
+  一次性"新 Token 已生成"提示也保留（只有直接 POST 该端点才会出现）。
+  自报页的**「漏填汇总」卡片同日一并去掉**（服务层 `report_compare.missing_summary()` 保留，MCP 可调用）。
 - **员工管理页编辑方式（2026-10-01 用户要求）**：`/staff-admin` 每行只留一个「编辑」按钮 →
   打开**原生 `<dialog>` 弹窗**（不依赖脚本库），里面改**姓名 / 登录名 / 状态 / 界面语言 / 重置口令**
   （`POST /staff-admin/{uid}/edit`，服务层 `staff_accounts.update_staff`）。

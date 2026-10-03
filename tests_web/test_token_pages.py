@@ -133,12 +133,11 @@ def test_admin_issue_revoke_for_staff(client):
     # 明文只显示一次（管理员页）
     page = client.get(r.headers["location"]).text
     assert raw in page
-    # 员工 token 列表可见（前缀/scope/状态）
+    # 2026-10-02 用户要求：**员工管理页不再展示 MCP Token 列表**（"这块没有用，隐藏掉"）
     page2 = client.get("/staff-admin").text
-    assert raw[:8] in page2
-    assert "read,write" in page2
-    assert "有效" in page2
-    assert raw not in page2
+    assert raw not in page2          # 明文永远不出现
+    assert raw[:8] not in page2      # 前缀也不展示了
+    assert "MCP Token" not in page2
     # 管理员永久签发 → expires_at 为空
     rows = _token_rows("emp1")
     assert len(rows) == 1
@@ -151,9 +150,11 @@ def test_admin_issue_revoke_for_staff(client):
     assert r.status_code == 303
     rows = _token_rows("emp1")
     assert rows[0].revoked_at is not None
-    # 吊销后状态显示
+    # 吊销后：页面**不展示** token 状态（列已隐藏），DB 里的状态照旧校验
     page3 = client.get("/staff-admin").text
-    assert "已吊销" in page3
+    assert "已吊销" not in page3 and "MCP Token" not in page3
+    revoked = _token_rows("emp1")[0]
+    assert revoked.revoked_at is not None
 
 
 # ---------- 员工状态变更 → 页面提示 token 失效/恢复 ----------
@@ -172,9 +173,10 @@ def test_staff_status_change_token_invalidation_hint(client):
                     follow_redirects=False)
     assert r.status_code == 303
     assert "token 已随之失效" in unquote(r.headers["location"])
+    # 提示只出现在跳转消息里（页面上那列已隐藏）
     page = client.get("/staff-admin").text
-    assert "该员工 token 已随之失效" in page
-    assert "随员工状态失效" in page
+    assert "该员工 token 已随之失效" not in page
+    assert "MCP Token" not in page
     # 改回在岗 → 提示恢复
     csrf = _csrf_of(client, "/staff-admin")
     r = client.post(f"/staff-admin/{uid}/status",
@@ -182,7 +184,7 @@ def test_staff_status_change_token_invalidation_hint(client):
                     follow_redirects=False)
     assert "token 已恢复有效" in unquote(r.headers["location"])
     page = client.get("/staff-admin").text
-    assert "有效" in page
+    assert "MCP Token" not in page          # 页面不再展示 token 列（消息里有提示即可）
 
 
 

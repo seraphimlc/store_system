@@ -10,7 +10,7 @@
     <label class="fld">{{ t('起') }}<input type="date" name="start" value="{{ start }}"></label>
     <label class="fld">{{ t('止') }}<input type="date" name="end" value="{{ end }}"></label>
     <label class="fld">{{ t('员工') }}
-      <select name="person_code">
+      <select name="person_code" data-emp-filter>
         <option value="">{{ t('全部') }}</option>
         {% for s in staff_opts %}
         <option value="{{ s.code }}" {% if s.code == person_code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
@@ -34,7 +34,8 @@
     <input type="hidden" name="end" value="{{ end }}">
     <table class="kv">
       <tr><th><label for="ed_person">{{ t('员工') }}</label></th>
-          <td><select name="person_code" id="ed_person">
+          <td><select name="person_code" id="ed_person" data-emp-filter
+                      data-emp-filter-hint="{{ t('输入编号后5位 或 姓名一个字') }}">
             <option value="">{{ t('请选择员工') }}</option>
             {% for s in staff_opts %}
             <option value="{{ s.code }}" {% if edit_row and edit_row.person_code == s.code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
@@ -59,36 +60,33 @@
   </form>
 </div>
 
-<div class="stat-grid" style="margin-bottom:.8rem">
-  <div class="stat-card"><p class="k">{{ t('自报条数') }}</p><p class="v">{{ data.total }}</p></div>
-  <div class="stat-card"><p class="k">{{ t('区间') }}</p><p class="v" style="font-size:1rem">{{ start }} ～ {{ end }}</p></div>
-  <div class="stat-card"><p class="k">{{ t('页') }}</p><p class="v">{{ data.page }} / {{ data.pages }}</p></div>
+{# 自报汇总模块（2026-10-02 用户："做成一个正经的模块，别就只显示一行"） #}
+<div class="card" data-testid="report-summary" style="margin-bottom:.8rem">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap">
+    <h2 style="font-size:1rem;margin:0">{{ t('自报汇总') }}</h2>
+    <span class="hint">{{ start }} ～ {{ end }} · {{ data.page }} / {{ data.pages }} {{ t('页') }}
+      · {{ t('自报条数') }} {{ rep_sum.count }}</span>
+  </div>
+  <div class="sum-row">
+    <div class="sum-tile" data-testid="sum-stores-p1"><span class="k">{{ t('1点店铺数') }}</span><b class="v">{{ rep_sum.p1 }}</b></div>
+    <div class="sum-tile" data-testid="sum-stores-p2"><span class="k">{{ t('2点店铺数') }}</span><b class="v">{{ rep_sum.p2 }}</b></div>
+    <div class="sum-tile" data-testid="sum-stores"><span class="k">{{ t('总店铺数') }}</span><b class="v">{{ rep_sum.stores }}</b></div>
+    <div class="sum-tile hl" data-testid="sum-store-rate" title="{{ t('该行合计里 2 点占多少：店铺数行=2点店÷总店；分数行=2点分数÷总分数') }}">
+      <span class="k">{{ t('2点店铺占比') }}</span><b class="v">{{ '%.1f%%' % (rep_sum.store_rate * 100) if rep_sum.store_rate is not none else '—' }}</b></div>
+  </div>
+  <div class="sum-row">
+    <div class="sum-tile" data-testid="sum-points-p1"><span class="k">{{ t('1点分数') }}</span><b class="v">{{ rep_sum.p1_points }}</b></div>
+    <div class="sum-tile" data-testid="sum-points-p2"><span class="k">{{ t('2点分数') }}</span><b class="v">{{ rep_sum.p2_points }}</b></div>
+    <div class="sum-tile" data-testid="sum-points"><span class="k">{{ t('总分数') }}</span><b class="v">{{ '{:,}'.format(rep_sum.points) }}</b></div>
+    <div class="sum-tile hl" data-testid="sum-rate" title="{{ t('该行合计里 2 点占多少：店铺数行=2点店÷总店；分数行=2点分数÷总分数') }}">
+      <span class="k">{{ t('2点分数占比') }}</span><b class="v">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</b></div>
+  </div>
 </div>
-
-{% if missing %}
-<div class="card" style="margin-bottom:.8rem">
-  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('漏填汇总') }}</h2>
-  <div class="tbl-wrap"><table class="grid-tbl" data-testid="missing-table">
-    <tr><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('应填天数') }}</th>
-        <th>{{ t('实填天数') }}</th><th>{{ t('漏填天数') }}</th><th>{{ t('漏填日期') }}</th></tr>
-    {% for m in missing if m.gaps %}
-    <tr>
-      <td>{{ m.name }}</td>
-      <td class="hint">{{ m.person_code }}</td>
-      <td class="num">{{ m.days_system }}</td>
-      <td class="num">{{ m.days_filled }}</td>
-      <td class="num" style="color:var(--warn);font-weight:650">{{ m.gaps }}</td>
-      <td class="hint">{% for d in m.dates[:8] %}{{ d }}　{% endfor %}{% if m.dates|length > 8 %}…{% endif %}</td>
-    </tr>
-    {% else %}<tr><td colspan="6" class="empty">{{ t('该区间没有漏填') }}</td></tr>{% endfor %}
-  </table></div>
-</div>
-{% endif %}
 
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">
   <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('担当区域') }}</th>
       <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th>
-      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点比例') }}</th>
+      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点分数占比') }}</th>
       <th>{{ t('提交时间') }}</th><th>{{ t('操作') }}</th></tr>
   {% for r in data.rows %}
   <tr>

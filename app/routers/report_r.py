@@ -259,14 +259,17 @@ def staff_reports_page(request: Request,
     names = dict(db.query(Person.code, Person.display_name).all())
     locked = {r["date"] for r in data["rows"]
               if daily_report.is_locked(db, r["date"])}
-    missing = report_compare.missing_summary(db, s, e)
+    # 「漏填汇总」卡片已按用户要求去掉（2026-10-02）；服务层 missing_summary() 保留，
+    # MCP/脚本仍可调用。
+    rep_sum = report_compare.reports_summary(db, start=s, end=e,
+                                             person_code=person_code)
     return templates.TemplateResponse("staff_reports.html", {
         "request": request, "current_user": user, "data": data,
         "start": s, "end": e, "person_code": person_code,
         "names": names, "staff_opts": _staff_options(db), "msg": msg, "err": err,
         "jst_delta": timedelta(hours=9),
         "cov_end": daily_report.coverage_end(db), "locked_dates": locked,
-        "missing": missing,
+        "rep_sum": rep_sum,
         "edit_row": _edit_row(db, person_code, edit_date),
     })
 

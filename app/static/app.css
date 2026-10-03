@@ -92,6 +92,42 @@ main.wrap { max-width: 1180px; margin: 0 auto; padding: 1.4rem 1.5rem 3rem; }
 @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 460px) { .stat-grid { grid-template-columns: 1fr; } }
 
+/* 自报汇总：8 个小块分两行（店铺数 / 分数，每行最后一块是那行的 2 点占比） */
+.sum-row { display: flex; align-items: stretch; gap: .5rem; flex-wrap: wrap;
+  margin-top: .5rem; }
+.sum-row + .sum-row { margin-top: .45rem; }
+.sum-tile { flex: 1 1 6.2rem; min-width: 6.2rem; display: flex; flex-direction: column;
+  gap: .1rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 10px;
+  background: #f8fafd; }
+.sum-tile .k { font-size: .76rem; color: var(--muted); line-height: 1.25; }
+.sum-tile .v { font-size: 1.22rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  line-height: 1.15; }
+.sum-tile.hl { background: #f1f6ff; border-color: #d8e4fb; }
+.sum-tile.hl .v { color: var(--brand); }
+@media (max-width: 640px) { .sum-tile { flex: 1 1 45%; } }   /* 窄屏两列 */
+
+/* 员工下拉：可搜索 combobox（emp_select.js）——点开即可输入 */
+.emp-cb { position: relative; display: inline-block; min-width: 12rem; max-width: 100%; }
+.emp-cb-native { display: none; }                 /* 原 select 只作为值的载体，提交/htmx 不变 */
+.emp-cb-btn { width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: .4rem; padding: .3rem .5rem; font-size: .92rem; color: var(--ink); background: #fff;
+  border: 1px solid var(--line); border-radius: 8px; cursor: pointer; text-align: left; }
+.emp-cb-btn:hover { border-color: #c9d6ee; }
+.emp-cb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emp-cb-caret { color: var(--muted); font-size: .78rem; flex: none; }
+.emp-cb-panel { position: absolute; z-index: 45; top: calc(100% + 2px); left: 0; min-width: 100%;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: .35rem;
+  box-shadow: 0 12px 28px rgba(15, 25, 50, .18); }
+.emp-cb-search { width: 100%; padding: .28rem .45rem; font-size: .88rem; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 7px; margin-bottom: .25rem; }
+.emp-cb-search:focus { outline: 2px solid #c6d4ff; outline-offset: 0; }
+.emp-cb-list { max-height: 15rem; overflow: auto; }
+.emp-cb-item { padding: .3rem .45rem; font-size: .9rem; border-radius: 6px; cursor: pointer;
+  white-space: nowrap; }
+.emp-cb-item.is-hi { background: #eef3ff; }
+.emp-cb-item.is-cur { font-weight: 650; color: var(--brand); }
+.emp-cb-none { padding: .45rem; font-size: .85rem; color: var(--muted); }
+
 /* 按钮/表单 */
 .btn { display: inline-block; background: var(--brand); color: #fff; border: 0;
   border-radius: 7px; padding: .5rem 1rem; font-size: .92rem; cursor: pointer;

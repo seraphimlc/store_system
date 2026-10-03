@@ -15,10 +15,20 @@ def points_of(p1: int, p2: int) -> int:
     return (p1 or 0) + (p2 or 0) * 2
 
 
-def p2_rate(p1: int, p2: int):
-    """**比例 = 2点店数 ÷ 总店数**（与看板 `p2rate` 同一口径）；没有店 → None。"""
-    total = (p1 or 0) + (p2 or 0)
-    return ((p2 or 0) / total) if total else None
+def p2_score_share(p1: int, p2: int):
+    """**比例 = 2点分数 ÷ 总分数**（用户 2026-10-02 明确口径）。
+
+    分数（点数）= 1点×1 + 2点×2，所以
+    `2点分数占比 = (2点店数×2) ÷ (1点店数×1 + 2点店数×2)`；
+    没有任何店（总分数 0）→ None（页面显示 —）。
+    ⚠️ 与看板 `p2rate`（2点**店数**占比）**不是**同一个数：如 1点6家/2点2家 → 本函数 40%，店数口径 25%。
+    """
+    pts = points_of(p1, p2)
+    return ((p2 or 0) * 2 / pts) if pts else None
+
+
+# 兼容旧名字（历史脚本/调用方）
+p2_rate = p2_score_share
 
 
 def _acc(abs_sum: int, sys_sum: int):
@@ -191,6 +201,34 @@ KIND_MISSING_REPORT = "missing_report"   # 系统有、员工没报 → 漏填�
 
 
 KIND_MISSING_SYSTEM = "missing_system"   # 员工报了、系统没有 → 自报无系统记录
+
+
+def reports_summary(db, *, start=None, end=None, person_code: str = "") -> dict:
+    """区间自报汇总（现算，不落库）：条数 / 总点数（=分数）/ 2点比例 / 1点2点明细。
+
+    口径与 `points_of()` / `p2_rate()` 完全一致（分数 = 1点×1 + 2点×2；比例 = 2点店数÷总店数）。
+    统计卡用；不受列表分页影响（直接聚合整段区间）。
+    """
+    from sqlalchemy import func
+    q = db.query(func.count(StaffDailyReport.id),
+                 func.coalesce(func.sum(StaffDailyReport.p1_cnt), 0),
+                 func.coalesce(func.sum(StaffDailyReport.p2_cnt), 0))
+    if start:
+        q = q.filter(StaffDailyReport.report_date >= start)
+    if end:
+        q = q.filter(StaffDailyReport.report_date <= end)
+    if person_code:
+        q = q.filter(StaffDailyReport.person_code == person_code)
+    cnt, p1, p2 = q.one()
+    p1, p2 = int(p1 or 0), int(p2 or 0)
+    total_stores = p1 + p2
+    return {"count": int(cnt or 0), "p1": p1, "p2": p2,
+            "stores": total_stores,
+            "p1_points": p1,                 # 1点总分数（1点店每家 1 分）
+            "p2_points": p2 * 2,             # 2点总分数（2点店每家 2 分）
+            "points": points_of(p1, p2),     # 总分数
+            "store_rate": (p2 / total_stores) if total_stores else None,  # 2点店铺数占比
+            "rate": p2_score_share(p1, p2)}  # 2点分数占比
 
 
 def _row_dict(r: StaffDailyReport) -> dict:

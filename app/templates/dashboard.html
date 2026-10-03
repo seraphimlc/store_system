@@ -122,7 +122,7 @@
 <div class="card">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('员工维度分析') }}</h2>
   <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem">
-    <select name="staff" hx-get="/dashboard/staff" hx-target="#staffModule"
+    <select name="staff" data-emp-filter hx-get="/dashboard/staff" hx-target="#staffModule"
             hx-swap="innerHTML" hx-trigger="change"
             style="min-width:16rem">
       <option value="">— {{ t('选择员工') }}—</option>
