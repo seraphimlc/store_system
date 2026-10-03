@@ -1116,8 +1116,9 @@ def test_reports_summary_and_cards(client):
     _seed_admin_staff_and_data(client)          # P1：9/16 = 4点1点/2点2家；9/17 = 2点1点/0
     db = appdb.SessionLocal()
     s = report_compare.reports_summary(db, start="2026-09-16", end="2026-09-17")
-    assert s == {"count": 2, "p1": 6, "p2": 2, "stores": 8, "points": 10,
-                 "rate": 0.4}
+    assert s == {"count": 2, "p1": 6, "p2": 2, "stores": 8,
+                 "p1_points": 6, "p2_points": 4, "points": 10,
+                 "store_rate": 0.25, "rate": 0.4}
     # 单人工/日筛选也走同一口径
     one = report_compare.reports_summary(db, start="2026-09-16", end="2026-09-16")
     assert one["count"] == 1 and one["points"] == 8
@@ -1125,9 +1126,14 @@ def test_reports_summary_and_cards(client):
     db.close()
     _login_admin(client)
     h = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
-    # 汇总压成一行（2026-10-02 用户："那几个汇总的数据模块太丑了"）
-    assert 'data-testid="report-summary-bar"' in h
-    assert 'data-testid="sum-count">2<' in h                # 条数
-    assert 'data-testid="sum-points">10<' in h              # 4+2*2 + 2 = 10
-    assert 'data-testid="sum-rate">40.0%<' in h             # 2点分数 4 / 总分数 10
+    # 自报汇总模块（2026-10-02 用户："做成一个正经的模块"）：7 个数字都在
+    assert 'data-testid="report-summary"' in h
+    assert 'data-testid="sum-stores-p1">6<' in h            # 1点店铺数
+    assert 'data-testid="sum-stores-p2">2<' in h            # 2点店铺数
+    assert 'data-testid="sum-stores">8<' in h               # 总店铺数
+    assert 'data-testid="sum-points-p1">6<' in h            # 1点总分数
+    assert 'data-testid="sum-points-p2">4<' in h            # 2点总分数
+    assert 'data-testid="sum-points">10<' in h              # 总分数
+    assert 'data-testid="sum-store-rate">25.0%<' in h       # 2点店铺数占比 2/8
+    assert 'data-testid="sum-rate">40.0%<' in h             # 2点分数占比 4/10
     assert 'class="stat-grid"' not in h.split('data-testid="reports-table"')[0]

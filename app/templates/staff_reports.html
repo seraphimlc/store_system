@@ -59,20 +59,38 @@
   </form>
 </div>
 
-{# 汇总压成一行（原来 5 张卡片，又高又空；2026-10-02 用户："那几个汇总的数据模块太丑了"） #}
-<div class="plan-bar" data-testid="report-summary-bar" style="margin:.1rem 0 .7rem">
-  <span class="plan-meta">
-    {{ t('自报条数') }} <b data-testid="sum-count">{{ rep_sum.count }}</b>
-    · {{ t('1点') }} <b>{{ rep_sum.p1 }}</b> / {{ t('2点') }} <b>{{ rep_sum.p2 }}</b>
-    · {{ t('总点数（分数）') }} <b data-testid="sum-points">{{ '{:,}'.format(rep_sum.points) }}</b>
-    · {{ t('2点分数占比') }}
-    <b data-testid="sum-rate">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</b>
-    <span class="hint">（{{ rep_sum.p2 * 2 }} / {{ rep_sum.points }}）</span>
-  </span>
-  <span class="plan-meta" style="margin-left:auto">{{ t('区间') }} <b>{{ start }} ～ {{ end }}</b>
-    · {{ data.page }} / {{ data.pages }} {{ t('页') }}</span>
+{# 自报汇总模块（2026-10-02 用户："做成一个正经的模块，别就只显示一行"） #}
+<div class="card" data-testid="report-summary" style="margin-bottom:.8rem">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap">
+    <h2 style="font-size:1rem;margin:0">{{ t('自报汇总') }}</h2>
+    <span class="hint">{{ start }} ～ {{ end }} · {{ data.page }} / {{ data.pages }} {{ t('页') }}
+      · {{ t('自报条数') }} {{ rep_sum.count }}</span>
+  </div>
+  <table class="grid-tbl" style="margin-top:.5rem">
+    <tr><th style="text-align:left"></th>
+        <th>{{ t('1点') }}</th><th>{{ t('2点') }}</th><th>{{ t('合计') }}</th></tr>
+    <tr>
+      <th style="text-align:left;font-weight:600">{{ t('店铺数') }}</th>
+      <td class="num" data-testid="sum-stores-p1">{{ rep_sum.p1 }}</td>
+      <td class="num" data-testid="sum-stores-p2">{{ rep_sum.p2 }}</td>
+      <td class="num"><b data-testid="sum-stores">{{ rep_sum.stores }}</b></td>
+    </tr>
+    <tr>
+      <th style="text-align:left;font-weight:600">{{ t('分数（点数）') }}</th>
+      <td class="num" data-testid="sum-points-p1">{{ rep_sum.p1_points }}</td>
+      <td class="num" data-testid="sum-points-p2">{{ rep_sum.p2_points }}</td>
+      <td class="num"><b data-testid="sum-points">{{ '{:,}'.format(rep_sum.points) }}</b></td>
+    </tr>
+    <tr class="totals">
+      <td colspan="3" style="text-align:left">{{ t('2点店铺数占比') }}</td>
+      <td class="num" data-testid="sum-store-rate">{{ '%.1f%%' % (rep_sum.store_rate * 100) if rep_sum.store_rate is not none else '—' }}</td>
+    </tr>
+    <tr class="totals">
+      <td colspan="3" style="text-align:left">{{ t('2点分数占比') }}</td>
+      <td class="num" data-testid="sum-rate">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</td>
+    </tr>
+  </table>
 </div>
-
 
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">
   <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('担当区域') }}</th>

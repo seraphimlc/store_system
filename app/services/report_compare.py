@@ -221,9 +221,14 @@ def reports_summary(db, *, start=None, end=None, person_code: str = "") -> dict:
         q = q.filter(StaffDailyReport.person_code == person_code)
     cnt, p1, p2 = q.one()
     p1, p2 = int(p1 or 0), int(p2 or 0)
+    total_stores = p1 + p2
     return {"count": int(cnt or 0), "p1": p1, "p2": p2,
-            "stores": p1 + p2, "points": points_of(p1, p2),
-            "rate": p2_rate(p1, p2)}
+            "stores": total_stores,
+            "p1_points": p1,                 # 1点总分数（1点店每家 1 分）
+            "p2_points": p2 * 2,             # 2点总分数（2点店每家 2 分）
+            "points": points_of(p1, p2),     # 总分数
+            "store_rate": (p2 / total_stores) if total_stores else None,  # 2点店铺数占比
+            "rate": p2_score_share(p1, p2)}  # 2点分数占比
 
 
 def _row_dict(r: StaffDailyReport) -> dict:
