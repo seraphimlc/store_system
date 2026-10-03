@@ -49,10 +49,12 @@ def reports_xlsx(db, start, end, person_code: str = ""):
     wb = Workbook(write_only=True)
     _write_sheet(wb, "自报明细",
                  ["日期", "员工编号", "姓名", "担当区域", "1点店铺数", "2点店铺数",
-                  "合计", "提交时间(UTC)", "来源"],
+                  "合计", "分数(点数)", "2点比例%", "提交时间(UTC)", "来源"],
                  ([str(r["date"]), r["person_code"],
                    names.get(r["person_code"], ""), r["area"], r["p1"], r["p2"],
-                   r["total"], str(r["submitted_at"] or ""), r["source"]]
+                   r["total"], r["points"],
+                   "—" if r["rate"] is None else round(r["rate"] * 100, 1),
+                   str(r["submitted_at"] or ""), r["source"]]
                   for r in data["rows"]))
     return _save(wb), "staff_reports_%s_%s.xlsx" % (start, end)
 
@@ -64,10 +66,15 @@ def compare_xlsx(db, start, end, person_code: str = ""):
     wb = Workbook(write_only=True)
     _write_sheet(wb, "对比(按人)",
                  ["员工编号", "姓名", "系统1点", "系统2点", "系统合计",
-                  "自报1点", "自报2点", "自报合计", "Δ1点", "Δ2点", "Δ合计",
+                  "系统分数", "系统2点比例%",
+                  "自报1点", "自报2点", "自报合计", "自报分数", "自报2点比例%",
+                  "Δ1点", "Δ2点", "Δ合计",
                   "准确率%", "已报天数", "系统天数", "应填未填"],
                  ([p["person_code"], p["name"], p["sys_p1"], p["sys_p2"],
-                   p["sys_total"], p["rep_p1"], p["rep_p2"], p["rep_total"],
+                   p["sys_total"], p["sys_points"],
+                   "—" if p["sys_rate"] is None else round(p["sys_rate"] * 100, 1),
+                   p["rep_p1"], p["rep_p2"], p["rep_total"], p["rep_points"],
+                   "—" if p["rep_rate"] is None else round(p["rep_rate"] * 100, 1),
                    p["d1"], p["d2"], p["d_total"],
                    "—" if p["acc"] is None else round(p["acc"] * 100, 1),
                    p["days_filled"], p["days_system"], p["gaps"]]
@@ -76,11 +83,12 @@ def compare_xlsx(db, start, end, person_code: str = ""):
                   "missing_system": "自报有/系统无"}
     _write_sheet(wb, "对比(逐日)",
                  ["日期", "员工编号", "姓名", "类型", "系统1点", "系统2点",
-                  "系统合计", "自报1点", "自报2点", "自报合计", "Δ合计", "单日准确率%"],
+                  "系统合计", "系统分数", "自报1点", "自报2点", "自报合计", "自报分数",
+                  "Δ合计", "单日准确率%"],
                  ([str(r["date"]), r["person_code"], r["name"],
                    kind_label.get(r["kind"], r["kind"]),
-                   r["sys_p1"], r["sys_p2"], r["sys_total"],
-                   r["rep_p1"], r["rep_p2"], r["rep_total"], r["dt"],
+                   r["sys_p1"], r["sys_p2"], r["sys_total"], r["sys_points"],
+                   r["rep_p1"], r["rep_p2"], r["rep_total"], r["rep_points"], r["dt"],
                    "—" if r.get("acc") is None else round(r["acc"] * 100, 1)]
                   for r in res["daily"]))
     s = res["summary"]

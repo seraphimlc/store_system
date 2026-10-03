@@ -241,8 +241,11 @@ def month_days(db, person_code: str, month: str = "", *,
     """**本月逐日视图**：1 号到「今天或月末」，**缺填报的日子留空行**。
 
     员工要能看到"哪天没有数据"，所以这里不做"只列有记录的天"。
-    返回：{month, days:[{date, wd, empty, future, area, p1, p2, total}], filled,
-          visible_days(整月天数), p1, p2, total}
+    返回：{month, days:[{date, wd, empty, future, area, p1, p2, total, points, rate}], filled,
+          visible_days(整月天数), p1, p2, total, points, rate}
+
+    `points`（分数=点数=1点×1+2点×2）与 `rate`（2点比例=2点店数÷总店数）都是**现算**，
+    不落库（2026-10-02 用户要求；口径与结算侧 `perf.py` / 看板 `p2rate` 完全一致）。
     """
     today = today or jst_today()
     if not month:
@@ -265,20 +268,28 @@ def month_days(db, person_code: str, month: str = "", *,
         future = False
         if r is not None:
             filled += 1
+            p1, p2 = r.p1_cnt or 0, r.p2_cnt or 0
+            _t = p1 + p2
             days.append({"date": d, "wd": d.weekday(), "empty": False,
-                         "future": future, "area": r.area or "", "p1": r.p1_cnt,
-                         "p2": r.p2_cnt, "total": r.total_cnt,
+                         "future": future, "area": r.area or "", "p1": p1,
+                         "p2": p2, "total": r.total_cnt,
+                         "points": p1 + p2 * 2,
+                         "rate": (p2 / _t) if _t else None,
                          "submitted_at": r.submitted_at})
         else:
             days.append({"date": d, "wd": d.weekday(), "empty": True,
                          "future": future, "area": "", "p1": 0, "p2": 0,
-                         "total": 0, "submitted_at": None})
+                         "total": 0, "points": 0, "rate": None,
+                         "submitted_at": None})
         d += timedelta(days=1)
+    sp1 = sum(x["p1"] for x in days)
+    sp2 = sum(x["p2"] for x in days)
     return {"month": month, "days": days, "filled": filled,
             "visible_days": len(days),
-            "p1": sum(x["p1"] for x in days),
-            "p2": sum(x["p2"] for x in days),
-            "total": sum(x["total"] for x in days)}
+            "p1": sp1, "p2": sp2,
+            "total": sum(x["total"] for x in days),
+            "points": sp1 + sp2 * 2,
+            "rate": (sp2 / (sp1 + sp2)) if (sp1 + sp2) else None}
 
 
 def my_months(db, person_code: str) -> list:

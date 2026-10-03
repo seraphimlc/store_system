@@ -8,15 +8,28 @@
 {% set _p1 = existing.p1_cnt if existing else 0 %}
 {% set _p2 = existing.p2_cnt if existing else 0 %}
 <div class="card" data-testid="today-card"
-     x-data="{ edit: {{ 'false' if existing else 'true' }}, p1: '{{ _p1 }}', p2: '{{ _p2 }}' }">
+     x-data="{ edit: {{ 'false' if existing else 'true' }}, p1: '{{ _p1 }}', p2: '{{ _p2 }}',
+               get pts() { return (parseInt(this.p1 || 0, 10) || 0)
+                                  + (parseInt(this.p2 || 0, 10) || 0) * 2 },
+               get rate() { const a = parseInt(this.p1 || 0, 10) || 0;
+                            const b = parseInt(this.p2 || 0, 10) || 0;
+                            const t = a + b;
+                            return t ? (b * 100 / t).toFixed(1) + '%' : '—' } }">
   <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ today }}</h2>
 
   {% if existing %}
+  {% set _x1 = existing.p1_cnt or 0 %}
+  {% set _x2 = existing.p2_cnt or 0 %}
+  {% set _xt = _x1 + _x2 %}
   <table class="kv" data-testid="today-summary" x-show="!edit">
     {% if existing.area %}<tr><th>{{ t('担当区域') }}</th><td>{{ existing.area }}</td></tr>{% endif %}
-    <tr><th>{{ t('1点店铺数') }}</th><td>{{ existing.p1_cnt }}</td></tr>
-    <tr><th>{{ t('2点店铺数') }}</th><td>{{ existing.p2_cnt }}</td></tr>
+    <tr><th>{{ t('1点店铺数') }}</th><td>{{ _x1 }}</td></tr>
+    <tr><th>{{ t('2点店铺数') }}</th><td>{{ _x2 }}</td></tr>
     <tr class="tot"><th>{{ t('合计') }}</th><td>{{ existing.total_cnt }}</td></tr>
+    <tr><th>{{ t('分数（点数）') }}</th>
+        <td data-testid="today-points">{{ _x1 + _x2 * 2 }}</td></tr>
+    <tr><th>{{ t('2点比例') }}</th>
+        <td data-testid="today-rate">{{ '%.1f%%' % (_x2 * 100 / _xt) if _xt else '—' }}</td></tr>
   </table>
   <div class="form-actions" style="margin-top:.7rem" x-show="!edit">
     <button class="btn" type="button" @click="edit = true"
@@ -42,6 +55,10 @@
                      data-testid="p2"></td></tr>
       <tr class="tot"><th>{{ t('合计') }}</th>
           <td x-text="(parseInt(p1 || 0, 10) || 0) + (parseInt(p2 || 0, 10) || 0)"></td></tr>
+      <tr><th>{{ t('分数（点数）') }}</th>
+          <td x-text="pts" data-testid="live-points"></td></tr>
+      <tr><th>{{ t('2点比例') }}</th>
+          <td x-text="rate" data-testid="live-rate"></td></tr>
     </table>
     <div class="form-actions" style="margin-top:.7rem">
       <button class="btn" type="submit"
@@ -113,10 +130,13 @@
 </div>
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-reports">
   <tr><th>{{ t('日期') }}</th><th>{{ t('担当区域') }}</th>
-      <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th></tr>
+      <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th>
+      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点比例') }}</th></tr>
   {% if view.days %}
   <tr class="totals"><td colspan="2">{{ t('本月合计') }}（{{ t('已填报') }} {{ view.filled }} / {{ view.visible_days }} {{ t('天') }}）</td>
-      <td class="num">{{ view.p1 }}</td><td class="num">{{ view.p2 }}</td><td class="num">{{ view.total }}</td></tr>
+      <td class="num">{{ view.p1 }}</td><td class="num">{{ view.p2 }}</td><td class="num">{{ view.total }}</td>
+      <td class="num">{{ view.points }}</td>
+      <td class="num">{{ '%.1f%%' % (view.rate * 100) if view.rate is not none else '—' }}</td></tr>
   {% endif %}
   {% for r in view.days|reverse %}
   <tr {% if r.empty %}style="color:var(--muted);background:#fbfcfe"{% endif %}>
@@ -125,7 +145,9 @@
     <td class="num">{{ r.p1 if not r.empty else '—' }}</td>
     <td class="num">{{ r.p2 if not r.empty else '—' }}</td>
     <td class="num">{% if r.empty %}—{% else %}{{ r.total }}{% endif %}</td>
+    <td class="num">{% if r.empty %}—{% else %}{{ r.points }}{% endif %}</td>
+    <td class="num">{% if r.empty %}—{% else %}{{ '%.1f%%' % (r.rate * 100) if r.rate is not none else '—' }}{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="5" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

@@ -10,6 +10,17 @@ from app.services.daily_report import jst_today
 from app.services.daterange import formal_date_range
 
 
+def points_of(p1: int, p2: int) -> int:
+    """**分数（点数）= 1点店数×1 + 2点店数×2** —— 与结算侧 `perf.py` 完全同一口径。"""
+    return (p1 or 0) + (p2 or 0) * 2
+
+
+def p2_rate(p1: int, p2: int):
+    """**比例 = 2点店数 ÷ 总店数**（与看板 `p2rate` 同一口径）；没有店 → None。"""
+    total = (p1 or 0) + (p2 or 0)
+    return ((p2 or 0) / total) if total else None
+
+
 def _acc(abs_sum: int, sys_sum: int):
     """准确率 = 1 − Σ|Δ| ÷ Σ系统（**用绝对值之和，不抵消**）；无对照日 → None。"""
     if sys_sum > 0:
@@ -56,6 +67,11 @@ def compare(db, start, end, person_code: str = "", sort: str = "acc") -> dict:
             "sys_total": s["total"] if s else None,
             "rep_p1": rp["p1"] if rp else None, "rep_p2": rp["p2"] if rp else None,
             "rep_total": rp["total"] if rp else None,
+            # 分数（点数）与比例（2点率）：**现算，不落库**（用户 2026-10-02 要求）
+            "sys_points": points_of(s["p1"], s["p2"]) if s else None,
+            "rep_points": points_of(rp["p1"], rp["p2"]) if rp else None,
+            "sys_rate": p2_rate(s["p1"], s["p2"]) if s else None,
+            "rep_rate": p2_rate(rp["p1"], rp["p2"]) if rp else None,
             "d1": d1, "d2": d2, "dt": dt,
             # 单日准确率（规格 §7）：max(0, 1 − |Δ总| ÷ max(系统总店数, 1))；只算 both 日
             "acc": (_acc(abs(dt or 0), s["total"]) if (kind == KIND_BOTH and s)
@@ -86,6 +102,11 @@ def compare(db, start, end, person_code: str = "", sort: str = "acc") -> dict:
 
     persons = list(per.values())
     for p in persons:
+        p["sys_points"] = points_of(p["sys_p1"], p["sys_p2"])
+        p["rep_points"] = points_of(p["rep_p1"], p["rep_p2"])
+        p["d_points"] = p["sys_points"] - p["rep_points"]
+        p["sys_rate"] = p2_rate(p["sys_p1"], p["sys_p2"])
+        p["rep_rate"] = p2_rate(p["rep_p1"], p["rep_p2"])
         p["acc"] = _acc(p["abs_dt"], p["both_sys_total"]) if p["days_both"] else None
         p["d_total"] = p["sys_total"] - p["rep_total"]          # >0 少报 / <0 多报
         p["d1"] = p["sys_p1"] - p["rep_p1"]
@@ -173,7 +194,10 @@ KIND_MISSING_SYSTEM = "missing_system"   # 员工报了、系统没有 → 自�
 
 
 def _row_dict(r: StaffDailyReport) -> dict:
+    """自报一行（列表/导出共用）：**分数与比例现算，不落库**。"""
+    p1, p2 = r.p1_cnt or 0, r.p2_cnt or 0
     return {"id": r.id, "person_code": r.person_code, "date": r.report_date,
-            "area": r.area or "", "p1": r.p1_cnt, "p2": r.p2_cnt,
+            "area": r.area or "", "p1": p1, "p2": p2,
             "total": r.total_cnt, "submitted_at": r.submitted_at,
-            "source": r.source}
+            "source": r.source,
+            "points": points_of(p1, p2), "rate": p2_rate(p1, p2)}
