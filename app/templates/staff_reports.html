@@ -67,25 +67,22 @@
     <span class="hint">{{ start }} ～ {{ end }} · {{ data.page }} / {{ data.pages }} {{ t('页') }}
       · {{ t('自报条数') }} {{ rep_sum.count }}</span>
   </div>
-  <table class="grid-tbl" style="margin-top:.5rem">
-    <tr><th style="text-align:left"></th>
-        <th>{{ t('1点') }}</th><th>{{ t('2点') }}</th><th>{{ t('合计') }}</th>
-        <th title="{{ t('该行合计里 2 点占多少：店铺数行=2点店÷总店；分数行=2点分数÷总分数') }}">{{ t('2点占比') }}</th></tr>
-    <tr>
-      <th style="text-align:left;font-weight:600">{{ t('店铺数') }}</th>
-      <td class="num" data-testid="sum-stores-p1">{{ rep_sum.p1 }}</td>
-      <td class="num" data-testid="sum-stores-p2">{{ rep_sum.p2 }}</td>
-      <td class="num"><b data-testid="sum-stores">{{ rep_sum.stores }}</b></td>
-      <td class="num" data-testid="sum-store-rate"><b>{{ '%.1f%%' % (rep_sum.store_rate * 100) if rep_sum.store_rate is not none else '—' }}</b></td>
-    </tr>
-    <tr>
-      <th style="text-align:left;font-weight:600">{{ t('分数（点数）') }}</th>
-      <td class="num" data-testid="sum-points-p1">{{ rep_sum.p1_points }}</td>
-      <td class="num" data-testid="sum-points-p2">{{ rep_sum.p2_points }}</td>
-      <td class="num"><b data-testid="sum-points">{{ '{:,}'.format(rep_sum.points) }}</b></td>
-      <td class="num" data-testid="sum-rate"><b>{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</b></td>
-    </tr>
-  </table>
+  <div class="sum-row">
+    <span class="sum-group">{{ t('店铺数') }}</span>
+    <div class="sum-tile" data-testid="sum-stores-p1"><span class="k">{{ t('1点店铺数') }}</span><b class="v">{{ rep_sum.p1 }}</b></div>
+    <div class="sum-tile" data-testid="sum-stores-p2"><span class="k">{{ t('2点店铺数') }}</span><b class="v">{{ rep_sum.p2 }}</b></div>
+    <div class="sum-tile" data-testid="sum-stores"><span class="k">{{ t('总店铺数') }}</span><b class="v">{{ rep_sum.stores }}</b></div>
+    <div class="sum-tile hl" data-testid="sum-store-rate" title="{{ t('该行合计里 2 点占多少：店铺数行=2点店÷总店；分数行=2点分数÷总分数') }}">
+      <span class="k">{{ t('2点店铺占比') }}</span><b class="v">{{ '%.1f%%' % (rep_sum.store_rate * 100) if rep_sum.store_rate is not none else '—' }}</b></div>
+  </div>
+  <div class="sum-row">
+    <span class="sum-group">{{ t('分数（点数）') }}</span>
+    <div class="sum-tile" data-testid="sum-points-p1"><span class="k">{{ t('1点分数') }}</span><b class="v">{{ rep_sum.p1_points }}</b></div>
+    <div class="sum-tile" data-testid="sum-points-p2"><span class="k">{{ t('2点分数') }}</span><b class="v">{{ rep_sum.p2_points }}</b></div>
+    <div class="sum-tile" data-testid="sum-points"><span class="k">{{ t('总分数') }}</span><b class="v">{{ '{:,}'.format(rep_sum.points) }}</b></div>
+    <div class="sum-tile hl" data-testid="sum-rate" title="{{ t('该行合计里 2 点占多少：店铺数行=2点店÷总店；分数行=2点分数÷总分数') }}">
+      <span class="k">{{ t('2点分数占比') }}</span><b class="v">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</b></div>
+  </div>
 </div>
 
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">

@@ -1130,19 +1130,24 @@ def test_reports_summary_and_cards(client):
     db.close()
     _login_admin(client)
     h = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
-    # 自报汇总模块（2026-10-02 用户："做成一个正经的模块"）：7 个数字都在
+    # 自报汇总模块（2026-10-02 用户："8 个小块分两行"）：8 个数字都要在
     assert 'data-testid="report-summary"' in h
-    assert 'data-testid="sum-stores-p1">6<' in h            # 1点店铺数
-    assert 'data-testid="sum-stores-p2">2<' in h            # 2点店铺数
-    assert 'data-testid="sum-stores">8<' in h               # 总店铺数
-    assert 'data-testid="sum-points-p1">6<' in h            # 1点总分数
-    assert 'data-testid="sum-points-p2">4<' in h            # 2点总分数
-    assert 'data-testid="sum-points">10<' in h              # 总分数
-    # 两个占比做成"2点占比"一列（2026-10-02 用户："为什么不加一列叫 2 点占比"）
-    assert '2点占比' in h
-    assert 'data-testid="sum-store-rate"><b>25.0%<' in h    # 店铺数行：2 点店 / 总店 = 2/8
-    assert 'data-testid="sum-rate"><b>40.0%<' in h          # 分数行：2点分数 / 总分数 = 4/10
-    assert h.count('<td class="num" data-testid="sum-store-rate"') == 1
+    mod = h[h.index('data-testid="report-summary"'):h.index('data-testid="reports-table"')]
+    for tid, val in (("sum-stores-p1", "6"),      # 1点店铺数
+                     ("sum-stores-p2", "2"),      # 2点店铺数
+                     ("sum-stores", "8"),         # 总店铺数
+                     ("sum-store-rate", "25.0%"),  # 2点店铺占比 = 2/8
+                     ("sum-points-p1", "6"),      # 1点分数
+                     ("sum-points-p2", "4"),      # 2点分数
+                     ("sum-points", "10"),        # 总分数
+                     ("sum-rate", "40.0%")):      # 2点分数占比 = 4/10
+        assert ('data-testid="%s"' % tid) in mod, tid
+        seg = mod[mod.index('data-testid="%s"' % tid):]
+        assert val in seg[:160], (tid, val)
+    assert mod.count("sum-tile") >= 8                # 8 个小块
+    for label in ("1点店铺数", "2点店铺数", "总店铺数", "2点店铺占比",
+                  "1点分数", "2点分数", "总分数", "2点分数占比"):
+        assert label in mod, label
     assert 'class="stat-grid"' not in h.split('data-testid="reports-table"')[0]
 
 
