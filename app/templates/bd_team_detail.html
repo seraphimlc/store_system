@@ -47,7 +47,7 @@
       <thead>
         <tr><th style="width:4rem">{{ t('进队') }}</th><th style="width:5rem">{{ t('队长') }}</th>
             <th>{{ t('姓名') }}</th><th>{{ t('编号') }}</th>
-            <th>{{ t('账号') }}</th><th>{{ t('原角色') }}</th></tr>
+            <th>{{ t('账号') }}</th><th>{{ t('员工状态') }}</th><th>{{ t('原角色') }}</th></tr>
       </thead>
       <tbody>
         {% for p in people %}
@@ -63,6 +63,7 @@
           <td>{{ p.display_name }}</td>
           <td>{{ p.code[-5:] }}</td>
           <td>{% if p.has_account %}✓{% else %}<span class="hint">{{ t('未开通') }}</span>{% endif %}</td>
+          <td data-testid="status-{{ p.code }}">{{ status_labels.get(p.status, p.status) if p.status else t('未开通账号') }}</td>
           <td>{% if old %}{{ t('队长') if old.role == 'leader' else t('队员') }}{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}

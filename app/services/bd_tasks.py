@@ -85,10 +85,14 @@ def create_station(db: Session, name: str, line: str = "", note: str = "",
 
 def update_station(db: Session, station_id: int, name: Optional[str] = None,
                    line: Optional[str] = None, note: Optional[str] = None,
-                   status: Optional[str] = None) -> BdStation:
+                   status: Optional[str] = None, actor_user=None) -> BdStation:
+    """改车站主数据（**改名/改线路/改备注/改状态都写日志**）。"""
+    from app.services import bd_log
     st = db.get(BdStation, station_id)
     if st is None:
         raise TaskError("车站不存在")
+    before = {"name": st.name, "line": st.line, "note": st.note,
+              "status": st.status}
     if name is not None:
         nm = name.strip()
         if not nm:
@@ -107,6 +111,14 @@ def update_station(db: Session, station_id: int, name: Optional[str] = None,
         st.status = status
     st.updated_at = datetime.utcnow()
     db.flush()
+    for f, label in (("name", "车站名"), ("line", "线路"), ("note", "备注"),
+                     ("status", "状态")):
+        after = getattr(st, f)
+        if before[f] != after:
+            bd_log.log_op(db, actor_user, "station",
+                          "rename" if f == "name" else "update",
+                          ref_id=st.id, ref_label=st.name, field=label,
+                          old=before[f], new=after)
     return st
 
 
@@ -177,8 +189,12 @@ def refresh_state(db: Session, task: BdTask) -> BdTask:
 
 def create_tasks(db: Session, station_ids: Sequence[int], by: str = "",
                  team_id: Optional[int] = None,
-                 assign_date: Optional[date] = None) -> dict:
-    """给车站**批量建任务**（缺则建，已有则跳过并回报，不覆盖、不报 500）。"""
+                 assign_date: Optional[date] = None,
+                 actor_user=None) -> dict:
+    """给车站**批量建任务**（缺则建，已有则跳过并回报，不覆盖、不报 500）。**写创建日志。**"""
+    from app.services import bd_log
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
     created = skipped = 0
     have = set()
     if station_ids:
@@ -188,11 +204,18 @@ def create_tasks(db: Session, station_ids: Sequence[int], by: str = "",
         if sid in have:
             skipped += 1
             continue
-        if db.get(BdStation, sid) is None:
+        st = db.get(BdStation, sid)
+        if st is None:
             skipped += 1
             continue
-        db.add(BdTask(station_id=sid, team_id=team_id, assign_date=assign_date,
-                      state=STATE_UNASSIGNED, pct=0, created_by=(by or "")))
+        t = BdTask(station_id=sid, team_id=team_id, assign_date=assign_date,
+                   state=STATE_UNASSIGNED, pct=0, created_by=(by or ""))
+        db.add(t)
+        db.flush()
+        bd_log.log_op(db, actor_user, "task", "create", ref_id=t.id,
+                      ref_label=(st.name or ""), field="",
+                      new=("派给 %s" % (db.get(BdTeam, team_id).name
+                                       if team_id else "（未派队）")))
         created += 1
     db.flush()
     return {"created": created, "skipped": skipped}
@@ -200,18 +223,35 @@ def create_tasks(db: Session, station_ids: Sequence[int], by: str = "",
 
 def set_task_team(db: Session, task_ids: Sequence[int],
                   team_id: Optional[int], assign_date: Optional[date] = None,
-                  by: str = "") -> dict:
+                  by: str = "", actor_user=None) -> dict:
     """**派给团队**（管理员）；顺带写分配日期。
 
-    换队 → **清空该任务的担当**（原担当不属于新队），并回报清掉的人数。
+    换队 → **清空不属于新队的担当**（原担当不属于新队），并回报清掉的人数。
+    **每次派活/换队/改分配日期都写日志。**
     """
+    from app.services import bd_log
     if team_id is not None and db.get(BdTeam, team_id) is None:
         raise TaskError("团队不存在")
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
     n_team = n_cleared = 0
     for tid in task_ids:
         t = db.get(BdTask, tid)
         if t is None:
             continue
+        label = _station_name(db, t)
+        old_team = db.get(BdTeam, t.team_id) if t.team_id else None
+        new_team = db.get(BdTeam, team_id) if team_id else None
+        if t.team_id != team_id:
+            bd_log.log_op(db, actor_user, "task", "dispatch", ref_id=t.id,
+                          ref_label=label, field="team",
+                          old=(old_team.name if old_team else "（未派队）"),
+                          new=(new_team.name if new_team else "（未派队）"))
+        if assign_date is not None and t.assign_date != assign_date:
+            bd_log.log_op(db, actor_user, "task", "update", ref_id=t.id,
+                          ref_label=label, field="assign_date",
+                          old=(t.assign_date.isoformat() if t.assign_date else ""),
+                          new=assign_date.isoformat())
         if t.team_id != team_id and team_id is not None:
             keep = {c for (c,) in db.query(BdTeamMember.person_code).filter(
                 BdTeamMember.team_id == team_id,
@@ -222,6 +262,10 @@ def set_task_team(db: Session, task_ids: Sequence[int],
                 if a.person_code not in keep:
                     db.delete(a)
                     n_cleared += 1
+                    bd_log.log_op(db, actor_user, "task", "unassign",
+                                  ref_id=t.id, ref_label=label,
+                                  field="assignee", old=a.person_code,
+                                  new="", note="换队清空原担当")
         t.team_id = team_id
         if assign_date is not None:
             t.assign_date = assign_date
@@ -232,11 +276,16 @@ def set_task_team(db: Session, task_ids: Sequence[int],
 
 
 def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
-                   by: str = "") -> dict:
-    """分派担当（**≤2 人**，必须是该队现役成员）。"""
+                   by: str = "", actor_user=None) -> dict:
+    """分派担当（**≤2 人**，必须是该队现役成员）。**谁进谁出都写日志。**
+
+    ⚠️ 离职/停用的人**不能**被分派（他执行不了）；历史担当记录不受影响。
+    """
     t = db.get(BdTask, task_id)
     if t is None:
         raise TaskError("任务不存在")
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
     codes = []
     for c in person_codes:
         c = (c or "").strip()
@@ -253,7 +302,17 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
         bad = [c for c in codes if c not in allowed]
         if bad:
             raise TaskError("不是该队现役成员：%s" % "、".join(bad))
+        # 离职/停用的人执行不了 → 不能分派（用户 2026-10-03 口径）
+        from app.models import User as _User
+        gone = []
+        for u in db.query(_User).filter(_User.person_code.in_(codes)).all():
+            if u.status in ("resigned", "disabled"):
+                gone.append(u.display_name or u.person_code)
+        if gone:
+            raise TaskError("这些人已离职/停用，不能派工：%s" % "、".join(gone))
+    from app.services import bd_log
     old = db.query(BdTaskAssign).filter(BdTaskAssign.task_id == task_id).all()
+    old_codes = [a.person_code for a in old]
     for a in old:
         db.delete(a)
     for c in codes:
@@ -262,17 +321,30 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
     db.flush()
     refresh_state(db, t)
     db.flush()
+    label = _station_name(db, t)
+    for c in old_codes:
+        if c not in codes:
+            bd_log.log_op(db, actor_user, "task", "unassign", ref_id=t.id,
+                          ref_label=label, field="assignee", old=c, new="")
+    for c in codes:
+        if c not in old_codes:
+            bd_log.log_op(db, actor_user, "task", "assign", ref_id=t.id,
+                          ref_label=label, field="assignee", old="", new=c)
     return {"n": len(codes), "state": t.state}
 
 
 def save_progress(db: Session, task_id: int, pct: int, note: str = "",
-                  by: str = "", on_date: Optional[date] = None) -> dict:
-    """**每日进展提交**：写/改当天一条，并把任务刷新为最新进度。
+                  by: str = "", on_date: Optional[date] = None,
+                  actor_user=None) -> dict:
+    """**每日进展上报/调整**：写/改当天一条，并把任务刷新为最新进度。
 
     - `pct` 夹到 0–100
-    - 当天已提交 → 覆盖（`updated_at` 变）
-    - 刷新 `bd_task.pct/state`
+    - 当天已上报 → 覆盖（`updated_at` 变）——**员工先上报、队长做调整**都走这里
+    - 刷新 `bd_task.pct/state`，开始日/完成日自动写
+    - **每次上报/调整都写一条日志**（进度表会被覆盖，日志不会：
+      "员工报 40% → 队长改成 60%" 能看出是谁改的）
     """
+    from app.services import bd_log
     t = db.get(BdTask, task_id)
     if t is None:
         raise TaskError("任务不存在")
@@ -282,6 +354,9 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         raise TaskError("进度必须是 0–100 的整数")
     p = max(0, min(100, p))
     d = _today(on_date)
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
+    old_pct, old_state = t.pct, t.state
     row = (db.query(BdTaskProgress)
            .filter(BdTaskProgress.task_id == task_id,
                    BdTaskProgress.progress_date == d).first())
@@ -306,8 +381,21 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         t.done_date = None                    # 进度回退 → 完成日清掉，保持自洽
     refresh_state(db, t)
     db.flush()
+    if p != old_pct or t.state != old_state:
+        bd_log.log_op(db, actor_user, "task",
+                      "progress" if p != old_pct else "state",
+                      ref_id=t.id, ref_label=_station_name(db, t),
+                      field="pct" if p != old_pct else "state",
+                      old=("%d%%" % old_pct) if p != old_pct else old_state,
+                      new=("%d%%" % p) if p != old_pct else t.state,
+                      note=(note or ""))
     return {"pct": p, "state": t.state, "date": d,
             "start_date": t.start_date, "done_date": t.done_date}
+
+
+def _station_name(db: Session, task: BdTask) -> str:
+    st = db.get(BdStation, task.station_id) if task is not None else None
+    return (st.name if st is not None else "") or ""
 
 
 def latest_progress(db: Session, task_ids: Sequence[int]) -> Dict[int, BdTaskProgress]:
@@ -324,26 +412,80 @@ def latest_progress(db: Session, task_ids: Sequence[int]) -> Dict[int, BdTaskPro
     return out
 
 
-# ---------------- 权限 ----------------
+# ---------------- 权限（口径见 bd_perm；数据范围见 bd_teams.is_leader_of） ----------------
 
 def is_admin(user) -> bool:
     return user is not None and getattr(user, "role", "") == "admin"
 
 
-def can_submit(db: Session, user, task: BdTask) -> bool:
-    """**提交进展/分派**的唯一权限判定：管理员，或该任务的队长。"""
+def _is_team_leader(db: Session, user, team_id) -> bool:
     from app.services import bd_teams
+    if user is None or getattr(user, "role", "") != "leader":
+        return False
+    return bd_teams.is_leader_of(db, getattr(user, "person_code", None), team_id)
+
+
+def is_assignee(db: Session, user, task: BdTask) -> bool:
+    """本人是不是这条任务的担当（1~2 人之一）。"""
+    code = getattr(user, "person_code", None) if user is not None else None
+    if not code:
+        return False
+    return db.query(BdTaskAssign).filter(
+        BdTaskAssign.task_id == task.id,
+        BdTaskAssign.person_code == code).first() is not None
+
+
+def can_report(db: Session, user, task: BdTask) -> bool:
+    """**上报进展**：管理员 / 该任务的队长 / **本人是担当**。
+
+    ⚠️ 用户 2026-10-03 口径变更：「员工自己先上报，队长做调整」——
+    旧口径只有队长能提交，已作废。
+    """
+    from app.services import bd_perm
     if user is None:
         return False
     if is_admin(user):
         return True
-    if getattr(user, "role", "") != "leader":
+    if not bd_perm.can(db, user, "task.report"):
         return False
-    return bd_teams.is_leader_of(db, getattr(user, "person_code", None),
-                                 task.team_id)
+    return _is_team_leader(db, user, task.team_id) or is_assignee(db, user, task)
+
+
+def can_assign(db: Session, user, task: BdTask) -> bool:
+    """**分派担当 / 调整别人的进展**：管理员 / 该任务的队长（队员不行）。"""
+    from app.services import bd_perm
+    if user is None:
+        return False
+    if is_admin(user):
+        return True
+    if not bd_perm.can(db, user, "task.assign"):
+        return False
+    return _is_team_leader(db, user, task.team_id)
+
+
+def can_adjust(db: Session, user, task: BdTask) -> bool:
+    """调整（修正）进展：管理员 / 该任务的队长。"""
+    from app.services import bd_perm
+    if user is None:
+        return False
+    if is_admin(user):
+        return True
+    if not bd_perm.can(db, user, "task.adjust"):
+        return False
+    return _is_team_leader(db, user, task.team_id)
 
 
 # ---------------- 视图数据 ----------------
+
+def task_rows(db: Session, task_ids: Sequence[int]) -> List[dict]:
+    """按 id 取任务行（路由/详情页用；内部走同一个 `_rows`）。"""
+    if not task_ids:
+        return []
+    tasks = (db.query(BdTask).filter(BdTask.id.in_(list(task_ids)))
+             .order_by(BdTask.id.asc()).all())
+    return _rows(db, tasks)
+
+
 
 def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
     """任务行（车站/队/担当/最新进展），**批量取，避免 N+1**。"""

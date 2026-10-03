@@ -47,7 +47,9 @@ def _today(today: Optional[date] = None) -> date:
 # ---------------- 队 ----------------
 
 def create_team(db: Session, name: str, code: str = "", note: str = "",
-                by: str = "", today: Optional[date] = None) -> BdTeam:
+                by: str = "", today: Optional[date] = None,
+                actor_user=None) -> BdTeam:
+    from app.services import bd_log
     nm = (name or "").strip()
     if not nm:
         raise TeamError("队名不能为空")
@@ -56,19 +58,27 @@ def create_team(db: Session, name: str, code: str = "", note: str = "",
         raise NameExists("队名已存在：%s（不覆盖）" % nm)
     if code_n and db.query(BdTeam).filter(BdTeam.code == code_n).first():
         raise CodeExists("队编号已存在：%s（不覆盖）" % code_n)
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
     t = BdTeam(name=nm, code=(code_n or None), note=(note or "").strip(),
                status="active", created_by=(by or ""))
     db.add(t)
     db.flush()
+    bd_log.log_op(db, actor_user, "team", "create", ref_id=t.id,
+                  ref_label=t.name, new=t.name)
     return t
 
 
 def update_team(db: Session, team_id: int, name: Optional[str] = None,
                 code: Optional[str] = None, note: Optional[str] = None,
-                status: Optional[str] = None, by: str = "") -> BdTeam:
+                status: Optional[str] = None, by: str = "",
+                actor_user=None) -> BdTeam:
+    """改队信息（**队名/编号/备注/停用都写日志**）。"""
+    from app.services import bd_log
     t = db.get(BdTeam, team_id)
     if t is None:
         raise TeamError("团队不存在")
+    before = {"name": t.name, "code": t.code, "note": t.note, "status": t.status}
     if name is not None:
         nm = name.strip()
         if not nm:
@@ -92,6 +102,14 @@ def update_team(db: Session, team_id: int, name: Optional[str] = None,
         t.status = status
     t.updated_at = _now()
     db.flush()
+    for f, label in (("name", "队名"), ("code", "队编号"), ("note", "备注"),
+                     ("status", "状态")):
+        after = getattr(t, f)
+        if before[f] != after:
+            bd_log.log_op(db, actor_user, "team",
+                          "rename" if f == "name" else "update",
+                          ref_id=t.id, ref_label=t.name, field=label,
+                          old=before[f] or "", new=after or "")
     return t
 
 
@@ -148,7 +166,11 @@ def team_options(db: Session) -> List[dict]:
 
 def team_members(db: Session, team_id: int, active_only: bool = True,
                  today: Optional[date] = None) -> List[dict]:
-    """成员（默认只看现役），带姓名与**有无账号**标记。"""
+    """成员（默认只看现役），带姓名、**有无账号**、以及**员工状态**。
+
+    ⚠️ 用户 2026-10-03 口径：「**队员的状态直接用员工状态**」——所以这里**不另造状态**，
+    直接把 `users.status`（active/leave/disabled/resigned）带出来给页面显示。
+    """
     q = (db.query(BdTeamMember, Person.display_name)
          .outerjoin(Person, Person.code == BdTeamMember.person_code)
          .filter(BdTeamMember.team_id == team_id))
@@ -157,23 +179,43 @@ def team_members(db: Session, team_id: int, active_only: bool = True,
     rows = q.order_by(BdTeamMember.role.asc(),
                       BdTeamMember.person_code.asc()).all()
     codes = [m.person_code for m, _ in rows]
-    have = set()
+    st: Dict[str, str] = {}
     if codes:
-        have = {c for (c,) in db.query(User.person_code)
-                .filter(User.person_code.in_(codes)).all() if c}
-    return [{"row": m, "person_code": m.person_code,
-             "display_name": disp or m.person_code, "role": m.role,
-             "start_date": m.start_date, "end_date": m.end_date,
-             "has_account": m.person_code in have} for m, disp in rows]
+        for code, status in (db.query(User.person_code, User.status)
+                             .filter(User.person_code.in_(codes)).all()):
+            if code:
+                st[code] = status or "active"
+    out = []
+    for m, disp in rows:
+        status = st.get(m.person_code, "")      # 空 = 没账号
+        out.append({"row": m, "person_code": m.person_code,
+                    "display_name": disp or m.person_code, "role": m.role,
+                    "start_date": m.start_date, "end_date": m.end_date,
+                    "has_account": m.person_code in st,
+                    "status": status,
+                    "can_work": status in ("active", "leave")})
+    return out
+
+
+def STATUS_LABELS(lang: str = "zh") -> Dict[str, str]:
+    """员工状态标签（与员工管理页同一套口径）。"""
+    zh = {"active": "在岗", "leave": "请假", "disabled": "停用",
+          "resigned": "离职", "": "未开通账号"}
+    ja = {"active": "在籍", "leave": "休暇", "disabled": "停止",
+          "resigned": "退職", "": "アカウント未開設"}
+    return ja if lang == "ja" else zh
 
 
 def set_members(db: Session, team_id: int,
                 entries: Sequence[Tuple[str, str]],
-                today: Optional[date] = None) -> dict:
+                today: Optional[date] = None,
+                actor_user=None) -> dict:
     """覆盖式保存成员。
 
     `entries` = [(person_code, role)]；未出现在里面的现役成员 → 写 `end_date`（移出）。
     role 变化就地更新（成员期不重开）。返回 `{"added","removed","changed"}`。
+
+    **加入 / 移出 / 队长任免都写日志**（用户 2026-10-03：团队变化、成员变化、队长变化要留痕）。
     """
     t = db.get(BdTeam, team_id)
     if t is None:
@@ -198,19 +240,43 @@ def set_members(db: Session, team_id: int,
               .filter(BdTeamMember.team_id == team_id,
                       BdTeamMember.end_date.is_(None)).all()}
     added = removed = changed = 0
+    from app.services import bd_log
+    names = {c: (d or c) for c, d in db.query(Person.code, Person.display_name)
+             .filter(Person.code.in_(list(set(active) | set(desired)))).all()}
+
+    def _label(code):
+        return "%s / %s" % (t.name, names.get(code, code))
+
+    def _role_cn(role):
+        return "队长" if role == ROLE_LEADER else "队员"
+
     for code in list(active):
         if code not in desired:
+            old_role = active[code].role
             active[code].end_date = day
             removed += 1
+            bd_log.log_op(db, actor_user, "member", "remove", ref_id=team_id,
+                          ref_label=_label(code), field="成员",
+                          old="%s（%s）" % (names.get(code, code),
+                                          _role_cn(old_role)),
+                          new="", note="移出团队（记录保留）")
     for code, role in desired.items():
         m = active.get(code)
         if m is None:
             db.add(BdTeamMember(team_id=team_id, person_code=code, role=role,
                                 start_date=day))
             added += 1
+            bd_log.log_op(db, actor_user, "member", "create", ref_id=team_id,
+                          ref_label=_label(code), field="成员", old="",
+                          new="%s（%s）" % (names.get(code, code), _role_cn(role)))
         elif m.role != role:
+            old_role = m.role
             m.role = role
             changed += 1
+            bd_log.log_op(db, actor_user, "member", "role", ref_id=team_id,
+                          ref_label=_label(code), field="角色",
+                          old=_role_cn(old_role), new=_role_cn(role),
+                          note="队长任免")
     db.flush()
     roles = sync_account_roles(db)
     return {"added": added, "removed": removed, "changed": changed,
@@ -284,17 +350,22 @@ def teams_of_person(db: Session, person_code: Optional[str]) -> List[dict]:
 
 
 def person_options(db: Session, kw: str = "") -> List[dict]:
-    """人员下拉（含队长角色账号）：姓名 + 编号后 5 位 + 有无账号。"""
+    """人员下拉（圈选成员用）：姓名 + 编号 + **有无账号** + **员工状态**。"""
     q = db.query(Person)
     if kw:
         like = "%%%s%%" % kw.strip()
         q = q.filter(or_(Person.display_name.like(like),
                          Person.code.like(like)))
     people = q.order_by(Person.code.asc()).all()
-    have = {c for (c,) in db.query(User.person_code)
-            .filter(User.person_code.isnot(None)).all() if c}
+    st: Dict[str, str] = {}
+    for code, status in (db.query(User.person_code, User.status)
+                         .filter(User.person_code.isnot(None)).all()):
+        st[code] = status or "active"
     return [{"code": p.code, "display_name": p.display_name or p.code,
-             "has_account": p.code in have} for p in people]
+             "has_account": p.code in st,
+             "status": st.get(p.code, ""),
+             "can_work": st.get(p.code) in ("active", "leave")}
+            for p in people]
 
 
 def summary(db: Session) -> dict:

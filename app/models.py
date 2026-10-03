@@ -1044,3 +1044,54 @@ class BdTaskProgress(Base):
                           server_default="")
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdLog(Base):
+    """作业域变更日志（**追加型：只写不改不删**）。
+
+    用户 2026-10-03 要求：「每个任务的变化日志；团队变化、团队成员变化、队长变化也要记」。
+    设计取舍：**一张通用表**（`domain` 区分），写入只有一处、时间线一次查询出全。
+
+    - `domain`：task / team / member / station
+    - `ref_id`：对应行 id；`ref_label` 冗余可读（车站名/队名/人名），日志永远看得懂
+    - `action`：create / update / dispatch / assign / unassign / role / state
+      / progress / remove / status
+    - `field` + `old_value` + `new_value`：改了什么（"担当：汤静 → 甘子杰"）
+    - `actor`：操作人（登录名或 person_code）；`actor_name` 冗余显示名
+    """
+    __tablename__ = "bd_log"
+    __table_args__ = (
+        Index("ix_bd_log_ref", "domain", "ref_id"),
+        Index("ix_bd_log_created", "created_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    domain = Column(String(16), nullable=False)
+    ref_id = Column(Integer, nullable=True)
+    ref_label = Column(String(128), nullable=False, default="", server_default="")
+    action = Column(String(24), nullable=False)
+    field = Column(String(32), nullable=False, default="", server_default="")
+    old_value = Column(Text, nullable=False, default="", server_default="")
+    new_value = Column(Text, nullable=False, default="", server_default="")
+    actor = Column(String(64), nullable=False, default="", server_default="")
+    actor_name = Column(String(64), nullable=False, default="", server_default="")
+    note = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdRoleCap(Base):
+    """角色能力表（**权限口径的单一来源**，用户 2026-10-03 选 (a) 方案）。
+
+    `(role, capability) → allowed`；判权（服务层）与页面按钮（模板）共用这一份。
+    能力清单见 `app/services/bd_perm.py::CAPABILITIES`（保持小而实用）。
+    """
+    __tablename__ = "bd_role_cap"
+    __table_args__ = (
+        UniqueConstraint("role", "capability", name="uq_bd_role_cap"),
+    )
+    id = Column(Integer, primary_key=True)
+    role = Column(String(16), nullable=False)
+    capability = Column(String(32), nullable=False)
+    allowed = Column(Boolean, nullable=False, default=False,
+                      server_default="0")
+    note = Column(Text, nullable=False, default="", server_default="")
+    updated_at = Column(DateTime, nullable=False, default=_now)

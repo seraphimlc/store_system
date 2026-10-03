@@ -331,10 +331,10 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   `bd_task_assign`（担当 **≤2 人**，必须是该队现役成员）/ `bd_task_progress`（**每日一条** `UNIQUE(task_id, date)`，当天可改=覆盖）。
 - **状态机（唯一口径 `bd_tasks.recompute_state`）**：没担当→`unassigned`；有担当且 `pct<100`→`doing`；`pct=100`→`done`。
   pct 夹在 0–100；**当前进度冗余在 `bd_task.pct`**（列表直读）。
-- **权限**：`can_submit(db, user, task)` = 管理员 **或该任务的队长**（走 `bd_teams.is_leader_of`）；
-  队员只读（页面无滑动条/无分派控件，写端点拒绝）。**换队 `set_task_team` 会清空原担当**。
+- **权限**：`can_report`（管理员/该任务队长/**本人是担当**）、`can_assign`、`can_adjust`（管理员/该任务队长，走 `bd_teams.is_leader_of`）；
+  队员**能上报自己担当的**（有滑动条），但不能分派/不能改别人的。**换队 `set_task_team` 会清空原担当**。
 - **页面**：管理端 `/teams`（+`/teams/{id}` 圈人）、`/stations`（批量建任务/批量派队）、`/tasks`（总表+日期区间+导出）；
-  员工端 `/my/tasks`（队长三 tab + 分派 + 滑动条提交；队员只读）。导航：`base.html` 管理菜单改 `role == 'admin'`，
+  员工端 `/my/tasks`（**同一页**：队员=我的任务+上报；队长=多出 我的/未分配/进行中/已完成 四 tab + 分派 + 调整）。导航：`base.html` 管理菜单改 `role == 'admin'`，
   底部 tabbar 对 `staff`+`leader` 都显示并新增「任务」tab。
 - **种子导入（真实数据已入库）**：`scripts/bd_seed_team_task.py --src "/Users/liuchang/Desktop/万总/team_task"`
   （**默认 dry-run**，`--apply` 才写）。实测：**6 队 + 515 站 + 515 任务**，`assign_date`=运行日；
@@ -349,7 +349,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **第二轮增量（2026-10-03 讨论「队长也要巡店」后）**：
   ① **队长页第 4 个 tab「我的」**（`/my/tasks?tab=mine`）= 他当担当的**全部**任务（**跨队也算**；
   旧实现只看他带的队 → 他在别队被派的活看不见，是真缺口）；顶部显示「我负责 N 条」。
-  ② **提交进展仍只有队长**（用户明确保持现状）→ 跨队那条对他是**只读**（行内写"由〈队〉队长提交进展"）；
+  ② ~~**提交进展仍只有队长**~~ ← ⚠️ **已被第三轮取代**（见下）：现在是「员工先上报、队长调整」；
   行内按 `can_submit` 决定给不给滑动条。**这不是 bug，是口径**。
   ③ **开始日/完成日**（`bd_task.start_date`/`done_date`，迁移 `c1b2a3d4e5f6`）：首次提交=开始、
   pct=100=完成、**回退清完成日**；管理端/导出/队长页都显示。
@@ -359,10 +359,36 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   （队长自己开工就踩）→ 改为 **已完成 > 进行中（有担当 或 有进度）> 未分配**。
   ⑥ 移出成员时若他还有未完成任务 → **提示不自动改派**。
   ⑦ 用户决定**往后放**：线路补全（PDF 里有 `XC01 井の頭線 11站/P2` 可抽）+ 批量导入界面。
-  ⑧ 未定：队员能否填自己的进展 / 能否看备注（备注对队员仍隐藏）。
+  ⑧ ~~未定：队员能否填自己的进展~~ ← **已在第三轮定案**：员工能上报自己的（见下）；队员看备注仍未定。
   测试 `tests_web/test_team_task.py` **37 项**；全量 `tests_web` **364 passed**。
-- 测试 `tests_web/test_team_task.py`（**37 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
-  队员只读/日期区间/导出/硬边界/我的 tab/跨队只读/开始完成日/停滞筛选/移出提醒）；**全量 `tests_web` 364 passed**；i18n 巡检 0 缺失 0 死键。
+- **第三轮增量（2026-10-03 用户总结 4 张表 + 口径纠正）** —— ⚠️ **本轮推翻第二轮的 ②**：
+  ① **进展改为「员工先上报、队长调整」**（用户："员工自己先上报，队长做调整"）。判权拆两个：
+  `can_report`（管理员 / 该任务的队长 / **本人是担当**）、`can_assign`+`can_adjust`（管理员 / 该任务的队长）。
+  **队员端任务页从只读变可写**（有滑动条）；不能分派、不能碰别人的任务。旧测试
+  `test_member_is_readonly` 已改名为 `test_member_can_report_own_but_not_others`。
+  ② **队长 = 员工 + 任务管理**（用户原话）：同一页 `/my/tasks`，队长多出 我的/未分配/进行中/已完成 四个 tab
+  （**默认「我的」**，与员工一致）+ 分派与调整控件。
+  ③ **日志 `bd_log`（一张通用追加表）**：domain(task/team/member/station) + ref_id + **ref_label 冗余可读**
+  + action + field + old_value→new_value + actor/actor_name + created_at；**只写不改不删**。
+  写入点：任务创建/派队(含分配日期)/分派担当(谁进谁出)/进展上报与状态变化/车站改名与线路；团队建/改/停用；
+  成员加入/移出(**记录保留**)/队长任免。查看：`/tasks/{id}` 详情（进展历史 + 时间线，可见=管理员/该队队长/担当）
+  + 管理端 `/logs`（按 domain 过滤；队长只看本队相关）。
+  ⚠️ 价值点：**每日进展表会被覆盖，日志不会** —— "员工报 40% → 队长改 60%"查得到。
+  ④ **权限表（用户选 a 方案）`bd_role_cap`**：`(role, capability) → allowed`，9 个能力；
+  **判权与页面按钮共用一份**（`app/services/bd_perm.py`；表为空回退 `DEFAULT_CAPS`，**读路径不写库**）。
+  ⑤ **队员状态直接用员工状态**（用户口径）：`bd_team_member` **不另造状态**；`team_members()/person_options()`
+  带出 `users.status`（在岗/请假/停用/离职/未开通账号），团队详情页新增「员工状态」列。
+  ⑥ **离职/停用不能派工**（`assign_members` 拒绝 + 派工候选不列出）；**成员记录保留**，任务**可改派**。
+  ⑦ **任务名先用车站名**（不加独立字段，用户："先这样定义，后面可以改"）。
+  ⑧ **线路补全做了**（用户："有就加"）：5 份执行说明 PDF 页头有线路（`XC01 · 井の頭線`）→
+  `scripts/bd_extract_lines.py` 抽 **53 线 / 576 站** → `data/bd_station_lines.json`（**运行时不需要 pypdf**）→
+  `scripts/bd_backfill_lines.py` 回填 → 本地库 **422/515 站有线路（82%）**；⚠️ 陳偉鋒队**无 PDF** → 82 站留空。
+  ⑨ **仍未定**：队员能否看任务备注（现在仍只有队长/管理员可见）；车站批量导入界面（往后放）。
+  迁移 `d1e2f3a4b5c6`（2 张表 + 27 行能力种子）；本地库 `create_all` + `bd_perm.seed()`。
+  测试 `tests_web/test_team_task.py` **44 项**；全量 `tests_web` **371 passed**；i18n 0 缺失 0 死键。
+- 测试 `tests_web/test_team_task.py`（**44 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
+  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表）；
+  **全量 `tests_web` 371 passed**；i18n 巡检 0 缺失 0 死键。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

@@ -2,10 +2,13 @@
 {% block title %}{{ t('我的任务') }}{% endblock %}
 {% block content %}
 <div class="page-title">
-  <h1>{% if is_leader %}{{ t('任务分派') }}{% else %}{{ t('我的任务') }}{% endif %}</h1>
+  <h1>{% if is_leader %}{{ t('任务') }}{% else %}{{ t('我的任务') }}{% endif %}</h1>
   <span class="sub">
-    {% if is_leader %}{{ t('把车站分给 1~2 名队员，每天提交一次进展（0–100%）') }}
-    {% else %}{{ t('分给我的车站与进展') }}{% endif %}
+    {% if is_leader %}
+      {{ t('我自己的任务照常上报；本队的任务可以分派和调整（页面与员工一样，只多出任务管理）') }}
+    {% else %}
+      {{ t('每天下班前上报一次进展（0–100%）') }}
+    {% endif %}
   </span>
 </div>
 
@@ -16,21 +19,22 @@
 {% if not teams %}
 <div class="card"><p class="empty" data-testid="no-team">{{ t('你还没被指定为队长') }}</p></div>
 {% else %}
-<p class="hint">
-  {{ t('我带的队：') }}{% for t in teams %}<b>{{ t.name }}</b>{{ '、' if not loop.last }}{% endfor %}
-  · {{ t('共') }} {{ counts.unassigned + counts.doing + counts.done }} {{ t('个车站') }}
+<p class="hint" data-testid="leader-hint">
+  {{ t('我带的队：') }}{% for tm in teams %}<b>{{ tm.name }}</b>{{ '、' if not loop.last }}{% endfor %}
+  · {{ t('我负责') }} <b data-testid="n-mine">{{ n_mine }}</b> {{ t('个车站') }}
+  · {{ t('本队') }} {{ counts.unassigned + counts.doing + counts.done }} {{ t('个车站') }}
 </p>
 
-{# 四个 tab：未分配 / 进行中 / 已完成 / **我的**（队长自己也要巡店） #}
+{# 队长：我的 / 未分配 / 进行中 / 已完成 #}
 <div class="tabs" data-testid="task-tabs">
+  <a class="{% if tab==tab_mine %}on{% endif %}" href="/my/tasks?tab={{ tab_mine }}"
+     data-testid="tab-mine">{{ t('我的') }}（{{ counts.mine }}）</a>
   <a class="{% if tab=='unassigned' %}on{% endif %}" href="/my/tasks?tab=unassigned"
      data-testid="tab-unassigned">{{ labels.unassigned }}（{{ counts.unassigned }}）</a>
   <a class="{% if tab=='doing' %}on{% endif %}" href="/my/tasks?tab=doing"
      data-testid="tab-doing">{{ labels.doing }}（{{ counts.doing }}）</a>
   <a class="{% if tab=='done' %}on{% endif %}" href="/my/tasks?tab=done"
      data-testid="tab-done">{{ labels.done }}（{{ counts.done }}）</a>
-  <a class="{% if tab==tab_mine %}on{% endif %}" href="/my/tasks?tab={{ tab_mine }}"
-     data-testid="tab-mine">{{ t('我的') }}（{{ n_mine }}）</a>
 </div>
 
 <form method="get" action="/my/tasks" style="margin-bottom:.6rem">
@@ -38,14 +42,23 @@
   <label class="f">{{ t('搜车站') }}<input type="text" name="kw" value="{{ kw }}" style="width:180px"></label>
   <button class="btn ghost" type="submit">{{ t('查') }}</button>
 </form>
+{% endif %}
+{% else %}
+<p class="hint" data-testid="staff-hint">
+  {{ t('分给我的车站：') }} <b>{{ rows|length }}</b> {{ t('个') }}
+</p>
+{% endif %}
 
 {% for r in rows %}
-{% set can = can_submit_map.get(r.task.id, false) %}
+{% set can_rep = can_report_map.get(r.task.id, false) %}
+{% set can_asg = can_assign_map.get(r.task.id, false) %}
 <div class="card task-row" style="margin-bottom:.6rem;padding:.7rem 1rem"
-     data-testid="my-task-row" data-can-submit="{{ '1' if can else '0' }}">
+     data-testid="my-task-row" data-can-report="{{ '1' if can_rep else '0' }}"
+     data-can-assign="{{ '1' if can_asg else '0' }}">
   <div style="display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap">
-    <b style="font-size:1.02rem">{{ r.station_name }}</b>
+    <a href="/tasks/{{ r.task.id }}"><b style="font-size:1.02rem">{{ r.station_name }}</b></a>
     {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
+    {% if r.task.id in my_ids %}<span class="pill okk">{{ t('我的') }}</span>{% endif %}
     <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}"
           data-testid="state-{{ r.task.id }}">{{ labels[r.state] }}</span>
     <span class="hint">{{ t('进度') }} <b data-testid="pct-{{ r.task.id }}">{{ r.pct }}%</b></span>
@@ -56,10 +69,11 @@
     <span class="spacer" style="flex:1"></span>
     <span class="hint">{% if r.assignees %}{{ r.assignees|map(attribute='name')|join('、') }}{% else %}{{ t('还没分人') }}{% endif %}</span>
     {% if r.team_name %}<span class="hint">· {{ r.team_name }}</span>{% endif %}
+    {% if r.team_leaders %}<span class="hint">· {{ t('队长') }} {{ r.team_leaders|join('、') }}</span>{% endif %}
   </div>
 
-  {% if can %}
-  {# 分派：勾选本队队员（最多 2 人）+ 一键「分给我」 #}
+  {% if can_asg %}
+  {# 分派：勾选本队队员（最多 2 人） #}
   <details style="margin-top:.45rem">
     <summary style="cursor:pointer" class="hint">
       {{ t('分派给队员（最多') }}{{ max_assign }}{{ t('人）') }}</summary>
@@ -79,8 +93,10 @@
       <button class="btn ghost" type="submit">{{ t('保存分派') }}</button>
     </form>
   </details>
+  {% endif %}
 
-  {# 每日进展：滑动条 0–100% #}
+  {% if can_rep %}
+  {# 进展上报 / 队长调整：滑动条 0–100% #}
   <form method="post" action="/my/tasks/progress" class="prog-form"
         style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"
         x-data="{v: {{ r.pct }}}" data-testid="progress-{{ r.task.id }}">
@@ -94,33 +110,14 @@
     <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
   </form>
   {% else %}
-  {# 我负责、但不是我带的队（别人的队）→ **只读**：只有该队队长能提交（用户 2026-10-03 口径） #}
   <p class="hint" style="margin:.45rem 0 0" data-testid="readonly-{{ r.task.id }}">
-    {{ t('这条由') }}{{ r.team_name }}{{ t('的队长提交进展') }}{% if r.team_leaders %}（{{ r.team_leaders|join('、') }}）{% endif %}
+    {{ t('这条不归你上报') }}
   </p>
   {% endif %}
 </div>
 {% else %}
-<div class="card"><p class="empty" data-testid="no-rows">{{ t('这个分组里没有车站') }}</p></div>
+<div class="card"><p class="empty" data-testid="no-rows">
+  {% if is_leader %}{{ t('这个分组里没有车站') }}{% else %}{{ t('当前没有分给你的车站') }}{% endif %}
+</p></div>
 {% endfor %}
-{% endif %}
-
-{% else %}
-{# 队员：只读 #}
-{% for r in rows %}
-<div class="card task-row" style="margin-bottom:.6rem;padding:.7rem 1rem"
-     data-testid="my-task-row">
-  <div style="display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap">
-    <b>{{ r.station_name }}</b>
-    {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
-    <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}">{{ labels[r.state] }}</span>
-    <span class="hint">{{ t('进度') }} <b>{{ r.pct }}%</b></span>
-    <span class="spacer" style="flex:1"></span>
-    <span class="hint">{{ r.team_name }}{% if r.team_leaders %} · {{ t('队长') }} {{ r.team_leaders|join('、') }}{% endif %}</span>
-  </div>
-</div>
-{% else %}
-<div class="card"><p class="empty" data-testid="no-rows">{{ t('当前没有分给你的车站') }}</p></div>
-{% endfor %}
-{% endif %}
 {% endblock %}

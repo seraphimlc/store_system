@@ -110,6 +110,7 @@ def team_detail(request: Request, team_id: int,
         "request": request, "current_user": user, "team": team,
         "members": members, "active_codes": active_codes,
         "people": bd_teams.person_options(db),
+        "status_labels": bd_teams.STATUS_LABELS(CURRENT_LANG.get()),
         "msg": msg, "err": err,
     })
 
@@ -439,13 +440,14 @@ def tasks_export(user: Optional[User] = Depends(require_login),
 @router.get("/my/tasks", response_class=HTMLResponse)
 def my_tasks_page(request: Request,
                   user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db), tab: str = "unassigned",
+                  db: Session = Depends(get_db), tab: str = "mine",
                   kw: str = "", msg: str = "", err: str = ""):
-    """员工端任务页。
+    """员工端任务页（**队长与队员同一页**，队长多出"任务管理"）。
 
-    - **队长**：本队任务按 tab（未分配/进行中/已完成）分组 + **第 4 个 tab「我的」**
-      （分给我自己的，**跨队也算**——队长自己也要巡店），可分派 + 提交每日进展
-    - **队员**：只读"分给我的车站"
+    - **队员（staff）**：只看"我的任务"（自己担当的），**每行可上报进展**（滑动条）
+      —— 用户 2026-10-03 口径：员工自己先上报，队长做调整
+    - **队长（leader）**：同一页 + 多出 本队任务的 未分配/进行中/已完成 三个 tab
+      （可分派担当、可调整进展）；他自己的任务照常上报
     """
     g = _staff_guard(user)
     if g:
@@ -455,8 +457,10 @@ def my_tasks_page(request: Request,
     is_leader = user.role == "leader"
     teams = bd_teams.leader_teams(db, user.person_code) if is_leader else []
     team_ids = [t.id for t in teams]
-    my_rows = bd_tasks.member_tasks(db, user.person_code)     # 分给我自己的（跨队）
-    can_submit_map = {}
+    my_rows = bd_tasks.member_tasks(db, user.person_code)     # 我担当的（跨队）
+    my_ids = {r["task"].id for r in my_rows}
+    can_report_map, can_assign_map = {}, {}
+    members = {}
     if is_leader:
         all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw)
         counts = {k: sum(1 for r in all_rows if r["state"] == k)
@@ -468,24 +472,24 @@ def my_tasks_page(request: Request,
             rows = [r for r in all_rows if r["state"] == tab]
         else:
             rows = all_rows
-        # 每行能不能提交（只有该队队长/管理员能提交，用户 2026-10-03 口径）
-        for r in rows:
-            can_submit_map[r["task"].id] = bd_tasks.can_submit(db, user, r["task"])
-        members = {}
         for t in teams:
+            # 派工候选：有账号**且在职**（离职/停用的人执行不了，不列出来）
             members[t.id] = [m for m in bd_teams.team_members(db, t.id)
-                             if m["has_account"]]
+                             if m["has_account"] and m["can_work"]]
     else:
         rows = my_rows
         counts = {k: sum(1 for r in rows if r["state"] == k)
                   for k in bd_tasks.STATES}
-        members = {}
+    for r in rows:
+        tid = r["task"].id
+        can_report_map[tid] = bd_tasks.can_report(db, user, r["task"])
+        can_assign_map[tid] = bd_tasks.can_assign(db, user, r["task"])
     return templates.TemplateResponse("my_tasks.html", {
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
-        "can_submit_map": can_submit_map, "tab_mine": TAB_MINE,
-        "n_mine": len(my_rows),
+        "can_report_map": can_report_map, "can_assign_map": can_assign_map,
+        "tab_mine": TAB_MINE, "my_ids": my_ids, "n_mine": len(my_rows),
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "max_assign": bd_tasks.MAX_ASSIGN,
         "today": date.today(), "msg": msg, "err": err,
@@ -509,12 +513,13 @@ def my_tasks_assign(request: Request, task_id: int = Form(0),
     if task is None:
         return RedirectResponse(back % "doing" + "&err=" + _q("任务不存在"),
                                 status_code=303)
-    if not bd_tasks.can_submit(db, user, task):
+    if not bd_tasks.can_assign(db, user, task):
         return RedirectResponse(back % "doing" + "&err="
                                 + _q("只有该队队长或管理员能分派"),
                                 status_code=303)
     try:
-        r = bd_tasks.assign_members(db, task_id, person or (), by=user.username)
+        r = bd_tasks.assign_members(db, task_id, person or (), by=user.username,
+                                    actor_user=user)
         db.commit()
         return RedirectResponse(
             "/my/tasks?tab=%s&msg=%s" % (r["state"],
@@ -532,7 +537,7 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
                       csrf_token: str = Form(""),
                       user: Optional[User] = Depends(require_login),
                       db: Session = Depends(get_db)):
-    """**每日进展提交**（队长或管理员）：写/改今天一条，刷新任务进度与状态。"""
+    """**每日进展上报**（员工报自己的 / 队长调整 / 管理员）：写或改今天一条。"""
     if user is None:
         return _denied()
     if not csrf_ok(request, csrf_token):
@@ -542,12 +547,13 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
     if task is None:
         return RedirectResponse("/my/tasks?err=" + _q("任务不存在"),
                                 status_code=303)
-    if not bd_tasks.can_submit(db, user, task):
+    if not bd_tasks.can_report(db, user, task):
         return RedirectResponse("/my/tasks?err="
-                                + _q("只有该队队长或管理员能提交进展"),
+                                + _q("只能上报自己担当的任务"),
                                 status_code=303)
     try:
-        r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username)
+        r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
+                                   actor_user=user)
         db.commit()
         return RedirectResponse(
             "/my/tasks?tab=%s&msg=%s" % (r["state"], _q("已提交 %d%%" % r["pct"])),
@@ -556,3 +562,83 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
         db.rollback()
         return RedirectResponse("/my/tasks?err=%s" % _q(str(e)),
                                 status_code=303)
+
+
+# ============================ 任务详情（日志时间线）+ 变更日志 ============================
+
+@router.get("/tasks/{task_id}", response_class=HTMLResponse)
+def task_detail(request: Request, task_id: int,
+                user: Optional[User] = Depends(require_login),
+                db: Session = Depends(get_db), msg: str = "", err: str = ""):
+    """单个任务：当前状态 + **每日进展历史** + **变更日志时间线**。
+
+    可见范围：管理员 / 该任务的队长 / **本人是担当**（数据隔离）。
+    """
+    if user is None:
+        return RedirectResponse("/login", status_code=302)
+    from app.services import bd_log, bd_tasks
+    task = db.get(bd_tasks.BdTask, task_id)
+    if task is None:
+        return RedirectResponse("/tasks?err=%s" % _q("任务不存在"),
+                                status_code=303)
+    if not bd_tasks.can_report(db, user, task):
+        # 越权（别的队、也不是担当）→ 回各自首页，不泄露内容
+        from app.services import home as _home
+        return RedirectResponse(_home.landing_home(db, user), status_code=302)
+    row = bd_tasks.task_rows(db, [task.id])
+    row = row[0] if row else None
+    progress = (db.query(bd_tasks.BdTaskProgress)
+                .filter(bd_tasks.BdTaskProgress.task_id == task.id)
+                .order_by(bd_tasks.BdTaskProgress.progress_date.desc())
+                .limit(60).all())
+    return templates.TemplateResponse("bd_task_detail.html", {
+        "request": request, "current_user": user, "r": row, "task": task,
+        "progress": progress, "timeline": bd_log.timeline(db, "task", task.id),
+        "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
+        "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
+        "can_adjust": bd_tasks.can_adjust(db, user, task),
+        "msg": msg, "err": err,
+    })
+
+
+@router.get("/logs", response_class=HTMLResponse)
+def logs_page(request: Request, user: Optional[User] = Depends(require_login),
+              db: Session = Depends(get_db), domain: str = "",
+              page: int = 1, msg: str = "", err: str = ""):
+    """**变更日志**（管理端）：任务/团队/成员/车站 的变化时间线。
+
+    - 管理员：看全部
+    - 队长（有 `log.view` 能力）：只看**本队任务**与**本队**的日志（数据隔离）
+    """
+    if user is None:
+        return RedirectResponse("/login", status_code=302)
+    from app.services import bd_log, bd_perm, bd_teams
+    is_admin = user.role == "admin"
+    if not (is_admin or bd_perm.can(db, user, "log.view")):
+        from app.services import home as _home
+        return RedirectResponse(_home.landing_home(db, user), status_code=302)
+    limit = 200
+    page = max(1, int(page or 1))
+    rows = bd_log.recent(db, domain=domain, limit=limit,
+                         offset=(page - 1) * limit)
+    if not is_admin:
+        # 队长：只保留自己队相关的（任务按 team 反查；团队/成员按队 id）
+        my_teams = {t.id for t in bd_teams.leader_teams(db, user.person_code)}
+        from app.models import BdTask
+        task_team = {tid: team for tid, team in
+                     db.query(BdTask.id, BdTask.team_id).all()}
+        kept = []
+        for r in rows:
+            if r.domain == "task" and task_team.get(r.ref_id) in my_teams:
+                kept.append(r)
+            elif r.domain in ("team", "member") and r.ref_id in my_teams:
+                kept.append(r)
+        rows = kept
+    return templates.TemplateResponse("bd_logs.html", {
+        "request": request, "current_user": user, "rows": rows,
+        "domain": domain, "page": page, "limit": limit,
+        "domains": bd_log.DOMAINS,
+        "domain_labels": bd_log.DOMAIN_LABELS(CURRENT_LANG.get()),
+        "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
+        "msg": msg, "err": err,
+    })

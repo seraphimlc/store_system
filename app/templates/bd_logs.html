@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ t('变更日志') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('变更日志') }}</h1>
+  <span class="sub">{{ t('任务 / 团队 / 成员 / 车站 的变化都记在这里（只追加，不修改）') }}</span>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+<div class="tabs" data-testid="log-tabs">
+  <a class="{% if not domain %}on{% endif %}" href="/logs">{{ t('全部') }}</a>
+  {% for d in domains %}
+  <a class="{% if domain==d %}on{% endif %}" href="/logs?domain={{ d }}"
+     data-testid="log-tab-{{ d }}">{{ domain_labels.get(d, d) }}</a>
+  {% endfor %}
+</div>
+
+<div class="tbl-wrap">
+  <table data-testid="logs">
+    <thead><tr><th>{{ t('时间') }}</th><th>{{ t('对象') }}</th><th>{{ t('动作') }}</th>
+      <th>{{ t('字段') }}</th><th>{{ t('旧值') }}</th><th>{{ t('新值') }}</th>
+      <th>{{ t('操作人') }}</th><th>{{ t('备注') }}</th></tr></thead>
+    <tbody>
+      {% for g in rows %}
+      <tr data-testid="log-row">
+        <td>{{ g.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ domain_labels.get(g.domain, g.domain) }}
+          {% if g.ref_label %}<span class="hint">{{ g.ref_label }}</span>{% endif %}</td>
+        <td>{{ action_labels.get(g.action, g.action) }}</td>
+        <td>{{ g.field or '—' }}</td>
+        <td>{{ g.old_value or '—' }}</td>
+        <td>{{ g.new_value or '—' }}</td>
+        <td>{{ g.actor_name or g.actor or '—' }}</td>
+        <td>{{ g.note or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="empty">{{ t('还没有日志') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if page > 1 or rows|length == limit %}
+<div class="form-actions">
+  {% if page > 1 %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page - 1 }}">{{ t('上一页') }}</a>{% endif %}
+  <span class="hint">{{ t('第') }}{{ page }} {{ t('页') }}</span>
+  {% if rows|length == limit %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page + 1 }}">{{ t('下一页') }}</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

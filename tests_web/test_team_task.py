@@ -366,12 +366,14 @@ def test_leader_task_page_tabs_and_assign(client, seeded):
     _login(client, "ogawa")
     p = client.get("/my/tasks")
     assert p.status_code == 200
-    for tid in ('data-testid="tab-unassigned"', 'data-testid="tab-doing"',
-                'data-testid="tab-done"'):
+    for tid in ('data-testid="tab-mine"', 'data-testid="tab-unassigned"',
+                'data-testid="tab-doing"', 'data-testid="tab-done"'):
         assert tid in p.text
     assert "未分配（1）" in p.text
-    # 未分配 tab 里能分派
-    assert 'data-testid="assign-%d"' % seeded["task"] in p.text
+    # 默认 tab = 我的（队长页面与员工一样）；本队待分派去「未分配」tab 看
+    assert p.text.count('data-testid="my-task-row"') == 0
+    p2 = client.get("/my/tasks?tab=unassigned")
+    assert 'data-testid="assign-%d"' % seeded["task"] in p2.text
     r = _post(client, "/my/tasks/assign",
               {"task_id": str(seeded["task"]), "person": "P2"},
               from_path="/my/tasks?tab=unassigned")
@@ -395,8 +397,13 @@ def test_leader_submit_progress_via_page(client, seeded):
     db.close()
 
 
-def test_member_is_readonly(client, seeded):
-    """队员：看得到分给自己的，但不能提交进展 / 不能分派。"""
+def test_member_can_report_own_but_not_others(client, seeded):
+    """口径（2026-10-03 变更）：**员工自己先上报**，队长做调整。
+
+    - 队员对自己担当的任务 → **有滑动条、能上报**
+    - 队员不能**分派**（分派=任务管理，队长专属）
+    - 队员不能上报**别人担当**的任务（数据隔离）
+    """
     db = appdb.SessionLocal()
     tid = seeded["task"]
     bd_tasks.assign_members(db, tid, ["P2"], by="admin")
@@ -407,13 +414,22 @@ def test_member_is_readonly(client, seeded):
     p = client.get("/my/tasks")
     assert p.status_code == 200
     assert "駒場東大前" in p.text
-    assert 'data-testid="slider-%d"' % tid not in p.text, "队员不该有滑动条"
-    # 从带表单的页面取 csrf（队员的任务页是只读的、页面上没有表单）
+    assert 'data-testid="slider-%d"' % tid in p.text, "队员对自己的任务应能上报"
+    assert 'data-testid="assign-%d"' % tid not in p.text, "队员不能分派"
+    r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "60"},
+              from_path="/my/tasks")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).pct == 60
+    # 换成别人担当 → 他不能上报
+    bd_tasks.assign_members(db, tid, ["P1"], by="admin")
+    db.commit()
+    db.close()
     r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "99"},
               from_path="/my/report")
     assert r.status_code == 303
     db = appdb.SessionLocal()
-    assert db.get(BdTask, tid).pct == 25, "队员不许改进度"
+    assert db.get(BdTask, tid).pct == 60, "不能改别人担当的任务"
     db.close()
 
 
@@ -546,16 +562,16 @@ def test_leader_view_after_role_sync(client, seeded):
     _login(client, "tangjing", password="pw123456")
     r = client.get("/", follow_redirects=False)
     assert r.headers["location"] == "/my/tasks"          # 队长落点
-    p = client.get("/my/tasks").text
+    p = client.get("/my/tasks?tab=unassigned").text
     assert 'data-testid="tab-unassigned"' in p
     assert 'data-testid="assign-%d"' % seeded["task"] in p
 
 
 # ---------------- 队长自己也要巡店（2026-10-03 用户口径） ----------------
 
-def test_leader_sees_own_cross_team_task_but_readonly(client, seeded):
-    """队长在**别人的队**里当队员、被派了活：第 4 tab「我的」能看到，但**只读**
-    （只有该队队长能提交进展 —— 用户选"只有队长"，所以不是 bug 而是口径）。"""
+def test_leader_sees_and_reports_own_cross_team_task(client, seeded):
+    """队长在**别人的队**里当队员、被派了活：看得见（跨队），而且**作为担当能自己上报**
+    （用户 2026-10-03 口径：员工自己先上报、队长做调整 —— 他在这里就是员工）。"""
     db = appdb.SessionLocal()
     b = bd_teams.create_team(db, "汤静队", by="admin")
     bd_teams.set_members(db, b.id, [("P3", "leader"), ("P1", "member")])
@@ -569,11 +585,17 @@ def test_leader_sees_own_cross_team_task_but_readonly(client, seeded):
     _login(client, "ogawa")
     p = client.get("/my/tasks?tab=mine")
     assert p.status_code == 200
-    assert 'data-testid="tab-mine"' in p.text          # 第 4 个 tab 在
+    assert 'data-testid="tab-mine"' in p.text          # 「我的」tab 在
     assert "池ノ上" in p.text, "队长在别队的活必须看得见（跨队）"
-    assert 'data-testid="slider-%d"' % t.id not in p.text, "别队的活不给滑动条"
-    assert 'data-testid="readonly-%d"' % t.id in p.text
-    assert "这条由汤静队的队长提交进展" in p.text
+    assert 'data-testid="slider-%d"' % t.id in p.text, "担当本人应能上报"
+    # 但不能分派别人的队（分派=任务管理）
+    assert 'data-testid="assign-%d"' % t.id not in p.text
+    r = _post(client, "/my/tasks/progress", {"task_id": str(t.id), "pct": "30"},
+              from_path="/my/tasks?tab=mine")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, t.id).pct == 30
+    db.close()
 
 
 def test_leader_can_submit_his_own_task_in_his_team(client, seeded):
@@ -653,3 +675,138 @@ def test_remove_member_warns_about_open_tasks(client, seeded):
     assert r.status_code == 303
     loc = r.headers["location"]
     assert "%E6%9C%AA%E5%AE%8C%E6%88%90" in loc or "未完成" in loc, loc
+
+
+# ---------------- 变更日志（用户 2026-10-03 第 3 条） ----------------
+
+def test_logs_written_for_task_and_team_changes(seeded):
+    """任务：创建/派队/分派/上报/状态变化 都留日志；团队：建队/成员/队长任免 也留。"""
+    from app.models import BdLog
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    before = db.query(BdLog).count()
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    bd_tasks.save_progress(db, tid, 40, "开始", by="ogawa")
+    bd_tasks.save_progress(db, tid, 70, "队长调整", by="ogawa")
+    bd_tasks.set_task_team(db, [tid], seeded["team"],
+                           assign_date=date(2026, 10, 9))
+    bd_teams.set_members(db, seeded["team"], [("P2", "leader")])
+    db.commit()
+    logs = db.query(BdLog).order_by(BdLog.id.asc()).all()
+    assert len(logs) > before
+    actions = [g.action for g in logs]
+    assert "assign" in actions and "progress" in actions
+    assert "role" in actions, "队长任免要留痕（旧实现就地改，看不到历史）"
+    # 进度日志能看到"改了两次、谁改的"
+    prog = [g for g in logs if g.action == "progress"]
+    assert len(prog) >= 2
+    assert prog[0].old_value == "0%" and prog[0].new_value == "40%"
+    assert prog[1].old_value == "40%" and prog[1].new_value == "70%"
+    # 换队日志带 队名 旧→新
+    disp = [g for g in logs if g.action == "dispatch"]
+    assert disp and disp[0].field == "team" and "小川队" in disp[0].new_value
+    db.close()
+
+
+def test_task_detail_page_shows_timeline_and_isolates(client, seeded):
+    """任务详情页：有日志时间线；别的队的人看不到（数据隔离）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    bd_tasks.save_progress(db, tid, 55, "一线报的", by="ogawa")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    p = client.get("/tasks/%d" % tid)
+    assert p.status_code == 200
+    assert 'data-testid="task-timeline"' in p.text
+    assert 'data-testid="progress-history"' in p.text
+    assert "一线报的" in p.text
+    # 汤静（P2）是担当 → 能看；甘子杰（P3，外人）→ 看不到
+    _login(client, "tangjing")
+    assert client.get("/tasks/%d" % tid).status_code == 200
+    _login(client, "ganzijie")
+    r = client.get("/tasks/%d" % tid, follow_redirects=False)
+    assert r.status_code == 302, "不是本队队长也不是担当 → 不能看"
+
+
+def test_logs_page_admin_only_and_leader_scoped(client, seeded):
+    _login(client, "admin")
+    p = client.get("/logs")
+    assert p.status_code == 200 and 'data-testid="logs"' in p.text
+    # 队员没有 log.view → 回员工首页
+    _login(client, "tangjing")
+    r = client.get("/logs", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"].startswith(("/my/plan", "/my/report", "/my/perf"))
+
+
+# ---------------- 数据隔离（用户 2026-10-03 第 9 条） ----------------
+
+def test_team_leader_cannot_touch_other_team(seeded):
+    """a 队队长不能处理 b 队的任务（读写都拦）。"""
+    db = appdb.SessionLocal()
+    b = bd_teams.create_team(db, "汤静队", by="admin")
+    bd_teams.set_members(db, b.id, [("P3", "leader"), ("P2", "member")])
+    st = bd_tasks.create_station(db, "池ノ上")
+    bd_tasks.create_tasks(db, [st.id], by="admin", team_id=b.id,
+                          assign_date=date(2026, 10, 3))
+    t = db.query(BdTask).filter(BdTask.station_id == st.id).one()
+    u_a = db.query(User).filter(User.username == "ogawa").one()   # a 队队长
+    assert bd_tasks.can_report(db, u_a, t) is False
+    assert bd_tasks.can_assign(db, u_a, t) is False
+    assert bd_tasks.can_adjust(db, u_a, t) is False
+    # 本队那条 → 都有权限
+    own = db.get(BdTask, seeded["task"])
+    assert bd_tasks.can_assign(db, u_a, own) is True
+    assert bd_tasks.can_report(db, u_a, own) is True
+    db.close()
+
+
+def test_cannot_assign_resigned_member(seeded):
+    """离职/停用的人不能派工（他执行不了）；成员记录仍保留。"""
+    db = appdb.SessionLocal()
+    u = db.query(User).filter(User.username == "tangjing").one()
+    u.status = "resigned"
+    db.commit()
+    with pytest.raises(bd_tasks.TaskError):
+        bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    # 成员记录还在（只是状态变了）
+    assert any(m["person_code"] == "P2"
+               for m in bd_teams.team_members(db, seeded["team"]))
+    st = [m for m in bd_teams.team_members(db, seeded["team"])
+          if m["person_code"] == "P2"][0]
+    assert st["status"] == "resigned" and st["can_work"] is False
+    db.close()
+
+
+def test_team_detail_shows_employee_status(client, seeded):
+    _login(client, "admin")
+    p = client.get("/teams/%d" % seeded["team"])
+    assert p.status_code == 200
+    assert "员工状态" in p.text
+    assert 'data-testid="status-P1"' in p.text and "在岗" in p.text
+
+
+# ---------------- 角色能力表（权限表 a 方案） ----------------
+
+def test_role_capability_table_drives_judgement(client, seeded):
+    """权限口径来自 bd_role_cap（表空则回退缺省），三类角色能力不同。"""
+    from app.services import bd_perm
+    db = appdb.SessionLocal()
+    assert bd_perm.allowed(db, "leader", "task.assign") is True
+    assert bd_perm.allowed(db, "staff", "task.assign") is False
+    assert bd_perm.allowed(db, "staff", "task.report") is True
+    assert bd_perm.allowed(db, "admin", "team.manage") is True
+    # 改表即改判权（单一来源）
+    from app.models import BdRoleCap
+    row = (db.query(BdRoleCap)
+           .filter(BdRoleCap.role == "staff",
+                   BdRoleCap.capability == "task.report").first())
+    if row is not None:
+        row.allowed = False
+        db.commit()
+        bd_perm.clear_cache()
+        assert bd_perm.allowed(db, "staff", "task.report") is False
+    bd_perm.clear_cache()
+    db.close()

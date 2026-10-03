@@ -96,7 +96,7 @@
   <tbody>
     {% for r in rows %}
     <tr data-testid="task-row" {% if r.stale %}class="stale-row" data-stale="1"{% endif %}>
-      <td><b>{{ r.station_name }}</b>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
+      <td><a href="/tasks/{{ r.task.id }}" data-testid="task-link-{{ r.task.id }}"><b>{{ r.station_name }}</b></a>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>{{ r.team_leaders|join('、') or '—' }}</td>
       <td>{% if r.assignees %}{{ r.assignees|map(attribute='name')|join('、') }}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
