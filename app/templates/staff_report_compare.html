@@ -11,7 +11,7 @@
     <label class="fld">{{ t('起') }}<input type="date" name="start" value="{{ start }}"></label>
     <label class="fld">{{ t('止') }}<input type="date" name="end" value="{{ end }}"></label>
     <label class="fld">{{ t('员工') }}
-      <select name="person_code">
+      <select name="person_code" data-emp-filter>
         <option value="">{{ t('全部') }}</option>
         {% for s in staff_opts %}
         <option value="{{ s.code }}" {% if s.code == person_code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>

@@ -117,6 +117,14 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   - 实现位置：`report_compare.points_of()/p2_score_share()`（唯一算法来源）、`_row_dict()`、`compare()`、
     `reports_summary()`、
     `daily_report.month_days()`、`report_export.py`。测试 `test_points_and_rate_helpers` 等 4 项。
+- **员工下拉一律带搜索过滤（2026-10-02 用户要求）**：`app/static/emp_select.js`（原生 JS，无依赖，
+  由 `base.html` 全局引入）——给 `<select data-emp-filter>` 自动挂一个筛选框：
+  **输编号后 5 位（选项文本里含完整编号，子串即命中）或姓名任一个字**，查询串做 **NFKC 归一**
+  （全角数字/字母、大小写都能匹配）；**唯一命中时自动选中并派发 `change`**（看板那种"change 即加载"的下拉
+  直接就出结果）；命中多个保留当前选择、由人工挑；无命中输入框标红提示「无匹配」；
+  **已选项永远保留在列表里**（避免过滤动作悄悄改掉已提交的筛选条件）；htmx 局部替换后自动重挂。
+  已挂的 4 处：`/staff-reports`（筛选 + 补录卡片）、`/staff-reports/compare` 筛选、`/dashboard` 员工维度。
+  新增员工下拉时**记得加 `data-emp-filter`**；测试 `test_employee_selects_have_filter`。
 - **员工管理页不再展示 MCP Token（2026-10-02 用户："这块没有用，隐藏掉"）**：
   整列（前缀/scope/状态/代发/吊销）已从 `/staff-admin` 移除，页面也不再查 token（省 N 次查询）；
   **端点 `/{uid}/tokens/issue|revoke` 与 `mcp_service` 全部保留**（脚本/测试仍可用），

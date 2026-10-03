@@ -10,7 +10,7 @@
     <label class="fld">{{ t('起') }}<input type="date" name="start" value="{{ start }}"></label>
     <label class="fld">{{ t('止') }}<input type="date" name="end" value="{{ end }}"></label>
     <label class="fld">{{ t('员工') }}
-      <select name="person_code">
+      <select name="person_code" data-emp-filter>
         <option value="">{{ t('全部') }}</option>
         {% for s in staff_opts %}
         <option value="{{ s.code }}" {% if s.code == person_code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>
@@ -34,7 +34,8 @@
     <input type="hidden" name="end" value="{{ end }}">
     <table class="kv">
       <tr><th><label for="ed_person">{{ t('员工') }}</label></th>
-          <td><select name="person_code" id="ed_person">
+          <td><select name="person_code" id="ed_person" data-emp-filter
+                      data-emp-filter-hint="{{ t('筛选：编号后5位 或 姓名一个字') }}">
             <option value="">{{ t('请选择员工') }}</option>
             {% for s in staff_opts %}
             <option value="{{ s.code }}" {% if edit_row and edit_row.person_code == s.code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>

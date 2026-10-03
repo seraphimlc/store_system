@@ -1137,3 +1137,28 @@ def test_reports_summary_and_cards(client):
     assert 'data-testid="sum-store-rate">25.0%<' in h       # 2点店铺数占比 2/8
     assert 'data-testid="sum-rate">40.0%<' in h             # 2点分数占比 4/10
     assert 'class="stat-grid"' not in h.split('data-testid="reports-table"')[0]
+
+
+def test_employee_selects_have_filter(client):
+    """所有员工下拉都挂上搜索过滤组件（2026-10-02 用户："输入后五位或姓名一个字就能筛"）。"""
+    _seed_admin_staff_and_data(client)
+    _login_admin(client)
+    # 看板要有一条月度统计才渲染"员工维度分析"块（否则是空态）
+    from app.models import MonthPerfRecord
+    db = appdb.SessionLocal()
+    db.add(MonthPerfRecord(month="2026-09", person_code="P1", records=6,
+                           p1=4, p2=2, points=8, salary=2000))
+    db.commit()
+    db.close()
+    for url in ("/staff-reports?start=2026-09-16&end=2026-09-17",
+                "/staff-reports/compare?start=2026-09-16&end=2026-09-17",
+                "/dashboard"):
+        h = client.get(url).text
+        assert "data-emp-filter" in h, url
+        assert "/static/emp_select.js" in h, url          # 组件脚本在所有页面都加载
+    # 自报页有两处（筛选 + 补录卡片）
+    page = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
+    assert page.count("data-emp-filter") >= 2
+    assert "筛选：编号后5位 或 姓名一个字" in page
+    # 静态资源可访问
+    assert client.get("/static/emp_select.js").status_code == 200
