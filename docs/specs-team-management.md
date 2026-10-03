@@ -20,6 +20,7 @@
 | 落点 | **队长 → `/my/tasks`（员工端任务页）**，不再是 `/lead/team`（用户 2026-10-03：「队长端，也就是员工端里增加…」）→ **`/lead/*` 路由没有实现** |
 | 导航 | `base.html`：管理端菜单改 `role == 'admin'`；底部 tabbar 对 `staff`+`leader` 都显示，新增「任务」tab |
 | 账号 | `users.role` 新增 `leader`；`/staff-admin` 建号/编辑弹窗都加了**角色**选项（只允许 队员/队长，**不给 admin**），列表加「角色」列 |
+| **角色自动同步** | `bd_teams.sync_account_roles()`：**在团队里当上队长 → 账号自动升 `leader`；不再当任何队队长 → 自动退回 `staff`**（只动 `staff`/`leader`，**绝不动 admin**）。`set_members` 保存成员后自动调用，种子脚本也会调。否则"指定了队长却进不去队长端"——本地库端到端实测踩到过：队长登录进的是队员视图、`/my/tasks` 显示 0 行 |
 | 种子导入 | **一个脚本**：`scripts/bd_seed_team_task.py`（默认 dry-run，`--apply` 才写；`--teams-only`/`--stations-only`）。已把 6 队 + 5 位队长导入本地库；**陈嘉溢队 2 条同名人员记录 → 只报警不猜** |
 | 测试 | `tests_web/test_team_task.py`（30 项，含队长无重定向环、导航 gate、队员只读等）；**全量 `tests_web` 357 passed** |
 | 额外修复 | `tests_web/test_date_plan.py` 有 4 个用例没按仓库约定冻结 `jst_today`（JST 跨过 10-03 截止日后必红，**在干净基线上同样失败**）→ 已补 `frozen` fixture |

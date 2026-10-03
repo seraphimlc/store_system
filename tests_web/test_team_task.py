@@ -505,3 +505,39 @@ def test_station_tasks_does_not_touch_settlement_tables():
     for t in ("bd_team", "bd_team_member", "bd_station", "bd_task",
               "bd_task_assign", "bd_task_progress"):
         assert t in Base.metadata.tables, t
+
+
+def test_designate_leader_syncs_account_role(seeded):
+    """指定队长 → 账号角色自动变 leader；不再当任何队队长 → 退回 staff；admin 不动。"""
+    db = appdb.SessionLocal()
+    tid = seeded["team"]
+    u2 = db.query(User).filter(User.username == "tangjing").first()
+    assert u2.role == "staff"
+    # 把 P2（汤静）设成队长
+    bd_teams.set_members(db, tid, [("P1", "member"), ("P2", "leader")])
+    db.commit()
+    assert db.query(User).filter(User.username == "tangjing").first().role == "leader"
+    assert db.query(User).filter(User.username == "ogawa").first().role == "staff", \
+        "不再当队长要退回 staff"
+    # 队长被移出所有队 → 退回 staff
+    bd_teams.set_members(db, tid, [("P1", "member")])
+    db.commit()
+    assert db.query(User).filter(User.username == "tangjing").first().role == "staff"
+    # 管理员账号绝不被改写
+    assert db.query(User).filter(User.username == "admin").first().role == "admin"
+    db.close()
+
+
+def test_leader_view_after_role_sync(client, seeded):
+    """端到端：把某人设成队长后，他登录看到的是**队长视图**（三 tab + 分派控件）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["team"]
+    bd_teams.set_members(db, tid, [("P2", "leader")])
+    db.commit()
+    db.close()
+    _login(client, "tangjing", password="pw123456")
+    r = client.get("/", follow_redirects=False)
+    assert r.headers["location"] == "/my/tasks"          # 队长落点
+    p = client.get("/my/tasks").text
+    assert 'data-testid="tab-unassigned"' in p
+    assert 'data-testid="assign-%d"' % seeded["task"] in p

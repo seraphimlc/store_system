@@ -212,7 +212,37 @@ def set_members(db: Session, team_id: int,
             m.role = role
             changed += 1
     db.flush()
-    return {"added": added, "removed": removed, "changed": changed}
+    roles = sync_account_roles(db)
+    return {"added": added, "removed": removed, "changed": changed,
+            "promoted": roles["promoted"], "demoted": roles["demoted"]}
+
+
+def sync_account_roles(db: Session) -> dict:
+    """把「团队里的队长身份」同步到账号角色（**避免指定了队长却进不去队长端**）。
+
+    - 在某队当 `leader`（现役且该队 `active`）→ `users.role = "leader"`
+    - 不再当任何队队长 → 退回 `"staff"`
+    - ⚠️ **只动 `role in ("staff","leader")` 的账号，绝不动 `admin`**
+    - 只影响"能不能进队长端"；数据范围仍由 `bd_team_member` 决定
+
+    返回 `{"promoted": [...], "demoted": [...]}`（改动的人）。
+    """
+    leads = {c for (c,) in
+             db.query(BdTeamMember.person_code)
+             .join(BdTeam, BdTeam.id == BdTeamMember.team_id)
+             .filter(BdTeamMember.role == ROLE_LEADER,
+                     BdTeamMember.end_date.is_(None),
+                     BdTeam.status == "active").all() if c}
+    promoted, demoted = [], []
+    for u in db.query(User).filter(User.role.in_(("staff", "leader"))).all():
+        if not u.person_code:
+            continue
+        want = ROLE_LEADER if u.person_code in leads else "staff"
+        if u.role != want:
+            u.role = want
+            (promoted if want == ROLE_LEADER else demoted).append(u.person_code)
+    db.flush()
+    return {"promoted": promoted, "demoted": demoted}
 
 
 def leader_teams(db: Session, person_code: Optional[str]) -> List[BdTeam]:

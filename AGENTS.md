@@ -320,6 +320,11 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   ⚠️ **加第三角色会死循环**（`/ → /dashboard → _denied() → /login → /`）：修法是
   `auth_r` 的 `GET /`、`GET /login`、登录 POST 三处都走 `landing_home`（**`GET /login` 是关键那一环**）；
   各 router 的 `_denied()` 保持 `/login`（会按角色二次落点，不成环）。
+- **⚠️ 队长角色必须自动同步（否则必踩）**：`bd_teams.sync_account_roles()` —— 在团队里当上队长 →
+  账号 `users.role` 自动升 `leader`；不再当任何队队长 → 自动退回 `staff`（**只动 staff/leader，绝不动 admin**）。
+  `set_members` 保存成员后自动调用；种子脚本也调。**本地库端到端实测踩到过**：只在团队表里指定队长、
+  不改账号角色 → 队长登录进的是**队员视图**（`/my/tasks` 0 行、没有三 tab）。本地库已同步：
+  5 位队长账号 = `ogawa`/`tangjing`/`ganzijie`/`luozijie`/`chenweifeng`（陈嘉溢队无队长）。
 - **表（6 张，迁移 `b2c3d4e5f6a7`，down_revision `d3e4f5a6b7c8`）**：
   `bd_team` / `bd_team_member`（成员含历史，移出写 `end_date` **不删行**）/
   `bd_station`（车站主数据，`name_norm` 判重）/ **`bd_task`（1 站 1 任务：`team_id` + `assign_date` + `state` + `pct`）** /

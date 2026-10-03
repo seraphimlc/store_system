@@ -144,6 +144,10 @@ def main():
                            leader.display_name if leader else "—",
                            team.id if team is not None else None))
         if args.apply:
+            # 把"团队里的队长身份"同步到账号角色（否则队长登录进的是队员视图）
+            roles = bd_teams.sync_account_roles(db)
+            if roles["promoted"]:
+                print("已设为队长账号：%s" % "、".join(roles["promoted"]))
             db.commit()
         else:
             db.rollback()

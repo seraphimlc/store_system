@@ -181,6 +181,10 @@ def team_members_save(request: Request, team_id: int,
         db.commit()
         msg = "已保存：新增 %d / 移出 %d / 改角色 %d" % (
             r["added"], r["removed"], r["changed"])
+        if r.get("promoted"):
+            msg += "；已设为队长账号 %d 人" % len(r["promoted"])
+        if r.get("demoted"):
+            msg += "；已退回队员账号 %d 人" % len(r["demoted"])
         return RedirectResponse("/teams/%d?msg=%s" % (team_id, _q(msg)),
                                 status_code=303)
     except bd_teams.TeamError as e:
