@@ -15,10 +15,20 @@ def points_of(p1: int, p2: int) -> int:
     return (p1 or 0) + (p2 or 0) * 2
 
 
-def p2_rate(p1: int, p2: int):
-    """**比例 = 2点店数 ÷ 总店数**（与看板 `p2rate` 同一口径）；没有店 → None。"""
-    total = (p1 or 0) + (p2 or 0)
-    return ((p2 or 0) / total) if total else None
+def p2_score_share(p1: int, p2: int):
+    """**比例 = 2点分数 ÷ 总分数**（用户 2026-10-02 明确口径）。
+
+    分数（点数）= 1点×1 + 2点×2，所以
+    `2点分数占比 = (2点店数×2) ÷ (1点店数×1 + 2点店数×2)`；
+    没有任何店（总分数 0）→ None（页面显示 —）。
+    ⚠️ 与看板 `p2rate`（2点**店数**占比）**不是**同一个数：如 1点6家/2点2家 → 本函数 40%，店数口径 25%。
+    """
+    pts = points_of(p1, p2)
+    return ((p2 or 0) * 2 / pts) if pts else None
+
+
+# 兼容旧名字（历史脚本/调用方）
+p2_rate = p2_score_share
 
 
 def _acc(abs_sum: int, sys_sum: int):

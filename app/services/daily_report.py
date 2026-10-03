@@ -268,13 +268,13 @@ def month_days(db, person_code: str, month: str = "", *,
         future = False
         if r is not None:
             filled += 1
+            from app.services.report_compare import p2_score_share, points_of
             p1, p2 = r.p1_cnt or 0, r.p2_cnt or 0
-            _t = p1 + p2
             days.append({"date": d, "wd": d.weekday(), "empty": False,
                          "future": future, "area": r.area or "", "p1": p1,
                          "p2": p2, "total": r.total_cnt,
-                         "points": p1 + p2 * 2,
-                         "rate": (p2 / _t) if _t else None,
+                         "points": points_of(p1, p2),
+                         "rate": p2_score_share(p1, p2),      # 2点分数占比
                          "submitted_at": r.submitted_at})
         else:
             days.append({"date": d, "wd": d.weekday(), "empty": True,
@@ -282,14 +282,15 @@ def month_days(db, person_code: str, month: str = "", *,
                          "total": 0, "points": 0, "rate": None,
                          "submitted_at": None})
         d += timedelta(days=1)
+    from app.services.report_compare import p2_score_share, points_of
     sp1 = sum(x["p1"] for x in days)
     sp2 = sum(x["p2"] for x in days)
     return {"month": month, "days": days, "filled": filled,
             "visible_days": len(days),
             "p1": sp1, "p2": sp2,
             "total": sum(x["total"] for x in days),
-            "points": sp1 + sp2 * 2,
-            "rate": (sp2 / (sp1 + sp2)) if (sp1 + sp2) else None}
+            "points": points_of(sp1, sp2),
+            "rate": p2_score_share(sp1, sp2)}
 
 
 def my_months(db, person_code: str) -> list:

@@ -124,9 +124,9 @@
     <td class="num">{{ p.sys_total }}<div class="hint">{{ p.sys_p1 }} / {{ p.sys_p2 }}</div></td>
     <td class="num">{{ p.rep_total }}<div class="hint">{{ p.rep_p1 }} / {{ p.rep_p2 }}</div></td>
     <td class="num" data-testid="sys-points-{{ p.person_code }}">{{ p.sys_points }}
-      <div class="hint">{{ t('2点比例') }} {{ '%.1f%%' % (p.sys_rate * 100) if p.sys_rate is not none else '—' }}</div></td>
+      <div class="hint">{{ t('2点分数占比') }} {{ '%.1f%%' % (p.sys_rate * 100) if p.sys_rate is not none else '—' }}</div></td>
     <td class="num" data-testid="rep-points-{{ p.person_code }}">{{ p.rep_points }}
-      <div class="hint">{{ t('2点比例') }} {{ '%.1f%%' % (p.rep_rate * 100) if p.rep_rate is not none else '—' }}</div></td>
+      <div class="hint">{{ t('2点分数占比') }} {{ '%.1f%%' % (p.rep_rate * 100) if p.rep_rate is not none else '—' }}</div></td>
     <td class="num" style="color:{% if p.d_total > 0 %}var(--warn){% elif p.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % p.d_total }}</td>
     <td class="num">{{ '%+d' % p.d1 }}</td>
     <td class="num">{{ '%+d' % p.d2 }}</td>

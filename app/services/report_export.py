@@ -49,7 +49,7 @@ def reports_xlsx(db, start, end, person_code: str = ""):
     wb = Workbook(write_only=True)
     _write_sheet(wb, "自报明细",
                  ["日期", "员工编号", "姓名", "担当区域", "1点店铺数", "2点店铺数",
-                  "合计", "分数(点数)", "2点比例%", "提交时间(UTC)", "来源"],
+                  "合计", "分数(点数)", "2点分数占比%", "提交时间(UTC)", "来源"],
                  ([str(r["date"]), r["person_code"],
                    names.get(r["person_code"], ""), r["area"], r["p1"], r["p2"],
                    r["total"], r["points"],
@@ -66,8 +66,8 @@ def compare_xlsx(db, start, end, person_code: str = ""):
     wb = Workbook(write_only=True)
     _write_sheet(wb, "对比(按人)",
                  ["员工编号", "姓名", "系统1点", "系统2点", "系统合计",
-                  "系统分数", "系统2点比例%",
-                  "自报1点", "自报2点", "自报合计", "自报分数", "自报2点比例%",
+                  "系统分数", "系统2点分数占比%",
+                  "自报1点", "自报2点", "自报合计", "自报分数", "自报2点分数占比%",
                   "Δ1点", "Δ2点", "Δ合计",
                   "准确率%", "已报天数", "系统天数", "应填未填"],
                  ([p["person_code"], p["name"], p["sys_p1"], p["sys_p2"],

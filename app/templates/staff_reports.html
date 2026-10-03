@@ -70,9 +70,9 @@
     <p class="hint" style="margin:.15rem 0 0">{{ t('1点分数') }} {{ rep_sum.p1 }} + {{ t('2点分数') }} {{ rep_sum.p2 * 2 }}</p>
   </div>
   <div class="stat-card" data-testid="card-rate">
-    <p class="k">{{ t('2点比例') }}</p>
+    <p class="k">{{ t('2点分数占比') }}</p>
     <p class="v" data-testid="sum-rate">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</p>
-    <p class="hint" style="margin:.15rem 0 0">{{ t('2点店') }} {{ rep_sum.p2 }} / {{ t('共') }} {{ rep_sum.stores }} {{ t('家') }}</p>
+    <p class="hint" style="margin:.15rem 0 0">{{ t('2点分数') }} {{ rep_sum.p2 * 2 }} / {{ t('总分数') }} {{ rep_sum.points }}</p>
   </div>
   <div class="stat-card"><p class="k">{{ t('区间') }}</p><p class="v" style="font-size:1rem">{{ start }} ～ {{ end }}</p></div>
   <div class="stat-card"><p class="k">{{ t('页') }}</p><p class="v">{{ data.page }} / {{ data.pages }}</p></div>
@@ -101,7 +101,7 @@
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">
   <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('担当区域') }}</th>
       <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th>
-      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点比例') }}</th>
+      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点分数占比') }}</th>
       <th>{{ t('提交时间') }}</th><th>{{ t('操作') }}</th></tr>
   {% for r in data.rows %}
   <tr>

@@ -28,7 +28,7 @@
     <tr class="tot"><th>{{ t('合计') }}</th><td>{{ existing.total_cnt }}</td></tr>
     <tr><th>{{ t('分数（点数）') }}</th>
         <td data-testid="today-points">{{ _x1 + _x2 * 2 }}</td></tr>
-    <tr><th>{{ t('2点比例') }}</th>
+    <tr><th>{{ t('2点分数占比') }}</th>
         <td data-testid="today-rate">{{ '%.1f%%' % (_x2 * 100 / _xt) if _xt else '—' }}</td></tr>
   </table>
   <div class="form-actions" style="margin-top:.7rem" x-show="!edit">
@@ -57,7 +57,7 @@
           <td x-text="(parseInt(p1 || 0, 10) || 0) + (parseInt(p2 || 0, 10) || 0)"></td></tr>
       <tr><th>{{ t('分数（点数）') }}</th>
           <td x-text="pts" data-testid="live-points"></td></tr>
-      <tr><th>{{ t('2点比例') }}</th>
+      <tr><th>{{ t('2点分数占比') }}</th>
           <td x-text="rate" data-testid="live-rate"></td></tr>
     </table>
     <div class="form-actions" style="margin-top:.7rem">
@@ -131,7 +131,7 @@
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="my-reports">
   <tr><th>{{ t('日期') }}</th><th>{{ t('担当区域') }}</th>
       <th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('合计') }}</th>
-      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点比例') }}</th></tr>
+      <th>{{ t('分数（点数）') }}</th><th>{{ t('2点分数占比') }}</th></tr>
   {% if view.days %}
   <tr class="totals"><td colspan="2">{{ t('本月合计') }}（{{ t('已填报') }} {{ view.filled }} / {{ view.visible_days }} {{ t('天') }}）</td>
       <td class="num">{{ view.p1 }}</td><td class="num">{{ view.p2 }}</td><td class="num">{{ view.total }}</td>
