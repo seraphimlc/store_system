@@ -260,13 +260,15 @@ def staff_reports_page(request: Request,
     locked = {r["date"] for r in data["rows"]
               if daily_report.is_locked(db, r["date"])}
     missing = report_compare.missing_summary(db, s, e)
+    rep_sum = report_compare.reports_summary(db, start=s, end=e,
+                                             person_code=person_code)
     return templates.TemplateResponse("staff_reports.html", {
         "request": request, "current_user": user, "data": data,
         "start": s, "end": e, "person_code": person_code,
         "names": names, "staff_opts": _staff_options(db), "msg": msg, "err": err,
         "jst_delta": timedelta(hours=9),
         "cov_end": daily_report.coverage_end(db), "locked_dates": locked,
-        "missing": missing,
+        "missing": missing, "rep_sum": rep_sum,
         "edit_row": _edit_row(db, person_code, edit_date),
     })
 

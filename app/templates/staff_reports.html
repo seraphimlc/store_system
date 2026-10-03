@@ -60,7 +60,20 @@
 </div>
 
 <div class="stat-grid" style="margin-bottom:.8rem">
-  <div class="stat-card"><p class="k">{{ t('自报条数') }}</p><p class="v">{{ data.total }}</p></div>
+  <div class="stat-card" data-testid="card-count">
+    <p class="k">{{ t('自报条数') }}</p><p class="v">{{ rep_sum.count }}</p>
+    <p class="hint" style="margin:.15rem 0 0">{{ t('1点') }} {{ rep_sum.p1 }} · {{ t('2点') }} {{ rep_sum.p2 }}</p>
+  </div>
+  <div class="stat-card" data-testid="card-points">
+    <p class="k">{{ t('总点数（分数）') }}</p>
+    <p class="v" data-testid="sum-points">{{ '{:,}'.format(rep_sum.points) }}</p>
+    <p class="hint" style="margin:.15rem 0 0">{{ t('1点分数') }} {{ rep_sum.p1 }} + {{ t('2点分数') }} {{ rep_sum.p2 * 2 }}</p>
+  </div>
+  <div class="stat-card" data-testid="card-rate">
+    <p class="k">{{ t('2点比例') }}</p>
+    <p class="v" data-testid="sum-rate">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</p>
+    <p class="hint" style="margin:.15rem 0 0">{{ t('2点店') }} {{ rep_sum.p2 }} / {{ t('共') }} {{ rep_sum.stores }} {{ t('家') }}</p>
+  </div>
   <div class="stat-card"><p class="k">{{ t('区间') }}</p><p class="v" style="font-size:1rem">{{ start }} ～ {{ end }}</p></div>
   <div class="stat-card"><p class="k">{{ t('页') }}</p><p class="v">{{ data.page }} / {{ data.pages }}</p></div>
 </div>

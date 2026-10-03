@@ -193,6 +193,29 @@ KIND_MISSING_REPORT = "missing_report"   # 系统有、员工没报 → 漏填�
 KIND_MISSING_SYSTEM = "missing_system"   # 员工报了、系统没有 → 自报无系统记录
 
 
+def reports_summary(db, *, start=None, end=None, person_code: str = "") -> dict:
+    """区间自报汇总（现算，不落库）：条数 / 总点数（=分数）/ 2点比例 / 1点2点明细。
+
+    口径与 `points_of()` / `p2_rate()` 完全一致（分数 = 1点×1 + 2点×2；比例 = 2点店数÷总店数）。
+    统计卡用；不受列表分页影响（直接聚合整段区间）。
+    """
+    from sqlalchemy import func
+    q = db.query(func.count(StaffDailyReport.id),
+                 func.coalesce(func.sum(StaffDailyReport.p1_cnt), 0),
+                 func.coalesce(func.sum(StaffDailyReport.p2_cnt), 0))
+    if start:
+        q = q.filter(StaffDailyReport.report_date >= start)
+    if end:
+        q = q.filter(StaffDailyReport.report_date <= end)
+    if person_code:
+        q = q.filter(StaffDailyReport.person_code == person_code)
+    cnt, p1, p2 = q.one()
+    p1, p2 = int(p1 or 0), int(p2 or 0)
+    return {"count": int(cnt or 0), "p1": p1, "p2": p2,
+            "stores": p1 + p2, "points": points_of(p1, p2),
+            "rate": p2_rate(p1, p2)}
+
+
 def _row_dict(r: StaffDailyReport) -> dict:
     """自报一行（列表/导出共用）：**分数与比例现算，不落库**。"""
     p1, p2 = r.p1_cnt or 0, r.p2_cnt or 0

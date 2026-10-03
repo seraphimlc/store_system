@@ -1105,3 +1105,24 @@ def test_export_includes_points_and_rate(client):
     assert "系统分数" in per_head and "自报分数" in per_head and "自报2点比例%" in per_head
     day_head = [c.value for c in wb2["对比(逐日)"][1]]
     assert "系统分数" in day_head and "自报分数" in day_head
+
+
+def test_reports_summary_and_cards(client):
+    """统计卡：自报条数 + 总点数（分数）+ 2点比例（现算，不受分页影响）。"""
+    from app.services import report_compare
+    _seed_admin_staff_and_data(client)          # P1：9/16 = 4点1点/2点2家；9/17 = 2点1点/0
+    db = appdb.SessionLocal()
+    s = report_compare.reports_summary(db, start="2026-09-16", end="2026-09-17")
+    assert s == {"count": 2, "p1": 6, "p2": 2, "stores": 8, "points": 10,
+                 "rate": 0.25}
+    # 单人工/日筛选也走同一口径
+    one = report_compare.reports_summary(db, start="2026-09-16", end="2026-09-16")
+    assert one["count"] == 1 and one["points"] == 8
+    assert abs(one["rate"] - 2 / 6) < 1e-9                 # 2 家 / 6 家
+    db.close()
+    _login_admin(client)
+    h = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
+    assert 'data-testid="card-count"' in h and 'data-testid="card-points"' in h
+    assert 'data-testid="sum-points">10<' in h              # 4+2*2 + 2 = 10
+    assert 'data-testid="sum-rate">25.0%<' in h             # 2 家 / 8 家
+    assert 'data-testid="card-rate"' in h
