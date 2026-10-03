@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ t('我的任务') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{% if is_leader %}{{ t('任务分派') }}{% else %}{{ t('我的任务') }}{% endif %}</h1>
+  <span class="sub">
+    {% if is_leader %}{{ t('把车站分给 1~2 名队员，每天提交一次进展（0–100%）') }}
+    {% else %}{{ t('分给我的车站与进展') }}{% endif %}
+  </span>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+{% if is_leader %}
+{% if not teams %}
+<div class="card"><p class="empty" data-testid="no-team">{{ t('你还没被指定为队长') }}</p></div>
+{% else %}
+<p class="hint">
+  {{ t('我带的队：') }}{% for t in teams %}<b>{{ t.name }}</b>{{ '、' if not loop.last }}{% endfor %}
+  · {{ t('共') }} {{ counts.unassigned + counts.doing + counts.done }} {{ t('个车站') }}
+</p>
+
+{# 三个 tab：未分配 / 进行中 / 已完成 #}
+<div class="tabs" data-testid="task-tabs">
+  <a class="{% if tab=='unassigned' %}on{% endif %}" href="/my/tasks?tab=unassigned"
+     data-testid="tab-unassigned">{{ labels.unassigned }}（{{ counts.unassigned }}）</a>
+  <a class="{% if tab=='doing' %}on{% endif %}" href="/my/tasks?tab=doing"
+     data-testid="tab-doing">{{ labels.doing }}（{{ counts.doing }}）</a>
+  <a class="{% if tab=='done' %}on{% endif %}" href="/my/tasks?tab=done"
+     data-testid="tab-done">{{ labels.done }}（{{ counts.done }}）</a>
+</div>
+
+<form method="get" action="/my/tasks" style="margin-bottom:.6rem">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <label class="f">{{ t('搜车站') }}<input type="text" name="kw" value="{{ kw }}" style="width:180px"></label>
+  <button class="btn ghost" type="submit">{{ t('查') }}</button>
+</form>
+
+{% for r in rows %}
+<div class="card task-row" style="margin-bottom:.6rem;padding:.7rem 1rem"
+     data-testid="my-task-row">
+  <div style="display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap">
+    <b style="font-size:1.02rem">{{ r.station_name }}</b>
+    {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
+    <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}"
+          data-testid="state-{{ r.task.id }}">{{ labels[r.state] }}</span>
+    <span class="hint">{{ t('进度') }} <b data-testid="pct-{{ r.task.id }}">{{ r.pct }}%</b></span>
+    {% if r.last_date %}<span class="hint">{{ t('最后提交') }} {{ r.last_date.strftime('%m-%d') }}
+      {%- if r.last_note %}· {{ r.last_note }}{% endif %}</span>{% endif %}
+    <span class="spacer" style="flex:1"></span>
+    <span class="hint">{% if r.assignees %}{{ r.assignees|map(attribute='name')|join('、') }}{% else %}{{ t('还没分人') }}{% endif %}</span>
+  </div>
+
+  {# 分派：勾选本队队员（最多 2 人） #}
+  <details style="margin-top:.45rem">
+    <summary style="cursor:pointer" class="hint">
+      {{ t('分派给队员（最多') }}{{ max_assign }}{{ t('人）') }}</summary>
+    <form method="post" action="/my/tasks/assign"
+          style="margin-top:.4rem" data-testid="assign-{{ r.task.id }}">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <input type="hidden" name="task_id" value="{{ r.task.id }}">
+      {% set cur = r.assignees|map(attribute='code')|list %}
+      {% for m in members.get(r.team_id, []) %}
+      <label class="pick" style="margin-right:.8rem">
+        <input type="checkbox" name="person" value="{{ m.person_code }}"
+               {% if m.person_code in cur %}checked{% endif %}>
+        {{ m.display_name }}
+      </label>
+      {% endfor %}
+      <button class="btn ghost" type="submit">{{ t('保存分派') }}</button>
+    </form>
+  </details>
+
+  {# 每日进展：滑动条 0–100% #}
+  <form method="post" action="/my/tasks/progress" class="prog-form"
+        style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"
+        x-data="{v: {{ r.pct }}}" data-testid="progress-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="range" name="pct" min="0" max="100" step="5" x-model.number="v"
+           style="flex:1;min-width:150px" data-testid="slider-{{ r.task.id }}">
+    <b style="min-width:3.2rem;text-align:right"><span x-text="v"></span>%</b>
+    <input type="text" name="note" placeholder="{{ t('备注（可空）') }}" style="width:11rem">
+    <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
+  </form>
+</div>
+{% else %}
+<div class="card"><p class="empty" data-testid="no-rows">{{ t('这个分组里没有车站') }}</p></div>
+{% endfor %}
+{% endif %}
+
+{% else %}
+{# 队员：只读 #}
+{% for r in rows %}
+<div class="card task-row" style="margin-bottom:.6rem;padding:.7rem 1rem"
+     data-testid="my-task-row">
+  <div style="display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap">
+    <b>{{ r.station_name }}</b>
+    {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
+    <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}">{{ labels[r.state] }}</span>
+    <span class="hint">{{ t('进度') }} <b>{{ r.pct }}%</b></span>
+    <span class="spacer" style="flex:1"></span>
+    <span class="hint">{{ r.team_name }}{% if r.team_leaders %} · {{ t('队长') }} {{ r.team_leaders|join('、') }}{% endif %}</span>
+  </div>
+</div>
+{% else %}
+<div class="card"><p class="empty" data-testid="no-rows">{{ t('当前没有分给你的车站') }}</p></div>
+{% endfor %}
+{% endif %}
+{% endblock %}

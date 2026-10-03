@@ -31,6 +31,11 @@
       <input name="username" id="ns-username" maxlength="64" style="width:180px;padding:.25rem .4rem"></label>
     <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('初始口令') }}
       <input name="password" maxlength="64" style="width:170px;padding:.25rem .4rem"></label>
+    <label style="display:flex;flex-direction:column;font-size:.85rem">{{ t('角色') }}
+      <select name="role" id="ns-role" data-testid="ns-role" style="padding:.25rem .4rem">
+        <option value="staff">{{ t('队员') }}</option>
+        <option value="leader">{{ t('队长') }}</option>
+      </select></label>
     <button class="btn ghost" type="button" id="ns-gen">{{ t('AI 生成登录名') }}</button>
     <button class="btn" type="submit">{{ t('创建') }}</button>
   </form>
@@ -90,22 +95,24 @@
   </div>
 </div>
 <div class="tbl-wrap"><table class="grid-tbl">
-  <tr><th>{{ t('登录名') }}</th><th>{{ t('员工姓名') }}</th><th>{{ t('人员编号') }}</th><th>{{ t('状态') }}</th><th>{{ t('界面语言') }}</th><th>{{ t('操作') }}</th></tr>
+  <tr><th>{{ t('登录名') }}</th><th>{{ t('员工姓名') }}</th><th>{{ t('人员编号') }}</th><th>{{ t('角色') }}</th><th>{{ t('状态') }}</th><th>{{ t('界面语言') }}</th><th>{{ t('操作') }}</th></tr>
   {% for u in staff %}
   <tr>
     <td>{{ u.username }}</td>
     <td>{{ u.display_name }}</td>
     <td>{{ u.person_code or '—' }}</td>
+    <td data-testid="role-{{ u.id }}">{{ t(roles.get(u.role, u.role)) }}</td>
     <td><span class="{{ pill(u.status) }}">{{ t(labels.get(u.status, u.status)) }}</span></td>
     <td>
       <button class="btn ghost" type="button" style="padding:.2rem .7rem"
               data-testid="edit-{{ u.id }}" onclick="openStaffEdit(this)"
               data-uid="{{ u.id }}" data-code="{{ u.person_code or '' }}"
               data-name="{{ u.display_name or '' }}" data-username="{{ u.username }}"
-              data-status="{{ u.status }}" data-lang="{{ u.lang or '' }}">{{ t('编辑') }}</button>
+              data-status="{{ u.status }}" data-lang="{{ u.lang or '' }}"
+              data-role="{{ u.role }}">{{ t('编辑') }}</button>
     </td>
   </tr>
-  {% else %}<tr><td colspan="6" class="empty">{{ t('没有符合条件的员工') }}</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7" class="empty">{{ t('没有符合条件的员工') }}</td></tr>{% endfor %}
 </table></div>
 <div class="card" style="margin-top:.8rem">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('状态说明') }}</h2>
@@ -144,6 +151,10 @@
       <select name="lang" id="ed-lang">
         {% for lv, ln in langs.items() %}<option value="{{ lv }}">{{ ln }}</option>{% endfor %}
       </select></label>
+    <label>{{ t('角色') }}
+      <select name="role" id="ed-role" data-testid="ed-role">
+        {% for rv, rn in roles.items() %}<option value="{{ rv }}">{{ t(rn) }}</option>{% endfor %}
+      </select></label>
     <label>{{ t('重置口令') }}
       <input name="password" id="ed-pwd" maxlength="64" placeholder="{{ t('留空 = 不改') }}"></label>
     <div class="form-actions">
@@ -161,6 +172,7 @@ function openStaffEdit(btn) {
   document.getElementById('ed-username').value = d.username || '';
   document.getElementById('ed-status').value = d.status || 'active';
   document.getElementById('ed-lang').value = d.lang || '';
+  document.getElementById('ed-role').value = d.role || 'staff';
   document.getElementById('ed-pwd').value = '';
   document.getElementById('edit-who').textContent =
     '　' + (d.name || '') + '（' + (d.username || '') + '）';

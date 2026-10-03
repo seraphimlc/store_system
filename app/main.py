@@ -22,6 +22,8 @@ def create_app() -> FastAPI:
     app.include_router(oauth_r.router)
     app.include_router(report_r.router)
     app.include_router(plan_r.router)
+    from app.routers import bd_r
+    app.include_router(bd_r.router)
 
     # 多语言：模板全局函数已在 app/templating.get_templates() 统一注册（t/LANG_NAMES/lang_url）
 
@@ -34,8 +36,15 @@ def create_app() -> FastAPI:
     STAFF_ALLOWED = ("/my/password", "/static", "/healthz",
                      "/login", "/logout", "/product", "/my/confirm",
                      "/my/appeal", "/my/perf", "/my/report", "/my/plan",
+                     # 车站任务：队员看"分给我的车站"，队长在**同一页**分派 + 提交每日进展
+                     # （两处写端点 `/my/tasks/assign`、`/my/tasks/progress` 由路由内做角色校验）
+                     "/my/tasks",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")
+
+    # 队长端在**员工端**里（规格 §6.2），所以白名单与员工一致；
+    # 单独列出是为了"以后队长若多出专属页面"有唯一落点。
+    LEADER_ALLOWED = STAFF_ALLOWED
 
     from fastapi.responses import RedirectResponse as _RR
 
@@ -100,18 +109,22 @@ def create_app() -> FastAPI:
                 s = _SL()
                 try:
                     u = s.get(_User, data["uid"])
-                    if u is not None and u.role == "staff":
-                        # 已登录员工且「待改密」（首登/口令被重置）：除改密页与登出外一律拦到改密页
+                    if u is not None and u.role in ("staff", "leader"):
+                        # 已登录员工/队长且「待改密」（首登/口令被重置）：
+                        # 除改密页与登出外一律拦到改密页（队长同一规则，别漏）
                         if u.must_change_password:
                             if not (path.startswith("/my/password")
                                     or path == "/logout"):
                                 return _RR("/my/password?must=1", status_code=302)
-                        # 待填报出勤计划 → 员工端提示；员工越权访问非白名单页 → 回员工首页
+                        # 待填报出勤计划 → 员工端提示；越权访问非白名单页 → 回各角色首页
                         from app.services import date_plan as _dp
                         request.state.plan_pending = _dp.needs_plan(
                             s, u.person_code) or None
-                        if not path.startswith(STAFF_ALLOWED):
-                            return _RR(_dp.staff_home(s, u), status_code=302)
+                        allowed = (LEADER_ALLOWED if u.role == "leader"
+                                   else STAFF_ALLOWED)
+                        if not path.startswith(allowed):
+                            from app.services import home as _home
+                            return _RR(_home.landing_home(s, u), status_code=302)
                 finally:
                     s.close()
         return await call_next(request)

@@ -27,9 +27,12 @@ def _denied():
 
 
 def _admin_guard(user):
+    """管理端守卫：非 admin 一律拦（队长 → `/login`，再按角色落到 `/my/tasks`）。"""
     if user is None:
         return RedirectResponse("/login", status_code=302)
     if user.role != "admin":
+        if user.role == "leader":
+            return RedirectResponse("/login", status_code=302)
         return RedirectResponse("/my/perf", status_code=302)
     return None
 

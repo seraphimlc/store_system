@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{{ t('团队') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('团队') }}</h1>
+  <span class="sub">{{ t('建一个队，圈选队员，指定其中一人当队长') }}</span>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+<div class="stat-grid grid" style="margin-bottom:.8rem">
+  <div class="stat-card"><div class="k">{{ t('在岗团队') }}</div><div class="v">{{ sum.n_team }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('现役成员') }}</div><div class="v">{{ sum.n_active_member }}</div></div>
+  <div class="stat-card {% if sum.no_leader %}warnk{% else %}okk{% endif %}">
+    <div class="k">{{ t('没有队长的队') }}</div>
+    <div class="v">{{ sum.no_leader|length }}</div>
+  </div>
+</div>
+{% if sum.no_leader %}
+<p class="hint" data-testid="no-leader-hint">
+  ⚠️ {{ t('这些队还没有队长，任务派下去也没人能分派：') }}
+  {% for tid, nm in sum.no_leader %}<a href="/teams/{{ tid }}">{{ nm }}</a>{{ '、' if not loop.last }}{% endfor %}
+</p>
+{% endif %}
+
+<form method="get" class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
+  <label class="f">{{ t('搜索队名 / 编号') }}
+    <input type="text" name="kw" value="{{ kw }}" style="width:220px">
+  </label>
+  <label class="f">{{ t('状态') }}
+    <select name="status">
+      <option value="">{{ t('全部') }}</option>
+      <option value="active" {% if status=='active' %}selected{% endif %}>{{ t('在岗') }}</option>
+      <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
+    </select>
+  </label>
+  <button class="btn" type="submit">{{ t('查') }}</button>
+</form>
+
+<details class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
+  <summary style="cursor:pointer"><b>{{ t('新建团队') }}</b></summary>
+  <form method="post" action="/teams/create" style="margin-top:.6rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <div class="form-grid">
+      <label>{{ t('队名') }}
+        <input type="text" name="name" required data-testid="team-name"
+               placeholder="{{ t('如 小川队') }}">
+      </label>
+      <label>{{ t('队编号（可空）') }}
+        <input type="text" name="code" data-testid="team-code">
+      </label>
+      <label>{{ t('备注') }}
+        <input type="text" name="note" style="width:100%">
+      </label>
+    </div>
+    <div class="form-actions">
+      <button class="btn" type="submit" data-testid="team-create">{{ t('建队') }}</button>
+    </div>
+  </form>
+</details>
+
+<div class="tbl-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>{{ t('队名') }}</th><th>{{ t('编号') }}</th><th>{{ t('队长') }}</th>
+      <th>{{ t('队员') }}</th><th>{{ t('状态') }}</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr data-testid="team-row">
+      <td><b>{{ r.team.name }}</b></td>
+      <td>{{ r.team.code or '—' }}</td>
+      <td>
+        {% if r.leaders %}{{ r.leaders|join('、') }}
+        {% else %}<span class="pill warnk">⚠️ {{ t('未指定') }}</span>{% endif %}
+      </td>
+      <td>{{ r.members|length }}</td>
+      <td>{% if r.team.status == 'active' %}{{ t('在岗') }}{% else %}{{ t('停用') }}{% endif %}</td>
+      <td><a class="btn ghost" href="/teams/{{ r.team.id }}">{{ t('成员 / 编辑') }}</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty">{{ t('还没有团队') }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

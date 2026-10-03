@@ -904,3 +904,139 @@ class BdStore(Base):
                     server_default="active")
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+# ---------------------------------------------------------------------------
+# 团队 + 车站任务（feat/team-task · 规格 docs/specs-team-management.md /
+# docs/specs-station-tasks.md）
+#
+# ⚠️ 硬边界：本域**只新增 bd_* 表**，绝不向结算域表（formal_records /
+#    person_daily_stats / month_perf_records / payroll_*）加列；
+#    结算域永不读取本域数据。
+# ---------------------------------------------------------------------------
+
+class BdTeam(Base):
+    """团队（一层队；队名由管理员起，如 `小川队`）。"""
+    __tablename__ = "bd_team"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_bd_team_name"),
+        UniqueConstraint("code", name="uq_bd_team_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    code = Column(String(32), nullable=True)
+    note = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")          # active / closed
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTeamMember(Base):
+    """团队成员（含历史：人走了写 end_date，永不删行）。
+
+    - `role`：leader 队长 / member 队员
+    - 一个人可以在多个队（多行）
+    """
+    __tablename__ = "bd_team_member"
+    __table_args__ = (
+        UniqueConstraint("team_id", "person_code", "start_date",
+                         name="uq_bd_team_member"),
+        Index("ix_bd_team_member_person", "person_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=False)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    role = Column(String(16), nullable=False, default="member",
+                  server_default="member")           # leader / member
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)           # NULL = 现役
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStation(Base):
+    """车站主数据（一个站 = 一个站前商圈 = 用户口中的"一边区域"）。
+
+    只存主数据；任务/担当/进展在 `bd_task*` 上。
+    `name_norm` 是判重键（NFKC + 去空白）。
+    """
+    __tablename__ = "bd_station"
+    __table_args__ = (
+        UniqueConstraint("name_norm", name="uq_bd_station_name"),
+        Index("ix_bd_station_line", "line"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    name_norm = Column(String(64), nullable=False)
+    line = Column(String(64), nullable=False, default="", server_default="")
+    note = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")          # active / closed
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTask(Base):
+    """任务 = 一个车站（用户口径：「每一个站点都定义成一个任务」）。
+
+    - **一个车站一个任务**（UNIQUE(station_id)）
+    - `assign_date`：**分配日期**（管理员把任务派给团队的日期）→ 管理端按区间查询
+    - `state`：unassigned 未分配 / doing 进行中 / done 已完成
+      （由担当 + 进度推导，服务层统一维护）
+    - `pct`：当前进展 0–100（最近一次提交的值，冗余在此便于列表直读）
+    """
+    __tablename__ = "bd_task"
+    __table_args__ = (
+        UniqueConstraint("station_id", name="uq_bd_task_station"),
+        Index("ix_bd_task_team", "team_id"),
+        Index("ix_bd_task_assign_date", "assign_date"),
+        Index("ix_bd_task_state", "state"),
+    )
+    id = Column(Integer, primary_key=True)
+    station_id = Column(Integer, ForeignKey("bd_station.id"), nullable=False)
+    team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=True)
+    assign_date = Column(Date, nullable=True)        # 分配日期（派给团队那天）
+    state = Column(String(16), nullable=False, default="unassigned",
+                   server_default="unassigned")      # unassigned / doing / done
+    pct = Column(Integer, nullable=False, default=0, server_default="0")
+    note = Column(Text, nullable=False, default="", server_default="")
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTaskAssign(Base):
+    """任务担当：一个任务分给 1~2 名队员（上限在服务层强制）。"""
+    __tablename__ = "bd_task_assign"
+    __table_args__ = (
+        UniqueConstraint("task_id", "person_code", name="uq_bd_task_assign"),
+        Index("ix_bd_task_assign_person", "person_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("bd_task.id"), nullable=False)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    assigned_by = Column(String(64), nullable=False, default="", server_default="")
+    assigned_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTaskProgress(Base):
+    """每日任务进展提交（一天一条，当天可改；历史留痕）。
+
+    - `pct` 0–100（滑动条）
+    - `progress_date`：业务日（JST），UNIQUE(task_id, progress_date)
+    """
+    __tablename__ = "bd_task_progress"
+    __table_args__ = (
+        UniqueConstraint("task_id", "progress_date", name="uq_bd_task_progress"),
+        Index("ix_bd_task_progress_date", "progress_date"),
+    )
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("bd_task.id"), nullable=False)
+    progress_date = Column(Date, nullable=False)
+    pct = Column(Integer, nullable=False, default=0, server_default="0")
+    note = Column(Text, nullable=False, default="", server_default="")
+    submitted_by = Column(String(32), nullable=False, default="",
+                          server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)

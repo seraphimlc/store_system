@@ -38,6 +38,9 @@ def my_password_page(request: Request, user: Optional[User] = Depends(require_lo
     if user is None:
         return _denied()
     if must == "1" and not user.must_change_password:
+        # 落点按角色：队长在员工端（/my/tasks），员工 /my/perf，管理员 /perf
+        if user.role == "leader":
+            return RedirectResponse("/my/tasks", status_code=302)
         return RedirectResponse("/my/perf" if user.role == "staff"
                                 else "/perf", status_code=302)
     return templates.TemplateResponse("my_password.html", {
@@ -82,8 +85,12 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
     if user is None:
         return _denied()
     if user.role != "admin":
+        # 队长 → /login（按角色落到 /my/tasks）；员工 → 员工首页
+        if user.role == "leader":
+            return RedirectResponse("/login", status_code=302)
         return RedirectResponse("/my/perf", status_code=302)
-    q = db.query(User).filter(User.role == "staff")
+    # 员工管理页同时管 队员(staff) 与 队长(leader) 账号
+    q = db.query(User).filter(User.role.in_(("staff", "leader")))
     if status in STATUS_ALLOW:
         q = q.filter(User.status == status)
     staff = q.order_by(User.id).all()
@@ -94,8 +101,9 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
         "msg": msg, "err": err, "status": status,
         "labels": STATUS_LABELS, "pill": _status_pill,
         "langs": {"": "自动", "zh": "中文", "ja": "日本語"},
-        "counts": {s: db.query(User).filter(User.role == "staff",
-                                           User.status == s).count()
+        "roles": {"staff": "队员", "leader": "队长"},
+        "counts": {s: db.query(User).filter(
+            User.role.in_(("staff", "leader")), User.status == s).count()
                    for s in STATUS_LABELS},
         "new_token": new_token, "new_token_name": new_token_name,
         "new_token_uid": new_token_uid})
@@ -104,6 +112,7 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
 # ---------- 新建员工（编号即身份键，规格 D19/D20） ----------
 @router.post("/staff-admin/create")
 def staff_create(request: Request, code: str = Form(""), name: str = Form(""),
+                 role: str = Form("staff"),
                  username: str = Form(""), password: str = Form(""),
                  csrf_token: str = Form(...),
                  user: Optional[User] = Depends(require_login),
@@ -116,7 +125,7 @@ def staff_create(request: Request, code: str = Form(""), name: str = Form(""),
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import staff_accounts
     try:
-        staff_accounts.create_staff(db, code=code, name=name,
+        staff_accounts.create_staff(db, code=code, name=name, role=role,
                                     username=username, password=password)
         return RedirectResponse("/staff-admin?msg=" + _q("已创建员工"),
                                 status_code=303)
@@ -132,6 +141,7 @@ def staff_create(request: Request, code: str = Form(""), name: str = Form(""),
 def staff_edit(uid: int, request: Request,
                name: str = Form(""), username: str = Form(""),
                status: str = Form(""), lang: str = Form(""),
+               role: str = Form(""),
                password: str = Form(""),
                csrf_token: str = Form(...),
                user: Optional[User] = Depends(require_login),
@@ -146,7 +156,7 @@ def staff_edit(uid: int, request: Request,
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     target = db.get(User, uid)
-    if target is None or target.role != "staff":
+    if target is None or target.role not in ("staff", "leader"):
         raise HTTPException(404, "员工不存在")
     if status and status not in STATUS_ALLOW:
         raise HTTPException(400, f"未知状态: {status}")
@@ -154,7 +164,7 @@ def staff_edit(uid: int, request: Request,
         raise HTTPException(400, f"未知语言: {lang}")
     from app.services import staff_accounts as SA
     try:
-        res = SA.update_staff(db, target, name=name, username=username,
+        res = SA.update_staff(db, target, name=name, username=username, role=role,
                               status=status, lang=lang, password=password)
     except SA.UsernameExists:
         return RedirectResponse("/staff-admin?err=" + _q(
@@ -189,7 +199,7 @@ def staff_set_lang(uid: int, request: Request, lang: str = Form(""),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     target = db.get(User, uid)
-    if target is None or target.role != "staff":
+    if target is None or target.role not in ("staff", "leader"):
         raise HTTPException(404, "员工不存在")
     if lang not in ("", "zh", "ja"):
         raise HTTPException(400, f"未知语言: {lang}")
@@ -211,7 +221,7 @@ def staff_set_status(uid: int, request: Request, new_status: str = Form(...),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     target = db.get(User, uid)
-    if target is None or target.role != "staff":
+    if target is None or target.role not in ("staff", "leader"):
         raise HTTPException(404, "员工不存在")
     if new_status not in STATUS_ALLOW:
         raise HTTPException(400, f"未知状态: {new_status}")
@@ -238,7 +248,7 @@ def staff_reset(uid: int, request: Request, password: str = Form("demo123"),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     target = db.get(User, uid)
-    if target is None or target.role != "staff":
+    if target is None or target.role not in ("staff", "leader"):
         raise HTTPException(404, "员工不存在")
     if len(password) < 6:
         raise HTTPException(400, "口令至少 6 位")

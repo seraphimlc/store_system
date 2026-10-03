@@ -8,14 +8,14 @@
 <script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
 <link rel="stylesheet" href="/static/app.css">
 </head>
-<body class="{% if current_user and current_user.role == 'staff' %}has-tabbar{% endif %}">
+<body class="{% if current_user and current_user.role in ('staff', 'leader') %}has-tabbar{% endif %}">
 {% if current_user %}
 <header class="topbar" x-data="{menu:false}">
   <span class="brand">{{ t('巡店结算系统') }}</span>
   <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
           :aria-expanded="menu ? 'true' : 'false'">☰</button>
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
-  {% if current_user.role != 'staff' %}
+  {% if current_user.role == 'admin' %}
   <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
   <a class="nav" href="/files"><b>{{ t('文件上传') }}</b></a>
   <a class="nav" href="/perf"><b>{{ t('绩效工资') }}</b></a>
@@ -27,6 +27,10 @@
   <a class="nav" href="/staff-admin">{{ t('员工管理') }}</a>
   <a class="nav" href="/staff-reports">{{ t('填报与对比') }}</a>
   <a class="nav" href="/staff-plans">{{ t('日期计划') }}</a>
+  <span class="nav disabled">｜</span>
+  <a class="nav" href="/teams">{{ t('团队') }}</a>
+  <a class="nav" href="/stations">{{ t('车站') }}</a>
+  <a class="nav" href="/tasks">{{ t('任务') }}</a>
   <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
   {% endif %}
   <span class="spacer"></span>
@@ -48,13 +52,18 @@
 {% endif %}
 <main class="wrap">{% block content %}{% endblock %}</main>
 {# agent 友好：结构化页面状态注入，浏览器自动化直接读取（替代截图 OCR） #}
-{% if current_user and current_user.role == 'staff' %}
-{# 员工端底部主导航：四项常驻，不再藏在汉堡菜单里（窄屏尤其重要） #}
+{% if current_user and current_user.role in ('staff', 'leader') %}
+{# 员工端底部主导航（队员与队长共用）：不再藏在汉堡菜单里，窄屏尤其重要 #}
 {% set _p = (request.url.path if request.url is defined else "") %}
 {# 待填报出勤计划：中间件写入 request.state.plan_pending（无则 None） #}
 {% set _pp = (request.state.plan_pending
               if request.state.plan_pending is defined else none) %}
 <nav class="tabbar" aria-label="{{ t('主导航') }}">
+  <a class="tab {% if _p.startswith('/my/tasks') %}on{% endif %}"
+     href="/my/tasks" data-testid="tab-tasks">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+    <span>{% if current_user.role == 'leader' %}{{ t('任务分派') }}{% else %}{{ t('我的任务') }}{% endif %}</span>
+  </a>
   <a class="tab {% if _p.startswith('/my/perf') %}on{% endif %}" href="/my/perf"
      data-testid="tab-perf">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><path d="M6 20v-7"/><path d="M12 20V6"/><path d="M18 20v-11"/></svg>

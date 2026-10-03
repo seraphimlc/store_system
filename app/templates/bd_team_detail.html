@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ team.name }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ team.name }} <span class="sub">{{ team.code or '' }}</span></h1>
+  <div class="actions">
+    <a class="btn ghost" href="/teams">{{ t('返回团队列表') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.9rem;padding:.8rem 1rem">
+  <form method="post" action="/teams/{{ team.id }}/edit">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <div class="form-grid">
+      <label>{{ t('队名') }}<input type="text" name="name" value="{{ team.name }}" required></label>
+      <label>{{ t('队编号') }}<input type="text" name="code" value="{{ team.code or '' }}"></label>
+      <label>{{ t('状态') }}
+        <select name="status">
+          <option value="active" {% if team.status=='active' %}selected{% endif %}>{{ t('在岗') }}</option>
+          <option value="closed" {% if team.status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
+        </select>
+      </label>
+      <label>{{ t('备注') }}<input type="text" name="note" value="{{ team.note or '' }}" style="width:100%"></label>
+    </div>
+    <div class="form-actions"><button class="btn" type="submit">{{ t('保存队信息') }}</button></div>
+  </form>
+</div>
+
+{# 成员：勾选进队 + radio 指定队长（一个队可以有多个队长，宽松） #}
+<form method="post" action="/teams/{{ team.id }}/members" class="card"
+      style="padding:.8rem 1rem" data-testid="members-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <h3 style="margin-top:0">{{ t('圈选队员') }}
+    <span class="hint">{{ t('勾选的人进队，没勾的移出（移出写历史，不删记录）') }}</span>
+  </h3>
+  <label class="f">{{ t('按姓名 / 编号筛选') }}
+    <input type="text" id="pick-filter" placeholder="{{ t('输入姓名或编号后 5 位') }}"
+           style="width:260px" oninput="bdFilter(this.value)">
+  </label>
+  <div class="tbl-wrap" style="max-height:26rem;overflow:auto">
+    <table>
+      <thead>
+        <tr><th style="width:4rem">{{ t('进队') }}</th><th style="width:5rem">{{ t('队长') }}</th>
+            <th>{{ t('姓名') }}</th><th>{{ t('编号') }}</th>
+            <th>{{ t('账号') }}</th><th>{{ t('原角色') }}</th></tr>
+      </thead>
+      <tbody>
+        {% for p in people %}
+        {% set on = p.code in active_codes %}
+        {% set old = (members|selectattr('person_code','equalto',p.code)|list|first) %}
+        <tr class="pick" data-name="{{ p.display_name }} {{ p.code }}"
+            data-testid="pick-row">
+          <td><input type="checkbox" name="person" value="{{ p.code }}"
+                     {% if on %}checked{% endif %}
+                     data-testid="pick-{{ p.code }}"></td>
+          <td><input type="radio" name="leader" value="{{ p.code }}"
+                     {% if old and old.role == 'leader' %}checked{% endif %}></td>
+          <td>{{ p.display_name }}</td>
+          <td>{{ p.code[-5:] }}</td>
+          <td>{% if p.has_account %}✓{% else %}<span class="hint">{{ t('未开通') }}</span>{% endif %}</td>
+          <td>{% if old %}{{ t('队长') if old.role == 'leader' else t('队员') }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">{{ t('提示：没有账号的人看不到任务页，但仍可被记录为队员。') }}</p>
+  <div class="form-actions">
+    <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
+  </div>
+</form>
+
+<script>
+/* 成员筛选（纯前端，不依赖脚本库） */
+function bdFilter(q) {
+  q = (q || '').trim().toLowerCase();
+  document.querySelectorAll('tr[data-testid="pick-row"]').forEach(function (tr) {
+    var t = (tr.getAttribute('data-name') || '').toLowerCase();
+    tr.style.display = (!q || t.indexOf(q) >= 0) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}
