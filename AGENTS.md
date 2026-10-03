@@ -98,6 +98,17 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - **漏填汇总**（规格 §7 漏填标记）：管理端列表按人给出 应填天数/实填天数/漏填天数 + 漏填日期。
 - 数据指纹**含逐人逐日 Δ**：只看合计的话，"同样合计换个日子" 会误判为同数据而复用旧报告。
 - Excel 导出用 `Workbook(write_only=True)` **流式写**（不在内存里保留整份工作簿）。
+- **分数与比例（2026-10-02 用户要求，纯展示、不落库）**：自报只存 1点/2点店数，
+  **分数（点数）= 1点×1 + 2点×2**、**2点比例 = 2点店数 ÷ 总店数** —— 与结算侧
+  （`perf.py` 的 `points = p1 + p2*2`）和看板 `p2rate` **完全同一口径**，一律**现算**：
+  - 员工端 `/my/report`：填报表单**实时算**（Alpine `get pts()/get rate()`，`data-testid="live-points|live-rate"`）、
+    已报回显、历史表（逐日 + 本月合计）都有；
+  - 管理端 `/staff-reports` 列表：新增「分数（点数）」「2点比例」两列；
+    对比页 `/staff-reports/compare` 逐人新增「系统分数」「自报分数」（比例在同格 hint 里），
+    逐日在「系统/自报」格子的 hint 里带分数与比例；
+  - **导出**：自报明细加「分数(点数)」「2点比例%」；对比导出（按人/逐日）加「系统分数/自报分数/比例」。
+  - 实现位置：`report_compare.points_of()/p2_rate()`（唯一算法来源）、`_row_dict()`、`compare()`、
+    `daily_report.month_days()`、`report_export.py`。测试 `test_points_and_rate_helpers` 等 4 项。
 - **员工管理页编辑方式（2026-10-01 用户要求）**：`/staff-admin` 每行只留一个「编辑」按钮 →
   打开**原生 `<dialog>` 弹窗**（不依赖脚本库），里面改**姓名 / 登录名 / 状态 / 界面语言 / 重置口令**
   （`POST /staff-admin/{uid}/edit`，服务层 `staff_accounts.update_staff`）。

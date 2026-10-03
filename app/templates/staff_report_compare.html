@@ -115,6 +115,7 @@
 
 <div class="tbl-wrap" style="margin-bottom:1rem"><table class="grid-tbl" data-testid="compare-persons">
   <tr><th>{{ t('员工') }}</th><th>{{ t('系统合计') }}</th><th>{{ t('自报合计') }}</th>
+      <th>{{ t('系统分数') }}</th><th>{{ t('自报分数') }}</th>
       <th>Δ{{ t('合计') }}</th><th>Δ{{ t('1点店铺数') }}</th><th>Δ{{ t('2点店铺数') }}</th>
       <th>{{ t('准确率') }}</th><th>{{ t('已报天数') }}</th><th>{{ t('应填未填') }}</th><th>{{ t('AI 评语') }}</th></tr>
   {% for p in res.persons %}
@@ -122,6 +123,10 @@
     <td>{{ p.name }}<div class="hint">{{ p.person_code }}</div></td>
     <td class="num">{{ p.sys_total }}<div class="hint">{{ p.sys_p1 }} / {{ p.sys_p2 }}</div></td>
     <td class="num">{{ p.rep_total }}<div class="hint">{{ p.rep_p1 }} / {{ p.rep_p2 }}</div></td>
+    <td class="num" data-testid="sys-points-{{ p.person_code }}">{{ p.sys_points }}
+      <div class="hint">{{ t('2点比例') }} {{ '%.1f%%' % (p.sys_rate * 100) if p.sys_rate is not none else '—' }}</div></td>
+    <td class="num" data-testid="rep-points-{{ p.person_code }}">{{ p.rep_points }}
+      <div class="hint">{{ t('2点比例') }} {{ '%.1f%%' % (p.rep_rate * 100) if p.rep_rate is not none else '—' }}</div></td>
     <td class="num" style="color:{% if p.d_total > 0 %}var(--warn){% elif p.d_total < 0 %}var(--err){% endif %}">{{ '%+d' % p.d_total }}</td>
     <td class="num">{{ '%+d' % p.d1 }}</td>
     <td class="num">{{ '%+d' % p.d2 }}</td>
@@ -130,7 +135,7 @@
     <td class="num">{% if p.gaps %}<span class="pill err">{{ p.gaps }}</span>{% else %}0{% endif %}</td>
     <td style="white-space:normal;max-width:340px">{% set blk = (report.per_person or {}).get(p.person_code) %}{% if blk %}{{ blk.comment }}{% if blk.off_days %}<div class="hint">{% for o in blk.off_days %}· {{ o.date }} {{ o.note }}　{% endfor %}</div>{% endif %}{% else %}<span class="hint">—</span>{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="10" class="empty">
+  {% else %}<tr><td colspan="12" class="empty">
     {% if res.counts.missing_report and not res.counts.missing_system %}
     {{ t('系统侧有数据，但这段时间员工一条自报都没有（算不出准确率和 AI 分析）。') }}
     {% elif res.counts.missing_system and not res.counts.missing_report %}
@@ -160,8 +165,10 @@
     <td>{% if r.kind == 'both' %}<span class="pill ok">{{ t('两侧都有') }}</span>
         {% elif r.kind == 'missing_report' %}<span class="pill warn">{{ t('系统有 / 未报') }}</span>
         {% else %}<span class="pill err">{{ t('自报有 / 系统无') }}</span>{% endif %}</td>
-    <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}{% if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }}</span>{% endif %}</td>
-    <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}{% if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }}</span>{% endif %}</td>
+    <td class="num">{{ r.sys_total if r.sys_total is not none else '—' }}
+      {%- if r.sys_total is not none %} <span class="hint">{{ r.sys_p1 }}/{{ r.sys_p2 }} · {{ r.sys_points }}{{ t('分') }} · {{ '%.1f%%' % (r.sys_rate * 100) if r.sys_rate is not none else '—' }}</span>{% endif %}</td>
+    <td class="num">{{ r.rep_total if r.rep_total is not none else '—' }}
+      {%- if r.rep_total is not none %} <span class="hint">{{ r.rep_p1 }}/{{ r.rep_p2 }} · {{ r.rep_points }}{{ t('分') }} · {{ '%.1f%%' % (r.rep_rate * 100) if r.rep_rate is not none else '—' }}</span>{% endif %}</td>
     <td class="num" style="color:{% if r.dt and r.dt > 0 %}var(--warn){% elif r.dt and r.dt < 0 %}var(--err){% endif %}">{{ ('%+d' % r.dt) if r.dt is not none else '—' }}</td>
     <td class="num">{% if r.acc is not none %}{{ (r.acc * 100) | round(1) }}%{% else %}—{% endif %}</td>
   </tr>

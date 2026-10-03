@@ -1027,3 +1027,81 @@ def test_chart_isolated_point_has_no_line_or_area(client):
     assert len(g["dots_p1"]) == 1                       # 点还在
     assert g["paths_p1"] == [] and g["areas_p1"] == []  # 连线和面积都为空
     assert g["paths_p2"] == [] and g["areas_p2"] == []
+
+
+# ---------- 分数（点数）与比例（2026-10-02 用户要求：自动展示，不落库） ----------
+
+def test_points_and_rate_helpers():
+    """分数 = 1点×1 + 2点×2（与结算侧同一口径）；比例 = 2点店数 ÷ 总店数。"""
+    from app.services.report_compare import p2_rate, points_of
+    assert points_of(3, 1) == 5 and points_of(0, 0) == 0 and points_of(10, 0) == 10
+    assert points_of(None, None) == 0
+    assert p2_rate(3, 1) == 0.25 and p2_rate(0, 5) == 1.0
+    assert p2_rate(0, 0) is None                     # 没店 → 没有比例（页面显示 —）
+
+
+def test_list_and_compare_carry_points_and_rate(client):
+    """列表/对比的每条数据都带 points 与 rate（现算，表里没有这两列）。"""
+    from app.services import report_compare
+    db = appdb.SessionLocal()
+    _person(db, "P1", "甲")
+    db.add(StaffDailyReport(person_code="P1", report_date=date(2026, 9, 16),
+                            p1_cnt=3, p2_cnt=1, total_cnt=4))
+    db.commit()
+    rows = report_compare.list_reports(db, start="2026-09-16", end="2026-09-16",
+                                       page=1, per=10)["rows"]
+    assert rows[0]["points"] == 5 and rows[0]["rate"] == 0.25
+    res = report_compare.compare(db, "2026-09-16", "2026-09-16")
+    p = res["persons"][0]
+    assert p["rep_points"] == 5 and p["rep_rate"] == 0.25
+    assert p["sys_points"] == 0 and p["sys_rate"] is None
+    d = res["daily"][0]
+    assert d["rep_points"] == 5 and d["rep_rate"] == 0.25
+    db.close()
+
+
+def test_pages_show_points_and_rate(client):
+    """员工端（回显 + 历史表 + 实时字段）与管理端（列表 + 对比页）都要展示。"""
+    _seed_admin_staff_and_data(client)          # 建 admin + P1 两条自报（9/16: 4/2，9/17: 2/0）
+    _seed_staff(client, "P1", "emp1", "甲")      # 员工账号
+    # 员工端：8 月没有数据，看 9 月
+    _login_staff(client, "emp1")
+    h = client.get("/my/report?month=2026-09").text
+    assert 'data-testid="live-points"' in h and 'data-testid="live-rate"' in h   # 实时算
+    tbl = h[h.index('data-testid="my-reports"'):]
+    assert "分数（点数）" in tbl and "2点比例" in tbl
+    assert "33.3%" in tbl                       # 9/16：2点2家 / 共6家 = 33.3%
+    assert "25.0%" in tbl                       # 本月合计：2点2家 / 共8家 = 25.0%
+    assert ">10<" in tbl                        # 本月分数 = 4+2*2 + 2+0 = 10
+    # 管理端
+    _login_admin(client)
+    a = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
+    assert "分数（点数）" in a and "2点比例" in a
+    assert 'data-testid="points-' in a and "33.3%" in a          # 4/2 → 33.3%
+    cmp_page = client.get("/staff-reports/compare?start=2026-09-16&end=2026-09-17").text
+    assert "系统分数" in cmp_page and "自报分数" in cmp_page
+    # 系统 9/16=4/2 → 8 分；9/17=5/0 → 5 分；合计 13 分；自报 4/2+2/0 → 8+2 = 10 分
+    assert 'data-testid="sys-points-P1">13' in cmp_page
+    assert 'data-testid="rep-points-P1">10' in cmp_page
+
+
+def test_export_includes_points_and_rate(client):
+    """导出也要带上分数与比例（自报明细 + 对比两页）。"""
+    import io as _io
+
+    from openpyxl import load_workbook
+    _seed_admin_staff_and_data(client)
+    _login_admin(client)
+    r = client.get("/staff-reports/export?kind=reports&start=2026-09-16&end=2026-09-16")
+    ws = load_workbook(_io.BytesIO(r.content)).active
+    head = [c.value for c in ws[1]]
+    assert "分数(点数)" in head and "2点比例%" in head
+    row = [c.value for c in ws[2]]
+    assert row[head.index("分数(点数)")] == 8          # 4×1 + 2×2
+    assert row[head.index("2点比例%")] == 33.3         # 2 / 6
+    r2 = client.get("/staff-reports/export?kind=compare&start=2026-09-16&end=2026-09-17")
+    wb2 = load_workbook(_io.BytesIO(r2.content))
+    per_head = [c.value for c in wb2["对比(按人)"][1]]
+    assert "系统分数" in per_head and "自报分数" in per_head and "自报2点比例%" in per_head
+    day_head = [c.value for c in wb2["对比(逐日)"][1]]
+    assert "系统分数" in day_head and "自报分数" in day_head
