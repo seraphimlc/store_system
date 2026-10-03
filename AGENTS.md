@@ -109,10 +109,11 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
     `data-testid="live-p1pts|live-p2pts|live-points|live-stores|live-rate|live-store-rate"`）、
     已报回显、历史表（逐日 + 本月合计）都有；`daily_report.month_days()` 逐日与合计都带这 6 个字段；
   - 管理端 `/staff-reports` 列表：新增「分数（点数）」「2点分数占比」两列；
-    **顶部汇总压成一行**（`data-testid="report-summary-bar"`，用 `.plan-bar`/`.plan-meta` 样式；
-    原来是 5 张卡片，2026-10-02 用户："那几个汇总的数据模块太丑了"）：
-    `自报条数 N · 1点 A / 2点 B · 总点数（分数）P · 2点分数占比 R%（2点分数/总分数）`，
-    右侧 `区间 … · 第 x/y 页`；数值由 `reports_summary()` 一次聚合查询给出，**不受分页影响**；
+    **顶部是「自报汇总」模块**（`data-testid="report-summary"`，卡片 + 小表；2026-10-02 用户先后要求
+    "太丑了别只显示一行"→"做成一个正经的模块"→"两个占比加一列叫 2 点占比"）：
+    `店铺数`（1点/2点/合计）与`分数（点数）`（1点分/2点分/总分）两行 × `1点/2点/合计/2点占比` 四列，
+    2点占比按行给（店铺数行=2点店÷总店、分数行=2点分数÷总分数），表头带 tooltip 说明；
+    右侧小字是 `区间 · 第 x/y 页 · 自报条数`；数值由 `reports_summary()` 一次聚合查询给出、**不受分页影响**；
     对比页 `/staff-reports/compare` 逐人新增「系统分数」「自报分数」（比例在同格 hint 里），
     逐日在「系统/自报」格子的 hint 里带分数与比例；
   - **导出**：自报明细加「分数(点数)」「2点分数占比%」；对比导出（按人/逐日）加「系统分数/自报分数/占比」。

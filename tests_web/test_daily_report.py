@@ -1138,8 +1138,11 @@ def test_reports_summary_and_cards(client):
     assert 'data-testid="sum-points-p1">6<' in h            # 1点总分数
     assert 'data-testid="sum-points-p2">4<' in h            # 2点总分数
     assert 'data-testid="sum-points">10<' in h              # 总分数
-    assert 'data-testid="sum-store-rate">25.0%<' in h       # 2点店铺数占比 2/8
-    assert 'data-testid="sum-rate">40.0%<' in h             # 2点分数占比 4/10
+    # 两个占比做成"2点占比"一列（2026-10-02 用户："为什么不加一列叫 2 点占比"）
+    assert '2点占比' in h
+    assert 'data-testid="sum-store-rate"><b>25.0%<' in h    # 店铺数行：2 点店 / 总店 = 2/8
+    assert 'data-testid="sum-rate"><b>40.0%<' in h          # 分数行：2点分数 / 总分数 = 4/10
+    assert h.count('<td class="num" data-testid="sum-store-rate"') == 1
     assert 'class="stat-grid"' not in h.split('data-testid="reports-table"')[0]
 
 
