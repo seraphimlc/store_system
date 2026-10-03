@@ -739,7 +739,7 @@ def test_my_plan_requires_login(client):
     assert r.status_code == 302 and r.headers["location"].startswith("/login")
 
 
-def test_my_plan_page_renders_three_states(client):
+def test_my_plan_page_renders_three_states(client, frozen):
     _staff(client)
     db = appdb.SessionLocal()
     db.add(StaffDailyReport(person_code="P1", report_date=date.today(),
@@ -800,7 +800,7 @@ def _submit_current(client, csrf):
     return key
 
 
-def test_needs_plan_and_staff_home(client):
+def test_needs_plan_and_staff_home(client, frozen):
     """窗口开着且未登记 = 需要填报；落点随之切换。"""
     db = appdb.SessionLocal()
     _person(db)
@@ -857,7 +857,7 @@ def test_staff_root_redirect_uses_staff_home(client, frozen):
     assert r.status_code == 302 and r.headers["location"] == "/my/plan"
 
 
-def test_plan_prompt_popup_shown_until_submitted(client):
+def test_plan_prompt_popup_shown_until_submitted(client, frozen):
     """待填报 → 员工端弹窗 + tab 角标；正在填的计划页不弹；登记后消失。"""
     csrf = _staff(client)
     r = client.get("/my/report")
@@ -1177,7 +1177,7 @@ def test_employee_page_late_join_banner_and_na_rows(client, monkeypatch):
     assert r.text.count('name="unavailable"') == 10
 
 
-def test_matrix_marks_before_start_blank_in_export(client):
+def test_matrix_marks_before_start_blank_in_export(client, frozen):
     """导出里入职前的格子也留空（不是 ×、不是 –）。"""
     db = appdb.SessionLocal()
     _hire(db, "NEW1", "新人", date(2026, 10, 6))
