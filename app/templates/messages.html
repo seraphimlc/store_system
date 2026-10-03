@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}{{ t('消息') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('消息') }}</h1>
+  <span class="sub">
+    {% if unread %}{{ t('未读') }} <b data-testid="unread-count">{{ unread }}</b> {{ t('条') }}
+    {% else %}{{ t('没有未读消息') }}{% endif %}
+  </span>
+</div>
+
+{% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ t(err) }}</div>{% endif %}
+
+<div class="tabs" data-testid="msg-tabs">
+  <a class="{% if tab=='inbox' %}on{% endif %}" href="/messages?tab=inbox"
+     data-testid="msg-tab-inbox">{{ t('收件箱') }}{% if unread %}（{{ unread }}）{% endif %}</a>
+  {% if can_send %}
+  <a class="{% if tab=='sent' %}on{% endif %}" href="/messages?tab=sent"
+     data-testid="msg-tab-sent">{{ t('我发出的') }}</a>
+  <a class="{% if tab=='new' %}on{% endif %}" href="/messages?tab=new"
+     data-testid="msg-tab-new">{{ t('发消息') }}</a>
+  {% endif %}
+</div>
+
+{% if tab == 'inbox' %}
+<div class="form-actions" style="margin-bottom:.5rem">
+  <a class="btn ghost" href="/messages?tab=inbox{% if show != 'unread' %}&show=unread{% endif %}"
+     data-testid="msg-filter">{{ t('只看未读') if show != 'unread' else t('看全部') }}</a>
+  <form method="post" action="/messages/read-all" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <button class="btn ghost" type="submit" data-testid="msg-read-all">{{ t('全部标为已读') }}</button>
+  </form>
+</div>
+
+{% for it in inbox %}
+<div class="card" style="padding:.6rem .9rem;margin-bottom:.5rem"
+     data-testid="msg-item" data-unread="{{ '1' if it.unread else '0' }}">
+  <div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap">
+    {% if it.unread %}<span class="pill warnk" data-testid="msg-unread">{{ t('未读') }}</span>{% endif %}
+    <a href="/messages/{{ it.msg.id }}/go" data-testid="msg-link-{{ it.msg.id }}"><b>{{ it.msg.title }}</b></a>
+    <span class="hint">{{ it.msg.sender_name or it.msg.sender }}</span>
+    <span class="hint">{{ it.msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+    {% if it.msg.scope == 'task_review' %}<span class="pill">{{ t('任务进展') }}</span>{% endif %}
+    <span class="spacer" style="flex:1"></span>
+    {% if it.unread %}
+    <form method="post" action="/messages/{{ it.msg.id }}/read" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <button class="btn ghost" type="submit" data-testid="msg-read-{{ it.msg.id }}">{{ t('标为已读') }}</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if it.msg.body %}<p class="hint" style="margin:.35rem 0 0">{{ it.msg.body }}</p>{% endif %}
+</div>
+{% else %}
+<div class="card"><p class="empty" data-testid="msg-empty">{{ t('没有消息') }}</p></div>
+{% endfor %}
+
+{% elif tab == 'sent' %}
+<div class="tbl-wrap">
+  <table data-testid="msg-sent">
+    <thead><tr><th>{{ t('时间') }}</th><th>{{ t('标题') }}</th>
+      <th>{{ t('收件人') }}</th><th>{{ t('已读') }}</th></tr></thead>
+    <tbody>
+      {% for s in sent %}
+      <tr data-testid="msg-sent-row">
+        <td>{{ s.msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ s.msg.title }}{% if s.msg.body %}<div class="hint">{{ s.msg.body }}</div>{% endif %}</td>
+        <td>{{ s.n }}</td>
+        <td>{{ s.read }} / {{ s.n }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">{{ t('还没发过消息') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+{# 发消息：一个 / 多个 / 全体（队长只能发本队 → 服务层校验，越界报错） #}
+<form method="post" action="/messages/send" data-testid="msg-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <div class="card" style="padding:.7rem 1rem">
+    <label class="f" style="display:block">{{ t('标题') }}
+      <input type="text" name="title" required maxlength="200" style="width:min(420px,90%)"
+             data-testid="msg-title">
+    </label>
+    <label class="f" style="display:block;margin-top:.4rem">{{ t('正文（可空）') }}
+      <textarea name="body" rows="3" style="width:min(560px,96%)" data-testid="msg-body"></textarea>
+    </label>
+
+    <div style="margin-top:.5rem">
+      <label class="pick" style="margin-right:1rem">
+        <input type="radio" name="mode" value="pick" checked data-testid="msg-mode-pick">
+        {{ t('发给选定的人') }}
+      </label>
+      <label class="pick">
+        <input type="radio" name="mode" value="all" data-testid="msg-mode-all">
+        {% if current_user.role == 'admin' %}{{ t('发给全体在岗员工') }}{% else %}{{ t('发给我队全体队员') }}{% endif %}
+      </label>
+    </div>
+
+    <div style="max-height:260px;overflow:auto;border:1px solid #e5e5e5;border-radius:6px;
+                padding:.4rem .6rem;margin-top:.5rem" data-testid="msg-people">
+      {% for c in candidates %}
+      <label class="pick" style="display:block">
+        <input type="checkbox" name="person" value="{{ c.code }}"
+               data-testid="msg-person-{{ c.code }}">
+        {{ c.display_name }} <span class="hint">{{ c.code }}</span>
+        {% if c.status == 'leave' %}<span class="pill warnk">{{ t('请假') }}</span>{% endif %}
+        {% if c.status in ('resigned', 'disabled') %}<span class="pill">{{ t('已离职/停用') }}</span>{% endif %}
+      </label>
+      {% else %}
+      <p class="empty">{{ t('没有可发送的对象') }}</p>
+      {% endfor %}
+    </div>
+
+    <div class="form-actions" style="margin-top:.6rem">
+      <button class="btn" type="submit" data-testid="msg-send">{{ t('发送') }}</button>
+      <span class="hint">
+        {% if current_user.role == 'admin' %}{{ t('管理员可以发给任意员工或全体。') }}
+        {% else %}{{ t('队长只能发给自己队里的队员。') }}{% endif %}
+      </span>
+    </div>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

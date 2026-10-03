@@ -405,10 +405,29 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   ⑦ **跨域只读**：作业域**只读** `staff_date_plans`/`users`（派工提醒），**绝不写**；写只写 `bd_staff_leave`。
   守门测试 `test_availability_reads_never_write`（可用性检查**一个表都没碰**）。
   迁移 `a3b4c5d6e7f8`（只加一张表）；开/结束都写 `bd_log`。
-  测试 `tests_web/test_team_task.py` **56 项**；全量 `tests_web` **383 passed**。
-- 测试 `tests_web/test_team_task.py`（**56 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
-  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**/假期模式开启结束与隔离/派工提醒四态；
-  **全量 `tests_web` 383 passed**；i18n 巡检 0 缺失 0 死键。
+  测试 `tests_web/test_team_task.py` **56 项**；全量 `tests_web` **383 passed**。（第五轮后：**66 项 / 393 passed**）
+- **第五轮增量（2026-10-03 进展确认/调整 + 站内消息）**：
+  ① **进展审核**：`bd_task_progress` 加 `reported_pct`（**员工原值，永不覆盖**）/`reported_by`/
+  `review_status(pending/confirmed/adjusted)`/`reviewed_by`/`reviewed_at`/`review_note`。
+  `pct` = 当前生效值 → 能展示"队员报 80%（已调成 70%）"。
+  ② **队长两个动作**：**确认** `POST /my/tasks/confirm`（认可原值，一键）/ **调整** 走
+  `POST /my/tasks/progress`（值与上报不同即 `adjusted`）。队长页新增**「待确认」tab**（否则藏在"进行中"里找不到）。
+  ③ **确认/调整都自动发消息给员工**（`scope=task_review` + 直达 `/tasks/{id}`，文案含原值→新值与操作人姓名）；
+  发件人 = **做事的人**（队长/管理员），不是无名 system。没有员工上报时队长直接填 → **不发消息**。
+  ④ **消息模块 `docs/specs-messages.md`**：`bd_message`（1 条消息）+ `bd_message_recipient`（每人一行、按人已读）；
+  一个/多个/全体都是同一条消息。`/messages` 三 tab：收件箱（只看未读/全部已读/单条已读）/ 我发出的（已读人数）/ 发消息。
+  未读红点由中间件注入 `request.state.unread_messages`（一次 COUNT）→ 底栏「消息」tab + 管理端顶栏「消息（N）」。
+  `GET /messages/{id}/go` 标已读并跳到目标页；不是我的消息 → 回列表且不改已读。
+  ⑤ **收件人隔离唯一入口** `bd_msg.recipients_for()`：管理员 → 指定人/全体；**队长 → 只能本队现役队员**
+  （"全体"= 我的队全体），**越界拒绝且不发**；员工不能发。
+  ⑥ ⚠️ **管理员账号可能没有 `person_code`** → 消息模块的登录判据不能用它（否则管理员连发件箱都进不去），
+  管理员特判放行（收件箱空而已）。
+  ⑦ 边界不变：只写作业域表；守门测试 `test_message_send_only_writes_bd_tables`。
+  迁移 `b4c5d6e7f8a9`（2 张新表 + `bd_task_progress` 加 6 列）。
+  测试 `tests_web/test_team_task.py` **66 项**；全量 `tests_web` **393 passed**。
+- 测试 `tests_web/test_team_task.py`（**66 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
+  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**/假期模式开启结束与隔离/派工提醒四态/进展确认调整与消息通知/消息收件人隔离；
+  **全量 `tests_web` 393 passed**；i18n 巡检 0 缺失 0 死键。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

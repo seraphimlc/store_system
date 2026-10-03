@@ -32,6 +32,7 @@
   <a class="nav" href="/stations">{{ t('车站') }}</a>
   <a class="nav" href="/tasks">{{ t('任务') }}</a>
   <a class="nav" href="/logs">{{ t('日志') }}</a>
+  <a class="nav" href="/messages">{{ t('消息') }}{% if request.state.unread_messages %}（{{ request.state.unread_messages }}）{% endif %}</a>
   <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
   {% endif %}
   <span class="spacer"></span>
@@ -59,6 +60,9 @@
 {# 待填报出勤计划：中间件写入 request.state.plan_pending（无则 None） #}
 {% set _pp = (request.state.plan_pending
               if request.state.plan_pending is defined else none) %}
+{# 未读消息数：中间件写入 request.state.unread_messages（底栏红点用） #}
+{% set _unread = (request.state.unread_messages
+                  if request.state.unread_messages is defined else 0) %}
 <nav class="tabbar" aria-label="{{ t('主导航') }}">
   <a class="tab {% if _p.startswith('/my/tasks') %}on{% endif %}"
      href="/my/tasks" data-testid="tab-tasks">
@@ -79,6 +83,12 @@
      href="/my/report/feedback" data-testid="tab-feedback">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
     <span>{{ t('核对结果') }}</span>
+  </a>
+  <a class="tab {% if _p.startswith('/messages') %}on{% endif %}"
+     href="/messages" data-testid="tab-messages">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H7l-3 3z"/></svg>
+    <span>{{ t('消息') }}</span>
+    {% if _unread %}<i class="dot" title="{{ t('未读消息') }}"></i>{% endif %}
   </a>
   <a class="tab {% if _p.startswith('/my/plan') %}on{% endif %}"
      href="/my/plan" data-testid="tab-plan">

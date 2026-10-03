@@ -457,6 +457,7 @@ def my_tasks_page(request: Request,
         return g
     from app.services import bd_leave, bd_teams, bd_tasks
     TAB_MINE = "mine"
+    TAB_PENDING = "pending"      # 待确认（队长专用 tab）
     is_leader = user.role == "leader"
     jst_today = bd_leave.today()
     teams = bd_teams.leader_teams(db, user.person_code) if is_leader else []
@@ -471,8 +472,12 @@ def my_tasks_page(request: Request,
         counts = {k: sum(1 for r in all_rows if r["state"] == k)
                   for k in bd_tasks.STATES}
         counts[TAB_MINE] = len(my_rows)
+        # 「待确认」= 队员报过、队长还没处理的（用户 2026-10-03：确认 / 调整）
+        counts[TAB_PENDING] = sum(1 for r in all_rows if r.get("pending_review"))
         if tab == TAB_MINE:
             rows = my_rows
+        elif tab == TAB_PENDING:
+            rows = [r for r in all_rows if r.get("pending_review")]
         elif tab in bd_tasks.TABS:
             rows = [r for r in all_rows if r["state"] == tab]
         else:
@@ -504,7 +509,9 @@ def my_tasks_page(request: Request,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
         "can_report_map": can_report_map, "can_assign_map": can_assign_map,
-        "tab_mine": TAB_MINE, "my_ids": my_ids, "n_mine": len(my_rows),
+        "tab_mine": TAB_MINE, "tab_pending": TAB_PENDING,
+        "my_ids": my_ids, "n_mine": len(my_rows),
+        "n_pending": counts.get(TAB_PENDING, 0),
         "avail": avail, "my_leave": my_leave,
         "avail_tags": {w: _tr(w, CURRENT_LANG.get()) for w in
                        ("休假", "计划休", "请假", "停用", "离职", "休")},
@@ -663,3 +670,39 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
         "msg": msg, "err": err,
     })
+
+
+@router.post("/my/tasks/confirm")
+def my_tasks_confirm(request: Request, task_id: int = Form(0),
+                     note: str = Form(""), csrf_token: str = Form(""),
+                     user: Optional[User] = Depends(require_login),
+                     db: Session = Depends(get_db)):
+    """队长**确认**队员今天的上报（认可原值）→ 自动给队员发消息。"""
+    if user is None:
+        return _denied()
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    task = db.get(bd_tasks.BdTask, task_id)
+    if task is None:
+        return RedirectResponse("/my/tasks?err=%s" % _q("任务不存在"),
+                                status_code=303)
+    if not bd_tasks.can_adjust(db, user, task):
+        return RedirectResponse("/my/tasks?err=%s"
+                                % _q("只有该队队长或管理员能确认"),
+                                status_code=303)
+    try:
+        r = bd_tasks.save_progress(db, task_id, task.pct, note, by=user.username,
+                                   actor_user=user, confirm=True)
+        db.commit()
+        msg = "已确认 %s%%" % r["pct"]
+        if r.get("reported_pct") is None:
+            msg = "这条还没有队员上报，未确认"
+        if r.get("notified"):
+            msg += "；已通知队员"
+        return RedirectResponse("/my/tasks?tab=%s&msg=%s"
+                                % (r["state"], _q(msg)), status_code=303)
+    except bd_tasks.TaskError as e:
+        db.rollback()
+        return RedirectResponse("/my/tasks?err=%s" % _q(str(e)),
+                                status_code=303)

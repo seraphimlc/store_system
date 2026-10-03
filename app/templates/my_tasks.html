@@ -31,12 +31,15 @@
   {{ t('我带的队：') }}{% for tm in teams %}<b>{{ tm.name }}</b>{{ '、' if not loop.last }}{% endfor %}
   · {{ t('我负责') }} <b data-testid="n-mine">{{ n_mine }}</b> {{ t('个车站') }}
   · {{ t('本队') }} {{ counts.unassigned + counts.doing + counts.done }} {{ t('个车站') }}
+  {% if n_pending %}· <span class="pill warnk" data-testid="pending-hint">{{ t('待确认') }} {{ n_pending }}</span>{% endif %}
 </p>
 
 {# 队长：我的 / 未分配 / 进行中 / 已完成 #}
 <div class="tabs" data-testid="task-tabs">
   <a class="{% if tab==tab_mine %}on{% endif %}" href="/my/tasks?tab={{ tab_mine }}"
      data-testid="tab-mine">{{ t('我的') }}（{{ counts.mine }}）</a>
+  <a class="{% if tab==tab_pending %}on{% endif %}" href="/my/tasks?tab={{ tab_pending }}"
+     data-testid="tab-pending">{{ t('待确认') }}（{{ counts.pending }}）</a>
   <a class="{% if tab=='unassigned' %}on{% endif %}" href="/my/tasks?tab=unassigned"
      data-testid="tab-unassigned">{{ labels.unassigned }}（{{ counts.unassigned }}）</a>
   <a class="{% if tab=='doing' %}on{% endif %}" href="/my/tasks?tab=doing"
@@ -70,6 +73,16 @@
     <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}"
           data-testid="state-{{ r.task.id }}">{{ labels[r.state] }}</span>
     <span class="hint">{{ t('进度') }} <b data-testid="pct-{{ r.task.id }}">{{ r.pct }}%</b></span>
+    {# 审核：员工上报 → 队长确认 / 调整（用户 2026-10-03） #}
+    {% if r.pending_review %}
+    <span class="pill warnk" data-testid="review-state-{{ r.task.id }}">{{ t('待确认') }}
+      {%- if r.last_reported_pct is not none and r.last_reported_pct != r.pct %}（{{ t('队员报') }} {{ r.last_reported_pct }}%）{% endif %}</span>
+    {% elif r.review_status == 'confirmed' and r.last_reported_pct is not none %}
+    <span class="pill okk" data-testid="review-state-{{ r.task.id }}">{{ t('已确认') }}</span>
+    {% elif r.review_status == 'adjusted' and r.last_reported_pct is not none %}
+    <span class="pill" data-testid="review-state-{{ r.task.id }}">{{ t('已调整') }}
+      {%- if r.last_reported_pct != r.pct %} <span class="hint">{{ t('队员报') }} {{ r.last_reported_pct }}%</span>{% endif %}</span>
+    {% endif %}
     {% if r.start_date %}<span class="hint">{{ t('开始日') }} {{ r.start_date.strftime('%m-%d') }}</span>{% endif %}
     {% if r.done_date %}<span class="hint">{{ t('完成日') }} {{ r.done_date.strftime('%m-%d') }}</span>{% endif %}
     {% if r.last_date %}<span class="hint">{{ t('最后提交') }} {{ r.last_date.strftime('%m-%d') }}
@@ -121,6 +134,11 @@
     <b style="min-width:3.2rem;text-align:right"><span x-text="v"></span>%</b>
     <input type="text" name="note" placeholder="{{ t('备注（可空）') }}" style="width:11rem">
     <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
+    {# 队长/管理员：一键**确认**队员的上报（认可原值，会发消息给队员） #}
+    {% if can_asg and r.pending_review %}
+    <button class="btn ghost" type="submit" formaction="/my/tasks/confirm"
+            data-testid="confirm-{{ r.task.id }}">{{ t('确认（认可队员上报）') }}</button>
+    {% endif %}
   </form>
   {% else %}
   <p class="hint" style="margin:.45rem 0 0" data-testid="readonly-{{ r.task.id }}">

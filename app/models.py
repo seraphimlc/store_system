@@ -1027,8 +1027,13 @@ class BdTaskAssign(Base):
 class BdTaskProgress(Base):
     """每日任务进展提交（一天一条，当天可改；历史留痕）。
 
-    - `pct` 0–100（滑动条）
+    - `pct` 0–100（滑动条）= **当前生效值**（队长调整后就是调整后的值）
     - `progress_date`：业务日（JST），UNIQUE(task_id, progress_date)
+    - **审核（用户 2026-10-03 要求：员工先上报 → 队长确认或调整）**：
+      · `reported_pct`/`reported_by`：**员工上报的原值**（队长调整也不动，用于对比展示）
+      · `review_status`：`pending`（等确认）/ `confirmed`（认可，值与上报一致）
+        / `adjusted`（队长改了值）
+      · `reviewed_by`/`reviewed_at`/`review_note`：谁什么时候处理的
     """
     __tablename__ = "bd_task_progress"
     __table_args__ = (
@@ -1042,6 +1047,16 @@ class BdTaskProgress(Base):
     note = Column(Text, nullable=False, default="", server_default="")
     submitted_by = Column(String(32), nullable=False, default="",
                           server_default="")
+    # ---- 上报 / 审核（员工先报、队长确认或调整）----
+    reported_pct = Column(Integer, nullable=True)
+    reported_by = Column(String(32), nullable=False, default="",
+                         server_default="")
+    review_status = Column(String(16), nullable=False, default="pending",
+                           server_default="pending")
+    reviewed_by = Column(String(32), nullable=False, default="",
+                         server_default="")
+    reviewed_at = Column(DateTime, nullable=True)
+    review_note = Column(Text, nullable=False, default="", server_default="")
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now)
 
@@ -1119,3 +1134,48 @@ class BdStaffLeave(Base):
     created_by = Column(String(64), nullable=False, default="", server_default="")
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdMessage(Base):
+    """站内消息（**头信息**，一条消息一行）。
+
+    用户 2026-10-03：「消息模块就是类似其它网站或者系统的消息模块」——
+    所以走标准设计：**一条消息 + N 个收件人**（`BdMessageRecipient`），已读是**按人**的。
+
+    - `sender_kind`：`system`（任务确认/调整等自动通知）/ `admin` / `leader`
+    - `scope`：`manual`（手动发）/ `task_review`（任务进展确认/调整）/ `announce`（公告）
+    - `url`：点开消息跳哪里（如任务详情 `/tasks/12`）
+    - `ref_type`/`ref_id`：关联对象，便于按任务查消息
+    """
+    __tablename__ = "bd_message"
+    __table_args__ = (Index("ix_bd_message_created", "created_at"),)
+    id = Column(Integer, primary_key=True)
+    sender_kind = Column(String(16), nullable=False, default="system",
+                         server_default="system")
+    sender = Column(String(64), nullable=False, default="", server_default="")
+    sender_name = Column(String(64), nullable=False, default="",
+                         server_default="")
+    title = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False, default="", server_default="")
+    url = Column(String(255), nullable=False, default="", server_default="")
+    scope = Column(String(24), nullable=False, default="manual",
+                   server_default="manual")
+    ref_type = Column(String(24), nullable=False, default="", server_default="")
+    ref_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdMessageRecipient(Base):
+    """消息收件人（**每个收件人一行**，已读各自独立）。"""
+    __tablename__ = "bd_message_recipient"
+    __table_args__ = (
+        UniqueConstraint("message_id", "person_code",
+                         name="uq_bd_message_recipient"),
+        Index("ix_bd_message_recipient_person", "person_code", "read_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("bd_message.id", ondelete="CASCADE"),
+                        nullable=False)
+    person_code = Column(String(64), nullable=False)
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)

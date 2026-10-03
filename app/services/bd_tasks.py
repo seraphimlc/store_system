@@ -355,7 +355,7 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
 
 def save_progress(db: Session, task_id: int, pct: int, note: str = "",
                   by: str = "", on_date: Optional[date] = None,
-                  actor_user=None) -> dict:
+                  actor_user=None, confirm: bool = False) -> dict:
     """**每日进展上报/调整**：写/改当天一条，并把任务刷新为最新进度。
 
     - `pct` 夹到 0–100
@@ -380,16 +380,47 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
     row = (db.query(BdTaskProgress)
            .filter(BdTaskProgress.task_id == task_id,
                    BdTaskProgress.progress_date == d).first())
+    # ---- 谁在写？员工本人上报 vs 队长/管理员确认或调整（用户 2026-10-03 口径）----
+    staff_report = bool(actor_user is not None
+                        and is_assignee(db, actor_user, t)
+                        and not can_adjust(db, actor_user, t))
+    leader_review = bool(actor_user is not None
+                         and can_adjust(db, actor_user, t))
+    if confirm and row is not None and row.reported_pct is not None:
+        p = int(row.reported_pct)             # 「确认」= 认可员工上报的原值
     if row is None:
         row = BdTaskProgress(task_id=task_id, progress_date=d, pct=p,
                              note=(note or "").strip(),
                              submitted_by=(by or ""))
         db.add(row)
+        db.flush()
     else:
         row.pct = p
         row.note = (note or "").strip()
         row.submitted_by = (by or "")
         row.updated_at = datetime.utcnow()
+    notified = None
+    review_action = ""
+    orig_reported = row.reported_pct
+    if staff_report:
+        # 员工上报 → 记录原值，等队长确认（重新报会再次进入待确认）
+        row.reported_pct = p
+        row.reported_by = (by or "")
+        row.review_status = "pending"
+        row.reviewed_by = ""
+        row.reviewed_at = None
+        row.review_note = ""
+    elif leader_review:
+        if row.reported_pct is None:
+            row.review_status = "adjusted"     # 队长直接填（没有员工上报可比）
+        elif p == int(row.reported_pct):
+            row.review_status = "confirmed"    # 认可
+        else:
+            row.review_status = "adjusted"     # 改了值
+        row.reviewed_by = (by or "")
+        row.reviewed_at = datetime.utcnow()
+        row.review_note = (note or "").strip()
+        review_action = row.review_status
     t.pct = p
     # 开始日 / 完成日**自动写**（用户 2026-10-03 口径）
     if t.start_date is None:
@@ -409,8 +440,22 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
                       old=("%d%%" % old_pct) if p != old_pct else old_state,
                       new=("%d%%" % p) if p != old_pct else t.state,
                       note=(note or ""))
+    elif review_action:
+        bd_log.log_op(db, actor_user, "task", "update", ref_id=t.id,
+                      ref_label=_station_name(db, t), field="进展确认",
+                      old=("%s%%" % orig_reported), new=review_action,
+                      note=(note or ""))
+    # **确认/调整结果通知员工**（用户明确要求：调整要发消息）
+    if review_action and orig_reported is not None:
+        from app.services import bd_msg
+        notified = bd_msg.notify_task_progress(
+            db, t, review_action, orig_reported, p, by_user=actor_user,
+            note=(note or ""), station=_station_name(db, t))
     return {"pct": p, "state": t.state, "date": d,
-            "start_date": t.start_date, "done_date": t.done_date}
+            "start_date": t.start_date, "done_date": t.done_date,
+            "review_status": row.review_status,
+            "reported_pct": row.reported_pct,
+            "notified": bool(notified)}
 
 
 def _station_name(db: Session, task: BdTask) -> str:
@@ -568,8 +613,28 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
             "last_date": last_d,
             "last_pct": (lp.pct if lp else None),
             "last_note": (lp.note if lp else ""),
+            # 审核（员工先报 → 队长确认/调整）；**待确认 = 有员工上报且还没处理**
+            "last_reported_pct": (lp.reported_pct if lp else None),
+            "last_reported_by": (lp.reported_by if lp else ""),
+            "review_status": (lp.review_status if lp else ""),
+            "reviewed_by": (lp.reviewed_by if lp else ""),
+            "pending_review": bool(lp is not None
+                                   and lp.reported_pct is not None
+                                   and lp.review_status == "pending"),
         })
     return out
+
+
+def assignees_of(db: Session, task_id: int) -> List[dict]:
+    """该任务的担当（`{code, name}`；消息通知用）。"""
+    codes = [c for (c,) in db.query(BdTaskAssign.person_code)
+             .filter(BdTaskAssign.task_id == task_id).all() if c]
+    names = {}
+    if codes:
+        names = {c: (d or c) for c, d in
+                 db.query(Person.code, Person.display_name)
+                 .filter(Person.code.in_(codes)).all()}
+    return [{"code": c, "name": names.get(c, c)} for c in codes]
 
 
 def team_tasks(db: Session, team_ids: Sequence[int],

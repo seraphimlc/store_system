@@ -1032,3 +1032,240 @@ def test_admin_board_marks_assignee_on_leave(client, seeded):
     p = client.get("/tasks")
     assert p.status_code == 200
     assert 'data-testid="leave-%d-P2"' % seeded["task"] in p.text
+
+
+# ---------------- 进展确认/调整 + 消息通知（用户 2026-10-03） ----------------
+
+def test_employee_report_then_leader_confirms_and_notifies(client, seeded):
+    """员工上报 → 待确认；队长**确认** → 已确认 + **给员工发消息**。"""
+    from app.models import BdMessage, BdMessageRecipient, BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    # 员工（汤静）上报 80%
+    _login(client, "tangjing")
+    r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "80"},
+              from_path="/my/tasks")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    p = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).one()
+    assert p.review_status == "pending" and p.reported_pct == 80
+    assert p.reported_by == "tangjing"
+    assert db.query(BdMessage).count() == 0, "上报本身不发消息"
+    db.close()
+    # 队长确认
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/confirm", {"task_id": str(tid)},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    p = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).one()
+    assert p.review_status == "confirmed" and p.pct == 80
+    assert p.reviewed_by == "ogawa" and p.reviewed_at is not None
+    m = db.query(BdMessage).one()
+    # 消息的"发件人"就是做这件事的人（队长），只是 scope 标成任务进展
+    assert m.scope == "task_review" and m.sender_kind == "leader"
+    assert m.sender == "ogawa"
+    assert "确认" in m.title and "80" in m.body
+    recips = db.query(BdMessageRecipient).filter(
+        BdMessageRecipient.message_id == m.id).all()
+    assert [r_.person_code for r_ in recips] == ["P2"], "只发给担当"
+    assert recips[0].read_at is None
+    db.close()
+
+
+def test_leader_adjust_notifies_old_and_new(client, seeded):
+    """员工报 80 → 队长**调整为 70** → 原值保留 + 消息里写明 80→70。"""
+    from app.models import BdMessage, BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "80"},
+          from_path="/my/tasks")
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/progress",
+              {"task_id": str(tid), "pct": "70", "note": "按现场情况下调"},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    p = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).one()
+    assert p.pct == 70 and p.reported_pct == 80, "原值必须留着（用于对比展示）"
+    assert p.review_status == "adjusted" and p.reviewed_by == "ogawa"
+    m = db.query(BdMessage).one()
+    assert "调整" in m.title
+    assert "80" in m.body and "70" in m.body, m.body
+    assert m.url == "/tasks/%d" % tid, "消息要能直达任务"
+    db.close()
+
+
+def test_leader_direct_write_does_not_notify(client, seeded):
+    """没有员工上报时队长直接填 → 不发"调整"消息（没得对比）。"""
+    from app.models import BdMessage
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    _post(client, "/my/tasks/progress",
+          {"task_id": str(seeded["task"]), "pct": "50"},
+          from_path="/my/tasks?tab=unassigned")
+    db = appdb.SessionLocal()
+    assert db.query(BdMessage).count() == 0
+    db.close()
+
+
+# ---------------- 消息模块 ----------------
+
+def test_admin_sends_to_all_and_staff_reads(client, seeded):
+    from app.models import BdMessage, BdMessageRecipient
+    _login(client, "admin")
+    r = _post(client, "/messages/send",
+              {"title": "全体通知", "body": "明天开大会", "mode": "all"},
+              from_path="/messages?tab=new")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    m = db.query(BdMessage).one()
+    recips = {x.person_code for x in db.query(BdMessageRecipient)
+              .filter(BdMessageRecipient.message_id == m.id).all()}
+    assert {"P1", "P2", "P3"} <= recips, recips
+    db.close()
+    # 员工看到未读 + 能标已读
+    _login(client, "tangjing")
+    p = client.get("/messages")
+    assert p.status_code == 200
+    assert "全体通知" in p.text and 'data-testid="msg-unread"' in p.text
+    assert 'data-testid="tab-messages"' in p.text
+    mid = m.id
+    r = _post(client, "/messages/%d/read" % mid, {}, from_path="/messages")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    row = db.query(BdMessageRecipient).filter(
+        BdMessageRecipient.message_id == mid,
+        BdMessageRecipient.person_code == "P2").one()
+    assert row.read_at is not None
+    db.close()
+    assert "没有未读消息" in client.get("/messages").text
+
+
+def test_leader_can_only_send_to_own_team(client, seeded):
+    """**数据隔离**：队长发给本队队员 OK；发给队外的人 → 拒绝且不发消息。"""
+    from app.models import BdMessage
+    _login(client, "ogawa")
+    r = _post(client, "/messages/send",
+              {"title": "给队员", "mode": "pick", "person": "P2"},
+              from_path="/messages?tab=new")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.query(BdMessage).count() == 1
+    db.close()
+    r = _post(client, "/messages/send",
+              {"title": "越界", "mode": "pick", "person": "P3"},
+              from_path="/messages?tab=new")
+    assert r.status_code == 303
+    assert "err=" in r.headers["location"]
+    db = appdb.SessionLocal()
+    assert db.query(BdMessage).count() == 1, "越界不许发出去"
+    db.close()
+
+
+def test_staff_cannot_send_messages(client, seeded):
+    from app.models import BdMessage
+    from app.services import bd_msg
+    _login(client, "tangjing")
+    r = _post(client, "/messages/send", {"title": "我要发", "mode": "all"},
+              from_path="/messages")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.query(BdMessage).count() == 0
+    with pytest.raises(bd_msg.MsgError):
+        bd_msg.recipients_for(db, db.query(User).filter(
+            User.username == "tangjing").one(), mode="all")
+    db.close()
+
+
+def test_message_go_marks_read_and_redirects(client, seeded):
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    admin = db.query(User).filter(User.username == "admin").one()
+    m = bd_msg.send(db, admin, ["P2"], "看这条", "点开跳任务",
+                    url="/tasks/%d" % seeded["task"])
+    db.commit()
+    mid = m.id
+    db.close()
+    _login(client, "tangjing")
+    r = client.get("/messages/%d/go" % mid, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/tasks/%d" % seeded["task"]
+    db = appdb.SessionLocal()
+    from app.models import BdMessageRecipient
+    assert db.query(BdMessageRecipient).filter(
+        BdMessageRecipient.message_id == mid).one().read_at is not None
+    db.close()
+
+
+def test_message_isolation_other_person_cannot_read_it(client, seeded):
+    """别人不能读我的消息（越权 → 回列表，不改状态）。"""
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    admin = db.query(User).filter(User.username == "admin").one()
+    m = bd_msg.send(db, admin, ["P2"], "只给汤静", "", url="/tasks/1")
+    db.commit()
+    mid = m.id
+    db.close()
+    _login(client, "ganzijie")          # P3，不是收件人
+    r = client.get("/messages/%d/go" % mid, follow_redirects=False)
+    assert r.headers["location"] == "/messages"
+    db = appdb.SessionLocal()
+    from app.models import BdMessageRecipient
+    assert db.query(BdMessageRecipient).filter(
+        BdMessageRecipient.message_id == mid).one().read_at is None
+    db.close()
+
+
+def test_message_send_only_writes_bd_tables(client, seeded):
+    """行为级守门：发消息/确认进展**只写 bd_ 表**（结算域照旧不碰）。"""
+    from sqlalchemy import event
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    touched = set()
+
+    def _before_flush(session, ctx, instances):
+        for o in list(session.new) + list(session.dirty) + list(session.deleted):
+            touched.add(type(o).__tablename__)
+
+    event.listen(db, "before_flush", _before_flush)
+    try:
+        admin = db.query(User).filter(User.username == "admin").one()
+        bd_msg.send(db, admin, ["P2"], "标题", "正文")
+        db.rollback()
+    finally:
+        event.remove(db, "before_flush", _before_flush)
+    bad = sorted(t for t in touched if not t.startswith("bd_"))
+    assert not bad, "发消息写了非作业域的表：%s" % bad
+    db.close()
+
+
+def test_leader_pending_tab_lists_reports_to_confirm(client, seeded):
+    """队长有专用「待确认」tab —— 队员报过、还没处理的都在这（别藏在"进行中"里）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "80"},
+          from_path="/my/tasks")
+    _login(client, "ogawa")
+    p = client.get("/my/tasks")
+    assert 'data-testid="tab-pending"' in p.text
+    assert "待确认（1）" in p.text
+    assert 'data-testid="pending-hint"' in p.text
+    p2 = client.get("/my/tasks?tab=pending")
+    assert "駒場東大前" in p2.text, "待确认 tab 里要能看到这条"
+    assert 'data-testid="confirm-%d"' % tid in p2.text
+    assert "队员报 80%" in p2.text or "80%" in p2.text

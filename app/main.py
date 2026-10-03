@@ -24,6 +24,8 @@ def create_app() -> FastAPI:
     app.include_router(plan_r.router)
     from app.routers import bd_r
     app.include_router(bd_r.router)
+    from app.routers import msg_r
+    app.include_router(msg_r.router)
 
     # 多语言：模板全局函数已在 app/templating.get_templates() 统一注册（t/LANG_NAMES/lang_url）
 
@@ -38,6 +40,8 @@ def create_app() -> FastAPI:
                      "/my/appeal", "/my/perf", "/my/report", "/my/plan",
                      # 假期模式（员工自己开/结束休假；派工时只提醒不阻断）
                      "/my/leave",
+                     # 站内消息（员工只读收件箱；队长/管理员可发）
+                     "/messages",
                      # 车站任务：队员看"分给我的车站"，队长在**同一页**分派 + 提交每日进展
                      # （两处写端点 `/my/tasks/assign`、`/my/tasks/progress` 由路由内做角色校验）
                      "/my/tasks",
@@ -122,6 +126,13 @@ def create_app() -> FastAPI:
                         from app.services import date_plan as _dp
                         request.state.plan_pending = _dp.needs_plan(
                             s, u.person_code) or None
+                        # 未读消息数（底栏红点；一次 COUNT，模板直接读）
+                        try:
+                            from app.services import bd_msg as _bm
+                            request.state.unread_messages = _bm.unread_count(
+                                s, u.person_code)
+                        except Exception:        # 表还没建也不该 500
+                            request.state.unread_messages = 0
                         allowed = (LEADER_ALLOWED if u.role == "leader"
                                    else STAFF_ALLOWED)
                         if not path.startswith(allowed):
