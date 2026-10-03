@@ -308,6 +308,42 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   **必须用 Python（读 macOS 系统代理），curl 不通**（curl 不读系统代理，要显式 `-x`）。
 - **已知未修**：缺陷清单见 `docs/问题单-已核实缺陷.md`（含 `period.py:93` 结转符号错等 6 项，均未修）。
 
+## 团队 + 车站任务（2026-10-03 交付 · 分支 feat/team-task）
+> 规格 `docs/specs-team-management.md`（第一期·团队定义）与 `docs/specs-station-tasks.md`（第二期·车站任务），
+> 两份文档开头都有 **§0 实施记录**（权威口径）。**只新增 `bd_*` 表，不碰结算域四表、不读 `raw_records`**。
+
+- **需求（用户原话）**：管理员建队圈人 + 指定队长 → 队长权限 → **队长端在员工端里**（任务分派 + 每日进展，
+  每任务一个 **0–100% 滑动条**，三个 tab **未分配/进行中/已完成**）→ 管理端看**所有已分配任务**的状态，
+  任务有**分配日期**、可按**日期区间**查 → **每个站点 = 一个任务**（后续可扩到所有地铁线路车站）。
+- **角色三档**：`admin` / **`leader`（新）** / `staff`。落点**唯一来源** `app/services/home.py::landing_home()`：
+  admin→`/dashboard`、leader→**`/my/tasks`**、staff→`date_plan.staff_home()`。
+  ⚠️ **加第三角色会死循环**（`/ → /dashboard → _denied() → /login → /`）：修法是
+  `auth_r` 的 `GET /`、`GET /login`、登录 POST 三处都走 `landing_home`（**`GET /login` 是关键那一环**）；
+  各 router 的 `_denied()` 保持 `/login`（会按角色二次落点，不成环）。
+- **表（6 张，迁移 `b2c3d4e5f6a7`，down_revision `d3e4f5a6b7c8`）**：
+  `bd_team` / `bd_team_member`（成员含历史，移出写 `end_date` **不删行**）/
+  `bd_station`（车站主数据，`name_norm` 判重）/ **`bd_task`（1 站 1 任务：`team_id` + `assign_date` + `state` + `pct`）** /
+  `bd_task_assign`（担当 **≤2 人**，必须是该队现役成员）/ `bd_task_progress`（**每日一条** `UNIQUE(task_id, date)`，当天可改=覆盖）。
+- **状态机（唯一口径 `bd_tasks.recompute_state`）**：没担当→`unassigned`；有担当且 `pct<100`→`doing`；`pct=100`→`done`。
+  pct 夹在 0–100；**当前进度冗余在 `bd_task.pct`**（列表直读）。
+- **权限**：`can_submit(db, user, task)` = 管理员 **或该任务的队长**（走 `bd_teams.is_leader_of`）；
+  队员只读（页面无滑动条/无分派控件，写端点拒绝）。**换队 `set_task_team` 会清空原担当**。
+- **页面**：管理端 `/teams`（+`/teams/{id}` 圈人）、`/stations`（批量建任务/批量派队）、`/tasks`（总表+日期区间+导出）；
+  员工端 `/my/tasks`（队长三 tab + 分派 + 滑动条提交；队员只读）。导航：`base.html` 管理菜单改 `role == 'admin'`，
+  底部 tabbar 对 `staff`+`leader` 都显示并新增「任务」tab。
+- **种子导入（真实数据已入库）**：`scripts/bd_seed_team_task.py --src "/Users/liuchang/Desktop/万总/team_task"`
+  （**默认 dry-run**，`--apply` 才写）。实测：**6 队 + 515 站 + 515 任务**，`assign_date`=运行日；
+  队长名模糊匹配（`小川`→**`小川逸`**）；⚠️ **陈嘉溢有两条同名人员记录 → 只报警不挂队长**（按"命中多条不猜"）。
+- **关键事实（实测，别再猜）**：`万总/team_task/*.xlsx` 是**已定义好的任务清单**（列：车站/担当/开始日/完成日/状态，
+  除车站外全空）；515 站**零重复、队间不重叠**；与上游 `task_plan/407站-小区域执行计划.xlsx` **只重合 189 个**
+  （10-03 是重新划分，**以 515 为准**）。`车站` = 用户说的"一片区域"（站前商圈），**系统不记录店明细**。
+- **踩过的坑**：① 导出文件名含中文 → 响应头 latin-1 报错，必须 `filename=` 用 ASCII、中文走 `filename*`；
+  ② `create_all` 前必须先 `import app.models`（否则建不出表）；③ 本地库不跑 alembic → 手工
+  `create_all` 补 6 张新表（只建缺失表）；④ **heredoc `python3 <<EOF` 会静默失败**（用 sed 或写脚本文件）；
+  ⑤ `tests_web/test_date_plan.py` 有 4 个用例没冻结 `jst_today`（跨过 10-03 截止日必红，基线同样失败）→ 已补 `frozen`。
+- 测试 `tests_web/test_team_task.py`（30 项：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
+  队员只读/日期区间/导出/硬边界）；**全量 `tests_web` 357 passed**；i18n 巡检 0 缺失 0 死键。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；

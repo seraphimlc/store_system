@@ -341,6 +341,11 @@ L2  丁目（官方编码）      = 原子地理单元，片区由"丁目集合"
 
 > `person_code` 关联既有 `persons.code`，**不新建人员主数据**。
 
+> ⚠️ **2026-10-02 变更**：`bd_team` / `bd_team_member` **已由 `docs/specs-team-management.md`（第一期）接管并简化**：
+> 只做**一层队**（**不加** `parent_id` / `level` / `manager_person_code`），"谁是队长"落在
+> `bd_team_member.role`（取值 `leader` / `member`），并新增账号角色 `users.role='leader'` 与之配合
+> （账号角色定"能否进队长端"，团队表定"管哪个队"）。本文的多层级设计**暂不实现**，等真有需求再加列。
+
 ### 5.3 门店宇宙
 
 | 表 | 关键字段 | 说明 |
@@ -357,6 +362,14 @@ L2  丁目（官方编码）      = 原子地理单元，片区由"丁目集合"
 |---|---|---|
 | `bd_target` | `period_type`、`period`、`scope_type`(company/team/zone/person)、`scope_code`、`metric`、`value`、`created_by`、`created_at` | 目标；**本期可不做**（`bd_assign.planned_stores` 已够用） |
 | `bd_task` | `id`、`task_date`、`scope_type`、`scope_code`、`zone_id`、`task_type`、`target_count`、`status`、`created_by` | 任务；**本期可不做**（队内自分配） |
+
+> ⚠️ **2026-10-02 / 10-03 变更**：用户新需求把「任务」做成了
+> **一个车站 = 一个任务 + 团队下派 + 队长分派 1~2 人 + 担当/开始日/完成日/状态**；
+> 并且**明确不要**半月期次、不要轮次、不要每日留痕（详见 `docs/specs-station-tasks.md`）。
+> 与本表的 `bd_task`（每日任务 `task_date` + `scope_type` + `target_count` 语义）**不是同一个东西**。
+> **本文的 `bd_task` 设计作废**，`bd_task` 这一实体由新规格接管（表名改为 `bd_station`）：
+> 见 `docs/specs-station-tasks.md`（第二期）与 `docs/specs-team-management.md`（第一期，团队与 `leader` 角色）。
+> `bd_target`（目标）**仍然不做**——新需求明确"不设目标分母，能做多少做多少"。
 
 ### 5.5 过程留痕（可选，取决于打卡端能力）
 
