@@ -1145,6 +1145,7 @@ def test_reports_summary_and_cards(client):
         seg = mod[mod.index('data-testid="%s"' % tid):]
         assert val in seg[:160], (tid, val)
     assert mod.count("sum-tile") >= 8                # 8 个小块
+    assert "sum-group" not in mod                    # 行组名已去掉（2026-10-02 用户："多余"）
     for label in ("1点店铺数", "2点店铺数", "总店铺数", "2点店铺占比",
                   "1点分数", "2点分数", "总分数", "2点分数占比"):
         assert label in mod, label
