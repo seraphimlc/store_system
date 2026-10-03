@@ -35,7 +35,7 @@
     <table class="kv">
       <tr><th><label for="ed_person">{{ t('员工') }}</label></th>
           <td><select name="person_code" id="ed_person" data-emp-filter
-                      data-emp-filter-hint="{{ t('筛选：编号后5位 或 姓名一个字') }}">
+                      data-emp-filter-hint="{{ t('输入编号后5位 或 姓名一个字') }}">
             <option value="">{{ t('请选择员工') }}</option>
             {% for s in staff_opts %}
             <option value="{{ s.code }}" {% if edit_row and edit_row.person_code == s.code %}selected{% endif %}>{{ s.name }}（{{ s.code }}）</option>

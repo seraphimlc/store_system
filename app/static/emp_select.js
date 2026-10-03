@@ -1,20 +1,20 @@
-/* 员工下拉的"搜索过滤"组件（2026-10-02 用户要求）
+/* 员工下拉：可搜索的 combobox（2026-10-02 用户要求）
  *
- * 用法：给任意 <select> 加 `data-emp-filter` 属性即可（选项文本形如 `姓名（编号）`）。
- * 组件会在下拉上方插入一个筛选输入框，输入即过滤：
- *   - **编号匹配**：直接输后 5 位就能命中（选项文本里含完整编号，子串命中即可）；
- *   - **姓名匹配**：输姓名里任意一个字即可；
- *   - 查询串做 NFKC 归一（全角数字/字母、大小写都能匹配）；
- *   - **唯一命中时自动选中**（省一次点击），命中多个则保留当前选择、由人工挑；
- *   - 无命中时输入框标红并提示"无匹配"；
- *   - 当前已选项始终保留在列表里，避免"过滤"悄悄改掉已提交的筛选条件。
+ * 目标交互：**点开下拉就能直接打字**——面板里自带搜索框，输入即过滤，回车/点击即选。
+ * 给任意 <select> 加 `data-emp-filter` 即可；脚本会把它"包装"成 combobox：
+ *   - 原 select 仍留在 DOM 里（`display:none`），**表单提交值 / htmx 行为完全不变**；
+ *   - 可见部分 = 一个按钮（显示当前选中项）+ 点开后的面板（搜索框 + 选项列表）；
+ *   - 匹配：**编号后 5 位**（选项文本含完整编号，子串即命中）、**姓名任一个字**；
+ *     查询串做 NFKC 归一（全角数字/字母、大小写都能匹配）；
+ *   - 键盘：↑/↓ 移动、Enter 选中、Esc 关闭、点面板外关闭；
+ *   - 选中后派发 `change`（看板那种"change 即加载"的下拉直接出结果）。
  *
- * 纯原生 JS、不依赖任何库（CDN 挂了也能用）；htmx 局部替换后会自动重新挂载。
+ * 纯原生 JS、零依赖；htmx 局部替换后自动重新挂载。
  */
 (function () {
   'use strict';
 
-  var HINT = '筛选：输入编号后5位 或 姓名一个字';
+  var HINT = '输入编号后5位 或 姓名一个字';
 
   function norm(s) {
     s = s || '';
@@ -26,67 +26,133 @@
     if (sel.dataset.empFilterDone === '1') { return; }
     sel.dataset.empFilterDone = '1';
 
-    // 记下全部原始选项（value / innerHTML / 是否选中）
-    var all = Array.prototype.slice.call(sel.options).map(function (o) {
-      return { value: o.value, html: o.innerHTML, text: o.textContent };
+    var opts = Array.prototype.slice.call(sel.options).map(function (o) {
+      return { value: o.value, label: o.textContent };
     });
+    var hint = sel.dataset.empFilterHint || HINT;
 
-    var wrap = document.createElement('div');
-    wrap.className = 'emp-filter-wrap';
-    var box = document.createElement('input');
-    box.type = 'search';
-    box.className = 'emp-filter';
-    box.placeholder = sel.dataset.empFilterHint || HINT;
-    box.setAttribute('autocomplete', 'off');
-    box.setAttribute('aria-label', HINT);
-    var tip = document.createElement('div');
-    tip.className = 'emp-filter-tip';
+    var box = document.createElement('div');
+    box.className = 'emp-cb';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'emp-cb-btn';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    var label = document.createElement('span');
+    label.className = 'emp-cb-label';
+    var caret = document.createElement('span');
+    caret.className = 'emp-cb-caret';
+    caret.textContent = '▾';
+    btn.appendChild(label);
+    btn.appendChild(caret);
 
-    sel.parentNode.insertBefore(wrap, sel);
-    wrap.appendChild(box);
-    wrap.appendChild(tip);
-    wrap.appendChild(sel);
+    var panel = document.createElement('div');
+    panel.className = 'emp-cb-panel';
+    panel.hidden = true;
+    var search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'emp-cb-search';
+    search.placeholder = hint;
+    search.setAttribute('autocomplete', 'off');
+    var list = document.createElement('div');
+    list.className = 'emp-cb-list';
+    list.setAttribute('role', 'listbox');
+    panel.appendChild(search);
+    panel.appendChild(list);
 
-    function apply(fireChange) {
-      var q = norm(box.value);
-      var matched = all.filter(function (o) {
-        return o.value && (!q || norm(o.text).indexOf(q) >= 0);
+    box.appendChild(btn);
+    box.appendChild(panel);
+    sel.parentNode.insertBefore(box, sel);
+    sel.classList.add('emp-cb-native');        // 原 select 只作为"值的载体"
+    sel.setAttribute('tabindex', '-1');
+
+    var hi = 0;
+
+    function current() {
+      for (var i = 0; i < opts.length; i++) { if (opts[i].value === sel.value) { return opts[i]; } }
+      return opts[0];
+    }
+    function syncLabel() {
+      var o = current();
+      label.textContent = o ? o.label : '';
+      btn.title = o && o.value ? o.label : '';
+    }
+    function items() {
+      var q = norm(search.value);
+      return opts.filter(function (o) {
+        return !q || !o.value || norm(o.label).indexOf(q) >= 0;
       });
-      // 已选项永远保留（否则提交时筛选会被偷偷改掉）
-      var cur = sel.value;
-      var keep = matched.slice();
-      if (cur && !keep.some(function (o) { return o.value === cur; })) {
-        all.forEach(function (o) { if (o.value === cur) { keep.push(o); } });
-      } else if (!q) {
-        keep = all.slice();
-      }
-
-      // 唯一命中 → 直接选中（"输后 5 位就不用再点一下"）
-      var auto = q && matched.length === 1 ? matched[0].value : null;
-      if (auto) { cur = auto; if (!keep.some(function (o) { return o.value === auto; })) { keep.push({ value: auto }); } }
-
-      sel.innerHTML = '';
-      keep.forEach(function (o) {
-        var op = document.createElement('option');
-        op.value = o.value;
-        if (o.html !== undefined) { op.innerHTML = o.html; } else { op.textContent = o.value; }
-        if (o.value === cur) { op.selected = true; }
-        sel.appendChild(op);
+    }
+    function render() {
+      var arr = items();
+      if (hi > arr.length - 1) { hi = Math.max(0, arr.length - 1); }
+      list.innerHTML = '';
+      arr.forEach(function (o, i) {
+        var it = document.createElement('div');
+        it.className = 'emp-cb-item' + (o.value === sel.value ? ' is-cur' : '')
+                     + (i === hi ? ' is-hi' : '');
+        it.setAttribute('role', 'option');
+        it.textContent = o.label;
+        it.addEventListener('mousedown', function (e) { e.preventDefault(); pick(o); });
+        list.appendChild(it);
       });
-
-      var none = !!q && matched.length === 0;
-      box.classList.toggle('is-none', none);
-      tip.textContent = none ? '无匹配' : (q && matched.length > 1 ? matched.length + ' 个匹配' : '');
-      if (auto && fireChange) {
-        sel.dispatchEvent(new Event('change', { bubbles: true }));   // 看板那种 change 即加载的下拉
+      if (!arr.some(function (o) { return o.value; }) && norm(search.value)) {
+        var none = document.createElement('div');
+        none.className = 'emp-cb-none';
+        none.textContent = '无匹配';
+        list.appendChild(none);
       }
     }
+    function open() {
+      panel.hidden = false;
+      box.classList.add('is-open');
+      btn.setAttribute('aria-expanded', 'true');
+      search.value = '';
+      hi = 0;
+      render();
+      search.focus();
+    }
+    function close() {
+      panel.hidden = true;
+      box.classList.remove('is-open');
+      btn.setAttribute('aria-expanded', 'false');
+    }
+    function pick(o) {
+      if (sel.value !== o.value) {
+        sel.value = o.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));   // htmx / onchange 都能收到
+      }
+      syncLabel();
+      close();
+      btn.focus();
+    }
 
-    box.addEventListener('input', function () { apply(true); });
-    box.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { box.value = ''; apply(false); }
-      if (e.key === 'Enter') { e.preventDefault(); apply(true); sel.focus(); }
+    btn.addEventListener('click', function () { panel.hidden ? open() : close(); });
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' && panel.hidden) { e.preventDefault(); open(); }
     });
+    search.addEventListener('input', function () { hi = 0; render(); });
+    search.addEventListener('keydown', function (e) {
+      var arr = items();
+      if (e.key === 'ArrowDown') {
+        e.preventDefault(); hi = Math.min(hi + 1, arr.length - 1); render(); scrollTo(list, hi);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault(); hi = Math.max(hi - 1, 0); render(); scrollTo(list, hi);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (arr[hi]) { pick(arr[hi]); }
+      } else if (e.key === 'Escape') {
+        close(); btn.focus();
+      }
+    });
+    document.addEventListener('click', function (e) { if (!box.contains(e.target)) { close(); } });
+    sel.addEventListener('change', syncLabel);
+    syncLabel();
+  }
+
+  function scrollTo(list, idx) {
+    var el = list.children[idx];
+    if (el && el.scrollIntoView) { el.scrollIntoView({ block: 'nearest' }); }
   }
 
   function scan(root) {
@@ -94,8 +160,6 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () { scan(document); });
-  document.addEventListener('htmx:afterSwap', function (e) {
-    scan((e && e.target) || document);
-  });
-  scan(document);      // 脚本在页面底部时直接挂载
+  document.addEventListener('htmx:afterSwap', function (e) { scan((e && e.target) || document); });
+  scan(document);
 })();

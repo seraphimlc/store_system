@@ -1171,6 +1171,9 @@ def test_employee_selects_have_filter(client):
     # 自报页有两处（筛选 + 补录卡片）
     page = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
     assert page.count("data-emp-filter") >= 2
-    assert "筛选：编号后5位 或 姓名一个字" in page
-    # 静态资源可访问
-    assert client.get("/static/emp_select.js").status_code == 200
+    assert "输入编号后5位 或 姓名一个字" in page        # combobox 搜索框的 placeholder
+    # 静态资源可访问，且是"点开即输入"的 combobox 实现（面板里带搜索框）
+    js = client.get("/static/emp_select.js")
+    assert js.status_code == 200
+    assert "emp-cb-panel" in js.text and "emp-cb-search" in js.text
+    assert "emp-cb-native" in js.text            # 原 select 保留为值载体（提交/htmx 不变）
