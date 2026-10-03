@@ -59,44 +59,20 @@
   </form>
 </div>
 
-<div class="stat-grid" style="margin-bottom:.8rem">
-  <div class="stat-card" data-testid="card-count">
-    <p class="k">{{ t('自报条数') }}</p><p class="v">{{ rep_sum.count }}</p>
-    <p class="hint" style="margin:.15rem 0 0">{{ t('1点') }} {{ rep_sum.p1 }} · {{ t('2点') }} {{ rep_sum.p2 }}</p>
-  </div>
-  <div class="stat-card" data-testid="card-points">
-    <p class="k">{{ t('总点数（分数）') }}</p>
-    <p class="v" data-testid="sum-points">{{ '{:,}'.format(rep_sum.points) }}</p>
-    <p class="hint" style="margin:.15rem 0 0">{{ t('1点分数') }} {{ rep_sum.p1 }} + {{ t('2点分数') }} {{ rep_sum.p2 * 2 }}</p>
-  </div>
-  <div class="stat-card" data-testid="card-rate">
-    <p class="k">{{ t('2点分数占比') }}</p>
-    <p class="v" data-testid="sum-rate">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</p>
-    <p class="hint" style="margin:.15rem 0 0">{{ t('2点分数') }} {{ rep_sum.p2 * 2 }} / {{ t('总分数') }} {{ rep_sum.points }}</p>
-  </div>
-  <div class="stat-card"><p class="k">{{ t('区间') }}</p><p class="v" style="font-size:1rem">{{ start }} ～ {{ end }}</p></div>
-  <div class="stat-card"><p class="k">{{ t('页') }}</p><p class="v">{{ data.page }} / {{ data.pages }}</p></div>
+{# 汇总压成一行（原来 5 张卡片，又高又空；2026-10-02 用户："那几个汇总的数据模块太丑了"） #}
+<div class="plan-bar" data-testid="report-summary-bar" style="margin:.1rem 0 .7rem">
+  <span class="plan-meta">
+    {{ t('自报条数') }} <b data-testid="sum-count">{{ rep_sum.count }}</b>
+    · {{ t('1点') }} <b>{{ rep_sum.p1 }}</b> / {{ t('2点') }} <b>{{ rep_sum.p2 }}</b>
+    · {{ t('总点数（分数）') }} <b data-testid="sum-points">{{ '{:,}'.format(rep_sum.points) }}</b>
+    · {{ t('2点分数占比') }}
+    <b data-testid="sum-rate">{{ '%.1f%%' % (rep_sum.rate * 100) if rep_sum.rate is not none else '—' }}</b>
+    <span class="hint">（{{ rep_sum.p2 * 2 }} / {{ rep_sum.points }}）</span>
+  </span>
+  <span class="plan-meta" style="margin-left:auto">{{ t('区间') }} <b>{{ start }} ～ {{ end }}</b>
+    · {{ data.page }} / {{ data.pages }} {{ t('页') }}</span>
 </div>
 
-{% if missing %}
-<div class="card" style="margin-bottom:.8rem">
-  <h2 style="font-size:1rem;margin:.1rem 0 .4rem">{{ t('漏填汇总') }}</h2>
-  <div class="tbl-wrap"><table class="grid-tbl" data-testid="missing-table">
-    <tr><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('应填天数') }}</th>
-        <th>{{ t('实填天数') }}</th><th>{{ t('漏填天数') }}</th><th>{{ t('漏填日期') }}</th></tr>
-    {% for m in missing if m.gaps %}
-    <tr>
-      <td>{{ m.name }}</td>
-      <td class="hint">{{ m.person_code }}</td>
-      <td class="num">{{ m.days_system }}</td>
-      <td class="num">{{ m.days_filled }}</td>
-      <td class="num" style="color:var(--warn);font-weight:650">{{ m.gaps }}</td>
-      <td class="hint">{% for d in m.dates[:8] %}{{ d }}　{% endfor %}{% if m.dates|length > 8 %}…{% endif %}</td>
-    </tr>
-    {% else %}<tr><td colspan="6" class="empty">{{ t('该区间没有漏填') }}</td></tr>{% endfor %}
-  </table></div>
-</div>
-{% endif %}
 
 <div class="tbl-wrap"><table class="grid-tbl" data-testid="reports-table">
   <tr><th>{{ t('日期') }}</th><th>{{ t('员工') }}</th><th>{{ t('员工编号') }}</th><th>{{ t('担当区域') }}</th>

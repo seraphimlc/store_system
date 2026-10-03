@@ -87,10 +87,8 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
     if status in STATUS_ALLOW:
         q = q.filter(User.status == status)
     staff = q.order_by(User.id).all()
-    # 每名员工的 MCP Token（代发/吊销/状态联动提示）
-    from app.services import mcp_tokens as _mt
-    tokens_by_user = {u.id: [_mt.decorate(r, u)
-                             for r in _mt.list_for_user(db, u.id)] for u in staff}
+    # MCP Token 列表**不再展示**（用户 2026-10-02："这块没有用，隐藏掉"）；
+    # `/staff-admin/{uid}/tokens/*` 端点保留（脚本/测试仍可用）。
     return templates.TemplateResponse("staff_admin.html", {
         "request": request, "current_user": user, "staff": staff,
         "msg": msg, "err": err, "status": status,
@@ -99,7 +97,6 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
         "counts": {s: db.query(User).filter(User.role == "staff",
                                            User.status == s).count()
                    for s in STATUS_LABELS},
-        "tokens_by_user": tokens_by_user,
         "new_token": new_token, "new_token_name": new_token_name,
         "new_token_uid": new_token_uid})
 

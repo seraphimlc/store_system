@@ -1125,7 +1125,9 @@ def test_reports_summary_and_cards(client):
     db.close()
     _login_admin(client)
     h = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text
-    assert 'data-testid="card-count"' in h and 'data-testid="card-points"' in h
+    # 汇总压成一行（2026-10-02 用户："那几个汇总的数据模块太丑了"）
+    assert 'data-testid="report-summary-bar"' in h
+    assert 'data-testid="sum-count">2<' in h                # 条数
     assert 'data-testid="sum-points">10<' in h              # 4+2*2 + 2 = 10
     assert 'data-testid="sum-rate">40.0%<' in h             # 2点分数 4 / 总分数 10
-    assert 'data-testid="card-rate"' in h
+    assert 'class="stat-grid"' not in h.split('data-testid="reports-table"')[0]

@@ -107,14 +107,21 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   - 员工端 `/my/report`：填报表单**实时算**（Alpine `get pts()/get rate()`，`data-testid="live-points|live-rate"`）、
     已报回显、历史表（逐日 + 本月合计）都有；
   - 管理端 `/staff-reports` 列表：新增「分数（点数）」「2点分数占比」两列；
-    统计卡：**自报条数**（小字 1点/2点 明细）+ **总点数（分数）**（小字 1点分数+2点分数）+
-    **2点分数占比**（小字 2点分数/总分数），由 `reports_summary()` 一次聚合查询给出，**不受分页影响**；
+    **顶部汇总压成一行**（`data-testid="report-summary-bar"`，用 `.plan-bar`/`.plan-meta` 样式；
+    原来是 5 张卡片，2026-10-02 用户："那几个汇总的数据模块太丑了"）：
+    `自报条数 N · 1点 A / 2点 B · 总点数（分数）P · 2点分数占比 R%（2点分数/总分数）`，
+    右侧 `区间 … · 第 x/y 页`；数值由 `reports_summary()` 一次聚合查询给出，**不受分页影响**；
     对比页 `/staff-reports/compare` 逐人新增「系统分数」「自报分数」（比例在同格 hint 里），
     逐日在「系统/自报」格子的 hint 里带分数与比例；
   - **导出**：自报明细加「分数(点数)」「2点分数占比%」；对比导出（按人/逐日）加「系统分数/自报分数/占比」。
   - 实现位置：`report_compare.points_of()/p2_score_share()`（唯一算法来源）、`_row_dict()`、`compare()`、
     `reports_summary()`、
     `daily_report.month_days()`、`report_export.py`。测试 `test_points_and_rate_helpers` 等 4 项。
+- **员工管理页不再展示 MCP Token（2026-10-02 用户："这块没有用，隐藏掉"）**：
+  整列（前缀/scope/状态/代发/吊销）已从 `/staff-admin` 移除，页面也不再查 token（省 N 次查询）；
+  **端点 `/{uid}/tokens/issue|revoke` 与 `mcp_service` 全部保留**（脚本/测试仍可用），
+  一次性"新 Token 已生成"提示也保留（只有直接 POST 该端点才会出现）。
+  自报页的**「漏填汇总」卡片同日一并去掉**（服务层 `report_compare.missing_summary()` 保留，MCP 可调用）。
 - **员工管理页编辑方式（2026-10-01 用户要求）**：`/staff-admin` 每行只留一个「编辑」按钮 →
   打开**原生 `<dialog>` 弹窗**（不依赖脚本库），里面改**姓名 / 登录名 / 状态 / 界面语言 / 重置口令**
   （`POST /staff-admin/{uid}/edit`，服务层 `staff_accounts.update_staff`）。
