@@ -1067,15 +1067,19 @@ def test_pages_show_points_and_rate(client):
     """员工端（回显 + 历史表 + 实时字段）与管理端（列表 + 对比页）都要展示。"""
     _seed_admin_staff_and_data(client)          # 建 admin + P1 两条自报（9/16: 4/2，9/17: 2/0）
     _seed_staff(client, "P1", "emp1", "甲")      # 员工账号
-    # 员工端：8 月没有数据，看 9 月
+    # 员工端（2026-10-02 用户要求）：自动算 6 个数——1点分数/2点分数/总分数/总店铺数/两个占比
     _login_staff(client, "emp1")
     h = client.get("/my/report?month=2026-09").text
-    assert 'data-testid="live-points"' in h and 'data-testid="live-rate"' in h   # 实时算
+    for tid in ("live-stores", "live-p1pts", "live-p2pts", "live-points",
+                "live-rate", "live-store-rate"):
+        assert 'data-testid="%s"' % tid in h, tid          # 表单里实时算的 6 个字段
     tbl = h[h.index('data-testid="my-reports"'):]
-    assert "分数（点数）" in tbl and "2点分数占比" in tbl
-    assert "50.0%" in tbl                       # 9/16：2点分数 4 / 总分数 8 = 50.0%
-    assert "40.0%" in tbl                       # 本月合计：2点分数 4 / 总分数 10 = 40.0%
-    assert ">10<" in tbl                        # 本月分数 = 4+2*2 + 2+0 = 10
+    for label in ("总店铺数", "1点分数", "2点分数", "总分数", "2点分数占比", "2点店铺占比"):
+        assert label in tbl, label
+    assert "33.3%" in tbl                       # 9/16：2点店 2 / 总店 6
+    assert "50.0%" in tbl                       # 9/16：2点分数 4 / 总分数 8
+    assert "40.0%" in tbl and "25.0%" in tbl    # 本月合计：分数 4/10、店数 2/8
+    assert ">10<" in tbl                        # 本月总分 = 4+2*2 + 2+0 = 10
     # 管理端
     _login_admin(client)
     a = client.get("/staff-reports?start=2026-09-16&end=2026-09-17").text

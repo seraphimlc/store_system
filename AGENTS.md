@@ -104,8 +104,10 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   （用户 2026-10-02 明确"我要 2 点分数占比"；⚠️ **与看板 `p2rate`（2点店数占比）不是同一个数**：
   1点6家/2点2家 → 分数占比 40%，店数占比 25%）。算法唯一来源 `report_compare.p2_score_share()`，
   一律**现算**：
-  - 员工端 `/my/report`：填报表单**实时算**（Alpine `get pts()/get rate()`，`data-testid="live-points|live-rate"`）、
-    已报回显、历史表（逐日 + 本月合计）都有；
+  - 员工端 `/my/report`：**自动算 6 个数**（2026-10-02 用户要求）——**1点分数 / 2点分数 / 总分数 /
+    总店铺数 / 2点分数占比 / 2点店铺占比**；填报表单**实时算**（Alpine 计算属性，
+    `data-testid="live-p1pts|live-p2pts|live-points|live-stores|live-rate|live-store-rate"`）、
+    已报回显、历史表（逐日 + 本月合计）都有；`daily_report.month_days()` 逐日与合计都带这 6 个字段；
   - 管理端 `/staff-reports` 列表：新增「分数（点数）」「2点分数占比」两列；
     **顶部汇总压成一行**（`data-testid="report-summary-bar"`，用 `.plan-bar`/`.plan-meta` 样式；
     原来是 5 张卡片，2026-10-02 用户："那几个汇总的数据模块太丑了"）：

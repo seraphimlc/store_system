@@ -273,24 +273,32 @@ def month_days(db, person_code: str, month: str = "", *,
             days.append({"date": d, "wd": d.weekday(), "empty": False,
                          "future": future, "area": r.area or "", "p1": p1,
                          "p2": p2, "total": r.total_cnt,
-                         "points": points_of(p1, p2),
+                         # 自动算出来的 6 个数（2026-10-02 用户要求）：
+                         "p1_points": p1,                     # 1点分数
+                         "p2_points": p2 * 2,                 # 2点分数
+                         "points": points_of(p1, p2),         # 总分数
+                         "stores": p1 + p2,                   # 总店铺数
                          "rate": p2_score_share(p1, p2),      # 2点分数占比
+                         "store_rate": (p2 / (p1 + p2)) if (p1 + p2) else None,  # 2点店铺占比
                          "submitted_at": r.submitted_at})
         else:
             days.append({"date": d, "wd": d.weekday(), "empty": True,
                          "future": future, "area": "", "p1": 0, "p2": 0,
-                         "total": 0, "points": 0, "rate": None,
-                         "submitted_at": None})
+                         "total": 0, "p1_points": 0, "p2_points": 0,
+                         "points": 0, "stores": 0, "rate": None,
+                         "store_rate": None, "submitted_at": None})
         d += timedelta(days=1)
     from app.services.report_compare import p2_score_share, points_of
     sp1 = sum(x["p1"] for x in days)
     sp2 = sum(x["p2"] for x in days)
+    stores = sp1 + sp2
     return {"month": month, "days": days, "filled": filled,
             "visible_days": len(days),
-            "p1": sp1, "p2": sp2,
-            "total": sum(x["total"] for x in days),
-            "points": points_of(sp1, sp2),
-            "rate": p2_score_share(sp1, sp2)}
+            "p1": sp1, "p2": sp2, "total": stores,
+            "p1_points": sp1, "p2_points": sp2 * 2, "points": points_of(sp1, sp2),
+            "stores": stores,
+            "rate": p2_score_share(sp1, sp2),
+            "store_rate": (sp2 / stores) if stores else None}
 
 
 def my_months(db, person_code: str) -> list:
