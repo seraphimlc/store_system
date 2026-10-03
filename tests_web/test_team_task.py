@@ -282,8 +282,16 @@ def test_state_machine_unassigned_doing_done(seeded):
     bd_tasks.save_progress(db, tid, 100, "完成", by="ogawa")
     db.commit()
     assert db.get(BdTask, tid).state == "done"
-    # 撤人 → 回到未分配
+    # 撤人：完成就是完成（pct=100 优先），不会退回未分配
     bd_tasks.assign_members(db, tid, [], by="admin")
+    db.commit()
+    assert db.get(BdTask, tid).state == "done"
+    # "没担当 + 有进度" = 进行中（2026-10-03 修：旧口径会显示成"未分配"）
+    bd_tasks.save_progress(db, tid, 20, by="admin")
+    db.commit()
+    assert db.get(BdTask, tid).state == "doing"
+    # 真正的未分配：没担当 + pct=0
+    bd_tasks.save_progress(db, tid, 0, by="admin")
     db.commit()
     assert db.get(BdTask, tid).state == "unassigned"
     db.close()
@@ -541,3 +549,107 @@ def test_leader_view_after_role_sync(client, seeded):
     p = client.get("/my/tasks").text
     assert 'data-testid="tab-unassigned"' in p
     assert 'data-testid="assign-%d"' % seeded["task"] in p
+
+
+# ---------------- 队长自己也要巡店（2026-10-03 用户口径） ----------------
+
+def test_leader_sees_own_cross_team_task_but_readonly(client, seeded):
+    """队长在**别人的队**里当队员、被派了活：第 4 tab「我的」能看到，但**只读**
+    （只有该队队长能提交进展 —— 用户选"只有队长"，所以不是 bug 而是口径）。"""
+    db = appdb.SessionLocal()
+    b = bd_teams.create_team(db, "汤静队", by="admin")
+    bd_teams.set_members(db, b.id, [("P3", "leader"), ("P1", "member")])
+    st = bd_tasks.create_station(db, "池ノ上", line="井の頭線")
+    bd_tasks.create_tasks(db, [st.id], by="admin", team_id=b.id,
+                          assign_date=date(2026, 10, 3))
+    t = db.query(BdTask).filter(BdTask.station_id == st.id).one()
+    bd_tasks.assign_members(db, t.id, ["P1"], by="admin")   # 小川（P1）自己的活
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    p = client.get("/my/tasks?tab=mine")
+    assert p.status_code == 200
+    assert 'data-testid="tab-mine"' in p.text          # 第 4 个 tab 在
+    assert "池ノ上" in p.text, "队长在别队的活必须看得见（跨队）"
+    assert 'data-testid="slider-%d"' % t.id not in p.text, "别队的活不给滑动条"
+    assert 'data-testid="readonly-%d"' % t.id in p.text
+    assert "这条由汤静队的队长提交进展" in p.text
+
+
+def test_leader_can_submit_his_own_task_in_his_team(client, seeded):
+    """队长在自己带的队里被派了活 → 有滑动条、能提交。"""
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P1"], by="admin")
+    db.commit()
+    t = db.get(BdTask, seeded["task"])
+    db.close()
+    _login(client, "ogawa")
+    p = client.get("/my/tasks?tab=mine")
+    assert "駒場東大前" in p.text
+    assert 'data-testid="slider-%d"' % t.id in p.text
+    r = _post(client, "/my/tasks/progress",
+              {"task_id": str(t.id), "pct": "40"}, from_path="/my/tasks")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, t.id).pct == 40
+    db.close()
+
+
+# ---------------- 开始日 / 完成日（自动写） ----------------
+
+def test_start_and_done_date_auto_written(seeded):
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    t = db.get(BdTask, tid)
+    assert t.start_date is None and t.done_date is None
+    bd_tasks.save_progress(db, tid, 30, by="ogawa")
+    db.commit()
+    t = db.get(BdTask, tid)
+    assert t.start_date == date.today(), "首次提交 = 开始日"
+    assert t.done_date is None
+    bd_tasks.save_progress(db, tid, 100, by="ogawa")
+    db.commit()
+    t = db.get(BdTask, tid)
+    assert t.done_date == date.today(), "到 100% = 完成日"
+    # 进度回退 → 完成日清掉（与 state 自洽）
+    bd_tasks.save_progress(db, tid, 80, by="ogawa")
+    db.commit()
+    t = db.get(BdTask, tid)
+    assert t.done_date is None and t.start_date == date.today()
+    assert t.state == "doing"
+    db.close()
+
+
+def test_board_shows_dates_and_stale_filter(client, seeded):
+    db = appdb.SessionLocal()
+    bd_tasks.save_progress(db, seeded["task"], 30, by="ogawa")
+    st2 = bd_tasks.create_station(db, "池ノ上")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"],
+                          assign_date=date(2026, 10, 3))     # 从没提交过 → 停滞
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    p = client.get("/tasks")
+    assert p.status_code == 200
+    assert date.today().strftime("%Y-%m-%d") in p.text, "开始日要显示"
+    assert 'data-testid="by-team"' in p.text, "按队汇总要在"
+    assert 'data-testid="stale-only"' in p.text
+    # 停滞筛选：只应留下"从没提交过"的那条
+    p2 = client.get("/tasks?stale=1")
+    assert "池ノ上" in p2.text
+    assert "駒場東大前" not in p2.text, "今天提交过的不该算停滞"
+
+
+def test_remove_member_warns_about_open_tasks(client, seeded):
+    """移出一个名下还有未完成任务的人 → 明确提示（不自动改派）。"""
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/teams/%d/members" % seeded["team"],
+              {"person": ["P1"], "leader": "P1"},
+              from_path="/teams/%d" % seeded["team"])
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "%E6%9C%AA%E5%AE%8C%E6%88%90" in loc or "未完成" in loc, loc

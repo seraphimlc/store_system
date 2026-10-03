@@ -1000,6 +1000,10 @@ class BdTask(Base):
     state = Column(String(16), nullable=False, default="unassigned",
                    server_default="unassigned")      # unassigned / doing / done
     pct = Column(Integer, nullable=False, default=0, server_default="0")
+    # 开始日 / 完成日：对应用户 Excel 的那两列，**自动写**
+    # （首次提交进展 = 开始日；pct 到 100 = 完成日）
+    start_date = Column(Date, nullable=True)
+    done_date = Column(Date, nullable=True)
     note = Column(Text, nullable=False, default="", server_default="")
     created_by = Column(String(64), nullable=False, default="", server_default="")
     created_at = Column(DateTime, nullable=False, default=_now)

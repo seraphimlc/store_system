@@ -176,6 +176,21 @@ def team_members_save(request: Request, team_id: int,
     leaders = set(leader or [])
     entries = [(c, "leader" if c in leaders else "member")
                for c in (person or [])]
+    # 先算：这次会被移出、且名下还有**未完成任务**的人 → 提示（不自动改派）
+    from app.models import BdTask, BdTaskAssign, BdTeamMember
+    from sqlalchemy import func as _func
+    keep = {c for c, _ in entries}
+    old_active = {m.person_code for m in db.query(BdTeamMember).filter(
+        BdTeamMember.team_id == team_id,
+        BdTeamMember.end_date.is_(None)).all()}
+    left_with_work = []
+    for code in sorted(old_active - keep):
+        n = (db.query(_func.count(BdTaskAssign.id))
+             .join(BdTask, BdTask.id == BdTaskAssign.task_id)
+             .filter(BdTaskAssign.person_code == code,
+                     BdTask.state != "done").scalar() or 0)
+        if n:
+            left_with_work.append((code, n))
     try:
         r = bd_teams.set_members(db, team_id, entries)
         db.commit()
@@ -185,6 +200,9 @@ def team_members_save(request: Request, team_id: int,
             msg += "；已设为队长账号 %d 人" % len(r["promoted"])
         if r.get("demoted"):
             msg += "；已退回队员账号 %d 人" % len(r["demoted"])
+        if left_with_work:
+            msg += "；⚠️ 移出的人里 %d 人还有未完成任务共 %d 条（不会自动改派）" % (
+                len(left_with_work), sum(n for _, n in left_with_work))
         return RedirectResponse("/teams/%d?msg=%s" % (team_id, _q(msg)),
                                 status_code=303)
     except bd_teams.TeamError as e:
@@ -338,7 +356,7 @@ def stations_set_team(request: Request,
 def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
                db: Session = Depends(get_db), team: str = "", state: str = "",
                date_from: str = "", date_to: str = "", kw: str = "",
-               page: int = 1, msg: str = "", err: str = ""):
+               stale: str = "", page: int = 1, msg: str = "", err: str = ""):
     g = _admin_guard(user)
     if g:
         return g
@@ -352,13 +370,16 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     d = bd_tasks.task_board(db, team_id=team_id, state=state,
                             date_from=_parse_date(date_from),
                             date_to=_parse_date(date_to), kw=kw,
+                            stale_only=bool(stale),
                             limit=limit, offset=(page - 1) * limit)
     return templates.TemplateResponse("bd_tasks.html", {
         "request": request, "current_user": user,
         "rows": d["rows"], "total": d["total"], "page": page, "limit": limit,
         "team_id": team_id, "teams": bd_teams.team_options(db),
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
+        "stale": stale, "stale_days": d["stale_days"],
         "sum": bd_tasks.board_summary(db),
+        "by_team": bd_tasks.team_board_summary(db),
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "msg": msg, "err": err,
     })
@@ -422,28 +443,40 @@ def my_tasks_page(request: Request,
                   kw: str = "", msg: str = "", err: str = ""):
     """员工端任务页。
 
-    - **队长**：本队任务按 tab（未分配/进行中/已完成）分组，可分派 + 提交每日进展
+    - **队长**：本队任务按 tab（未分配/进行中/已完成）分组 + **第 4 个 tab「我的」**
+      （分给我自己的，**跨队也算**——队长自己也要巡店），可分派 + 提交每日进展
     - **队员**：只读"分给我的车站"
     """
     g = _staff_guard(user)
     if g:
         return g
     from app.services import bd_teams, bd_tasks
+    TAB_MINE = "mine"
     is_leader = user.role == "leader"
     teams = bd_teams.leader_teams(db, user.person_code) if is_leader else []
     team_ids = [t.id for t in teams]
+    my_rows = bd_tasks.member_tasks(db, user.person_code)     # 分给我自己的（跨队）
+    can_submit_map = {}
     if is_leader:
         all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw)
         counts = {k: sum(1 for r in all_rows if r["state"] == k)
                   for k in bd_tasks.STATES}
-        rows = [r for r in all_rows if r["state"] == tab] \
-            if tab in bd_tasks.TABS else all_rows
+        counts[TAB_MINE] = len(my_rows)
+        if tab == TAB_MINE:
+            rows = my_rows
+        elif tab in bd_tasks.TABS:
+            rows = [r for r in all_rows if r["state"] == tab]
+        else:
+            rows = all_rows
+        # 每行能不能提交（只有该队队长/管理员能提交，用户 2026-10-03 口径）
+        for r in rows:
+            can_submit_map[r["task"].id] = bd_tasks.can_submit(db, user, r["task"])
         members = {}
         for t in teams:
             members[t.id] = [m for m in bd_teams.team_members(db, t.id)
                              if m["has_account"]]
     else:
-        rows = bd_tasks.member_tasks(db, user.person_code)
+        rows = my_rows
         counts = {k: sum(1 for r in rows if r["state"] == k)
                   for k in bd_tasks.STATES}
         members = {}
@@ -451,6 +484,8 @@ def my_tasks_page(request: Request,
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
+        "can_submit_map": can_submit_map, "tab_mine": TAB_MINE,
+        "n_mine": len(my_rows),
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "max_assign": bd_tasks.MAX_ASSIGN,
         "today": date.today(), "msg": msg, "err": err,

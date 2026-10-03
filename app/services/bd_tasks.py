@@ -141,10 +141,21 @@ def list_stations(db: Session, kw: str = "", status: str = "",
 # ---------------- 任务 ----------------
 
 def recompute_state(pct: int, n_assign: int) -> str:
-    """状态唯一口径：没担当 → 未分配；有担当 pct<100 → 进行中；pct>=100 → 已完成。"""
-    if n_assign <= 0:
-        return STATE_UNASSIGNED
-    return STATE_DONE if int(pct or 0) >= 100 else STATE_DOING
+    """状态唯一口径（优先级：已完成 > 进行中 > 未分配）：
+
+    - `pct >= 100` → **已完成**（哪怕担当被撤掉，完成就是完成）
+    - 否则 **有担当 或 有进度** → **进行中**（已经开工了就不该显示"未分配"）
+    - 其他（没担当且 pct=0）→ **未分配**
+
+    ⚠️ 「有进度也算进行中」是 2026-10-03 修的：旧口径只看担当，会出现
+    "pct=30 但停在未分配"的自相矛盾状态（队长自己开工、还没分人时就会踩）。
+    """
+    p = int(pct or 0)
+    if p >= 100:
+        return STATE_DONE
+    if n_assign > 0 or p > 0:
+        return STATE_DOING
+    return STATE_UNASSIGNED
 
 
 def _assign_counts(db: Session, task_ids: Sequence[int]) -> Dict[int, int]:
@@ -285,9 +296,18 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         row.submitted_by = (by or "")
         row.updated_at = datetime.utcnow()
     t.pct = p
+    # 开始日 / 完成日**自动写**（用户 2026-10-03 口径）
+    if t.start_date is None:
+        t.start_date = d                      # 首次提交 = 开始
+    if p >= 100:
+        if t.done_date is None:
+            t.done_date = d                   # 到 100% = 完成
+    else:
+        t.done_date = None                    # 进度回退 → 完成日清掉，保持自洽
     refresh_state(db, t)
     db.flush()
-    return {"pct": p, "state": t.state, "date": d}
+    return {"pct": p, "state": t.state, "date": d,
+            "start_date": t.start_date, "done_date": t.done_date}
 
 
 def latest_progress(db: Session, task_ids: Sequence[int]) -> Dict[int, BdTaskProgress]:
@@ -358,10 +378,18 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
         for team_id, code, disp in lrows:
             team_leaders.setdefault(team_id, []).append(disp or code)
     out = []
+    today = date.today()
     for t in tasks:
         st = stations.get(t.station_id)
         a_codes = assigns.get(t.id, [])
         lp = last.get(t.id)
+        last_d = (lp.progress_date if lp else None)
+        # "多少天没动"：从最后一次提交算；从没提交过则按分配日期算
+        base = last_d or t.assign_date
+        days = (today - base).days if base else None
+        # 停滞 = 还没完成 且（从没提交 或 超过 2 天没更新）
+        stale = (t.state != STATE_DONE
+                 and (last_d is None or (days is not None and days >= 2)))
         out.append({
             "task": t, "station": st,
             "station_name": (st.name if st else ""),
@@ -373,7 +401,9 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
             "n_assign": len(a_codes),
             "pct": t.pct, "state": t.state,
             "assign_date": t.assign_date,
-            "last_date": (lp.progress_date if lp else None),
+            "start_date": t.start_date, "done_date": t.done_date,
+            "days_since": days, "stale": stale,
+            "last_date": last_d,
             "last_pct": (lp.pct if lp else None),
             "last_note": (lp.note if lp else ""),
         })
@@ -412,11 +442,13 @@ def member_tasks(db: Session, person_code: Optional[str]) -> List[dict]:
 def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
                date_from: Optional[date] = None,
                date_to: Optional[date] = None, kw: str = "",
-               only_assigned: bool = True,
+               only_assigned: bool = True, stale_only: bool = False,
+               stale_days: int = 2,
                limit: int = 500, offset: int = 0) -> dict:
     """**管理端任务总表**：默认只看"已分配"（派给了团队）的任务。
 
     - `date_from/date_to` 按**分配日期**区间过滤（用户要求）
+    - `stale_only` = 只看"停滞"（未完成 且 ≥`stale_days` 天没更新，或从没提交）
     """
     q = db.query(BdTask)
     if only_assigned:
@@ -425,6 +457,12 @@ def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
         q = q.filter(BdTask.team_id == team_id)
     if state in STATES:
         q = q.filter(BdTask.state == state)
+    if stale_only:
+        from datetime import timedelta as _td
+        cutoff = date.today() - _td(days=max(0, stale_days))
+        recent = (db.query(BdTaskProgress.task_id)
+                  .filter(BdTaskProgress.progress_date >= cutoff))
+        q = q.filter(BdTask.state != STATE_DONE, BdTask.id.notin_(recent))
     if date_from is not None:
         q = q.filter(BdTask.assign_date.isnot(None),
                      BdTask.assign_date >= date_from)
@@ -436,11 +474,44 @@ def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
                         BdTask.id.asc())
              .limit(limit).offset(offset).all())
     rows = _rows(db, tasks)
+    if stale_only:
+        rows = [r for r in rows if r["stale"]]
     if kw:
         k = kw.strip()
         rows = [r for r in rows if k in (r["station_name"] or "")
                 or k in (r["team_name"] or "")]
-    return {"rows": rows, "total": total, "offset": offset, "limit": limit}
+    return {"rows": rows, "total": total, "offset": offset, "limit": limit,
+            "stale_days": stale_days}
+
+
+def team_board_summary(db: Session, stale_days: int = 2) -> List[dict]:
+    """**按队汇总**（一次查询后在 Python 聚合）：每队 总数/未分配/进行中/已完成/停滞。
+
+    "停滞" = 未完成 且（从没提交 或 超过 `stale_days` 天没更新）——
+    管理端一眼看出"哪个队没动"（没有分母时这是最有用的抓手）。
+    """
+    tasks = db.query(BdTask.id, BdTask.team_id, BdTask.state,
+                     BdTask.assign_date).all()
+    last = latest_progress(db, [t[0] for t in tasks])
+    teams = {t.id: t.name for t in db.query(BdTeam).all()}
+    today = date.today()
+    agg: Dict[int, dict] = {}
+    for tid, team_id, state, assign_date in tasks:
+        if team_id is None:
+            continue
+        a = agg.setdefault(team_id, {"team_id": team_id,
+                                     "team_name": teams.get(team_id, ""),
+                                     "total": 0, "unassigned": 0, "doing": 0,
+                                     "done": 0, "stale": 0})
+        a["total"] += 1
+        a[state if state in ("unassigned", "doing", "done") else "unassigned"] += 1
+        lp = last.get(tid)
+        base = (lp.progress_date if lp else assign_date)
+        days = (today - base).days if base else None
+        if state != STATE_DONE and (lp is None or (days is not None
+                                                  and days >= stale_days)):
+            a["stale"] += 1
+    return sorted(agg.values(), key=lambda x: (-x["stale"], x["team_name"]))
 
 
 def board_summary(db: Session) -> dict:
@@ -471,19 +542,22 @@ def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
                       date_to=date_to, limit=100000)
     wb = Workbook(write_only=True)
     ws = wb.create_sheet("车站任务")
-    head = ["车站", "线路", "团队", "担当", "状态", "进度%", "分配日期",
-            "最后提交", "备注"]
+    head = ["车站", "线路", "团队", "担当", "状态", "进度%",
+            "分配日期", "开始日", "完成日", "最后提交", "多少天没动", "备注"]
     ws.append(head)
     for c in range(1, len(head) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 18
+
+    def _d(v):
+        return v.strftime("%Y-%m-%d") if v else ""
+
     for r in data["rows"]:
         ws.append([r["station_name"], r["line"], r["team_name"],
                    "、".join(a["name"] for a in r["assignees"]),
                    labels.get(r["state"], r["state"]), r["pct"],
-                   (r["assign_date"].strftime("%Y-%m-%d")
-                    if r["assign_date"] else ""),
-                   (r["last_date"].strftime("%Y-%m-%d")
-                    if r["last_date"] else ""),
+                   _d(r["assign_date"]), _d(r["start_date"]), _d(r["done_date"]),
+                   _d(r["last_date"]),
+                   ("" if r["days_since"] is None else r["days_since"]),
                    r["last_note"]])
     buf = BytesIO()
     wb.save(buf)

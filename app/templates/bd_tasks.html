@@ -49,8 +49,37 @@
   <label class="f">{{ t('关键词') }}
     <input type="text" name="kw" value="{{ kw }}" style="width:150px">
   </label>
+  <label class="f">
+    <input type="checkbox" name="stale" value="1" {% if stale %}checked{% endif %}
+           data-testid="stale-only">
+    {{ t('只看多少天没动的') }}（≥{{ stale_days }} {{ t('天') }}）
+  </label>
   <button class="btn" type="submit" data-testid="task-search">{{ t('查') }}</button>
 </form>
+
+{# 按队汇总：谁在动、谁没动（任务没有分母时，这是管理端最实用的抓手） #}
+{% if by_team %}
+<div class="tbl-wrap" style="margin-bottom:.8rem">
+  <table data-testid="by-team">
+    <thead>
+      <tr><th>{{ t('按队') }}</th><th>{{ t('任务') }}</th><th>{{ t('未分配') }}</th>
+          <th>{{ t('进行中') }}</th><th>{{ t('已完成') }}</th><th>{{ t('停滞') }}</th></tr>
+    </thead>
+    <tbody>
+      {% for b in by_team %}
+      <tr data-testid="by-team-row">
+        <td>{{ b.team_name }}</td>
+        <td>{{ b.total }}</td>
+        <td>{{ b.unassigned }}</td>
+        <td>{{ b.doing }}</td>
+        <td>{{ b.done }}</td>
+        <td>{% if b.stale %}<span class="pill warnk">{{ b.stale }}</span>{% else %}0{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <p class="hint">{{ t('共') }}{{ total }} {{ t('条（本页') }}{{ rows|length }}）</p>
 
@@ -60,12 +89,13 @@
     <tr>
       <th>{{ t('车站') }}</th><th>{{ t('团队') }}</th><th>{{ t('队长') }}</th>
       <th>{{ t('担当') }}</th><th>{{ t('状态') }}</th><th>{{ t('进度') }}</th>
-      <th>{{ t('分配日期') }}</th><th>{{ t('最后提交') }}</th><th>{{ t('修正进展') }}</th>
+      <th>{{ t('分配日期') }}</th><th>{{ t('开始日') }}</th><th>{{ t('完成日') }}</th>
+      <th>{{ t('最后提交') }}</th><th>{{ t('多少天没动') }}</th><th>{{ t('修正进展') }}</th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
-    <tr data-testid="task-row">
+    <tr data-testid="task-row" {% if r.stale %}class="stale-row" data-stale="1"{% endif %}>
       <td><b>{{ r.station_name }}</b>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>{{ r.team_leaders|join('、') or '—' }}</td>
@@ -77,8 +107,15 @@
       </td>
       <td>{{ r.pct }}%</td>
       <td>{{ r.assign_date.strftime('%Y-%m-%d') if r.assign_date else '—' }}</td>
+      <td>{{ r.start_date.strftime('%Y-%m-%d') if r.start_date else '—' }}</td>
+      <td>{{ r.done_date.strftime('%Y-%m-%d') if r.done_date else '—' }}</td>
       <td>{{ r.last_date.strftime('%Y-%m-%d') if r.last_date else '—' }}
         {% if r.last_note %}<span class="hint">{{ r.last_note }}</span>{% endif %}</td>
+      <td data-testid="days-{{ r.task.id }}">
+        {% if r.days_since is none %}—
+        {% elif r.stale %}<span class="pill warnk">{{ r.days_since }}</span>
+        {% else %}{{ r.days_since }}{% endif %}
+      </td>
       <td>
         <form method="post" action="/tasks/{{ r.task.id }}/progress"
               style="display:flex;gap:.3rem;align-items:center">
@@ -92,7 +129,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="9" class="empty">{{ t('没有符合条件的任务') }}</td></tr>
+    <tr><td colspan="12" class="empty">{{ t('没有符合条件的任务') }}</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -425,3 +425,7 @@ table.plan-matrix th .hint { font-weight: 400; }
   font-size: .95rem; color: var(--ink); border: 1px solid var(--line);
   border-radius: 8px; background: #fff; }
 .edit-dlg .form-actions { display: flex; gap: .5rem; margin-top: .7rem; }
+
+/* 车站任务：停滞行（未完成且多少天没动）高亮，管理端一眼可见 */
+.stale-row { background: #fff8e6; }
+.stale-row td:first-child { box-shadow: inset 3px 0 0 var(--warn, #d98a00); }
