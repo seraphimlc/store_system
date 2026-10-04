@@ -232,7 +232,7 @@ def stations_page(request: Request,
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_teams, bd_tasks, bd_lines, paging
+    from app.services import bd_teams, bd_tasks, bd_lines, bd_places, paging
     line_id = int(line) if str(line).strip().isdigit() else None
     pager = bd_tasks.list_stations(db, kw, status,
                                    only_without_task=bool(no_task),
@@ -245,6 +245,7 @@ def stations_page(request: Request,
         "lines": bd_lines.line_options(db), "line_id": line_id,
         "teams": bd_teams.team_options(db),
         "sum": bd_tasks.board_summary(db),
+        "asset": bd_places.asset_stats(db),   # 车站数据资产（三层规模）
         "msg": msg, "err": err,
     })
 

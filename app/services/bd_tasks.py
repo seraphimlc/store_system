@@ -84,23 +84,44 @@ def state_labels(lang: str = "zh") -> dict:
 # ---------------- 车站主数据 ----------------
 
 def create_station(db: Session, name: str, line: str = "", note: str = "",
-                   by: str = "") -> BdStation:
+                   by: str = "", line_id: Optional[int] = None) -> BdStation:
+    """新建车站。**唯一键 = (线路, 站名)**（一线一站，用户 2026-10-05 口径）。
+
+    `line_id` 给了就挂到线路主档（`line` 文本自动取线路名）+ 同步建"物理车站"层；
+    没给就是"无线路"的手工站（此时按站名判重，部分唯一索引兜底）。
+
+    ⚠️ 2026-10-05 这个改动**曾经因为打补丁时中途 assert 失败而没写进去**，
+    而路由已经在传 `line_id=` → 界面新建车站会 TypeError（测试抓到的）。
+    """
+    from app.models import BdLine
     nm = (name or "").strip()
     if not nm:
         raise TaskError("车站名不能为空")
     key = norm_name(nm)
-    if db.query(BdStation).filter(BdStation.name_norm == key).first():
-        raise NameExists("车站已存在：%s（不覆盖）" % nm)
-    st = BdStation(name=nm, name_norm=key, line=(line or "").strip(),
-                   note=(note or "").strip(), status="active")
+    ln = db.get(BdLine, int(line_id)) if line_id else None
+    if line_id and ln is None:
+        raise TaskError("线路不存在")
+    dup = (db.query(BdStation)
+           .filter(BdStation.name_norm == key,
+                   BdStation.line_id == (ln.id if ln else None)).first())
+    if dup:
+        raise NameExists("该线路下已有这个车站：%s（不覆盖）" % nm)
+    st = BdStation(name=nm, name_norm=key,
+                   line=((ln.name if ln else "") or (line or "").strip()),
+                   line_id=(ln.id if ln else None),
+                   operator=(ln.operator if ln else ""),
+                   note=(note or "").strip(), status="active", source="manual")
     db.add(st)
     db.flush()
+    from app.services import bd_places
+    bd_places.rebuild_places(db)          # 手工站也进物理车站层（资产完整）
     return st
 
 
 def update_station(db: Session, station_id: int, name: Optional[str] = None,
                    line: Optional[str] = None, note: Optional[str] = None,
-                   status: Optional[str] = None, actor_user=None) -> BdStation:
+                   status: Optional[str] = None, actor_user=None,
+                   line_id: Optional[int] = None) -> BdStation:
     """改车站主数据（**改名/改线路/改备注/改状态都写日志**）。"""
     from app.services import bd_log
     st = db.get(BdStation, station_id)
@@ -170,13 +191,19 @@ def list_stations(db: Session, kw: str = "", status: str = "",
                  .filter(BdTask.station_id.in_([s.id for s in stations])).all())
         task_map = {t.station_id: t for t in tasks}
     team_names = {t.id: t.name for t in db.query(BdTeam).all()}
-    from app.models import BdLine
+    from app.models import BdLine, BdStationPlace
     line_names = {l.id: "%s %s" % (l.operator_short, l.name)
                   for l in db.query(BdLine).all()}
+    # 物理车站层（资产）：给列表带出"N 条线经过"
+    places = {pl.id: pl for pl in db.query(BdStationPlace).filter(
+        BdStationPlace.id.in_([s.place_id for s in stations if s.place_id] or [0])).all()}
     out = []
     for s in stations:
         t = task_map.get(s.id)
-        out.append({"station": s, "task": t,
+        pl = places.get(s.place_id)
+        out.append({"station": s, "task": t, "place": pl,
+                    "n_line": (pl.n_line if pl else 0),
+                    "lines_text": (pl.lines_text if pl else ""),
                     "line_label": line_names.get(s.line_id, s.line or ""),
                     "team_name": (team_names.get(t.team_id) if t else "") or "",
                     "state": (t.state if t else ""),

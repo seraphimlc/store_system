@@ -618,6 +618,49 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
     （`test_oauth.py::test_e2e_oauth_token_calls_mcp_tool` 在**未改代码的干净树上也失败**（MCP 子进程 502）
     → 环境问题，与本轮无关）。
 
+- **车站数据资产化：物理车站层（2026-10-05 用户："你把车站的数据好好整理一下，以后有更大的用处。
+  车站数据可以当成我们的数据资产。也是任务的输入源之一。"）**：
+  - **三层资产结构**（这次补齐了"上家"）：
+    `bd_line`（线路 131）──1:N──> `bd_station`（**站×线** 1,920）──N:1──> **`bd_station_place`（物理车站 1,568）**
+    任务 `bd_task` 挂**站×线**那一层（**本层不改任务行为**）；将来要"一个物理车站一个任务"时把任务指到 place。
+  - **分层键 = N02_005g 駅グループコード**（MLIT 官方"同一车站"分组，**不用猜**）。
+    实测：1,920 条站×线 → **1,568 个物理车站**；**237 个跨线站**（渋谷/新宿/横浜/大宮/池袋 最多 **7 条线**）；
+    **同组站名 100% 一致、坐标 100% 在 1km 内（0 异常）**。place 存 name/name_norm/pref/city/lon/lat/
+    group_code/**n_line/n_operator/operators/lines_text（冗余可读）**/source。
+  - `bd_places.rebuild_places(db, dry)`：**幂等重建**（按 group_code 归组 + 回填 `bd_station.place_id`），
+    导入流程（`import_rail` 第 ⑤ 步）与 `create_station` 都会调 → 资产永远跟着数据走；
+    重建会**清理孤儿 place**（派生数据，可再生）。
+    ⚠️ 手工站的复用键必须是 **站名+县**：拿 `place.id` 去比 `station.id` 会每次重建都新建一个 place、
+    旧的变孤儿（2026-10-05 踩到，测试 `test_place_layer_groups_by_group_code` 抓到）。
+    ⚠️ `n_line` 语义 = **不同线路数**（手工站可为 0）→ 体检对照必须 `COUNT(DISTINCT line_id)`（不是 `COUNT(*)`）。
+  - **资产体检 `scripts/check_station_asset.py`**（只读，非 0 退出可当发布验收）：规模（三层数量/跨线站/
+    按县/按类型）、完整性（缺线路/缺物理车站/缺县/缺坐标）、一致性（同组站名一致、`n_line` 对照、
+    `n_station` 对照、同线不重名、无孤儿 place）、**与数据源对齐**（`scripts/bd_kanto_rail.json` vs 库里
+    N02 派生行）。⚠️ 对齐口径用 **`group_code != ''`**，不能按 `source='mlit'` —— 认领的 515 行是从种子表建的
+    （`source=manual`）但属性来自 N02。实测：**资产健康 ✓**。
+  - **资产导出 `scripts/export_station_asset.py`**（`--out`，默认 `data/`）：两份 CSV、**utf-8-sig**
+    （Excel 双击不乱码）——`stations_places.csv`（物理车站层）+ `stations_lines.csv`（站×线层，
+    **含任务状态/队伍/担当**，因为"任务就是挂在这一层的"）。
+  - 界面（`/stations`）：统计卡显示资产三层（线路 / 车站（站×线）/ 物理车站 / 跨线车站）+ 跨线站在站名后
+    显示「N 条线」（tooltip 列出经过的线路）；**顺手删掉了那列 `#任务id`**（用户要求"任务编号不用显示"，
+    之前用"编号"两个字搜没搜到，是 `#{{ r.task.id }}`）。
+  - **未做的部分（明确留给下一轮）**：① **市区町村**（`bd_station_place.city` 已建列、现在是空的）——
+    需要行政区划边界数据源（N03 行政区域 GML 448MB 太重；可换市政区 GeoJSON 轻量源）；
+    ② 沿線**站序**（`seq`，巡店路线排序要用）——N02 的 RailroadSection 一段一 feature，
+    要先按共享端点把段串成线再投影，属独立小工程；
+    ③ 同名跨线车站**合并成 1 个任务**（`group_code` 已备好，等用户定合并规则）。
+  - 迁移 **`aa11bb22cc33`**（新表 + `bd_station.place_id`）。⚠️ 踩坑：
+    ① **选迁移 id 必须容错扫库**：老迁移里有 `revision: str = 'xxx'`（带类型注解）和单引号写法，
+       只认 `revision = "xxx"` 的正则会漏 → 选到已占用的号 → `CycleDetected`（**同一天踩了两次**）；
+       正确做法见 `/tmp` 里的教训：用 `^(?:revision|down_revision)(?:\s*:\s*[^=\n]+)?\s*=\s*['"]…['"]`
+       扫全部 60 个文件（实测占用 59 个 id）。
+    ② **SQLite 不能用 ALTER 加带外键的列**（"No support for ALTER of constraints"）→ 走 `batch_alter_table`；
+       且 **batch 模式下外键必须显式命名**（否则 "Constraint must have a name"）。
+    ③ 补丁脚本里 `assert` 失败会导致**前面的 replace 没落盘** → `create_station(line_id=)` 漏改而路由已在传它
+       （界面新建车站必 500），是测试抓出来的。**改完要复查函数签名**。
+  - 测试 `tests_web/test_team_task.py` **90 项**（+物理车站层归组/幂等/孤儿清理/体检抓脏数据/页面显示资产且
+    无任务编号）；全量 **425 passed**（oauth e2e 那条是环境问题，干净树上同样失败）。
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

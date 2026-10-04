@@ -184,6 +184,11 @@ def import_rail(db: Session, payload: Optional[dict] = None, dry: bool = False,
             if todo:
                 r = bd_tasks.create_tasks(db, todo, by=actor)
                 rep["tasks_created"] = r.get("created", len(todo))
+    # ---------- ⑤ 物理车站层（资产核心）：按 group_code 重建 ----------
+    from app.services import bd_places
+    pr = bd_places.rebuild_places(db, dry=dry)
+    rep["places"] = pr["places"]
+    rep["places_created"] = pr["created"]
     if not dry:
         db.flush()
     return rep

@@ -93,6 +93,15 @@ def main() -> int:
         if "bd_line" not in have_tables:
             Base.metadata.tables["bd_line"].create(conn, checkfirst=True)
             print("建表 bd_line ✓")
+        # 物理车站层（车站数据资产核心，2026-10-05）
+        if "bd_station_place" not in have_tables:
+            Base.metadata.tables["bd_station_place"].create(conn, checkfirst=True)
+            print("建表 bd_station_place ✓")
+        if "place_id" not in _cols(inspect(conn), "bd_station"):
+            conn.execute(text("ALTER TABLE bd_station ADD COLUMN place_id INTEGER "
+                              "REFERENCES bd_station_place(id)"))
+            conn.commit()
+            print("bd_station.place_id ✓")
 
         # ② 任务来源判别
         if "source_type" not in tk_cols:
@@ -115,6 +124,7 @@ def main() -> int:
             conn.execute(text("ALTER TABLE bd_station_new RENAME TO bd_station"))
             for i in orm_st.indexes:
                 i.create(conn, checkfirst=True)
+            # 重建表会按 ORM 建全列（含 place_id），这里不再单独补列
             conn.commit()
             print("重建 bd_station ✓ 迁移 %d 行" % n)
 

@@ -1845,3 +1845,129 @@ def test_import_rail_ids_are_positive(seeded):
         assert ids and min(ids) > 0, "线路 id 必须是正的（数据库发号）：%s" % ids
     finally:
         db.close()
+
+
+# ---------------- 车站数据资产（物理车站层，2026-10-05） ----------------
+
+def test_place_layer_groups_by_group_code(seeded):
+    """**物理车站层**：同一个 `group_code` 的多条"站×线"归到一个物理车站。
+
+    这是"车站数据资产"的核心结构（用户："车站数据可以当成我们的数据资产"）。
+    """
+    from app.models import BdStation, BdStationPlace
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    try:
+        # ⚠️ 站必须挂在**真实线路**上：bd_station 有"无线路时站名唯一"的部分唯一索引，
+        # 两条同名的"无线路"站会直接撞索引（2026-10-05 测试踩过）
+        from app.models import BdLine
+        l_y = BdLine(name="山手線", name_norm="山手線", operator="東日本旅客鉄道",
+                     operator_short="JR東日本", kind="jr", prefs="13", n_station=1)
+        l_i = BdLine(name="井の頭線", name_norm="井の頭線", operator="京王電鉄",
+                     operator_short="京王", kind="private", prefs="13", n_station=2)
+        db.add_all([l_y, l_i])
+        db.flush()
+        # 同一个物理车站（渋谷）被两条线路各记一行
+        a = BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"),
+                      line="山手線", line_id=l_y.id, operator="東日本旅客鉄道",
+                      pref="13", lon=139.70, lat=35.658, group_code="GX01",
+                      source="mlit")
+        b = BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"),
+                      line="井の頭線", line_id=l_i.id, operator="京王電鉄",
+                      pref="13", lon=139.702, lat=35.660, group_code="GX01",
+                      source="mlit")
+        c = BdStation(name="池ノ上", name_norm=bd_tasks.norm_name("池ノ上"),
+                      line="井の頭線", line_id=l_i.id, operator="京王電鉄",
+                      pref="13", lon=139.68, lat=35.66, group_code="GX02",
+                      source="mlit")
+        db.add_all([a, b, c])
+        db.flush()
+        rep = bd_places.rebuild_places(db)
+        db.commit()
+        # seeded 里那个站没有 group_code（手工站）→ 它自己也是一个物理车站，共 3 个
+        assert rep["places"] == 3, "GX01/GX02 + seeded 的手工站"
+        pa = db.query(BdStationPlace).filter(BdStationPlace.group_code == "GX01").one()
+        assert pa.n_line == 2 and pa.n_line == len(
+            db.query(BdStation).filter(BdStation.place_id == pa.id).all())
+        assert set(pa.lines_text.split("、")) == {"山手線", "井の頭線"}
+        assert pa.operators.count("、") == 1, "两家运营公司"
+        assert db.get(BdStation, c.id).place_id != pa.id
+        assert pa.lon and abs(pa.lon - 139.701) < 0.002, "坐标取组内均值"
+        assert bd_places.place_label(pa) == "渋谷（2 线）"
+        # 幂等：再建一次不新增、不重复
+        rep2 = bd_places.rebuild_places(db)
+        db.commit()
+        assert rep2["created"] == 0 and rep2["places"] == 3
+        # seeded 里那个手工站没线路/县/坐标，所以不能断言"全库 0 问题"；
+        # 只断言**物理车站层自身**的一致性没问题
+        kinds = {i["kind"] for i in bd_places.integrity_issues(db)}
+        assert "线路数与成员数不符" not in kinds and "孤儿物理车站" not in kinds
+    finally:
+        db.close()
+
+
+def test_place_integrity_detects_broken_asset(seeded):
+    """体检要能**抓出**资产坏掉的情况（否则"资产"就是没人管的表）。"""
+    from app.models import BdStation, BdTask
+    from app.models import BdLine as bd_lines_mod  # noqa: N813  简写，仅本测试用
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    try:
+        line = bd_lines_mod(name="井の頭線", name_norm="井の頭線",
+                                  operator="京王電鉄", operator_short="京王",
+                                  kind="private", prefs="13", n_station=1)
+        db.add(line)
+        db.flush()
+        seeded_st = db.get(BdStation, seeded["station"])
+        # 先把 seeded 的站补成"完整资产行"（挂线路 + 县 + 坐标），否则它自己就是缺项
+        seeded_st.line_id = line.id
+        seeded_st.pref = "13"
+        seeded_st.lon, seeded_st.lat = 139.68, 35.66
+        seeded_st.group_code = "GSEED"
+        db.flush()
+        bd_places.rebuild_places(db)         # 建物理车站层 → 资产健康
+        db.commit()
+        assert bd_places.integrity_issues(db) == [], "补完资产后应该健康"
+        # 故意**绕过 create_station** 直插一行（模拟脏数据/历史脚本写入）：
+        # 没有线路、没有县、没有坐标、也没有物理车站 → 体检要全部抓出来
+        st = BdStation(name="破损站", name_norm=bd_tasks.norm_name("破损站"),
+                       source="manual")
+        db.add(st)
+        bd_tasks.create_tasks(db, [st.id], by="admin")
+        db.flush()
+        kinds = {i["kind"] for i in bd_places.integrity_issues(db)}
+        assert "缺少线路" in kinds and "缺少物理车站" in kinds and "缺少县" in kinds
+    finally:
+        db.close()
+
+
+def test_stations_page_shows_asset_and_no_task_id(client, seeded):
+    """车站页显示资产三层规模 + **不显示任务编号**（用户："任务编号不用显示"）。"""
+    from app.models import BdStation
+    from app.services import bd_places
+    from app.models import BdLine
+    db = appdb.SessionLocal()
+    l_y = BdLine(name="山手線", name_norm="山手線", operator="東日本旅客鉄道",
+                 operator_short="JR東日本", kind="jr", prefs="13", n_station=1)
+    l_i = BdLine(name="井の頭線", name_norm="井の頭線", operator="京王電鉄",
+                 operator_short="京王", kind="private", prefs="13", n_station=1)
+    db.add_all([l_y, l_i])
+    db.flush()
+    a = BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"), line="山手線",
+                  line_id=l_y.id, operator="東日本旅客鉄道", pref="13",
+                  group_code="GX01", source="mlit")
+    b = BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"), line="井の頭線",
+                  line_id=l_i.id, operator="京王電鉄", pref="13",
+                  group_code="GX01", source="mlit")
+    db.add_all([a, b])
+    db.flush()
+    bd_places.rebuild_places(db)
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    p = client.get("/stations")
+    assert p.status_code == 200
+    assert 'data-testid="multi-line-%d"' % a.id in p.text, "跨线站要标出 N 条线"
+    for word in ("物理车站", "跨线车站", "车站（站×线）"):
+        assert word in p.text, "资产统计卡要有「%s」" % word
+    assert "#%d" % seeded["task"] not in p.text, "不许显示任务编号（#id）"

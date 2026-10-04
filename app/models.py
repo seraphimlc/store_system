@@ -996,6 +996,50 @@ class BdLine(Base):
     updated_at = Column(DateTime, nullable=False, default=_now)
 
 
+class BdStationPlace(Base):
+    """**物理车站（场所）**：车站数据资产的**核心层**（2026-10-05 用户："车站数据可以当成我们的数据资产。
+
+    也是任务的输入源之一"）。
+
+    - 一条 = 一个真实存在的车站（人真正走到的那个地方）
+    - `bd_station` = "**某条线路上的**这个站"（站×线隶属），一个 place 下 1~N 条
+    - 分层键 = **N02_005g 駅グループコード**（MLIT 官方"同一车站"分组；**不用猜**）
+      实测：1,920 条站×线 → **1,568 个物理车站**，237 个跨线站（渋谷/新宿/横浜/大宮/池袋 最多 7 条线），
+      同组站名 100% 一致、坐标 100% 在 1km 内（0 异常）
+    - ⚠️ **任务仍挂在 `bd_station`（站×线）上**，本层**不改任务行为**：将来要"一个物理车站一个任务"
+      时，把任务指到 place 即可（届时定合并规则）；`lines_text`/`n_line` 让界面先能显示"N 条线经过"
+    - 未来**片区（zone）**也从这一层长出来（一片区域 = 若干物理车站）
+    """
+    __tablename__ = "bd_station_place"
+    __table_args__ = (
+        # group_code 是 N02 的分组码；手工建的站没有 → 用部分唯一索引（只约束非空）
+        Index("uq_bd_place_group", "group_code", unique=True,
+              sqlite_where=text("group_code != ''"),
+              postgresql_where=text("group_code != ''")),
+        Index("ix_bd_place_pref", "pref"),
+        Index("ix_bd_place_name_norm", "name_norm"),
+        Index("ix_bd_place_city", "city"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)              # 规范站名（同组取一致写法）
+    name_norm = Column(String(64), nullable=False)         # NFKC + 去空白 + ケ/ヶ 统一
+    pref = Column(String(8), nullable=False, default="", server_default="")
+    city = Column(String(64), nullable=False, default="", server_default="")  # 市区町村（待补）
+    lon = Column(Float, nullable=True)                     # 组内坐标均值
+    lat = Column(Float, nullable=True)
+    group_code = Column(String(16), nullable=False, default="", server_default="")
+    n_line = Column(Integer, nullable=False, default=0, server_default="0")
+    n_operator = Column(Integer, nullable=False, default=0, server_default="0")
+    operators = Column(String(128), nullable=False, default="", server_default="")   # 冗余可读
+    lines_text = Column(Text, nullable=False, default="", server_default="")        # 冗余可读
+    source = Column(String(16), nullable=False, default="mlit", server_default="mlit")
+    note = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
 class BdStation(Base):
     """车站主数据（一个站 = 一个站前商圈 = 用户口中的"一边区域"）。
 
@@ -1020,6 +1064,7 @@ class BdStation(Base):
         Index("ix_bd_station_line_id", "line_id"),
         Index("ix_bd_station_pref", "pref"),
         Index("ix_bd_station_group_code", "group_code"),
+        Index("ix_bd_station_place_id", "place_id"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(64), nullable=False)
@@ -1027,6 +1072,8 @@ class BdStation(Base):
     line = Column(String(64), nullable=False, default="", server_default="")
     #: 线路主档（N02 导入的行都有；手工建且没填线路的行可能为空）
     line_id = Column(Integer, ForeignKey("bd_line.id"), nullable=True)
+    #: **物理车站**（资产核心层）：同一 place 下的多行 = 多条线路经过同一个车站
+    place_id = Column(Integer, ForeignKey("bd_station_place.id"), nullable=True)
     #: MLIT 运营公司全名（冗余，列表页不用 join）
     operator = Column(String(64), nullable=False, default="", server_default="")
     #: JIS 都道府県码（13=東京都 / 11=埼玉 / 12=千葉 / 14=神奈川）
@@ -1065,7 +1112,7 @@ class BdTask(Base):
         Index("ix_bd_task_state", "state"),
     )
     id = Column(Integer, primary_key=True)
-    #: 任务来源判别：station（现在）/ zone（将来片区）
+    #: 任务来源判别：station（现在）/ zone（将来片区）—— 车站与片区都是任务的**输入源**
     source_type = Column(String(16), nullable=False, default="station",
                          server_default="station")
     station_id = Column(Integer, ForeignKey("bd_station.id"), nullable=False)

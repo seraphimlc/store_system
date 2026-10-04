@@ -10,7 +10,11 @@
 {% if err %}<div class="msg err">{{ err }}</div>{% endif %}
 
 <div class="stat-grid grid" style="margin-bottom:.8rem">
-  <div class="stat-card"><div class="k">{{ t('车站') }}</div><div class="v">{{ sum.n_station }}</div></div>
+  {# 车站数据资产（三层：线路 / 站×线 / 物理车站）—— 用户 2026-10-05："车站数据是数据资产" #}
+  <div class="stat-card"><div class="k">{{ t('线路') }}</div><div class="v">{{ asset.n_line }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('车站（站×线）') }}</div><div class="v">{{ asset.n_station }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('物理车站') }}</div><div class="v">{{ asset.n_place }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('跨线车站') }}</div><div class="v">{{ asset.n_multi_line }}</div></div>
   <div class="stat-card"><div class="k">{{ t('任务') }}</div><div class="v">{{ sum.n_task }}</div></div>
   <div class="stat-card {% if sum.no_team %}warnk{% endif %}">
     <div class="k">{{ t('还没派给团队') }}</div><div class="v">{{ sum.no_team }}</div></div>
@@ -124,7 +128,7 @@
   <thead>
     <tr>
       <th style="width:2.6rem"></th>
-      <th>{{ t('车站') }}</th><th>{{ t('线路') }}</th><th>{{ t('任务') }}</th>
+      <th>{{ t('车站') }}</th><th>{{ t('线路') }}</th>
       <th>{{ t('所属团队') }}</th><th>{{ t('状态') }}</th><th>{{ t('进度') }}</th>
       <th></th>
     </tr>
@@ -134,9 +138,10 @@
     <tr data-testid="station-row">
       <td><input type="checkbox" name="station_id" value="{{ r.station.id }}"
                  form="bulk-team"></td>
-      <td><b>{{ r.station.name }}</b></td>
+      <td><b>{{ r.station.name }}</b>
+        {% if r.n_line > 1 %}<span class="pill" data-testid="multi-line-{{ r.station.id }}"
+              title="{{ r.lines_text }}">{{ r.n_line }} {{ t('条线') }}</span>{% endif %}</td>
       <td>{{ r.line_label or '—' }}</td>
-      <td>{% if r.task %}#{{ r.task.id }}{% else %}<span class="hint">{{ t('未建') }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>
         {% if not r.task %}—
@@ -161,7 +166,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="empty">{{ t('没有车站，先新建或用脚本导入') }}</td></tr>
+    <tr><td colspan="7" class="empty">{{ t('没有车站，先新建或用脚本导入') }}</td></tr>
     {% endfor %}
   </tbody>
 </table>
