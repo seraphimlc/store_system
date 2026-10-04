@@ -463,6 +463,11 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   别沉到 500 行下面）；列 = 进队 / 队长(radio，队里只能 1 人) / 姓名 / 员工编号(显示后 5 位，title 全号) /
   账号(已开通·未开通) / 员工状态(**色块**：在岗绿/请假黄/离职停用灰) / 原角色；
   **勾选行整行淡蓝高亮**（`.pick-bar` + `tr.picked` CSS）。提交字段不变（`person[]` / `leader`）。
+  ⚠️ **队长怎么指定**（2026-10-03 用户问"如何指定队长？"）：勾「进队」+ 点该行「队长」两步。
+  旧实现 `entries` **只遍历 `person`** → 只点「队长」不勾「进队」时**静默丢弃**（用户以为指定了却没生效）。
+  已两端修：① 点「队长」**自动勾上「进队」**（`bdLeaderPicked`，页面上写了操作说明）
+  ② 后端把 `leader` 里的人**兜底并进 entries**（JS 没跑也不丢）。回归测试
+  `test_leader_set_even_if_not_ticked_as_member` + `test_team_detail_leader_howto_and_autocheck`。
 - **模板 HTML 结构自检 `scripts/check_templates.py`**：Jinja 不校验 HTML，切文件（head/tail 拼接）
   容易把标签切坏（当天就切掉了 `<form>` 的续行）。用法 `./.venv/bin/python scripts/check_templates.py`，
   输出"检查 N 个模板，M 个标签不配对"（0 为正常）。**改完模板顺手跑一次。**

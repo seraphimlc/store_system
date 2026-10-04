@@ -52,11 +52,15 @@
             data-testid="pick-clear">{{ t('全不选') }}</button>
     <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
   </div>
+  {# 队长怎么指定：说清两步（2026-10-03 用户问"如何指定队长"→ 之前确实容易漏勾「进队」） #}
+  <p class="hint" style="margin:.1rem 0 .5rem" data-testid="leader-howto">
+    {{ t('指定队长：勾上他这行的「进队」，再点「队长」——点「队长」会自动帮你勾上「进队」。一个队 1 名队长。') }}
+  </p>
   <div class="tbl-wrap" style="max-height:26rem;overflow:auto">
     <table class="grid-tbl">
       <thead>
         <tr><th style="width:3.6rem">{{ t('进队') }}</th>
-            <th style="width:3.6rem" title="{{ t('整个队只能指定 1 名队长') }}">{{ t('队长') }}</th>
+            <th style="width:3.6rem" title="{{ t('点这里＝指定他当队长（会自动勾上「进队」）；一个队 1 名') }}">{{ t('队长') }}</th>
             <th>{{ t('姓名') }}</th>
             <th title="{{ t('鼠标悬停看完整编号') }}">{{ t('员工编号') }}</th>
             <th>{{ t('账号') }}</th>
@@ -74,6 +78,7 @@
                      {% if on %}checked{% endif %} onchange="bdRowPicked(this)"
                      data-testid="pick-{{ p.code }}"></td>
           <td><input type="radio" name="leader" value="{{ p.code }}"
+                     onchange="bdLeaderPicked(this)"
                      {% if old and old.role == 'leader' %}checked{% endif %}
                      data-testid="leader-{{ p.code }}"></td>
           <td>{{ p.display_name }}</td>
@@ -109,6 +114,18 @@ function bdRowPicked(cb) {
   var tr = cb.closest ? cb.closest('tr') : null;
   if (tr) tr.classList.toggle('picked', cb.checked);
   bdCount();
+}
+/* 点「队长」= 指定他当队长 → **自动勾上「进队」**（后端只认「进队」勾选的人；
+   用户 2026-10-03："如何指定队长？" 就是漏了这一步）。 */
+function bdLeaderPicked(radio) {
+  var tr = radio.closest ? radio.closest('tr') : null;
+  if (!tr) return;
+  var cb = tr.querySelector('input[name="person"]');
+  if (cb && !cb.checked) {
+    cb.checked = true;
+    tr.classList.add('picked');
+    bdCount();
+  }
 }
 function bdUncheckAll() {
   document.querySelectorAll('input[name="person"]').forEach(function (cb) {

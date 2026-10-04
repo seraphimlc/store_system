@@ -175,8 +175,12 @@ def team_members_save(request: Request, team_id: int,
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import bd_teams
     leaders = set(leader or [])
-    entries = [(c, "leader" if c in leaders else "member")
-               for c in (person or [])]
+    # ⚠️ 被指定为队长的人**一定也是队员**：前端点「队长」会自动勾上「进队」，
+    # 但 JS 没跑（CDN 挂了/禁用 JS）时 `person` 里没有他 → 以前会**静默丢掉**，
+    # 用户看到"指定了队长却没生效"（2026-10-03 用户问"如何指定队长？"）。
+    # 这里兜底并进来，语义：指定他当队长 = 他当然在队里。
+    codes = list(dict.fromkeys(list(person or []) + list(leaders)))
+    entries = [(c, "leader" if c in leaders else "member") for c in codes]
     # 先算：这次会被移出、且名下还有**未完成任务**的人 → 提示（不自动改派）
     from app.models import BdTask, BdTaskAssign, BdTeamMember
     from sqlalchemy import func as _func

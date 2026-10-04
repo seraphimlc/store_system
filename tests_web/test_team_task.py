@@ -1338,3 +1338,35 @@ def test_leave_marks_show_in_admin_plan_matrix(client, seeded):
     assert p.status_code == 200
     assert 'data-testid="cell-P2-%s"' % today.isoformat() in p.text
     assert "（假期模式）" in p.text
+
+
+def test_leader_set_even_if_not_ticked_as_member(client, seeded):
+    """只点「队长」不勾「进队」也要生效（后端兜底）。
+
+    2026-10-03 用户问"如何指定队长？"—— 前端 `person` 里没有他时旧实现**静默丢弃**，
+    界面上"指定了却没生效"。语义：被指定当队长 = 他当然在队里。
+    """
+    from app.models import BdTeamMember
+    db = appdb.SessionLocal()
+    tid = seeded["team"]
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/teams/%d/members" % tid,
+              {"leader": "P1"}, from_path="/teams/%d" % tid)
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    m = [x for x in bd_teams.team_members(db, tid)
+         if x["person_code"] == "P1"]
+    assert m and m[0]["role"] == "leader", "只传 leader 也要进队并当队长"
+    db.close()
+
+
+def test_team_detail_leader_howto_and_autocheck(client, seeded):
+    """页面要写清怎么指定队长，且点「队长」自动勾「进队」。"""
+    _login(client, "admin")
+    p = client.get("/teams/%d" % seeded["team"])
+    assert p.status_code == 200
+    assert 'data-testid="leader-howto"' in p.text
+    assert "指定队长" in p.text
+    assert 'onchange="bdLeaderPicked(this)"' in p.text
+    assert "function bdLeaderPicked" in p.text
