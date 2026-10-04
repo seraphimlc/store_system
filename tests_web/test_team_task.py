@@ -2060,3 +2060,32 @@ def test_list_stations_orders_by_seq_when_line_selected(seeded):
         assert out["rows"][0]["station"].along_km == 10.0
     finally:
         db.close()
+
+
+def test_geometry_seq_is_quality_gated():
+    """几何兜底的产物必须**过质量门槛**（用户："别太勉强" → 算不干净的宁可不给）。
+
+    门槛：每个站的投影误差 ≤ 250m（车站必须真的贴在轨道几何上）。
+    """
+    import json
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "scripts", "bd_line_seq_geom.json")
+    assert os.path.exists(p), "几何兜底文件要在仓库里"
+    d = json.load(open(p, encoding="utf-8"))
+    assert d["n_line"] >= 10
+    for L in d["lines"]:
+        assert L["max_proj_m"] <= 250, "%s 投影误差 %.0fm 超标，不该产出" % (L["name"], L["max_proj_m"])
+        seqs = [s["seq"] for s in L["stops"]]
+        kms = [s["km"] for s in L["stops"]]
+        assert seqs == list(range(1, len(seqs) + 1)), "%s 的 seq 必须连续" % L["name"]
+        assert kms == sorted(kms), "%s 必须按里程递增" % L["name"]
+    # 3 条"算不干净"的线路必须**不在**里面（宁可空着）
+    names = {L["name"] for L in d["lines"]}
+    assert "総武線" not in names and "成田線" not in names
+
+
+def test_fill_seq_prefers_geom_when_osm_covers_less_than_half():
+    """OSM 覆盖不到一半时，整条线改用几何顺序（**不混用两个源**，否则 seq 不可比）。"""
+    mod = _load_script("bd_fill_seq.py")
+    assert "geom:N02" in open(mod.__file__, encoding="utf-8").read(), "落库脚本要支持几何兜底"

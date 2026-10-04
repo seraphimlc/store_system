@@ -25,6 +25,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 SRC = os.path.join(ROOT, "scripts", "bd_osm_routes.json")
+#: 几何兜底（`bd_seq_from_geometry.py` 产出；只覆盖 OSM 拿不到顺序的线路）
+SRC_GEOM = os.path.join(ROOT, "scripts", "bd_line_seq_geom.json")
 NEAR_M = 300.0          # 车站与 OSM 站点的匹配阈值
 MIN_RATIO = 0.75        # 召回门槛：本线车站要有 75% 能在该 OSM 线路里找到
 MIN_F1 = 0.70           # 精确+召回的综合门槛（防"别的线的班次"误配）
@@ -136,6 +138,11 @@ def main() -> int:
     from app.db import SessionLocal
 
     meta, routes = load_routes()
+    geom = {}
+    if os.path.exists(SRC_GEOM):
+        for L in json.load(open(SRC_GEOM, encoding="utf-8"))["lines"]:
+            geom[L["line_id"]] = L
+        print("几何兜底可用: %d 条线路（%s）" % (len(geom), os.path.basename(SRC_GEOM)))
     print("顺序源: %s（%d 条线路 / %d 个站次）" % (meta.get("source"), len(routes),
           sum(r["n_stop"] for r in routes)))
     db = SessionLocal()
@@ -149,6 +156,14 @@ def main() -> int:
                    "SELECT id, name, lat, lon FROM bd_station WHERE line_id=:i"),
                    {"i": lid}).all()]
         pick = best_route_for_line(sts, routes)
+        # OSM 没匹配上、或只覆盖不到一半 → 用**几何兜底**（不混用两个源，否则 seq 不可比）
+        if (not pick or pick[2] < 0.5 * len(sts)) and lid in geom:
+            g = geom[lid]
+            for x in g["stops"]:
+                plan[x["id"]] = (x["seq"], x["km"], "geom:N02")
+            ok.append((nm, "几何法(投影误差%.0fm)" % g["max_proj_m"], len(g["stops"]),
+                       len(g["stops"])))
+            continue
         if not pick:
             fail.append("%s %s" % (op, nm))
             continue
