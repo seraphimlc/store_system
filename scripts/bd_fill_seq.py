@@ -27,6 +27,8 @@ sys.path.insert(0, ROOT)
 SRC = os.path.join(ROOT, "scripts", "bd_osm_routes.json")
 #: 几何兜底（`bd_seq_from_geometry.py` 产出；只覆盖 OSM 拿不到顺序的线路）
 SRC_GEOM = os.path.join(ROOT, "scripts", "bd_line_seq_geom.json")
+#: 人工定稿顺序（OSM / 几何都拿不到的 3 条线：総武線・成田線・箱根登山鉄道線）
+SRC_MANUAL = os.path.join(ROOT, "scripts", "bd_line_seq_manual.json")
 NEAR_M = 300.0          # 车站与 OSM 站点的匹配阈值
 MIN_RATIO = 0.75        # 召回门槛：本线车站要有 75% 能在该 OSM 线路里找到
 MIN_F1 = 0.70           # 精确+召回的综合门槛（防"别的线的班次"误配）
@@ -145,6 +147,11 @@ def main() -> int:
         print("几何兜底可用: %d 条线路（%s）" % (len(geom), os.path.basename(SRC_GEOM)))
     print("顺序源: %s（%d 条线路 / %d 个站次）" % (meta.get("source"), len(routes),
           sum(r["n_stop"] for r in routes)))
+    manual = {}
+    if os.path.exists(SRC_MANUAL):
+        for L in json.load(open(SRC_MANUAL, encoding="utf-8"))["lines"]:
+            manual[L["line"]] = L
+        print("人工顺序可用: %d 条线路（%s）" % (len(manual), os.path.basename(SRC_MANUAL)))
     db = SessionLocal()
     lines = db.execute(text(
         "SELECT id, operator_short, name FROM bd_line ORDER BY id")).all()
@@ -163,6 +170,13 @@ def main() -> int:
                 plan[x["id"]] = (x["seq"], x["km"], "geom:N02")
             ok.append((nm, "几何法(投影误差%.0fm)" % g["max_proj_m"], len(g["stops"]),
                        len(g["stops"])))
+            continue
+        if nm in manual:
+            M = manual[nm]
+            for x in M["stops"]:
+                plan[x["id"]] = (x["seq"], x["km"], "manual:%s" % M["source"].split(" ")[0])
+            ok.append((nm, "人工定稿(%s)" % M["source"].split(" ")[0], len(M["stops"]),
+                       len(M["stops"])))
             continue
         if not pick:
             fail.append("%s %s" % (op, nm))

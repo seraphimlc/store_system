@@ -2089,3 +2089,35 @@ def test_fill_seq_prefers_geom_when_osm_covers_less_than_half():
     """OSM 覆盖不到一半时，整条线改用几何顺序（**不混用两个源**，否则 seq 不可比）。"""
     mod = _load_script("bd_fill_seq.py")
     assert "geom:N02" in open(mod.__file__, encoding="utf-8").read(), "落库脚本要支持几何兜底"
+
+
+def test_manual_seq_file_for_hard_lines():
+    """OSM/几何都拿不到的 3 条线：人工定稿顺序（Wikipedia 駅一覧 + 坐标交叉校验）。
+
+    用户 2026-10-05："剩下的，你可以通过 google 搜索来做。方式是笨点，但肯定能解决。"
+    """
+    import json
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "scripts", "bd_line_seq_manual.json")
+    assert os.path.exists(p), "人工顺序文件要在仓库里"
+    d = json.load(open(p, encoding="utf-8"))
+    assert d["n_line"] == 3
+    assert {L["line"] for L in d["lines"]} == {"総武線", "成田線", "鉄道線"}
+    for L in d["lines"]:
+        assert L["n_stop"] == len(L["stops"])
+        assert [s["seq"] for s in L["stops"]] == list(range(1, len(L["stops"]) + 1))
+        assert len({s["name"] for s in L["stops"]}) == len(L["stops"]), "同一条线不能有重复站"
+        assert "wiki" in L["source"], "来源必须可审计（Wikipedia 条目）"
+        assert L["note"], "支线/折返等要写清楚"
+    # ⚠️ 成田線是 Y 字形（有支线）→ **不适用里程**（否则会显示误导性的 37km）
+    narita = next(L for L in d["lines"] if L["line"] == "成田線")
+    assert narita["km_mode"] == "none"
+    assert all(s["km"] is None for s in narita["stops"])
+
+
+def test_fill_seq_supports_manual_source():
+    """落库脚本要支持人工顺序（`manual:` 前缀）。"""
+    mod = _load_script("bd_fill_seq.py")
+    src = open(mod.__file__, encoding="utf-8").read()
+    assert "bd_line_seq_manual.json" in src and "manual:" in src
