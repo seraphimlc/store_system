@@ -452,6 +452,21 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   Python dict 取**最后一个**值，功能不出错，但会**掩盖两种译法**——实测 10 个词有两套日文
   （`状态` 状態/ステータス、`在岗` 在職/在籍、`员工编号` 従業員番号/従業員コード、`共` 合計/計…），
   当前生效的是**后出现**的那个。`--apply` 只删"整行单键"的安全重复项；**同行多键的不自动改**（要人定译法）。
+- **表格样式必须带 `grid-tbl`（2026-10-03 真 bug）**：`app.css` **没有通用 `table` 规则**，
+  表格样式全挂在 `table.grid-tbl` 上（内边距/行分隔线/表头底色+**粘性表头**/悬停高亮/窄屏首列吸附）。
+  作业域新模板（bd_*/messages）当时写了**裸 `<table>`** → 渲染成"没边框没内边距、挤成一坨的文字"，
+  用户反馈"圈选队员--做成一个表格"（它本来就是 table，只是没有表格样式）。已全部补 `grid-tbl`；
+  `config.html`/`file_layout.html` 两张键值表单表补 `kv`。守门测试 `test_ops_tables_use_grid_tbl`
+  （作业域模板里出现无 class 的 `<table>` 直接红）。**新建表格一律 `class="grid-tbl"` + 外面包 `.tbl-wrap`。**
+- **「圈选队员」重做（团队详情页）**：从"一列复选框"变成**带工具条的真表格** ——
+  顶部一行：`筛选输入框` + `已勾选 N / 共 M 人 · 可见 K 人`（实时） + `全不选` + `保存成员`（按钮上移，
+  别沉到 500 行下面）；列 = 进队 / 队长(radio，队里只能 1 人) / 姓名 / 员工编号(显示后 5 位，title 全号) /
+  账号(已开通·未开通) / 员工状态(**色块**：在岗绿/请假黄/离职停用灰) / 原角色；
+  **勾选行整行淡蓝高亮**（`.pick-bar` + `tr.picked` CSS）。提交字段不变（`person[]` / `leader`）。
+- **模板 HTML 结构自检 `scripts/check_templates.py`**：Jinja 不校验 HTML，切文件（head/tail 拼接）
+  容易把标签切坏（当天就切掉了 `<form>` 的续行）。用法 `./.venv/bin/python scripts/check_templates.py`，
+  输出"检查 N 个模板，M 个标签不配对"（0 为正常）。**改完模板顺手跑一次。**
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

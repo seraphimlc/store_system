@@ -155,3 +155,44 @@ def test_every_template_references_static_with_version():
                              p.read_text(encoding="utf-8")):
             bad.append("%s → %s" % (p.name, m.group(0)))
     assert not bad, "这些静态引用没带版本号（浏览器会吃旧缓存）：%s" % bad
+
+
+def test_ops_tables_use_grid_tbl():
+    """作业域模板的表格必须带 `class="grid-tbl"`。
+
+    ⚠️ 2026-10-03 实测踩到：`app.css` **没有通用 `table` 规则**，样式全挂在
+    `table.grid-tbl` 上；新建的 bd_*/messages 模板写了裸 `<table>` →
+    渲染出来没边框没内边距、挤成一坨，用户反馈"圈选队员--做成一个表格"
+    （它本来就是 table，只是**没有表格样式**）。
+    """
+    import re
+    from pathlib import Path
+    names = ["bd_tasks.html", "bd_teams.html", "bd_team_detail.html",
+             "bd_stations.html", "bd_logs.html", "bd_task_detail.html",
+             "messages.html"]
+    bad = []
+    for name in names:
+        html = Path("app/templates", name).read_text(encoding="utf-8")
+        for m in re.finditer(r"<table(?![^>]*class=)[^>]*>", html):
+            bad.append("%s → %s" % (name, m.group(0)))
+    assert not bad, "这些表格没有 grid-tbl 样式（会看起来不像表格）：%s" % bad
+
+
+def test_team_detail_pick_table_toolbar():
+    """「圈选队员」= 一张带工具条的表格：筛选 + 已勾选计数 + 全不选 + 保存按钮在工具条上。"""
+    html = _env().get_template("bd_team_detail.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req(), team=SimpleNamespace(id=1, name="一队", code="T1",
+                                            status="active", note=""),
+        people=[SimpleNamespace(code="P1", display_name="甲", has_account=True,
+                                status="active")],
+        members=[], active_codes=set(), status_labels={"active": "在岗"},
+        msg="", err="")
+    assert 'class="grid-tbl"' in html
+    assert 'class="pick-bar"' in html
+    assert 'data-testid="pick-filter"' in html
+    assert 'data-testid="pick-count"' in html and 'id="pick-n"' in html
+    assert 'data-testid="pick-clear"' in html
+    assert 'data-testid="members-save"' in html
+    assert 'data-testid="leader-P1"' in html          # 队长仍是 radio（单人选）
+    assert 'data-testid="status-P1"' in html and "在岗" in html

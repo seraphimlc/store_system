@@ -60,7 +60,7 @@
 {# 按队汇总：谁在动、谁没动（任务没有分母时，这是管理端最实用的抓手） #}
 {% if by_team %}
 <div class="tbl-wrap" style="margin-bottom:.8rem">
-  <table data-testid="by-team">
+  <table class="grid-tbl" data-testid="by-team">
     <thead>
       <tr><th>{{ t('按队') }}</th><th>{{ t('任务') }}</th><th>{{ t('未分配') }}</th>
           <th>{{ t('进行中') }}</th><th>{{ t('已完成') }}</th><th>{{ t('停滞') }}</th></tr>
@@ -84,7 +84,7 @@
 <p class="hint">{{ t('共') }}{{ total }} {{ t('条（本页') }}{{ rows|length }}）</p>
 
 <div class="tbl-wrap">
-<table>
+<table class="grid-tbl">
   <thead>
     <tr>
       <th>{{ t('车站') }}</th><th>{{ t('团队') }}</th><th>{{ t('队长') }}</th>

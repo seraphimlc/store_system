@@ -486,3 +486,11 @@ table.plan-matrix th .hint { font-weight: 400; }
 }
 @media (min-width: 861px) { .nav-mask { display: none !important; } }
 [x-cloak] { display: none !important; }
+
+/* 圈选表格工具条 + 选中行高亮（团队详情） */
+.pick-bar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  margin: .2rem 0 .6rem; }
+.pick-bar .pick-q { width: min(300px, 62%); padding: .38rem .55rem;
+  border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+table.grid-tbl tr.picked, table.grid-tbl tr.picked:hover { background: #eaf1ff; }
+table.grid-tbl tr.picked td, table.grid-tbl tr.picked:hover td { background: #eaf1ff; }

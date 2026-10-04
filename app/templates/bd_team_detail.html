@@ -38,32 +38,54 @@
   <h3 style="margin-top:0">{{ t('圈选队员') }}
     <span class="hint">{{ t('勾选的人进队，没勾的移出（移出写历史，不删记录）') }}</span>
   </h3>
-  <label class="f">{{ t('按姓名 / 编号筛选') }}
-    <input type="text" id="pick-filter" placeholder="{{ t('输入姓名或编号后 5 位') }}"
-           style="width:260px" oninput="bdFilter(this.value)">
-  </label>
+  {# 工具条：筛选 + 已勾选计数 + 全不选 + 保存（表格操作按钮放一起，别沉到最底下） #}
+  <div class="pick-bar">
+    <input type="text" id="pick-filter" class="pick-q"
+           placeholder="{{ t('输入姓名或编号后 5 位筛选') }}"
+           oninput="bdFilter(this.value)" data-testid="pick-filter">
+    <span class="hint" data-testid="pick-count">
+      {{ t('已勾选') }} <b id="pick-n">0</b> / {{ people|length }} {{ t('人') }}
+      · {{ t('可见') }} <span id="pick-shown">{{ people|length }}</span> {{ t('人') }}
+    </span>
+    <span style="flex:1"></span>
+    <button class="btn ghost" type="button" onclick="bdUncheckAll()"
+            data-testid="pick-clear">{{ t('全不选') }}</button>
+    <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
+  </div>
   <div class="tbl-wrap" style="max-height:26rem;overflow:auto">
-    <table>
+    <table class="grid-tbl">
       <thead>
-        <tr><th style="width:4rem">{{ t('进队') }}</th><th style="width:5rem">{{ t('队长') }}</th>
-            <th>{{ t('姓名') }}</th><th>{{ t('编号') }}</th>
-            <th>{{ t('账号') }}</th><th>{{ t('员工状态') }}</th><th>{{ t('原角色') }}</th></tr>
+        <tr><th style="width:3.6rem">{{ t('进队') }}</th>
+            <th style="width:3.6rem" title="{{ t('整个队只能指定 1 名队长') }}">{{ t('队长') }}</th>
+            <th>{{ t('姓名') }}</th>
+            <th title="{{ t('鼠标悬停看完整编号') }}">{{ t('员工编号') }}</th>
+            <th>{{ t('账号') }}</th>
+            <th>{{ t('员工状态') }}</th>
+            <th>{{ t('原角色') }}</th></tr>
       </thead>
       <tbody>
         {% for p in people %}
         {% set on = p.code in active_codes %}
         {% set old = (members|selectattr('person_code','equalto',p.code)|list|first) %}
-        <tr class="pick" data-name="{{ p.display_name }} {{ p.code }}"
+        <tr class="pick{% if on %} picked{% endif %}"
+            data-name="{{ p.display_name }} {{ p.code }}"
             data-testid="pick-row">
           <td><input type="checkbox" name="person" value="{{ p.code }}"
-                     {% if on %}checked{% endif %}
+                     {% if on %}checked{% endif %} onchange="bdRowPicked(this)"
                      data-testid="pick-{{ p.code }}"></td>
           <td><input type="radio" name="leader" value="{{ p.code }}"
-                     {% if old and old.role == 'leader' %}checked{% endif %}></td>
+                     {% if old and old.role == 'leader' %}checked{% endif %}
+                     data-testid="leader-{{ p.code }}"></td>
           <td>{{ p.display_name }}</td>
-          <td>{{ p.code[-5:] }}</td>
-          <td>{% if p.has_account %}✓{% else %}<span class="hint">{{ t('未开通') }}</span>{% endif %}</td>
-          <td data-testid="status-{{ p.code }}">{{ status_labels.get(p.status, p.status) if p.status else t('未开通账号') }}</td>
+          <td title="{{ p.code }}">{{ p.code[-5:] }}</td>
+          <td>{% if p.has_account %}{{ t('已开通') }}{% else %}<span class="hint">{{ t('未开通') }}</span>{% endif %}</td>
+          <td data-testid="status-{{ p.code }}">
+            {% set sl = status_labels.get(p.status, p.status) if p.status else t('未开通账号') %}
+            {% if p.status == 'active' %}<span class="pill okk">{{ sl }}</span>
+            {% elif p.status == 'leave' %}<span class="pill warnk">{{ sl }}</span>
+            {% elif p.status %}<span class="pill">{{ sl }}</span>
+            {% else %}<span class="hint">{{ sl }}</span>{% endif %}
+          </td>
           <td>{% if old %}{{ t('队长') if old.role == 'leader' else t('队员') }}{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}
@@ -71,19 +93,43 @@
     </table>
   </div>
   <p class="hint">{{ t('提示：没有账号的人看不到任务页，但仍可被记录为队员。') }}</p>
-  <div class="form-actions">
-    <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
-  </div>
 </form>
 
 <script>
-/* 成员筛选（纯前端，不依赖脚本库） */
+/* 圈选表格（纯前端，不依赖脚本库）：
+   筛选 + 已勾选计数 + 选中行高亮 + 全不选。提交字段仍是 person[] / leader。 */
+function bdPicked() {
+  return document.querySelectorAll('input[name="person"]:checked');
+}
+function bdCount() {
+  var el = document.getElementById('pick-n');
+  if (el) el.textContent = bdPicked().length;
+}
+function bdRowPicked(cb) {
+  var tr = cb.closest ? cb.closest('tr') : null;
+  if (tr) tr.classList.toggle('picked', cb.checked);
+  bdCount();
+}
+function bdUncheckAll() {
+  document.querySelectorAll('input[name="person"]').forEach(function (cb) {
+    cb.checked = false;
+    var tr = cb.closest ? cb.closest('tr') : null;
+    if (tr) tr.classList.remove('picked');
+  });
+  bdCount();
+}
 function bdFilter(q) {
   q = (q || '').trim().toLowerCase();
+  var shown = 0;
   document.querySelectorAll('tr[data-testid="pick-row"]').forEach(function (tr) {
     var t = (tr.getAttribute('data-name') || '').toLowerCase();
-    tr.style.display = (!q || t.indexOf(q) >= 0) ? '' : 'none';
+    var hit = !q || t.indexOf(q) >= 0;
+    tr.style.display = hit ? '' : 'none';
+    if (hit) shown++;
   });
+  var el = document.getElementById('pick-shown');
+  if (el) el.textContent = shown;
 }
+bdCount();
 </script>
 {% endblock %}
