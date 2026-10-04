@@ -661,6 +661,23 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   - 测试 `tests_web/test_team_task.py` **90 项**（+物理车站层归组/幂等/孤儿清理/体检抓脏数据/页面显示资产且
     无任务编号）；全量 **425 passed**（oauth e2e 那条是环境问题，干净树上同样失败）。
 
+- **作业域重置（2026-10-05 用户："之前的 excel 文件导入的任务，全都可以删除。后面我们再做任务分配"
+  + "测试队/测试2队可以清掉"）**：新流程确立 —— **车站数据资产 → 自动出任务 → Excel 只当派工单**。
+  - ⚠️ **先纠正一个容易搞错的认知**：当初的 515 条**不是另一套数据**，导入时是**认领**（enrich）进资产的
+    —— 它们就是 `bd_station` 里 id 1~515（`source='manual'`），N02 新增的是 id 516~1920，合计 1,920 = 全部资产。
+    所以"清掉旧数据"要分两层：**车站资产层保留**（它就是要以之为准的那份），**任务层清空重建**。
+  - 工具 `scripts/bd_reset_ops.py`（**默认 dry-run**，`--apply` 才做；自动备份库 + **把 bd_task 全量归档成
+    `data/backup_tasks_<ts>.csv`**（utf-8-sig）+ 写 `bd_log(action='wipe')` 留痕）：
+    `--tasks` 清任务层（progress/assign/task 三表）、`--teams "测试队,测试2队"` 清队（连带成员关系，
+    那些人变自由人 + `sync_account_roles()` 把不再是队长的人退回 staff）。
+  - 实测结果：任务 1,920 → **0**；队 8 → **6**（剩 小川/汤静/甘子杰/罗子傑/陈嘉溢/陳偉鋒）；
+    12 名测试队成员释放为自由人；付罡 + DP-DEMO-01 两个原队长自动退回 `staff`；
+    **车站资产原封不动**：站×线 1,920 / 物理车站 1,568 / 线路 131；一人多队检查 0 违规、资产体检健康 ✓。
+    空任务状态下 `/tasks`（三 tab 全 0）、`/stations`（共 1,920 条）、`/teams`、`/logs`、`/messages` 都 200。
+  - `bd_log.ACTION_LABELS` 补 `wipe`（清空重建）/`merge`（合并）。
+  - ⓘ 清任务后 `bd_log(domain=task)` 的 1,405 条仍指向已删任务 id（**日志是追加表，不删**）→
+    这是硬删的必然代价；要彻底干净需要另跑日志清理（未做，等用户定）。
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

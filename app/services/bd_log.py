@@ -80,11 +80,13 @@ def ACTION_LABELS(lang: str = "zh") -> Dict[str, str]:
     zh = {"create": "创建", "update": "修改", "dispatch": "派给团队",
           "assign": "分派担当", "unassign": "取消担当", "role": "改角色",
           "state": "状态变化", "progress": "进展上报", "remove": "移出",
-          "status": "状态", "rename": "改名"}
+          "status": "状态", "rename": "改名",
+          "wipe": "清空重建", "merge": "合并"}
     ja = {"create": "作成", "update": "変更", "dispatch": "チーム割当",
           "assign": "担当割当", "unassign": "担当解除", "role": "役割変更",
           "state": "状態変更", "progress": "進捗提出", "remove": "退出",
-          "status": "状態", "rename": "名称変更"}
+          "status": "状態", "rename": "名称変更",
+          "wipe": "クリア再構築", "merge": "統合"}
     return ja if lang == "ja" else zh
 
 
