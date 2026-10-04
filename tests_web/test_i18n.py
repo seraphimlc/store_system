@@ -136,3 +136,21 @@ def test_i18n_dict_is_clean():
         cwd=str(Path(__file__).parent.parent)).stdout
     assert "模板/代码用到但字典缺失（日文界面会显示中文）: 0" in out, out
     assert "字典里有但全仓库没人用（死键）: 0" in out, out
+
+
+def test_i18n_prune_runs_as_script():
+    """`i18n_prune.py` **当脚本跑**也要能工作（dry-run）。
+
+    ⚠️ 2026-10-04 真踩到：我把 `remove_keys()` 放到了 `if __name__` 之后 →
+    importlib 导入测得到、直接 `python scripts/i18n_prune.py` 却 NameError
+    （脚本一跑就崩，死键清不掉）。所以必须按真实调用方式测一次。
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    r = subprocess.run([sys.executable, str(root / "scripts" / "i18n_prune.py")],
+                       capture_output=True, text=True, cwd=str(root))
+    assert r.returncode == 0, r.stderr
+    assert "拟删除死键" in r.stdout, r.stdout
+    assert "NameError" not in r.stderr, r.stderr

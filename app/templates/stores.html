@@ -21,7 +21,7 @@
   <label class="f">{{ t('搜索店名 / Store ID / 城市') }}
     <input type="text" name="q" value="{{ q }}" style="width:300px" placeholder="{{ t('如 春田屋 或 01010470...') }}">
   </label>
-  <button class="btn" type="submit">{{ t('查') }}</button>
+  <button class="btn" type="submit">{{ t('查询') }}</button>
 </form>
 <p class="hint">{{ t('共') }}{{ cat.total }} {{ t('家（本页') }}{{ cat.rows|length }}）｜{{ t('点') }}"{{ t('关联店铺') }}"{{ t('展开并入的分身，可单独解绑') }}</p>
 {% for r in cat.rows %}

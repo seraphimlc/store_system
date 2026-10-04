@@ -63,9 +63,6 @@ def main():
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 def remove_keys(text, keys):
     """从字典文本里删掉指定键，返回 `(新文本, 删除处数, 没匹配上的键)`。
 
@@ -85,3 +82,7 @@ def remove_keys(text, keys):
         if not n:
             missed.append(k)
     return text, removed, missed
+
+
+if __name__ == "__main__":
+    sys.exit(main())

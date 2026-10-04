@@ -19,45 +19,62 @@
   <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div><div class="v">{{ sum.done }}</div></div>
 </div>
 
-<form method="get" class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
-  <label class="f">{{ t('搜索车站 / 线路') }}
-    <input type="text" name="kw" value="{{ kw }}" style="width:220px">
-  </label>
-  <label class="f">{{ t('状态') }}
-    <select name="status">
-      <option value="">{{ t('全部') }}</option>
-      <option value="active" {% if status=='active' %}selected{% endif %}>{{ t('启用') }}</option>
-      <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
-    </select>
-  </label>
-  <label class="f">
-    <input type="checkbox" name="no_task" value="1" {% if no_task %}checked{% endif %}>
-    {{ t('只看还没建任务的') }}
-  </label>
-  <button class="btn" type="submit">{{ t('查') }}</button>
-</form>
+<div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
+  {# 筛选：标准写法（form.form-grid + label.fld + form-actions） #}
+  <form method="get" class="form-grid">
+    <label class="fld">{{ t('车站 / 线路') }}
+      <input type="text" name="kw" value="{{ kw }}"
+             placeholder="{{ t('输入车站名或线路') }}" data-testid="station-kw">
+    </label>
+    <label class="fld">{{ t('状态') }}
+      <select name="status">
+        <option value="">{{ t('全部') }}</option>
+        <option value="active" {% if status=='active' %}selected{% endif %}>{{ t('启用') }}</option>
+        <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
+      </select>
+    </label>
+    <label class="fld">{{ t('只看还没建任务的') }}
+      <span style="display:flex;align-items:center;gap:.4rem;height:100%">
+        <input type="checkbox" name="no_task" value="1" {% if no_task %}checked{% endif %}
+               data-testid="no-task-only" style="width:auto">
+        <span class="hint">{{ t('勾上后只列没任务的站') }}</span>
+      </span>
+    </label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit" data-testid="station-search">{{ t('查询') }}</button>
+      {% if kw or status or no_task %}<a class="btn ghost" href="/stations">{{ t('清空') }}</a>{% endif %}
+    </div>
+  </form>
+</div>
 
-<details class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
-  <summary style="cursor:pointer"><b>{{ t('新建车站') }}</b></summary>
-  <form method="post" action="/stations/create" style="margin-top:.6rem">
+<div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
+  <h3 style="margin:0 0 .6rem">{{ t('新建车站') }}</h3>
+  {# 新建：一行对齐 #}
+  <form method="post" action="/stations/create" class="form-grid">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <div class="form-grid">
-      <label>{{ t('车站名') }}<input type="text" name="name" required data-testid="station-name"
-             placeholder="{{ t('如 駒場東大前') }}"></label>
-      <label>{{ t('线路（可空）') }}<input type="text" name="line" placeholder="{{ t('如 井の頭線') }}"></label>
-      <label>{{ t('备注') }}<input type="text" name="note" style="width:100%"></label>
-      <label style="align-self:end">
-        <input type="checkbox" name="make_task" value="1" checked> {{ t('同时建任务') }}
-      </label>
-    </div>
-    <div class="form-actions">
+    <label class="fld">{{ t('车站名') }}
+      <input type="text" name="name" required data-testid="station-name"
+             placeholder="{{ t('如 駒場東大前') }}">
+    </label>
+    <label class="fld">{{ t('线路（可空）') }}
+      <input type="text" name="line" placeholder="{{ t('如 井の頭線') }}">
+    </label>
+    <label class="fld">{{ t('备注（可空）') }}
+      <input type="text" name="note">
+    </label>
+    <label class="fld">{{ t('同时建任务') }}
+      <span style="display:flex;align-items:center;gap:.4rem;height:100%">
+        <input type="checkbox" name="make_task" value="1" checked
+               data-testid="make-task" style="width:auto">
+        <span class="hint">{{ t('建站后立刻生成任务') }}</span>
+      </span>
+    </label>
+    <div class="form-actions" style="align-items:flex-end">
       <button class="btn" type="submit" data-testid="station-create">{{ t('新增') }}</button>
     </div>
   </form>
-</details>
-
-{# 批量操作：勾选框用 form="" 关联到下面的表单，避免 form 套 table 的非法结构 #}
+</div>
 <form id="bulk-task" method="post" action="/stations/tasks" class="card"
       style="padding:.7rem 1rem;margin-bottom:.8rem">
   <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">

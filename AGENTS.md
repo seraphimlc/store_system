@@ -512,6 +512,21 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
      之前报的"10 个词两套译法"是误报。清理 33 行重复键后**生效译文 0 变化**（键数 907→906 只少 1 个死键）。
   + 新增 CI 兜底 `test_i18n_dict_is_clean`（跑 audit，缺日文/死键非 0 直接红）。
 
+- **表单/筛选行统一（2026-10-03 用户："团队页面…『查』这算什么事？放不下两个字吗？" +
+  "新建团队的UI也特别丑，你放到一行里，对齐不行吗？"）**：
+  ① 全站按钮文案 `查` → **`查询`**（9 个模板：teams/stations/tasks/my_tasks/stores/store_entities/
+     file_report/staff_reports/staff_report_compare）。**别为省地方把按钮裁成一个字**。
+  ② 筛选行与新建表单**一律照抄项目既有标准写法**：
+     `<div class="card"><form class="form-grid">` + `<label class="fld">标签<input></label>` ×N +
+     末尾 `<div class="form-actions" style="align-items:flex-end">按钮</div>`
+     （范例：`staff_report_compare.html` / `staff_reports.html`）。
+     `.form-grid` = `auto-fit minmax(170px,1fr)` → **宽屏一行、窄屏自动一列**（≤760px）；
+     `align-items:flex-end` 让按钮与输入框**底部对齐**。
+     ⚠️ 反例（改之前的样子）：用 `label.f`（inline-flex，标签与输入同排）+ 某些输入框写 `width:100%`
+     → 各列宽度不一、标签跳动；按钮另起一行；`<details>` 里再塞一个不成形的表单。
+  ③ 团队页/车站页的「新建」从 `<details>` 折叠改为**常显卡片 + h3 标题 + 一行对齐表单**
+     （用户口径："放到一行里，对齐"）；每张筛选卡加「清空」（有筛选条件时才出现）。
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

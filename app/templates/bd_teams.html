@@ -24,42 +24,48 @@
 </p>
 {% endif %}
 
-<form method="get" class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
-  <label class="f">{{ t('搜索队名 / 编号') }}
-    <input type="text" name="kw" value="{{ kw }}" style="width:220px">
-  </label>
-  <label class="f">{{ t('状态') }}
-    <select name="status">
-      <option value="">{{ t('全部') }}</option>
-      <option value="active" {% if status=='active' %}selected{% endif %}>{{ t('在岗') }}</option>
-      <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
-    </select>
-  </label>
-  <button class="btn" type="submit">{{ t('查') }}</button>
-</form>
+<div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
+  {# 筛选：照抄 /staff-reports/compare 的标准写法（form.form-grid + label.fld + form-actions） #}
+  <form method="get" class="form-grid">
+    <label class="fld">{{ t('队名 / 编号') }}
+      <input type="text" name="kw" value="{{ kw }}"
+             placeholder="{{ t('输入队名或编号') }}" data-testid="team-kw">
+    </label>
+    <label class="fld">{{ t('状态') }}
+      <select name="status">
+        <option value="">{{ t('全部') }}</option>
+        <option value="active" {% if status=='active' %}selected{% endif %}>{{ t('在岗') }}</option>
+        <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
+      </select>
+    </label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit" data-testid="team-search">{{ t('查询') }}</button>
+      {% if kw or status %}<a class="btn ghost" href="/teams">{{ t('清空') }}</a>{% endif %}
+    </div>
+  </form>
+</div>
 
-<details class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
-  <summary style="cursor:pointer"><b>{{ t('新建团队') }}</b></summary>
-  <form method="post" action="/teams/create" style="margin-top:.6rem">
+<div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
+  <h3 style="margin:0 0 .6rem">{{ t('新建团队') }}</h3>
+  {# 新建：**一行对齐**（字段在同一行，按钮在末尾与输入框底对齐） #}
+  <form method="post" action="/teams/create" class="form-grid">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <div class="form-grid">
-      <label>{{ t('队名') }}
-        <input type="text" name="name" required data-testid="team-name"
-               placeholder="{{ t('如 小川队') }}">
-      </label>
-      <label>{{ t('队编号（可空）') }}
-        <input type="text" name="code" data-testid="team-code">
-      </label>
-      <label>{{ t('备注') }}
-        <input type="text" name="note" style="width:100%">
-      </label>
-    </div>
-    <div class="form-actions">
+    <label class="fld">{{ t('队名') }}
+      <input type="text" name="name" required data-testid="team-name"
+             placeholder="{{ t('如 小川队') }}">
+    </label>
+    <label class="fld">{{ t('队编号（可空）') }}
+      <input type="text" name="code" data-testid="team-code">
+    </label>
+    <label class="fld">{{ t('备注（可空）') }}
+      <input type="text" name="note">
+    </label>
+    <div class="form-actions" style="align-items:flex-end">
       <button class="btn" type="submit" data-testid="team-create">{{ t('建队') }}</button>
     </div>
   </form>
-</details>
+</div>
 
 <div class="tbl-wrap">
 <table class="grid-tbl">
