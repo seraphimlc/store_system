@@ -123,15 +123,27 @@ def update_station(db: Session, station_id: int, name: Optional[str] = None,
 
 
 def list_stations(db: Session, kw: str = "", status: str = "",
-                  only_without_task: bool = False) -> List[dict]:
-    """车站列表 + 任务概要（一次查询任务/队，避免 N+1）。"""
+                  only_without_task: bool = False, page: int = 1,
+                  per: int = None) -> dict:
+    """车站列表 + 任务概要（**分页**；本页内的任务/队名一次查询，避免 N+1）。
+
+    2026-10-03 用户要求分页：515 个车站以前是**全量铺一屏**。
+    `only_without_task` 改在 **SQL 里**过滤（子查询 NOT EXISTS）——
+    否则分页只对"过滤后的 Python 列表"生效，`total` 会算错。
+    """
+    from app.services import paging as _pg
     q = db.query(BdStation)
     if kw:
         like = "%%%s%%" % kw.strip()
         q = q.filter(or_(BdStation.name.like(like), BdStation.line.like(like)))
     if status in ("active", "closed"):
         q = q.filter(BdStation.status == status)
-    stations = q.order_by(BdStation.id.asc()).all()
+    if only_without_task:
+        sub = db.query(BdTask.id).filter(BdTask.station_id == BdStation.id)
+        q = q.filter(~sub.exists())
+    pg = _pg.paginate(q.order_by(BdStation.id.asc()), page,
+                      per or _pg.PER_DEFAULT)
+    stations = pg["rows"]
     task_map = {}
     if stations:
         tasks = (db.query(BdTask)
@@ -141,13 +153,12 @@ def list_stations(db: Session, kw: str = "", status: str = "",
     out = []
     for s in stations:
         t = task_map.get(s.id)
-        if only_without_task and t is not None:
-            continue
         out.append({"station": s, "task": t,
                     "team_name": (team_names.get(t.team_id) if t else "") or "",
                     "state": (t.state if t else ""),
                     "pct": (t.pct if t else 0)})
-    return out
+    pg["rows"] = out
+    return pg
 
 
 # ---------------- 任务 ----------------
@@ -790,3 +801,19 @@ def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+def station_ids_without_task(db: Session, kw: str = "",
+                            status: str = "") -> List[int]:
+    """**所有**「还没有任务」的车站 id（不分页；批量建任务用）。
+
+    分页只影响列表展示，批量操作要作用于**全集** —— 不能只拿当前页。
+    """
+    sub = db.query(BdTask.id).filter(BdTask.station_id == BdStation.id)
+    q = db.query(BdStation.id).filter(~sub.exists())
+    if kw:
+        like = "%%%s%%" % kw.strip()
+        q = q.filter(or_(BdStation.name.like(like), BdStation.line.like(like)))
+    if status in ("active", "closed"):
+        q = q.filter(BdStation.status == status)
+    return [i for (i,) in q.order_by(BdStation.id.asc()).all()]

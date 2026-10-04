@@ -34,7 +34,7 @@
   </form>
 </div>
 
-{% for it in inbox %}
+{% for it in rows %}
 <div class="card" style="padding:.6rem .9rem;margin-bottom:.5rem"
      data-testid="msg-item" data-unread="{{ '1' if it.unread else '0' }}">
   <div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap">
@@ -57,6 +57,7 @@
 {% else %}
 <div class="card"><p class="empty" data-testid="msg-empty">{{ t('没有消息') }}</p></div>
 {% endfor %}
+{% include "_pager.html" %}
 
 {% elif tab == 'sent' %}
 <div class="tbl-wrap">
@@ -64,7 +65,7 @@
     <thead><tr><th>{{ t('时间') }}</th><th>{{ t('标题') }}</th>
       <th>{{ t('收件人') }}</th><th>{{ t('已读') }}</th></tr></thead>
     <tbody>
-      {% for s in sent %}
+      {% for s in rows %}
       <tr data-testid="msg-sent-row">
         <td>{{ s.msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
         <td>{{ s.msg.title }}{% if s.msg.body %}<div class="hint">{{ s.msg.body }}</div>{% endif %}</td>
@@ -76,6 +77,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% include "_pager.html" %}
 </div>
 
 {% else %}

@@ -177,26 +177,37 @@ def notify_task_progress(db: Session, task, action: str, old_pct,
 
 
 def inbox(db: Session, person_code: str, unread_only: bool = False,
-          limit: int = 100, offset: int = 0) -> List[dict]:
-    """我收到的消息（新→旧），带已读标记。"""
+          page: int = 1, per: int = None) -> dict:
+    """我收到的消息（新→旧，**分页**），带已读标记。
+
+    以前是 `limit=100` 硬截断（第 101 条起永远看不到）；2026-10-03 改真分页。
+    """
+    from app.services import paging as _pg
     q = (db.query(BdMessageRecipient, BdMessage)
          .join(BdMessage, BdMessage.id == BdMessageRecipient.message_id)
          .filter(BdMessageRecipient.person_code == person_code))
     if unread_only:
         q = q.filter(BdMessageRecipient.read_at.is_(None))
-    rows = (q.order_by(BdMessage.created_at.desc(), BdMessage.id.desc())
-            .limit(limit).offset(offset).all())
-    return [{"msg": m, "to": r, "unread": r.read_at is None} for r, m in rows]
+    pg = _pg.paginate(q.order_by(BdMessage.created_at.desc(),
+                                 BdMessage.id.desc()), page,
+                      per or _pg.PER_DEFAULT)
+    pg["rows"] = [{"msg": m, "to": r, "unread": r.read_at is None}
+                  for r, m in pg["rows"]]
+    return pg
 
 
-def sent(db: Session, user, limit: int = 100) -> List[dict]:
-    """我发出的消息 + 已读人数（管理员/队长看谁读了）。"""
+def sent(db: Session, user, page: int = 1, per: int = None) -> dict:
+    """我发出的消息 + 已读人数（管理员/队长看谁读了；**分页**）。"""
+    from app.services import paging as _pg
     login = getattr(user, "username", "") or ""
-    rows = (db.query(BdMessage).filter(BdMessage.sender == login)
-            .order_by(BdMessage.created_at.desc(), BdMessage.id.desc())
-            .limit(limit).all())
+    pg = _pg.paginate(db.query(BdMessage).filter(BdMessage.sender == login)
+                      .order_by(BdMessage.created_at.desc(),
+                                BdMessage.id.desc()), page,
+                      per or _pg.PER_DEFAULT)
+    rows = pg["rows"]
     if not rows:
-        return []
+        pg["rows"] = []
+        return pg
     ids = [m.id for m in rows]
     agg = dict(db.query(BdMessageRecipient.message_id,
                         func.count(BdMessageRecipient.id))
@@ -207,8 +218,9 @@ def sent(db: Session, user, limit: int = 100) -> List[dict]:
                 .filter(BdMessageRecipient.message_id.in_(ids),
                         BdMessageRecipient.read_at.isnot(None))
                 .group_by(BdMessageRecipient.message_id).all())
-    return [{"msg": m, "n": agg.get(m.id, 0), "read": read.get(m.id, 0)}
-            for m in rows]
+    pg["rows"] = [{"msg": m, "n": agg.get(m.id, 0),
+                   "read": read.get(m.id, 0)} for m in rows]
+    return pg
 
 
 def unread_count(db: Session, person_code: Optional[str]) -> int:

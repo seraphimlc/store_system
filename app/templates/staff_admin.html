@@ -113,7 +113,9 @@
     </td>
   </tr>
   {% else %}<tr><td colspan="7" class="empty">{{ t('没有符合条件的员工') }}</td></tr>{% endfor %}
-</table></div>
+</table>
+  {% include "_pager.html" %}
+</div>
 <div class="card" style="margin-top:.8rem">
   <h2 style="font-size:1rem;margin:.2rem 0 .6rem">{{ t('状态说明') }}</h2>
   <ul style="margin:0;padding-left:1.2rem;line-height:1.9">

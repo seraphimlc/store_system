@@ -45,6 +45,7 @@ def _user_guard(user):
 
 @router.get("/messages", response_class=HTMLResponse)
 def messages_page(request: Request, tab: str = "inbox", show: str = "",
+                  page: int = 1, per: int = 0,
                   msg: str = "", err: str = "",
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db)):
@@ -52,17 +53,23 @@ def messages_page(request: Request, tab: str = "inbox", show: str = "",
     g = _user_guard(user)
     if g:
         return g
-    from app.services import bd_msg
+    from app.services import bd_msg, paging
     can_send = user.role in ("admin", "leader")
-    inbox = bd_msg.inbox(db, user.person_code or "",
-                         unread_only=(show == "unread"))
+    where = tab if tab in ("inbox", "sent", "new") else "inbox"
+    if where == "sent" and can_send:
+        pager = bd_msg.sent(db, user, page=page, per=per or paging.PER_DEFAULT)
+        rows = pager["rows"]
+    else:
+        pager = bd_msg.inbox(db, user.person_code or "",
+                             unread_only=(show == "unread"), page=page,
+                             per=per or paging.PER_DEFAULT)
+        rows = pager["rows"]
     return templates.TemplateResponse("messages.html", {
         "request": request, "current_user": user,
-        "tab": tab if tab in ("inbox", "sent", "new") else "inbox",
-        "show": show, "inbox": inbox,
+        "tab": where, "show": show, "rows": rows,
+        "pager": pager, "page_qs": paging.qs(request.query_params),
         "can_send": can_send,
         "candidates": bd_msg.candidates(db, user) if can_send else [],
-        "sent": bd_msg.sent(db, user) if can_send else [],
         "unread": bd_msg.unread_count(db, user.person_code or ""),
         "unread_by_kind": bd_msg.unread_by_kind(db, user.person_code),
         "msg": msg, "err": err,

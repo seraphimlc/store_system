@@ -1481,3 +1481,104 @@ def test_db_level_single_team_constraint(seeded):
         "P3" not in [m["person_code"] for m in
                      bd_teams.team_members(db, seeded["team"])]
     db.close()
+
+
+# ---------------- 分页（用户 2026-10-03："你就不能做个分页吗？"） ----------------
+
+def test_stations_page_is_paginated(client, seeded):
+    """车站页必须分页（以前 515 行全铺一屏）。
+
+    断言：默认每页 50 条、有分页条、第 2 页内容不同、筛选条件在翻页链接里保留。
+    """
+    from app.services import paging
+    db = appdb.SessionLocal()
+    for i in range(60):
+        bd_tasks.create_station(db, "测试站%02d" % i, line="井の頭線")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    p1 = client.get("/stations")
+    assert p1.status_code == 200
+    assert 'data-testid="pager"' in p1.text
+    assert "共 61 条" in p1.text and "第 1 / 2 页" in p1.text
+    assert 'data-testid="page-next"' in p1.text
+    assert 'data-testid="page-prev"' not in p1.text, "第 1 页不该有上一页"
+    p2 = client.get("/stations?page=2")
+    assert "第 2 / 2 页" in p2.text
+    assert 'data-testid="page-prev"' in p2.text
+    # 两页不重复
+    import re
+    def names(html):
+        return set(re.findall(r'data-testid="st-name-(\d+)"', html))
+    assert not (names(p1.text) & names(p2.text)), "两页内容不该重叠"
+    # 筛选条件要带进翻页链接
+    f = client.get("/stations?kw=测试站&page=1")
+    assert "kw=%E6%B5%8B%E8%AF%95%E7%AB%99" in f.text or "kw=测试站" in f.text
+    assert paging.PER_DEFAULT == 50
+
+
+def test_bulk_make_tasks_uses_all_stations_not_just_page(client, seeded):
+    """「全部建任务」作用于**全集**，不受分页影响（否则只建当前页 → 静默漏建）。"""
+    db = appdb.SessionLocal()
+    for i in range(60):
+        bd_tasks.create_station(db, "批量站%02d" % i)
+    db.commit()
+    before = db.query(BdTask).count()
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/stations/tasks", {"all_without": "1"},
+              from_path="/stations")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    after = db.query(BdTask).count()
+    db.close()
+    assert after - before == 60, "全部建任务要把 60 个站都建了（不是只建 1 页）"
+
+
+def test_db_pagination_helper_bounds_and_total(seeded):
+    """`paging.paginate()`：夹取越界页、算对 total/pages/区间。"""
+    from app.services import paging
+    db = appdb.SessionLocal()
+    for i in range(7):
+        bd_tasks.create_station(db, "helper站%02d" % i)
+    db.commit()
+    from app.models import BdStation
+    q = db.query(BdStation).order_by(BdStation.id.asc())
+    pg = paging.paginate(q, page=1, per=3)
+    assert pg["total"] == 8 and pg["pages"] == 3
+    assert (pg["start"], pg["end"]) == (1, 3) and pg["has_next"] and not pg["has_prev"]
+    pg3 = paging.paginate(q, page=3, per=3)
+    assert (pg3["start"], pg3["end"]) == (7, 8) and pg3["has_prev"] and not pg3["has_next"]
+    # 越界夹到最后一页（不能返回空页）
+    over = paging.paginate(q, page=99, per=3)
+    assert over["page"] == 3 and len(over["rows"]) == 2
+    under = paging.paginate(q, page=0, per=3)
+    assert under["page"] == 1
+    db.close()
+
+
+def test_staff_admin_and_store_entities_are_paginated(client, seeded):
+    """员工管理（55 行）与店铺实体（42k 行，以前 limit(500) 硬砍）都要分页。"""
+    from app.models import StoreEntity
+    from datetime import date as _d
+    db = appdb.SessionLocal()
+    from sqlalchemy import func as _f
+    base = (db.query(_f.max(StoreEntity.id)).scalar() or 0)
+    for i in range(55):
+        db.add(StoreEntity(store_id_raw="S%04d" % i, name_local="测试店%02d" % i,
+                           name_norm="测试店%02d" % i,
+                           master_id=base + i + 1))   # 自指=主档
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    p = client.get("/stores/entities")
+    assert p.status_code == 200
+    assert 'data-testid="pager"' in p.text and "第 1 / 2 页" in p.text
+    assert 'data-testid="page-next"' in p.text
+    db2 = appdb.SessionLocal()
+    for i in range(55):   # 员工管理要 >50 人才会翻页
+        _user(db2, "u%02d" % i, "staff", "Z%03d" % i, "测试员工%02d" % i)
+    db2.commit()
+    db2.close()
+    a = client.get("/staff-admin")
+    assert 'data-testid="pager"' in a.text

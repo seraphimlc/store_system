@@ -81,7 +81,8 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
                      db: Session = Depends(get_db), msg: str = "",
                      err: str = "",
                      status: str = "", new_token: str = "",
-                     new_token_name: str = "", new_token_uid: str = ""):
+                     new_token_name: str = "", new_token_uid: str = "",
+                     page: int = 1, per: int = 0):
     if user is None:
         return _denied()
     if user.role != "admin":
@@ -93,11 +94,15 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
     q = db.query(User).filter(User.role.in_(("staff", "leader")))
     if status in STATUS_ALLOW:
         q = q.filter(User.status == status)
-    staff = q.order_by(User.id).all()
+    from app.services import paging
+    pager = paging.paginate(q.order_by(User.id.asc()), page,
+                            per or paging.PER_DEFAULT)
     # MCP Token 列表**不再展示**（用户 2026-10-02："这块没有用，隐藏掉"）；
     # `/staff-admin/{uid}/tokens/*` 端点保留（脚本/测试仍可用）。
     return templates.TemplateResponse("staff_admin.html", {
-        "request": request, "current_user": user, "staff": staff,
+        "request": request, "current_user": user,
+        "staff": pager["rows"], "pager": pager,
+        "page_qs": paging.qs(request.query_params),
         "msg": msg, "err": err, "status": status,
         "labels": STATUS_LABELS, "pill": _status_pill,
         "langs": {"": "自动", "zh": "中文", "ja": "日本語"},

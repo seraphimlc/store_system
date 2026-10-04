@@ -490,3 +490,9 @@ table.plan-matrix th .hint { font-weight: 400; }
 /* 圈选表格工具条 + 选中行高亮（团队详情） */
 /* 圈选表格：进队/队长两列窄且居中；其余走通用 grid-tbl（用户："做一个普通的表格"） */
 .pick-cell { width: 3.6rem; text-align: center !important; }
+
+/* 统一分页条（_pager.html）：一行，左计数右翻页 */
+.pager { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .55rem .8rem; border-top: 1px solid var(--line); background: #fafbfe; }
+.pager .btn.disabled { opacity: .45; cursor: default; pointer-events: none; }
+.pager .hint { font-size: .86rem; }

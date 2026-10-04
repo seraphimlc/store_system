@@ -205,3 +205,23 @@ def test_team_detail_pick_table_plain():
     assert "picked" not in html                        # 没有整行染色
     assert 'class="pick-cell"' in html                 # 进队/队长两列窄且居中
     assert "在岗" in html and 'pill okk">在岗' not in html   # 状态是纯文本，不是彩色药丸
+
+
+def test_every_template_compiles():
+    """**所有模板都要能编译**（Jinja 语法不允许坏）。
+
+    ⚠️ 2026-10-04 真踩到：`store_entities.html` 被 i18n 批量包裹工具写成了
+    `or '({{ t('无名)') }}'`（引号里套引号）→ 该模板**一直编译失败**，
+    `/stores/entities` 就是 500，但没有任何测试渲染过它 → 长期没被发现。
+    这条测试把所有模板编译一遍，成本极低。
+    """
+    from pathlib import Path
+    from app.templating import get_templates
+    env = get_templates().env
+    bad = []
+    for p in sorted(Path("app/templates").glob("*.html")):
+        try:
+            env.get_template(p.name)
+        except Exception as e:            # noqa: BLE001 —— 就是要抓所有模板错误
+            bad.append("%s → %s" % (p.name, e))
+    assert not bad, "模板编译失败：\n  " + "\n  ".join(bad)

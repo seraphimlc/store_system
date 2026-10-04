@@ -527,6 +527,30 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   ③ 团队页/车站页的「新建」从 `<details>` 折叠改为**常显卡片 + h3 标题 + 一行对齐表单**
      （用户口径："放到一行里，对齐"）；每张筛选卡加「清空」（有筛选条件时才出现）。
 
+- **全站列表分页（2026-10-03 用户："你就不能做个分页吗？你查查有多少地方可以做成分页的"）**：
+  **审计结果（实测行数 / 修前状态 / 现状）**——
+  | 页面 | 行数 | 修前 | 现在 |
+  |---|---|---|---|
+  | /stations 车站 | 515 | 全量铺一屏 | ✅ 50/页（11 页），筛选条件带进翻页链接 |
+  | /staff-admin 员工管理 | 54 | 全量 | ✅ 50/页 |
+  | /stores/entities 店铺实体 | **42,140** | `limit(500)` **硬砍** + 42k 全查进内存 | ✅ 50/页（843 页），`by_id` 只装本页 |
+  | /messages 收发箱 | — | service `limit=100` 截断 | ✅ 50/页 |
+  | /tasks、/logs、/staff-reports、/files | 515/486/17/5 | 已有分页 | 保持 |
+  | /perf 83、/staff-plans 99 | — | 按月/按人范围 | 不需要（说明在回复里给了） |
+  | /teams/{id} 圈选队员 | ≤55 | 全量 | **故意不分页**：那是 checkbox 表单，翻页会**丢未保存的勾选**；有筛选框即可，真要分页得做"选择跨页携带" |
+  - **唯一实现**：`app/services/paging.py`（`paginate(query, page, per)` 出一份完整 pager dict +
+    `qs(params)` 生成保留筛选条件的查询串）+ `app/templates/_pager.html`（首页/上一页/下一页/末页 +
+    「共 N 条 · 第 x / y 页（a–b）」；**单页时只显示「共 N 条」**，不显示翻页按钮）。
+    `.pager` 样式在 app.css。**新页面要有分页就直接用这两个，别再自己写一套。**
+  - ⚠️ **批量操作必须作用于全集，不能只看当前页**：`/stations` 的「全部建任务」改用
+    `bd_tasks.station_ids_without_task()`（原来遍历 `list_stations()` 的返回值，加分页后会**只建当前页**）。
+    同理 `list_stations(only_without_task=)` 的过滤**挪进 SQL**（`NOT EXISTS`），否则 total 会算错。
+- **两个真 bug（2026-10-04 顺手挖出）**：
+  ① `store_entities.html` **模板编译失败**（i18n 批量包裹工具留下 `or '({{ t('无名)') }}'` 引号套引号）
+     → `/stores/entities` **一直是 500**，但没有任何测试渲染过它。已修，并加
+     **`test_every_template_compiles`**（把所有模板编译一遍，成本极低，专门防这类"页面直接崩"）。
+  ② `/stores/entities` 的 `limit(500)`：42,140 家里后 41,640 家**永远看不到**（静默丢数据）。
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

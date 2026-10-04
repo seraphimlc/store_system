@@ -227,14 +227,18 @@ def stations_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), kw: str = "",
                   status: str = "", no_task: str = "",
+                  page: int = 1, per: int = 0,
                   msg: str = "", err: str = ""):
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_teams, bd_tasks
-    rows = bd_tasks.list_stations(db, kw, status, only_without_task=bool(no_task))
+    from app.services import bd_teams, bd_tasks, paging
+    pager = bd_tasks.list_stations(db, kw, status,
+                                   only_without_task=bool(no_task),
+                                   page=page, per=per or paging.PER_DEFAULT)
     return templates.TemplateResponse("bd_stations.html", {
-        "request": request, "current_user": user, "rows": rows,
+        "request": request, "current_user": user, "rows": pager["rows"],
+        "pager": pager, "page_qs": paging.qs(request.query_params),
         "kw": kw, "status": status, "no_task": no_task,
         "teams": bd_teams.team_options(db),
         "sum": bd_tasks.board_summary(db),
@@ -310,8 +314,7 @@ def stations_make_tasks(request: Request,
     from app.services import bd_tasks
     ids = _ids(station_id)
     if all_without:
-        ids = [r["station"].id for r in bd_tasks.list_stations(
-            db, only_without_task=True)]
+        ids = bd_tasks.station_ids_without_task(db)   # 批量=全集，不受分页影响
     if not ids:
         return RedirectResponse("/stations?err=%s" % _q("请先勾选车站"),
                                 status_code=303)
