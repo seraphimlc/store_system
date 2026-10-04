@@ -18,7 +18,7 @@
   <div class="stat-card {% if sum.no_team %}warnk{% endif %}">
     <div class="k">{{ t('还没派给团队') }}</div><div class="v">{{ sum.no_team }}</div></div>
   <div class="stat-card"><div class="k">{{ t('未分配') }}</div><div class="v">{{ sum.unassigned }}</div></div>
-  <div class="stat-card warnk"><div class="k">{{ t('进行中') }}</div><div class="v">{{ sum.doing }}</div></div>
+  <div class="stat-card warnk"><div class="k">{{ t('已分配') }}</div><div class="v">{{ sum.doing }}</div></div>
   <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div><div class="v">{{ sum.done }}</div></div>
 </div>
 
@@ -32,11 +32,12 @@
       {% endfor %}
     </select>
   </label>
-  <label class="f">{{ t('状态') }}
-    <select name="state">
-      <option value="">{{ t('全部') }}</option>
-      {% for k in ['unassigned', 'doing', 'done'] %}
-      <option value="{{ k }}" {% if state == k %}selected{% endif %}>{{ labels[k] }}</option>
+  <label class="f">{{ t('线路') }}
+    <select name="line" data-testid="line-filter">
+      <option value="">{{ t('全部线路') }}</option>
+      {% for ln in lines %}
+      <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %}>
+        {{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
       {% endfor %}
     </select>
   </label>
@@ -57,13 +58,23 @@
   <button class="btn" type="submit" data-testid="task-search">{{ t('查询') }}</button>
 </form>
 
+{# 三个 tab（用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"）——
+   计数**只受其它筛选影响**，不受当前 tab 影响；链接保留其余筛选条件。 #}
+<div class="tabs" data-testid="task-tabs" style="margin-bottom:.6rem">
+  {% for k in tabs %}
+  <a class="{% if tab == k %}on{% endif %}"
+     href="/tasks?{{ page_qs }}tab={{ k }}"
+     data-testid="tab-{{ k }}">{{ labels[k] }}（{{ tab_counts[k] }}）</a>
+  {% endfor %}
+</div>
+
 {# 按队汇总：谁在动、谁没动（任务没有分母时，这是管理端最实用的抓手） #}
 {% if by_team %}
 <div class="tbl-wrap" style="margin-bottom:.8rem">
   <table class="grid-tbl" data-testid="by-team">
     <thead>
       <tr><th>{{ t('按队') }}</th><th>{{ t('任务') }}</th><th>{{ t('未分配') }}</th>
-          <th>{{ t('进行中') }}</th><th>{{ t('已完成') }}</th><th>{{ t('停滞') }}</th></tr>
+          <th>{{ t('已分配') }}</th><th>{{ t('已完成') }}</th><th>{{ t('停滞') }}</th></tr>
     </thead>
     <tbody>
       {% for b in by_team %}
@@ -142,13 +153,6 @@
     {% endfor %}
   </tbody>
 </table>
+  {% include "_pager.html" %}
 </div>
-
-{% if total > limit %}
-<div class="form-actions">
-  {% if page > 1 %}<a class="btn ghost" href="/tasks?team={{ team_id or '' }}&state={{ state }}&date_from={{ date_from }}&date_to={{ date_to }}&kw={{ kw }}&page={{ page - 1 }}">{{ t('上一页') }}</a>{% endif %}
-  <span class="hint">{{ t('第') }}{{ page }} {{ t('页') }}</span>
-  {% if page * limit < total %}<a class="btn ghost" href="/tasks?team={{ team_id or '' }}&state={{ state }}&date_from={{ date_from }}&date_to={{ date_to }}&kw={{ kw }}&page={{ page + 1 }}">{{ t('下一页') }}</a>{% endif %}
-</div>
-{% endif %}
 {% endblock %}

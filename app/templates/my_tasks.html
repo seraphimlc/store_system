@@ -34,7 +34,7 @@
   {% if n_pending %}· <span class="pill warnk" data-testid="pending-hint">{{ t('待确认') }} {{ n_pending }}</span>{% endif %}
 </p>
 
-{# 队长：我的 / 未分配 / 进行中 / 已完成 #}
+{# 队长：我的 / 未分配 / 待确认 / 已分配 / 已完成 #}
 <div class="tabs" data-testid="task-tabs">
   <a class="{% if tab==tab_mine %}on{% endif %}" href="/my/tasks?tab={{ tab_mine }}"
      data-testid="tab-mine">{{ t('我的') }}（{{ counts.mine }}）</a>

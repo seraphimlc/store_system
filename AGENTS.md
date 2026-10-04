@@ -551,6 +551,73 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
      **`test_every_template_compiles`**（把所有模板编译一遍，成本极低，专门防这类"页面直接崩"）。
   ② `/stores/entities` 的 `limit(500)`：42,140 家里后 41,640 家**永远看不到**（静默丢数据）。
 
+- **一都三県「线路 + 车站」全量入池 + 车站即任务（2026-10-05 用户："把一都三县所有的地铁线和车站都收集进来"
+  / "每个车站都是一个任务，自动创建就行" / "车站即任务" / "任务分为已完成，已分配，未分配几个tab页"
+  / "可以根据线路做查询" / "任务编号不用显示" / "后台存储肯定是要分开的，未来我们会以片区当成任务"）**：
+  - **数据源 = 国土数値情報 N02（鉄道）**（MLIT 官方，免费；`https://nlftp.mlit.go.jp/ksj/gml/data/N02/N02-22/N02-22_GML.zip`）。
+    实测：全国 10,220 条车站记录 → **一都三県 1,949 条 → 去重 1,920 个车站 / 131 条线路**
+    （東京 871 / 神奈川 408 / 千葉 383 / 埼玉 258）。**N02 的车站属性里没有都道府県** →
+    必须用坐标 + 都道府県边界做点在多边形内判定（边界取自 dataofjapan/land `japan.geojson`，13MB）。
+    字段：`N02_003` 路线名 / `N02_004` 运营公司 / `N02_005` 站名 / `N02_005c` 駅コード /
+    **`N02_005g` 同一駅グループコード（将来合并同名跨线车站的钥匙）**；`N02_001×N02_002` 是铁道区分
+    （实测归纳成 kind：jr/shinkansen/private/public/third/monorail/agt/tram/cable）。
+    ⚠️ **N02 会把同一个车站按站台/区间重复记录**（山手線「新宿」记了 4 条，坐标差 100~300m）→
+    按 (线路, 站名) + 坐标邻近(<1km) 去重（合并 29 条）。
+    抓取脚本 `scripts/bd_fetch_rail.py`（可换版本重跑）→ 数据落 `scripts/bd_kanto_rail.json`（434KB，
+    **随仓库走，导入时不需要网络**）。
+  - **一线一站（用户口径："同名车站…先分哪个线的就按哪个线的来，后面再定规则"）**：
+    `bd_station` 唯一键 从 `name_norm` 改成 **`(line_id, name_norm)`**（部分唯一索引，SQLite/PG；
+    `line_id IS NULL` 的行用另一个部分唯一索引保证站名不重复）。所以 渋谷/池袋/東京 等会**按线路各存一行**
+    （实测同名最跨 7 条线）。`group_code` 已存好，合并时用它 + 坐标即可（**本轮不做**）。
+  - **新增 `bd_line`（线路主档）** + `bd_station` 加 `line_id/operator/pref/lon/lat/ekicode/group_code/source`；
+    **`bd_task.source_type`**（今天恒为 `station`；将来片区 = 加 `zone_id` 可空 + `station_id` 改可空 +
+    `source_type='zone'`，任务表别的都不动）。
+    ⚠️ **线路名一律用 `bd_lines.line_label()` 显示**（`operator_short + name`）：MLIT 官方线路名会重名
+    （「本線」有京急/京成/西武/東武…；都営叫「12号線大江戸線」）→ 简称表在 `OPERATOR_SHORT`。
+  - **导入 = 幂等 + 必须认领历史站**（`app/services/bd_import_rail.py`，CLI `scripts/bd_import_rail.py`，
+    默认 dry-run、`--apply` 才写）：现有 515 个车站（来自 `万总/team_task/*.xlsx`，**带着队伍与担当**）
+    必须被**认领**（enrich 而不是新插）→ 否则同一个车站会有两个任务、队伍的派工白做。
+    认领顺序：① (line_id, name_norm) 已存在 → 用它；② 同名且 `line_id IS NULL` 的历史行：唯一候选就认领，
+    多候选时用**各自**的 `line` 串归一后比对线路名，唯一命中才认领（否则记账进 `unmatched`）；③ 其余新建。
+    **实测：1,920 = 认领 515 + 新建 1,405，515 个派工与任务全保留，认领后 0 悬挂**。
+    ⚠️ **老库的 `name_norm` 是旧口径写的**（`ケ` 没统一成 `ヶ`：库里"箱根ケ崎"、新口径"箱根ヶ崎"）→
+    导入时**顺手改写旧键**（`rep["renorm"]`），否则同名却认领不到而重复建站（实测 3 个）。
+  - **`norm_name()` 加了 ケ/ヶ 统一**（`app/services/bd_tasks.py`，全站唯一入口）：
+    `箱根ケ崎/箱根ヶ崎`、`茅ケ崎/茅ヶ崎`、`南阿佐ケ谷/南阿佐ヶ谷` 必须同键 —— 实测有 3 个站因这点对不上。
+  - **任务页 `/tasks` 三个 tab**（用户："任务分为已完成，已分配，未分配"）：tab 按**有没有人管**分，
+    **不是按 `state`** —— 因为"派给了团队但还没分到人"在 state 上仍是 `unassigned`，而管理员眼里
+    那是**已经派下去了**（515 个历史任务全属这类）：
+    `done` = pct=100；`assigned` = 未完成 且（有队伍 或 有担当 或 有进度）；`unassigned` = 未完成 且 三无。
+    `bd_tasks.BOARD_TABS` + `_apply_tab()` + `tab_counts()`（**计数只受其它筛选影响，不受当前 tab 影响**）。
+    **默认 tab = 未分配**（1,405 个待派活是管理员的行动面）。`tab_counts`/`task_board` 都走 SQL 子查询。
+  - **按线路查询**：任务页与车站页都有线路下拉（131 条，显示 `运营商简称 线路名（站数）`）；
+    `task_board(line_id=)`/`list_stations(line_id=)`。⚠️ **`kw` 关键词必须在 SQL 里过滤**（1,920 个任务 +
+    分页，只在当前页过滤等于"搜不到"）；⚠️ 关键词子查询里 **`BdLine` 必须显式 join**，只写
+    `BdLine.name.like()` 会跟 `bd_team` 笛卡尔积 → "任何一条线路命中 = 所有任务命中"
+    （实测搜「井の頭」返回全部 1,405 条）。
+  - **任务编号不显示**（核查过：任务页/详情页/车站页都没有编号列，只有表单隐藏字段 `task_id`）。
+  - 迁移 **`f9a8b7c6d5e4`**（新表 bd_line + bd_station 换键加列 + bd_task.source_type）。
+    本地库不跑 alembic → `scripts/bd_migrate_rail_local.py`（**不 import alembic**：本机 iCloud 会把 venv
+    文件驱逐成 dataless，import 直接超时）。本地 SQLite **不能 drop 唯一约束** → 用
+    「建新表→拷数据→删旧表→改名」（**不要**先 RENAME 旧表：SQLite ≥3.25 会改写别表的 FK）。
+    ⚠️ `to_metadata()` 必须传**同一个 metadata**（新表的 FK 指向 bd_line，空 MetaData 解析不到目标表）。
+  - **踩过的坑（都写死了测试）**：
+    ① **alembic revision id 撞车 = 环**：新迁移用了已被占用的 id（它是另一条链的父节点）→
+       `CycleDetected`，`alembic heads` 直接报错。**新建迁移先查 id 是否被占用**。
+    ② **真实导入不能用 dry-run 的临时负 id** → 131 条线路全成了负 id（URL 里 `?line=-19`）。
+       已修（dry 才发临时 id）+ `scripts/bd_fix_line_ids.py` 修数据（先把旧行改成唯一占位再插正 id 行，
+       否则撞 `uq_bd_line_op_name`）+ 测试 `test_import_rail_ids_are_positive`。
+    ③ `STATE_LABELS` 漏了 tab 键 `assigned` → 渲染出「已分配」**空标签**（页面显示「（515）」）→
+       测试 `test_board_tab_labels_all_present` 兜住。
+    ④ **本机 iCloud「优化存储」会把 `~/Documents` 里的文件驱逐**（`ls -lO` 显示 `dataless`）→
+       读文件超时（venv 里 116 个 .py 中招，`import alembic` ETIMEDOUT）。**开 VPN 时 iCloud 拉不回来。**
+       遇到就绕开（不 import 那个包）或让用户把项目移出 `~/Documents` / 关掉 iCloud 同步。
+    ⑤ 任务页分页改用统一组件 `app/services/paging.py` + `_pager.html`（`per=50`）。
+  - 测试：`tests_web/test_team_task.py` **87 项**（+数据文件自洽/导入幂等/认领历史站并保任务/旧键改写/
+    三个 tab 与计数/线路过滤与 SQL 关键词/正 id/标签齐全）；全量 `tests_web` **420 passed**
+    （`test_oauth.py::test_e2e_oauth_token_calls_mcp_tool` 在**未改代码的干净树上也失败**（MCP 子进程 502）
+    → 环境问题，与本轮无关）。
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

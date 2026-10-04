@@ -56,3 +56,20 @@ def qs(params, drop: str = "page") -> str:
     kv = [(k, v) for k, v in items if k != drop and v not in ("", None)]
     s = urlencode(kv)
     return (s + "&") if s else ""
+
+
+def info_from(total: int, page: int = 1, per: int = PER_DEFAULT) -> Pager:
+    """已知总数时构造分页对象（给"自己算 limit/offset"的调用方用，如任务总表）。
+
+    `paginate()` 也走这里，保证两条路径的字段完全一致。
+    """
+    per = max(1, min(int(per or PER_DEFAULT), PER_MAX))
+    total = int(total or 0)
+    pages = max(1, (total + per - 1) // per)
+    p = max(1, min(int(page or 1), pages))
+    return Pager({
+        "rows": [], "total": total, "page": p, "per": per, "pages": pages,
+        "has_prev": p > 1, "has_next": p < pages,
+        "start": (p - 1) * per + 1 if total else 0,
+        "end": min(p * per, total),
+    })

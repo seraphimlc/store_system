@@ -226,20 +226,23 @@ def team_members_save(request: Request, team_id: int,
 def stations_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), kw: str = "",
-                  status: str = "", no_task: str = "",
+                  status: str = "", no_task: str = "", line: str = "",
                   page: int = 1, per: int = 0,
                   msg: str = "", err: str = ""):
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_teams, bd_tasks, paging
+    from app.services import bd_teams, bd_tasks, bd_lines, paging
+    line_id = int(line) if str(line).strip().isdigit() else None
     pager = bd_tasks.list_stations(db, kw, status,
                                    only_without_task=bool(no_task),
-                                   page=page, per=per or paging.PER_DEFAULT)
+                                   page=page, per=per or paging.PER_DEFAULT,
+                                   line_id=line_id)
     return templates.TemplateResponse("bd_stations.html", {
         "request": request, "current_user": user, "rows": pager["rows"],
         "pager": pager, "page_qs": paging.qs(request.query_params),
         "kw": kw, "status": status, "no_task": no_task,
+        "lines": bd_lines.line_options(db), "line_id": line_id,
         "teams": bd_teams.team_options(db),
         "sum": bd_tasks.board_summary(db),
         "msg": msg, "err": err,
@@ -249,7 +252,7 @@ def stations_page(request: Request,
 @router.post("/stations/create")
 def station_create(request: Request, name: str = Form(""),
                    line: str = Form(""), note: str = Form(""),
-                   make_task: str = Form(""),
+                   line_id: str = Form(""), make_task: str = Form(""),
                    csrf_token: str = Form(""),
                    user: Optional[User] = Depends(require_login),
                    db: Session = Depends(get_db)):
@@ -260,7 +263,8 @@ def station_create(request: Request, name: str = Form(""),
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import bd_tasks
     try:
-        st = bd_tasks.create_station(db, name, line, note, by=user.username)
+        st = bd_tasks.create_station(db, name, line, note, by=user.username,
+                                     line_id=int(line_id) if line_id.strip().isdigit() else None)
         extra = ""
         if make_task:
             r = bd_tasks.create_tasks(db, [st.id], by=user.username)
@@ -277,7 +281,8 @@ def station_create(request: Request, name: str = Form(""),
 @router.post("/stations/{station_id}/edit")
 def station_edit(request: Request, station_id: int, name: str = Form(""),
                  line: str = Form(""), note: str = Form(""),
-                 status: str = Form(""), csrf_token: str = Form(""),
+                 line_id: str = Form(""), status: str = Form(""),
+                 csrf_token: str = Form(""),
                  user: Optional[User] = Depends(require_login),
                  db: Session = Depends(get_db)):
     g = _admin_guard(user)
@@ -288,7 +293,8 @@ def station_edit(request: Request, station_id: int, name: str = Form(""),
     from app.services import bd_tasks
     try:
         bd_tasks.update_station(db, station_id, name=name, line=line, note=note,
-                                status=status)
+                                status=status,
+                                line_id=int(line_id) if line_id.strip().isdigit() else None)
         db.commit()
         return RedirectResponse("/stations?msg=%s" % _q("已保存"),
                                 status_code=303)
@@ -367,29 +373,48 @@ def stations_set_team(request: Request,
 @router.get("/tasks", response_class=HTMLResponse)
 def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
                db: Session = Depends(get_db), team: str = "", state: str = "",
+               tab: str = "", line: str = "",
                date_from: str = "", date_to: str = "", kw: str = "",
                stale: str = "", page: int = 1, msg: str = "", err: str = ""):
+    """任务总表：三个 tab（未分配 / 已分配 / 已完成）+ 按线路/队/日期/关键词筛选。
+
+    用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"、"可以根据线路做查询"、
+    "车站即任务"（所以这一页就是任务列表，不再强调车站/任务的区别）。
+    """
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_leave, bd_teams, bd_tasks
+    from app.services import bd_leave, bd_teams, bd_tasks, bd_lines, paging
     try:
         team_id = int(team) if str(team).strip() else None
     except ValueError:
         team_id = None
-    limit = 200
+    line_id = int(line) if str(line).strip().isdigit() else None
+    tab = tab if tab in bd_tasks.BOARD_TABS else bd_tasks.TAB_UNASSIGNED
+    limit = paging.PER_DEFAULT
     page = max(1, int(page or 1))
-    d = bd_tasks.task_board(db, team_id=team_id, state=state,
+    d = bd_tasks.task_board(db, team_id=team_id, state=state, tab=tab,
+                            line_id=line_id,
                             date_from=_parse_date(date_from),
                             date_to=_parse_date(date_to), kw=kw,
                             stale_only=bool(stale),
                             limit=limit, offset=(page - 1) * limit)
+    pager = paging.info_from(d["total"], d["page"] if "page" in d else page, limit)
+    pager["rows"] = d["rows"]
     # 当日休假中的人（担当旁边标出来 —— 管理端一眼看到"活派给休假的人了"）
     leave_map = bd_leave.active_map(db)
     return templates.TemplateResponse("bd_tasks.html", {
         "request": request, "current_user": user,
-        "rows": d["rows"], "total": d["total"], "page": page, "limit": limit,
+        "rows": d["rows"], "total": d["total"], "page": pager["page"],
+        "limit": limit, "pager": pager,
+        "page_qs": paging.qs(request.query_params),
         "team_id": team_id, "teams": bd_teams.team_options(db),
+        "tab": tab, "tabs": bd_tasks.BOARD_TABS,
+        "tab_counts": bd_tasks.tab_counts(
+            db, team_id=team_id, line_id=line_id,
+            date_from=_parse_date(date_from), date_to=_parse_date(date_to),
+            kw=kw),
+        "lines": bd_lines.line_options(db), "line_id": line_id,
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
         "stale": stale, "stale_days": d["stale_days"],
         "leave_map": leave_map,

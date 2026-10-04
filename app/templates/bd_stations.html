@@ -15,7 +15,7 @@
   <div class="stat-card {% if sum.no_team %}warnk{% endif %}">
     <div class="k">{{ t('还没派给团队') }}</div><div class="v">{{ sum.no_team }}</div></div>
   <div class="stat-card"><div class="k">{{ t('未分配') }}</div><div class="v">{{ sum.unassigned }}</div></div>
-  <div class="stat-card"><div class="k">{{ t('进行中') }}</div><div class="v">{{ sum.doing }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('已分配') }}</div><div class="v">{{ sum.doing }}</div></div>
   <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div><div class="v">{{ sum.done }}</div></div>
 </div>
 
@@ -25,6 +25,14 @@
     <label class="fld">{{ t('车站 / 线路') }}
       <input type="text" name="kw" value="{{ kw }}"
              placeholder="{{ t('输入车站名或线路') }}" data-testid="station-kw">
+    </label>
+    <label class="fld">{{ t('线路') }}
+      <select name="line" data-testid="line-filter">
+        <option value="">{{ t('全部线路') }}</option>
+        {% for ln in lines %}
+        <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %}>{{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
+        {% endfor %}
+      </select>
     </label>
     <label class="fld">{{ t('状态') }}
       <select name="status">
@@ -57,8 +65,13 @@
       <input type="text" name="name" required data-testid="station-name"
              placeholder="{{ t('如 駒場東大前') }}">
     </label>
-    <label class="fld">{{ t('线路（可空）') }}
-      <input type="text" name="line" placeholder="{{ t('如 井の頭線') }}">
+    <label class="fld">{{ t('线路') }}
+      <select name="line_id">
+        <option value="">{{ t('（不指定线路）') }}</option>
+        {% for ln in lines %}
+        <option value="{{ ln.id }}">{{ ln.operator_short }} {{ ln.name }}</option>
+        {% endfor %}
+      </select>
     </label>
     <label class="fld">{{ t('备注（可空）') }}
       <input type="text" name="note">
@@ -122,13 +135,13 @@
       <td><input type="checkbox" name="station_id" value="{{ r.station.id }}"
                  form="bulk-team"></td>
       <td><b>{{ r.station.name }}</b></td>
-      <td>{{ r.station.line or '—' }}</td>
+      <td>{{ r.line_label or '—' }}</td>
       <td>{% if r.task %}#{{ r.task.id }}{% else %}<span class="hint">{{ t('未建') }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>
         {% if not r.task %}—
         {% elif r.state == 'unassigned' %}<span class="pill">{{ t('未分配') }}</span>
-        {% elif r.state == 'doing' %}<span class="pill warnk">{{ t('进行中') }}</span>
+        {% elif r.state == 'doing' %}<span class="pill warnk">{{ t('已分配') }}</span>
         {% else %}<span class="pill okk">{{ t('已完成') }}</span>{% endif %}
       </td>
       <td>{% if r.task %}{{ r.pct }}%{% else %}—{% endif %}</td>

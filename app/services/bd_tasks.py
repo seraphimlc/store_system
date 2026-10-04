@@ -27,15 +27,24 @@ STATE_DONE = "done"
 STATES = (STATE_UNASSIGNED, STATE_DOING, STATE_DONE)
 
 TAB_UNASSIGNED = "unassigned"
-TAB_DOING = "doing"
+TAB_DOING = "doing"          # 队长页的 tab 名（历史）；管理端用 TAB_ASSIGNED
+TAB_ASSIGNED = "assigned"
 TAB_DONE = "done"
 TABS = (TAB_UNASSIGNED, TAB_DOING, TAB_DONE)
+#: 管理端任务总表的 tab（用户 2026-10-05："任务分为已完成，已分配，未分配"）
+BOARD_TABS = (TAB_UNASSIGNED, TAB_ASSIGNED, TAB_DONE)
 
 MAX_ASSIGN = 2
 
 STATE_LABELS = {
-    "zh": {STATE_UNASSIGNED: "未分配", STATE_DOING: "进行中", STATE_DONE: "已完成"},
-    "ja": {STATE_UNASSIGNED: "未割当", STATE_DOING: "進行中", STATE_DONE: "完了"},
+    # 用户 2026-10-05 口径："任务分为已完成，已分配，未分配" —— 有担当/有进度但没完成
+    # 就叫「已分配」（不再叫"进行中"，那个词在管理端容易和"有没有派下去"混淆）
+    # ⚠️ "assigned" 是管理端 tab 的键（BOARD_TABS），必须也有标签 ——
+    # 漏了就会渲染出「（515）」这种空标签（2026-10-05 实测踩到）
+    "zh": {STATE_UNASSIGNED: "未分配", STATE_DOING: "已分配",
+           TAB_ASSIGNED: "已分配", STATE_DONE: "已完成"},
+    "ja": {STATE_UNASSIGNED: "未割当", STATE_DOING: "割当中",
+           TAB_ASSIGNED: "割当中", STATE_DONE: "完了"},
 }
 
 
@@ -52,10 +61,16 @@ class NotOpenError(TaskError):
 
 
 def norm_name(s: Optional[str]) -> str:
-    """车站名归一（NFKC + 去全部空白）——判重唯一入口。"""
+    """车站名归一（NFKC + 去全部空白 + **ケ/ヶ 统一**）——判重唯一入口。
+
+    ⚠️ ケ/ヶ 必须统一：同一个站在不同资料里写法不同（`箱根ケ崎` vs `箱根ヶ崎`、
+    `茅ケ崎` vs `茅ヶ崎`、`南阿佐ケ谷` vs `南阿佐ヶ谷`）—— 2026-10-05 导入 N02 实测
+    有 3 个站因为这点对不上而会**重复建任务**。
+    """
     import unicodedata
     t = unicodedata.normalize("NFKC", str(s or ""))
-    return "".join(t.split())
+    t = "".join(t.split()).replace("ケ", "ヶ").replace("ｹ", "ヶ")
+    return t
 
 
 def _today(today: Optional[date] = None) -> date:
@@ -98,8 +113,11 @@ def update_station(db: Session, station_id: int, name: Optional[str] = None,
         if not nm:
             raise TaskError("车站名不能为空")
         key = norm_name(nm)
-        dup = db.query(BdStation).filter(BdStation.name_norm == key,
-                                         BdStation.id != station_id).first()
+        # 一线一站：只在**同一条线路**内判重（同名跨线是允许的，用户口径先按线路来）
+        dup = (db.query(BdStation)
+               .filter(BdStation.name_norm == key,
+                       BdStation.line_id == st.line_id,
+                       BdStation.id != station_id).first())
         if dup is not None:
             raise NameExists("车站已存在：%s（不覆盖）" % nm)
         st.name, st.name_norm = nm, key
@@ -124,7 +142,7 @@ def update_station(db: Session, station_id: int, name: Optional[str] = None,
 
 def list_stations(db: Session, kw: str = "", status: str = "",
                   only_without_task: bool = False, page: int = 1,
-                  per: int = None) -> dict:
+                  per: int = None, line_id: Optional[int] = None) -> dict:
     """车站列表 + 任务概要（**分页**；本页内的任务/队名一次查询，避免 N+1）。
 
     2026-10-03 用户要求分页：515 个车站以前是**全量铺一屏**。
@@ -138,6 +156,8 @@ def list_stations(db: Session, kw: str = "", status: str = "",
         q = q.filter(or_(BdStation.name.like(like), BdStation.line.like(like)))
     if status in ("active", "closed"):
         q = q.filter(BdStation.status == status)
+    if line_id:
+        q = q.filter(BdStation.line_id == line_id)
     if only_without_task:
         sub = db.query(BdTask.id).filter(BdTask.station_id == BdStation.id)
         q = q.filter(~sub.exists())
@@ -150,10 +170,14 @@ def list_stations(db: Session, kw: str = "", status: str = "",
                  .filter(BdTask.station_id.in_([s.id for s in stations])).all())
         task_map = {t.station_id: t for t in tasks}
     team_names = {t.id: t.name for t in db.query(BdTeam).all()}
+    from app.models import BdLine
+    line_names = {l.id: "%s %s" % (l.operator_short, l.name)
+                  for l in db.query(BdLine).all()}
     out = []
     for s in stations:
         t = task_map.get(s.id)
         out.append({"station": s, "task": t,
+                    "line_label": line_names.get(s.line_id, s.line or ""),
                     "team_name": (team_names.get(t.team_id) if t else "") or "",
                     "state": (t.state if t else ""),
                     "pct": (t.pct if t else 0)})
@@ -677,36 +701,103 @@ def member_tasks(db: Session, person_code: Optional[str]) -> List[dict]:
     return _rows(db, tasks)
 
 
+def _has_assignee(db: Session):
+    """有担当的任务 id 子查询（tab 判定用，**在 SQL 里**，不能只在当前页算）。"""
+    return db.query(BdTaskAssign.task_id)
+
+
+def _apply_tab(q, db: Session, tab: str):
+    """三个 tab 的唯一口径（用户 2026-10-05："任务分为已完成，已分配，未分配"）。
+
+    按**有没有人管**分（不是按 state）—— 因为"派给了团队但还没分到人"在 state 上
+    仍是 `unassigned`，可对管理员来说那是**已经派下去了**（515 个历史任务全属这类）：
+    - `done`       已完成（pct=100）
+    - `assigned`   已分配 = 未完成 且（有队伍 或 有担当 或 有进度）
+    - `unassigned` 未分配 = 未完成 且 无队伍 且 无担当 且 无进度
+    """
+    if tab == TAB_DONE:
+        return q.filter(BdTask.state == STATE_DONE)
+    if tab in (TAB_DOING, TAB_ASSIGNED):       # 已分配
+        return q.filter(BdTask.state != STATE_DONE,
+                        or_(BdTask.team_id.isnot(None), BdTask.pct > 0,
+                            BdTask.id.in_(_has_assignee(db))))
+    if tab == TAB_UNASSIGNED:
+        return q.filter(BdTask.state != STATE_DONE, BdTask.team_id.is_(None),
+                        BdTask.pct == 0, ~BdTask.id.in_(_has_assignee(db)))
+    return q
+
+
+def tab_counts(db: Session, team_id: Optional[int] = None,
+               line_id: Optional[int] = None, date_from=None, date_to=None,
+               kw: str = "") -> dict:
+    """三个 tab 的数字（**只受其它筛选影响，不受 tab 自己影响**）。"""
+    out = {}
+    for tab in BOARD_TABS:
+        q = _base_query(db, team_id=team_id, line_id=line_id,
+                        date_from=date_from, date_to=date_to, kw=kw)
+        out[tab] = _apply_tab(q, db, tab).count()
+    out["all"] = sum(out.values())
+    return out
+
+
+def _base_query(db: Session, team_id: Optional[int] = None,
+                line_id: Optional[int] = None, date_from=None, date_to=None,
+                kw: str = ""):
+    """任务总表的基础筛选（tab 之外的公共条件）。"""
+    q = db.query(BdTask)
+    if team_id:
+        q = q.filter(BdTask.team_id == team_id)
+    if line_id:
+        q = q.filter(BdTask.id.in_(
+            db.query(BdTask.id).join(BdStation, BdStation.id == BdTask.station_id)
+            .filter(BdStation.line_id == line_id)))
+    if date_from is not None:
+        q = q.filter(BdTask.assign_date.isnot(None), BdTask.assign_date >= date_from)
+    if date_to is not None:
+        q = q.filter(BdTask.assign_date.isnot(None), BdTask.assign_date <= date_to)
+    if kw:
+        # ⚠️ 必须在 SQL 里过滤：1920 个任务 + 分页，只在当前页过滤等于"搜不到"
+        from app.models import BdLine
+        k = "%%%s%%" % kw.strip()
+        sub = (db.query(BdTask.id)
+               .join(BdStation, BdStation.id == BdTask.station_id)
+               .outerjoin(BdTeam, BdTeam.id == BdTask.team_id)
+               # ⚠️ BdLine 必须显式 join：只写 BdLine.name.like() 会跟 bd_team 笛卡尔积，
+               # 结果是"任何一条线路命中 → 所有任务命中"（2026-10-05 实测：搜"井の頭"返回全部 1405）
+               .outerjoin(BdLine, BdLine.id == BdStation.line_id)
+               .filter(or_(BdStation.name.like(k), BdStation.line.like(k),
+                           BdLine.name.like(k), BdLine.operator_short.like(k),
+                           BdTeam.name.like(k))))
+        q = q.filter(BdTask.id.in_(sub))
+    return q
+
+
 def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
                date_from: Optional[date] = None,
                date_to: Optional[date] = None, kw: str = "",
-               only_assigned: bool = True, stale_only: bool = False,
-               stale_days: int = 2,
+               only_assigned: bool = False, stale_only: bool = False,
+               stale_days: int = 2, tab: str = "",
+               line_id: Optional[int] = None,
                limit: int = 500, offset: int = 0) -> dict:
-    """**管理端任务总表**：默认只看"已分配"（派给了团队）的任务。
+    """**管理端任务总表**（tab = 未分配 / 已分配 / 已完成，可按线路过滤）。
 
     - `date_from/date_to` 按**分配日期**区间过滤（用户要求）
     - `stale_only` = 只看"停滞"（未完成 且 ≥`stale_days` 天没更新，或从没提交）
     """
-    q = db.query(BdTask)
+    q = _base_query(db, team_id=team_id, line_id=line_id,
+                    date_from=date_from, date_to=date_to, kw=kw)
     if only_assigned:
         q = q.filter(BdTask.team_id.isnot(None))
-    if team_id:
-        q = q.filter(BdTask.team_id == team_id)
     if state in STATES:
         q = q.filter(BdTask.state == state)
+    if tab in BOARD_TABS:
+        q = _apply_tab(q, db, tab)
     if stale_only:
         from datetime import timedelta as _td
         cutoff = date.today() - _td(days=max(0, stale_days))
         recent = (db.query(BdTaskProgress.task_id)
                   .filter(BdTaskProgress.progress_date >= cutoff))
         q = q.filter(BdTask.state != STATE_DONE, BdTask.id.notin_(recent))
-    if date_from is not None:
-        q = q.filter(BdTask.assign_date.isnot(None),
-                     BdTask.assign_date >= date_from)
-    if date_to is not None:
-        q = q.filter(BdTask.assign_date.isnot(None),
-                     BdTask.assign_date <= date_to)
     total = q.count()
     tasks = (q.order_by(BdTask.assign_date.desc().nullslast(),
                         BdTask.id.asc())
@@ -714,12 +805,8 @@ def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
     rows = _rows(db, tasks)
     if stale_only:
         rows = [r for r in rows if r["stale"]]
-    if kw:
-        k = kw.strip()
-        rows = [r for r in rows if k in (r["station_name"] or "")
-                or k in (r["team_name"] or "")]
     return {"rows": rows, "total": total, "offset": offset, "limit": limit,
-            "stale_days": stale_days}
+            "stale_days": stale_days, "tab": tab, "line_id": line_id}
 
 
 def team_board_summary(db: Session, stale_days: int = 2) -> List[dict]:
@@ -804,7 +891,8 @@ def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
 
 
 def station_ids_without_task(db: Session, kw: str = "",
-                            status: str = "") -> List[int]:
+                            status: str = "",
+                            line_id: Optional[int] = None) -> List[int]:
     """**所有**「还没有任务」的车站 id（不分页；批量建任务用）。
 
     分页只影响列表展示，批量操作要作用于**全集** —— 不能只拿当前页。
@@ -816,4 +904,6 @@ def station_ids_without_task(db: Session, kw: str = "",
         q = q.filter(or_(BdStation.name.like(like), BdStation.line.like(like)))
     if status in ("active", "closed"):
         q = q.filter(BdStation.status == status)
+    if line_id:
+        q = q.filter(BdStation.line_id == line_id)
     return [i for (i,) in q.order_by(BdStation.id.asc()).all()]

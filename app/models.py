@@ -966,21 +966,78 @@ class BdTeamMember(Base):
     created_at = Column(DateTime, nullable=False, default=_now)
 
 
+class BdLine(Base):
+    """铁道线路主档（车站的上级）。
+
+    数据来源：**国土数値情報 N02（鉄道）** —— `scripts/bd_fetch_rail.py` 抓取并生成
+    `scripts/bd_kanto_rail.json`，`scripts/bd_import_rail.py` 导入。一都三県 ≈ 131 线。
+
+    ⚠️ `name` 是 MLIT 的**官方线路名**，单看会重名（「本線」有京急/京成/西武…，
+    都営是「12号線大江戸線」）→ **界面一律显示 `operator_short + name`**（如「京急 本線」）。
+    `kind` 是粗分类（jr / shinkansen / private / public / third / monorail / agt / tram / cable）。
+    """
+    __tablename__ = "bd_line"
+    __table_args__ = (
+        UniqueConstraint("operator", "name", name="uq_bd_line_op_name"),
+        Index("ix_bd_line_kind", "kind"),
+        Index("ix_bd_line_name_norm", "name_norm"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    name_norm = Column(String(64), nullable=False)          # NFKC + 去空白
+    operator = Column(String(64), nullable=False)           # MLIT 运营公司全名
+    operator_short = Column(String(32), nullable=False, default="", server_default="")
+    kind = Column(String(16), nullable=False, default="", server_default="")
+    prefs = Column(String(32), nullable=False, default="", server_default="")
+    n_station = Column(Integer, nullable=False, default=0, server_default="0")
+    source = Column(String(16), nullable=False, default="mlit", server_default="mlit")
+    note = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
 class BdStation(Base):
     """车站主数据（一个站 = 一个站前商圈 = 用户口中的"一边区域"）。
 
     只存主数据；任务/担当/进展在 `bd_task*` 上。
-    `name_norm` 是判重键（NFKC + 去空白）。
+    `name_norm` 是站名判重键（NFKC + 去空白 + **ケ/ヶ 统一**）。
+
+    ⚠️ **一线一站**（用户 2026-10-03 口径）：唯一键 = `(line_id, name_norm)`。
+    同一个物理车站跨多条线路时**现在按线路各存一行**（东京站 ×山手線/中央線/…），
+    将来再定合并规则 —— `group_code`（N02_005g，MLIT 的同一车站分组码）已存下来，
+    合并时用它 + 坐标即可（用户："知道有这个坑就行，先不处理"）。
+    `line_id` 为空的历史/手工行，用 `uq_bd_station_noline_name` 保证站名不重复。
     """
     __tablename__ = "bd_station"
     __table_args__ = (
-        UniqueConstraint("name_norm", name="uq_bd_station_name"),
+        Index("uq_bd_station_line_name", "line_id", "name_norm", unique=True,
+              sqlite_where=text("line_id IS NOT NULL"),
+              postgresql_where=text("line_id IS NOT NULL")),
+        Index("uq_bd_station_noline_name", "name_norm", unique=True,
+              sqlite_where=text("line_id IS NULL"),
+              postgresql_where=text("line_id IS NULL")),
         Index("ix_bd_station_line", "line"),
+        Index("ix_bd_station_line_id", "line_id"),
+        Index("ix_bd_station_pref", "pref"),
+        Index("ix_bd_station_group_code", "group_code"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(64), nullable=False)
     name_norm = Column(String(64), nullable=False)
     line = Column(String(64), nullable=False, default="", server_default="")
+    #: 线路主档（N02 导入的行都有；手工建且没填线路的行可能为空）
+    line_id = Column(Integer, ForeignKey("bd_line.id"), nullable=True)
+    #: MLIT 运营公司全名（冗余，列表页不用 join）
+    operator = Column(String(64), nullable=False, default="", server_default="")
+    #: JIS 都道府県码（13=東京都 / 11=埼玉 / 12=千葉 / 14=神奈川）
+    pref = Column(String(8), nullable=False, default="", server_default="")
+    lon = Column(Float, nullable=True)
+    lat = Column(Float, nullable=True)
+    #: N02_005c 駅コード / N02_005g 同一駅グループコード（将来の合并用）
+    ekicode = Column(String(16), nullable=False, default="", server_default="")
+    group_code = Column(String(16), nullable=False, default="", server_default="")
+    source = Column(String(16), nullable=False, default="manual",
+                    server_default="manual")           # manual / mlit
     note = Column(Text, nullable=False, default="", server_default="")
     status = Column(String(16), nullable=False, default="active",
                     server_default="active")          # active / closed
@@ -989,9 +1046,12 @@ class BdStation(Base):
 
 
 class BdTask(Base):
-    """任务 = 一个车站（用户口径：「每一个站点都定义成一个任务」）。
+    """任务 = 一件要做的活；**来源可以是车站，将来也可以是片区**。
 
-    - **一个车站一个任务**（UNIQUE(station_id)）
+    - 现在：**一个车站一个任务**（`UNIQUE(station_id)`），用户口径「车站即任务」
+    - `source_type`：任务来源判别（今天恒为 `station`）。将来以**片区**当任务时：
+      加 `zone_id`（可空）+ `station_id` 改可空 + `source_type='zone'`，任务表别的都不动
+    - `assign_date`：**分配日期**（管理员把任务派给团队的日期）→ 管理端按区间查询
     - `assign_date`：**分配日期**（管理员把任务派给团队的日期）→ 管理端按区间查询
     - `state`：unassigned 未分配 / doing 进行中 / done 已完成
       （由担当 + 进度推导，服务层统一维护）
@@ -1005,6 +1065,9 @@ class BdTask(Base):
         Index("ix_bd_task_state", "state"),
     )
     id = Column(Integer, primary_key=True)
+    #: 任务来源判别：station（现在）/ zone（将来片区）
+    source_type = Column(String(16), nullable=False, default="station",
+                         server_default="station")
     station_id = Column(Integer, ForeignKey("bd_station.id"), nullable=False)
     team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=True)
     assign_date = Column(Date, nullable=True)        # 分配日期（派给团队那天）

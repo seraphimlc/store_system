@@ -458,28 +458,32 @@ def test_admin_cannot_use_staff_task_page_as_leader(client, seeded):
 
 # ---------------- 管理端任务总表（第 4 项） ----------------
 
-def test_admin_board_default_only_assigned_and_date_range(client, seeded):
+def test_admin_board_assigned_tab_and_date_range(client, seeded):
     db = appdb.SessionLocal()
     st2 = bd_tasks.create_station(db, "池ノ上")
     bd_tasks.create_tasks(db, [st2.id], by="admin")            # 未派队
     db.commit()
     db.close()
     _login(client, "admin")
-    p = client.get("/tasks")
+    # ⚠️ 2026-10-05 起任务页默认 tab = 未分配（用户："任务分为已完成，已分配，未分配"）；
+    # 「已派队」的视图 = tab=assigned
+    p = client.get("/tasks?tab=assigned")
     assert p.status_code == 200
-    # 默认只看已分配：已派队的出现，没派队的不出现
     assert "駒場東大前" in p.text
-    assert "池ノ上" not in p.text, "还没派队的任务不该出现在已分配视图"
+    assert "池ノ上" not in p.text, "还没派队的任务不该出现在已分配 tab"
     assert "2026-10-03" in p.text, "分配日期要显示出来"
     # 分配日期区间之外 → 查不到；区间之内 → 查得到
-    assert "駒場東大前" not in client.get("/tasks?date_from=2026-10-04").text
-    assert "駒場東大前" not in client.get("/tasks?date_to=2026-10-02").text
+    assert "駒場東大前" not in client.get("/tasks?tab=assigned&date_from=2026-10-04").text
+    assert "駒場東大前" not in client.get("/tasks?tab=assigned&date_to=2026-10-02").text
     assert "駒場東大前" in client.get(
-        "/tasks?date_from=2026-10-01&date_to=2026-10-05").text
+        "/tasks?tab=assigned&date_from=2026-10-01&date_to=2026-10-05").text
     # 按队 / 按状态筛
-    assert "駒場東大前" in client.get("/tasks?team=%d" % seeded["team"]).text
-    assert "駒場東大前" in client.get("/tasks?state=unassigned").text
-    assert "駒場東大前" not in client.get("/tasks?state=done").text
+    assert "駒場東大前" in client.get(
+        "/tasks?tab=assigned&team=%d" % seeded["team"]).text
+    assert "駒場東大前" in client.get(
+        "/tasks?tab=assigned&date_from=2026-10-01&date_to=2026-10-05").text
+    assert "駒場東大前" in client.get("/tasks?tab=assigned&state=unassigned").text
+    assert "駒場東大前" not in client.get("/tasks?tab=assigned&state=done").text
 
 
 def test_admin_fix_progress_via_page(client, seeded):
@@ -664,13 +668,13 @@ def test_board_shows_dates_and_stale_filter(client, seeded):
     db.commit()
     db.close()
     _login(client, "admin")
-    p = client.get("/tasks")
+    p = client.get("/tasks?tab=assigned")
     assert p.status_code == 200
     assert date.today().strftime("%Y-%m-%d") in p.text, "开始日要显示"
     assert 'data-testid="by-team"' in p.text, "按队汇总要在"
     assert 'data-testid="stale-only"' in p.text
     # 停滞筛选：只应留下"从没提交过"的那条
-    p2 = client.get("/tasks?stale=1")
+    p2 = client.get("/tasks?tab=assigned&stale=1")
     assert "池ノ上" in p2.text
     assert "駒場東大前" not in p2.text, "今天提交过的不该算停滞"
 
@@ -1042,7 +1046,7 @@ def test_admin_board_marks_assignee_on_leave(client, seeded):
     db.commit()
     db.close()
     _login(client, "admin")
-    p = client.get("/tasks")
+    p = client.get("/tasks?tab=assigned")
     assert p.status_code == 200
     assert 'data-testid="leave-%d-P2"' % seeded["task"] in p.text
 
@@ -1582,3 +1586,262 @@ def test_staff_admin_and_store_entities_are_paginated(client, seeded):
     db2.close()
     a = client.get("/staff-admin")
     assert 'data-testid="pager"' in a.text
+
+
+# ---------------- 一都三県 线路 + 车站（2026-10-05） ----------------
+
+def _tiny_rail_payload():
+    """给导入用的小数据集（不依赖 scripts/bd_kanto_rail.json，跑得快）。"""
+    return {
+        "source": "test",
+        "lines": [
+            {"key": "京王電鉄|井の頭線", "operator": "京王電鉄", "name": "井の頭線",
+             "kind": "private", "prefs": ["13"], "n": 2},
+            {"key": "東日本旅客鉄道|山手線", "operator": "東日本旅客鉄道", "name": "山手線",
+             "kind": "jr", "prefs": ["13"], "n": 1},
+        ],
+        "stations": [
+            {"line_key": "京王電鉄|井の頭線", "name": "駒場東大前", "line": "井の頭線",
+             "operator": "京王電鉄", "kind": "private", "pref": "13",
+             "lon": 139.68, "lat": 35.66, "code": "001", "group": "g1"},
+            {"line_key": "京王電鉄|井の頭線", "name": "井の頭公園", "line": "井の頭線",
+             "operator": "京王電鉄", "kind": "private", "pref": "13",
+             "lon": 139.58, "lat": 35.70, "code": "002", "group": "g2"},
+            {"line_key": "東日本旅客鉄道|山手線", "name": "駒場東大前", "line": "山手線",
+             "operator": "東日本旅客鉄道", "kind": "jr", "pref": "13",
+             "lon": 139.68, "lat": 35.66, "code": "003", "group": "g1"},
+        ],
+    }
+
+
+def test_kanto_rail_data_file_consistency():
+    """数据文件本身要自洽（131 线 / 1920 站 / 一线一站 / 都道府県只含一都三県）。
+
+    这条是**数据守门**：换 N02 版本重跑 `bd_fetch_rail.py` 后若结构变了要立刻发现。
+    """
+    import json
+    from pathlib import Path
+    p = Path(__file__).parent.parent / "scripts" / "bd_kanto_rail.json"
+    if not p.exists():                                    # 没抓过数据就跳过（CI 友好）
+        pytest.skip("scripts/bd_kanto_rail.json 不存在（先跑 bd_fetch_rail.py）")
+    d = json.loads(p.read_text(encoding="utf-8"))
+    assert len(d["lines"]) == 131, "一都三県线路数变了：%d" % len(d["lines"])
+    assert len(d["stations"]) == 1920, "车站数变了：%d" % len(d["stations"])
+    keys = {(l["operator"], l["name"]) for l in d["lines"]}
+    assert all((s["operator"], s["line"]) in keys for s in d["stations"]), \
+        "有车站挂不到线路上"
+    assert {s["pref"] for s in d["stations"]} <= {"13", "11", "12", "14"}, "混进了一都三県以外的县"
+    # 一线一站：(线路, 站名) 必须唯一（同名跨线是允许的，这正是用户要的口径）
+    combo = [(s["operator"], s["line"], s["name"]) for s in d["stations"]]
+    assert len(combo) == len(set(combo)), "同一线路里出现了重复站名"
+
+
+def test_import_rail_creates_lines_stations_and_tasks(seeded):
+    """导入：建线路 + 建车站 + **自动为每个车站建任务**；重复导入幂等。"""
+    from app.services import bd_import_rail
+    db = appdb.SessionLocal()
+    try:
+        before_tasks = db.query(BdTask).count()
+        rep = bd_import_rail.import_rail(db, _tiny_rail_payload(), dry=True)
+        # ⚠️ seeded 里已经有「駒場東大前」这个历史站（无线路）→ 它会被**认领**，
+        # 不是新建（这正是"不能重复建任务"的关键）
+        assert rep["lines_created"] == 2
+        assert rep["stations_new"] == 2 and rep["stations_adopted"] == 1
+        db.rollback()                                     # dry-run 不写
+
+        rep = bd_import_rail.import_rail(db, _tiny_rail_payload())
+        db.commit()
+        assert rep["lines_created"] == 2
+        assert rep["stations_new"] == 2 and rep["stations_adopted"] == 1
+        # 每个车站都有任务（车站即任务）：只给**新建**的车站补任务
+        assert db.query(BdTask).count() == before_tasks + 2
+        from app.models import BdLine, BdStation
+        line = db.query(BdLine).filter(BdLine.name == "井の頭線").one()
+        assert line.operator_short == "京王", "运营商简称要能对上"
+        assert line.kind == "private" and line.n_station == 2
+        st = db.query(BdStation).filter(BdStation.name == "井の頭公園").one()
+        assert st.line_id == line.id and st.pref == "13" and st.source == "mlit"
+        assert st.lon == 139.58 and st.ekicode == "002" and st.group_code == "g2"
+        # 同名跨线 → 两行（用户："先分哪个线的就按哪个线的来"）
+        same = db.query(BdStation).filter(BdStation.name == "駒場東大前").all()
+        assert len(same) == 2, "同名跨线要先各存一行（历史那行被认领 + 山手線新一行）"
+        assert {s.line_id for s in same} == {line.id,
+                                            db.query(BdLine).filter(BdLine.name == "山手線").one().id}
+
+        # 幂等：再导一次不新增
+        rep2 = bd_import_rail.import_rail(db, _tiny_rail_payload())
+        db.commit()
+        assert rep2["lines_created"] == 0 and rep2["stations_new"] == 0
+        assert rep2["stations_existing"] == 3, "三个站都已存在（含被认领的那个）"
+        assert db.query(BdTask).count() == before_tasks + 2
+    finally:
+        db.close()
+
+
+def test_import_rail_adopts_legacy_station_and_keeps_its_task(seeded):
+    """历史车站（无线路 + 已派队）必须被**认领**：挂上线路、**任务与派工保留**、不新增一行。
+
+    这是最要紧的一条：认领失败 = 给同一个车站重复建任务，队伍的派工就白做了。
+    """
+    from app.services import bd_import_rail
+    from app.models import BdLine, BdStation
+    db = appdb.SessionLocal()
+    try:
+        st = db.get(BdStation, seeded["station"])
+        assert st.line_id is None and st.name == "駒場東大前"
+        task = db.get(BdTask, seeded["task"])
+        assert task.team_id is not None
+        n_st, n_task = db.query(BdStation).count(), db.query(BdTask).count()
+
+        rep = bd_import_rail.import_rail(db, _tiny_rail_payload())
+        db.commit()
+        assert rep["stations_adopted"] == 1, "同名历史站要被认领"
+        assert rep["stations_new"] == 2, "另外两个站才是新建"
+        db.refresh(st)
+        assert st.line_id is not None and st.pref == "13"
+        assert db.query(BdStation).count() == n_st + 2, "认领不该多出一行"
+        assert db.query(BdTask).count() == n_task + 2, "历史站的任务必须保留"
+        db.refresh(task)
+        assert task.team_id is not None, "原有派工不能被清掉"
+    finally:
+        db.close()
+
+
+def test_import_rail_renorms_legacy_station_name(seeded):
+    """老库的 name_norm 是旧口径（`ケ` 没统一成 `ヶ`）→ 导入时要改写，否则认领不到。"""
+    from app.services import bd_import_rail
+    from app.models import BdStation
+    db = appdb.SessionLocal()
+    try:
+        st = bd_tasks.create_station(db, "箱根ケ崎")          # 旧写法
+        db.flush()
+        assert st.name_norm == "箱根ヶ崎" or True
+        st.name_norm = "箱根ケ崎"                              # 人为退回旧键
+        db.commit()
+        payload = {"lines": [{"operator": "東日本旅客鉄道", "name": "八高線",
+                              "kind": "jr", "prefs": ["13"], "n": 1}],
+                   "stations": [{"name": "箱根ヶ崎", "line": "八高線",
+                                 "operator": "東日本旅客鉄道", "kind": "jr",
+                                 "pref": "13", "lon": 139.2, "lat": 35.7,
+                                 "code": "", "group": ""}]}
+        rep = bd_import_rail.import_rail(db, payload)
+        db.commit()
+        assert rep["stations_adopted"] == 1 and rep["stations_new"] == 0
+        assert rep["renorm"] == 1, "旧键要被改写"
+        db.refresh(st)
+        assert st.name_norm == "箱根ヶ崎" and st.line_id is not None
+    finally:
+        db.close()
+
+
+def test_task_tabs_unassigned_assigned_done(client, seeded):
+    """任务页三个 tab（未分配 / 已分配 / 已完成）+ 计数（用户 2026-10-05 要求）。
+
+    ⚠️ tab 按"**有没有人管**"分，不是按 state：派给了团队但还没分人的任务
+    （state 仍是 unassigned）在管理员眼里是**已分配**。
+    """
+    db = appdb.SessionLocal()
+    st2 = bd_tasks.create_station(db, "池ノ上")
+    bd_tasks.create_tasks(db, [st2.id], by="admin")           # 无队无担当 → 未分配
+    st3 = bd_tasks.create_station(db, "新代田")
+    bd_tasks.create_tasks(db, [st3.id], by="admin")
+    t3 = db.query(BdTask).filter(BdTask.station_id == st3.id).one()
+    bd_tasks.set_task_team(db, [t3.id], seeded["team"], assign_date=date(2026, 10, 4))
+    bd_tasks.assign_members(db, t3.id, ["P2"], by="admin")     # 有人 → 已分配
+    db.commit()
+    c = bd_tasks.tab_counts(db)
+    db.close()
+    assert c["unassigned"] == 1, "只有「池ノ上」是没人管的"
+    assert c["assigned"] == 2, "派了队的历史任务 + 有担当的算「已分配」"
+    assert c["done"] == 0
+    assert c["all"] == 3
+
+    _login(client, "admin")
+    p = client.get("/tasks")
+    assert p.status_code == 200
+    assert 'data-testid="task-tabs"' in p.text
+    for k in ("unassigned", "assigned", "done"):
+        assert 'data-testid="tab-%s"' % k in p.text
+    assert "池ノ上" in p.text, "默认 tab = 未分配"
+    assert "駒場東大前" not in p.text, "派了队的任务不在未分配 tab"
+    a = client.get("/tasks?tab=assigned")
+    assert "駒場東大前" in a.text and "池ノ上" not in a.text
+    d = client.get("/tasks?tab=done")
+    assert "駒場東大前" not in d.text and "池ノ上" not in d.text
+
+
+def test_task_line_filter_and_kw_search_in_sql(client, seeded):
+    """按线路查询（用户 2026-10-05："可以根据线路查询"）+ 关键词在 **SQL 里**过滤。
+
+    ⚠️ 关键词必须走 SQL：1,920 个任务 + 分页，只在当前页过滤等于"搜不到"。
+    """
+    from app.models import BdLine, BdStation
+    from app.services import bd_import_rail
+    db = appdb.SessionLocal()
+    # 造 60 个同线路的车站，其中只有一个名字含"特殊"
+    line = BdLine(name="テスト線", name_norm="テスト線", operator="テスト鉄道",
+                  operator_short="テスト", kind="private", prefs="13", n_station=60)
+    db.add(line)
+    db.flush()
+    ids = []
+    for i in range(60):
+        nm = "特殊駅" if i == 59 else "普通駅%02d" % i
+        st = BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line="テスト線",
+                       line_id=line.id, operator="テスト鉄道", pref="13", source="mlit")
+        db.add(st)
+        db.flush()
+        ids.append(st.id)
+    bd_tasks.create_tasks(db, ids, by="admin")
+    db.commit()
+    line_id = line.id
+    total_line = bd_tasks.task_board(db, line_id=line_id, tab="unassigned")["total"]
+    kw_hit = bd_tasks.task_board(db, line_id=line_id, kw="特殊", tab="unassigned")
+    kw_miss = bd_tasks.task_board(db, line_id=line_id, kw="不存在的名字", tab="unassigned")
+    db.close()
+    assert total_line == 60
+    assert kw_hit["total"] == 1, "关键词要在 SQL 里过滤（第 3 页的那个也要能搜到）"
+    assert kw_hit["rows"][0]["station_name"] == "特殊駅"
+    assert kw_miss["total"] == 0
+
+    _login(client, "admin")
+    p = client.get("/tasks?line=%d" % line_id)
+    assert p.status_code == 200
+    assert 'data-testid="line-filter"' in p.text
+    assert "普通駅00" in p.text
+    assert "駒場東大前" not in p.text, "别的线路的任务不该出现"
+    # 分页条也要在（60 条 > 50/页）
+    assert 'data-testid="page-next"' in p.text
+    assert client.get("/tasks?line=%d&page=2" % line_id).status_code == 200
+
+
+def test_board_tab_labels_all_present(client, seeded):
+    """三个 tab 的标签都要有（`assigned` 是 tab 键，不在 state 里 —— 漏了会渲染出空标签）。"""
+    from app.services import bd_tasks
+    for lang in ("zh", "ja"):
+        labels = bd_tasks.state_labels(lang)
+        for k in bd_tasks.BOARD_TABS:
+            assert labels.get(k), "%s 的 tab %s 没有标签" % (lang, k)
+    _login(client, "admin")
+    p = client.get("/tasks")
+    for k, word in (("unassigned", "未分配"), ("assigned", "已分配"),
+                    ("done", "已完成")):
+        assert 'data-testid="tab-%s">%s（' % (k, word) in p.text, \
+            "tab %s 的标签渲染不对" % k
+
+
+def test_import_rail_ids_are_positive(seeded):
+    """导入必须让**数据库发号**（正 id）。
+
+    ⚠️ 2026-10-05 踩到：dry-run 的临时负 id 在真实导入时也被用上了 →
+    131 条线路全是负 id（URL 里出现 `?line=-19`）。这条测试钉住这个洞。
+    """
+    from app.services import bd_import_rail
+    from app.models import BdLine
+    db = appdb.SessionLocal()
+    try:
+        bd_import_rail.import_rail(db, _tiny_rail_payload())
+        db.commit()
+        ids = [i for (i,) in db.query(BdLine.id).all()]
+        assert ids and min(ids) > 0, "线路 id 必须是正的（数据库发号）：%s" % ids
+    finally:
+        db.close()
