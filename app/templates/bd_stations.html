@@ -128,7 +128,7 @@
   <thead>
     <tr>
       <th style="width:2.6rem"></th>
-      <th>{{ t('车站') }}</th><th>{{ t('线路') }}</th>
+      <th>{{ t('顺序') }}</th><th>{{ t('车站') }}</th><th>{{ t('线路') }}</th>
       <th>{{ t('所属团队') }}</th><th>{{ t('状态') }}</th><th>{{ t('进度') }}</th>
       <th></th>
     </tr>
@@ -138,6 +138,9 @@
     <tr data-testid="station-row">
       <td><input type="checkbox" name="station_id" value="{{ r.station.id }}"
                  form="bulk-team"></td>
+      <td>{% if r.station.seq %}<b>{{ r.station.seq }}</b>{% if r.station.along_km is not none %}
+        <span class="hint">{{ '%.1f'|format(r.station.along_km) }}km</span>{% endif %}
+        {% else %}<span class="hint">—</span>{% endif %}</td>
       <td><b>{{ r.station.name }}</b>
         {% if r.n_line > 1 %}<span class="pill" data-testid="multi-line-{{ r.station.id }}"
               title="{{ r.lines_text }}">{{ r.n_line }} {{ t('条线') }}</span>{% endif %}</td>
@@ -166,11 +169,14 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="empty">{{ t('没有车站，先新建或用脚本导入') }}</td></tr>
+    <tr><td colspan="8" class="empty">{{ t('没有车站，先新建或用脚本导入') }}</td></tr>
     {% endfor %}
   </tbody>
 </table>
   {% include "_pager.html" %}
+<p class="hint" style="margin-top:.6rem">
+  {{ t('线路顺序数据') }} © <a href="https://www.openstreetmap.org/copyright" target="_blank"
+  rel="noopener">OpenStreetMap</a> contributors（ODbL）</p>
 </div>
 
 <dialog id="st-dlg" class="edit-dlg" data-testid="station-edit-dialog">

@@ -169,6 +169,9 @@ def list_stations(db: Session, kw: str = "", status: str = "",
     2026-10-03 用户要求分页：515 个车站以前是**全量铺一屏**。
     `only_without_task` 改在 **SQL 里**过滤（子查询 NOT EXISTS）——
     否则分页只对"过滤后的 Python 列表"生效，`total` 会算错。
+
+    **按线路查时按 `seq`（沿線顺序）排序**（用户 2026-10-05："后面我们查的时候就拿这列做
+    order 排序"）—— 顺序来自 OSM 的运行系统线路（`bd_fill_seq.py`），取不到的排最后。
     """
     from app.services import paging as _pg
     q = db.query(BdStation)
@@ -182,8 +185,10 @@ def list_stations(db: Session, kw: str = "", status: str = "",
     if only_without_task:
         sub = db.query(BdTask.id).filter(BdTask.station_id == BdStation.id)
         q = q.filter(~sub.exists())
-    pg = _pg.paginate(q.order_by(BdStation.id.asc()), page,
-                      per or _pg.PER_DEFAULT)
+    # 选了线路 → 按沿線顺序排（seq 空的排最后）；否则按 id（老行为）
+    order = ([BdStation.seq.is_(None), BdStation.seq.asc(), BdStation.id.asc()]
+             if line_id else [BdStation.id.asc()])
+    pg = _pg.paginate(q.order_by(*order), page, per or _pg.PER_DEFAULT)
     stations = pg["rows"]
     task_map = {}
     if stations:

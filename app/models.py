@@ -1083,6 +1083,16 @@ class BdStation(Base):
     #: N02_005c 駅コード / N02_005g 同一駅グループコード（将来の合并用）
     ekicode = Column(String(16), nullable=False, default="", server_default="")
     group_code = Column(String(16), nullable=False, default="", server_default="")
+    #: **沿线顺序**（1 起）——「按线路选站」时用来排序（用户 2026-10-05：
+    #: "直接在现有的车站表里加一列，后面我们查的时候就拿这列做 order 排序"）
+    #: ⚠️ 来源是 **OSM 的"运行系统线路"**（山手線 = 30 站一圈），不是 N02 官方线路口径
+    #:   （N02 把山手环拆成 山手線17 + 東北線 + 東海道線）→ 所以同一 N02 线路内的 seq
+    #:   **可能不连续，但相对顺序是对的**（排序只看相对大小，不看是否 1..N 连号）
+    seq = Column(Integer, nullable=True)
+    #: 沿线里程（km，从该运行系统线路的起点站算）—— 判断"这一站离市中心多远"
+    along_km = Column(Float, nullable=True)
+    #: 顺序来源标记（如 `osm:JR山手線`），空 = 没取到顺序
+    seq_src = Column(String(64), nullable=False, default="", server_default="")
     source = Column(String(16), nullable=False, default="manual",
                     server_default="manual")           # manual / mlit
     note = Column(Text, nullable=False, default="", server_default="")

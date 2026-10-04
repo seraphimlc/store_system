@@ -1971,3 +1971,92 @@ def test_stations_page_shows_asset_and_no_task_id(client, seeded):
     for word in ("物理车站", "跨线车站", "车站（站×线）"):
         assert word in p.text, "资产统计卡要有「%s」" % word
     assert "#%d" % seeded["task"] not in p.text, "不许显示任务编号（#id）"
+
+
+# ---------------- 沿線顺序（OSM 数据源，2026-10-05） ----------------
+
+def _load_script(name):
+    """按文件路径加载 scripts/ 下的脚本（scripts 不是包，没有 __init__.py）。"""
+    import importlib.util
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "scripts", name)
+    spec = importlib.util.spec_from_file_location(name.replace(".py", ""), path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_osm_route_data_is_ordered_and_licensed():
+    """顺序数据来自 OSM（**明文有序，不是我们算的**），且带 ODbL 署名信息。
+
+    用户 2026-10-05："你应该还能找到其它的数据源来确定这个顺序，而不是计算出来"
+    → 选 A（OSM route relation 的成员本身有序）。
+    """
+    import json
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "scripts", "bd_osm_routes.json")
+    assert os.path.exists(p), "OSM 顺序数据文件必须在仓库里（导入时不需要网络）"
+    d = json.load(open(p, encoding="utf-8"))
+    assert d["n_route"] >= 100, "一都三县应该有上百条运行系统线路"
+    assert "ODbL" in d["license"] and "OpenStreetMap" in d["license"], "许可必须写明"
+    keiyo = [r for r in d["routes"] if "京葉線" in (r["name"] or "")]
+    assert keiyo, "必须有京葉線"
+    r = max(keiyo, key=lambda x: x["n_stop"])
+    names = [s["name"] for s in r["stops"]]
+    assert "東京" in names and "蘇我" in names
+    assert names.index("東京") < names.index("葛西臨海公園") < names.index("蘇我"), \
+        "顺序必须是 東京 → 葛西臨海公園 → 蘇我（明文顺序）"
+    assert all(s.get("lat") and s.get("lon") for s in r["stops"]), "每个站要有坐标"
+
+
+def test_seq_matcher_tiers_and_name_gate():
+    """匹配三档：F1 强匹配 / 子集（山手線型）/ 名字不相关则拒绝。"""
+    mod = _load_script("bd_fill_seq.py")
+    near = (35.68, 139.76)
+    ours = [{"id": 1, "name": "A", "lat": 35.680, "lon": 139.760, "line_name": "山手線"},
+            {"id": 2, "name": "B", "lat": 35.690, "lon": 139.770, "line_name": "山手線"},
+            {"id": 3, "name": "C", "lat": 35.700, "lon": 139.780, "line_name": "山手線"}]
+
+    def route(name, pts):
+        return {"rel_id": 1, "name": name, "route": "train", "n_stop": len(pts),
+                "stops": [{"name": "s%d" % i, "lat": a, "lon": b} for i, (a, b) in enumerate(pts)]}
+
+    # ① 子集：OSM 那条线比我们长（多了 4 个远处的站）→ 第 2 档（山手線就是这个情形）
+    sub = route("JR山手線", [(35.680, 139.760), (35.690, 139.770), (35.700, 139.780),
+                            (35.80, 139.90), (35.81, 139.91), (35.82, 139.92), (35.83, 139.93)])
+    pick = mod.best_route_for_line(ours, [sub])
+    assert pick and pick[0] == 2, "应该被子集档接受（召回 100%、精确低但名字相关）"
+
+    # ② 名字不相关 → 拒绝（实测"多摩線"曾被"多摩快速急行"抢走）
+    other = route("多摩快速急行", [(35.680, 139.760), (35.690, 139.770), (35.700, 139.780)] +
+                  [(35.60 + i * 0.01, 139.5) for i in range(12)])
+    assert mod.best_route_for_line(ours, [other]) is None, "名字不相关不能认"
+
+    # ③ 站名归一是必要的（ケ/ヶ、駅、空白）
+    assert mod._norm_station("箱根ケ崎駅") == mod._norm_station("箱根ヶ崎")
+
+
+def test_list_stations_orders_by_seq_when_line_selected(seeded):
+    """用户口径："后面我们查的时候就拿这列做 order 排序" → 按线路查时按 seq 排。"""
+    from app.models import BdLine, BdStation
+    from app.services import bd_places, bd_tasks
+    db = appdb.SessionLocal()
+    try:
+        ln = BdLine(name="测试线", name_norm="测试线", operator="X", operator_short="X",
+                    kind="private", prefs="13", n_station=3)
+        db.add(ln)
+        db.flush()
+        for nm, sq in (("第三", 30), ("第一", 10), ("第二", 20)):
+            db.add(BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line="测试线",
+                             line_id=ln.id, pref="13", seq=sq, along_km=float(sq),
+                             seq_src="osm:test", source="manual"))
+        db.flush()
+        bd_places.rebuild_places(db)
+        db.commit()
+        out = bd_tasks.list_stations(db, line_id=ln.id)
+        assert [r["station"].name for r in out["rows"]] == ["第一", "第二", "第三"]
+        assert out["rows"][0]["station"].along_km == 10.0
+    finally:
+        db.close()
