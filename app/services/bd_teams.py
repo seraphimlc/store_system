@@ -239,6 +239,17 @@ def set_members(db: Session, team_id: int,
               db.query(BdTeamMember)
               .filter(BdTeamMember.team_id == team_id,
                       BdTeamMember.end_date.is_(None)).all()}
+    # 「一个队员只能在一个队」：**已经在别队的人不能再被圈进来**
+    # （界面已不显示，这里挡住构造 POST / 并发下的漏网；要调人先在原队移出）
+    if desired:
+        elsewhere = active_team_of(db, exclude_team_id=team_id)
+        clash = sorted((c, elsewhere[c]) for c in desired if c in elsewhere)
+        if clash:
+            _nm = {c: (d or c) for c, d in
+                   db.query(Person.code, Person.display_name)
+                   .filter(Person.code.in_([c for c, _ in clash])).all()}
+            raise TeamError("这些人已在别的队，请先在原队移出：%s" % "、".join(
+                "%s（%s）" % (_nm.get(c, c), tn) for c, tn in clash[:6]))
     added = removed = changed = 0
     from app.services import bd_log
     names = {c: (d or c) for c, d in db.query(Person.code, Person.display_name)
@@ -349,8 +360,32 @@ def teams_of_person(db: Session, person_code: Optional[str]) -> List[dict]:
             for m, t in rows]
 
 
-def person_options(db: Session, kw: str = "") -> List[dict]:
-    """人员下拉（圈选成员用）：姓名 + 编号 + **有无账号** + **员工状态**。"""
+def active_team_of(db: Session,
+                   exclude_team_id: Optional[int] = None) -> Dict[str, str]:
+    """`person_code → 队名`：**现役成员**在哪个队（用户 2026-10-03 口径）。
+
+    「一个队员只能在一个队」：圈选列表只显示**本队队员 + 没被任何队圈走的人**；
+    已在别队的人**不显示**（要调人先在原队移出）。`exclude_team_id` = 正在编辑的队。
+    """
+    q = (db.query(BdTeamMember.person_code, BdTeam.name)
+         .join(BdTeam, BdTeam.id == BdTeamMember.team_id)
+         .filter(BdTeamMember.end_date.is_(None))
+         .order_by(BdTeamMember.id.asc()))
+    if exclude_team_id is not None:
+        q = q.filter(BdTeamMember.team_id != exclude_team_id)
+    out: Dict[str, str] = {}
+    for code, name in q.all():
+        out.setdefault(code, name or "")
+    return out
+
+
+def person_options(db: Session, kw: str = "",
+                   team_id: Optional[int] = None) -> List[dict]:
+    """人员下拉（圈选成员用）：姓名 + 编号 + **有无账号** + **员工状态**。
+
+    `team_id`（正在编辑的队）：传入时**排除已在别队的人**（见 `active_team_of`），
+    只留「本队现役成员 + 自由人」。
+    """
     q = db.query(Person)
     if kw:
         like = "%%%s%%" % kw.strip()
@@ -361,11 +396,13 @@ def person_options(db: Session, kw: str = "") -> List[dict]:
     for code, status in (db.query(User.person_code, User.status)
                          .filter(User.person_code.isnot(None)).all()):
         st[code] = status or "active"
+    taken = active_team_of(db, exclude_team_id=team_id) if team_id else {}
     return [{"code": p.code, "display_name": p.display_name or p.code,
              "has_account": p.code in st,
              "status": st.get(p.code, ""),
-             "can_work": st.get(p.code) in ("active", "leave")}
-            for p in people]
+             "can_work": st.get(p.code) in ("active", "leave"),
+             "other_team": taken.get(p.code, "")}
+            for p in people if p.code not in taken]
 
 
 def summary(db: Session) -> dict:

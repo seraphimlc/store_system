@@ -568,34 +568,47 @@ def test_leader_view_after_role_sync(client, seeded):
 
 
 # ---------------- 队长自己也要巡店（2026-10-03 用户口径） ----------------
+def test_leader_cannot_be_in_two_teams_and_cannot_see_other_team_tasks(
+        client, seeded):
+    """**一个队员只能在一个队**（用户 2026-10-03 口径）。
 
-def test_leader_sees_and_reports_own_cross_team_task(client, seeded):
-    """队长在**别人的队**里当队员、被派了活：看得见（跨队），而且**作为担当能自己上报**
-    （用户 2026-10-03 口径：员工自己先上报、队长做调整 —— 他在这里就是员工）。"""
+    本轮改口径：以前允许「队长去别的队当队员、被派活」（跨队兼任），
+    与"一个队员只能在一个队"互斥 → 现在写入端直接拒绝，
+    并且他在别队看不见任务（数据隔离）。
+    """
+    from app.models import BdTask
+    from app.services import bd_tasks as _bt
     db = appdb.SessionLocal()
     b = bd_teams.create_team(db, "汤静队", by="admin")
-    bd_teams.set_members(db, b.id, [("P3", "leader"), ("P1", "member")])
-    st = bd_tasks.create_station(db, "池ノ上", line="井の頭線")
-    bd_tasks.create_tasks(db, [st.id], by="admin", team_id=b.id,
-                          assign_date=date(2026, 10, 3))
-    t = db.query(BdTask).filter(BdTask.station_id == st.id).one()
-    bd_tasks.assign_members(db, t.id, ["P1"], by="admin")   # 小川（P1）自己的活
+    bd_teams.set_members(db, b.id, [("P3", "leader")])
+    db.commit()          # 先落地：下面失败那次 rollback 不能把建队也回滚
+    # P1 已在 A 队 → 不能再进 B 队（以前允许，现在明确拒绝）
+    with pytest.raises(bd_teams.TeamError) as e:
+        bd_teams.set_members(db, b.id, [("P3", "leader"), ("P1", "member")])
+    assert "别的队" in str(e.value)
+    db.rollback()
+    st = _bt.create_station(db, "池ノ上", line="井の頭線")
+    _bt.create_tasks(db, [st.id], by="admin", team_id=b.id,
+                     assign_date=date(2026, 10, 3))
+    b_task = db.query(BdTask).filter(BdTask.station_id == st.id).one()
+    b_task_id = b_task.id
     db.commit()
     db.close()
-    _login(client, "ogawa")
+    _login(client, "ogawa")                    # A 队队长，不在 B 队
     p = client.get("/my/tasks?tab=mine")
     assert p.status_code == 200
-    assert 'data-testid="tab-mine"' in p.text          # 「我的」tab 在
-    assert "池ノ上" in p.text, "队长在别队的活必须看得见（跨队）"
-    assert 'data-testid="slider-%d"' % t.id in p.text, "担当本人应能上报"
-    # 但不能分派别人的队（分派=任务管理）
-    assert 'data-testid="assign-%d"' % t.id not in p.text
-    r = _post(client, "/my/tasks/progress", {"task_id": str(t.id), "pct": "30"},
-              from_path="/my/tasks?tab=mine")
-    assert r.status_code == 303
+    assert "池ノ上" not in p.text, "别队的任务不该出现在他的「我的」里"
     db = appdb.SessionLocal()
-    assert db.get(BdTask, t.id).pct == 30
+    t = db.get(BdTask, b_task_id)
+    u_a = db.query(User).filter(User.username == "ogawa").one()
+    assert _bt.can_report(db, u_a, t) is False
+    assert _bt.can_assign(db, u_a, t) is False
+    assert _bt.can_adjust(db, u_a, t) is False
+    own = db.get(BdTask, seeded["task"])       # 本队那条 → 都有权限
+    assert _bt.can_assign(db, u_a, own) is True
     db.close()
+
+
 
 
 def test_leader_can_submit_his_own_task_in_his_team(client, seeded):
@@ -747,7 +760,7 @@ def test_team_leader_cannot_touch_other_team(seeded):
     """a 队队长不能处理 b 队的任务（读写都拦）。"""
     db = appdb.SessionLocal()
     b = bd_teams.create_team(db, "汤静队", by="admin")
-    bd_teams.set_members(db, b.id, [("P3", "leader"), ("P2", "member")])
+    bd_teams.set_members(db, b.id, [("P3", "leader")])   # P2 已在 A 队（一人只能一队）
     st = bd_tasks.create_station(db, "池ノ上")
     bd_tasks.create_tasks(db, [st.id], by="admin", team_id=b.id,
                           assign_date=date(2026, 10, 3))
@@ -1370,3 +1383,65 @@ def test_team_detail_leader_howto_and_autocheck(client, seeded):
     assert "指定队长" in p.text
     assert 'onchange="bdLeaderPicked(this)"' in p.text
     assert "function bdLeaderPicked" in p.text
+
+
+# ---------------- 「一个队员只能在一个队」（用户 2026-10-03 口径） ----------------
+
+def test_person_options_hides_people_in_other_teams(seeded):
+    """候选列表 = **本队现役成员 + 自由人**；已在别队的人**不显示**。"""
+    from app.models import BdTeam
+    db = appdb.SessionLocal()
+    t1 = seeded["team"]
+    t2 = bd_teams.create_team(db, "汤静队", by="admin")
+    bd_teams.set_members(db, t1, [("P1", "leader"), ("P2", "member")])
+    db.commit()
+    # 编 t2 时：P1/P2 已在 t1 → 不出现；P3 自由 → 出现
+    codes = [p["code"] for p in bd_teams.person_options(db, team_id=t2.id)]
+    assert "P1" not in codes and "P2" not in codes, "已进别队的人不能出现在候选里"
+    assert "P3" in codes
+    # 编 t1 时：本队的人要在（才能取消勾选/改角色）
+    codes1 = [p["code"] for p in bd_teams.person_options(db, team_id=t1)]
+    assert {"P1", "P2"} <= set(codes1) and "P3" in codes1
+    # 不传 team_id（别处复用）→ 不过滤，行为保持
+    assert {"P1", "P2", "P3"} <= {p["code"] for p in
+                                  bd_teams.person_options(db)}
+    db.close()
+
+
+def test_set_members_rejects_person_from_another_team(seeded):
+    """写入端也挡：已在别队的人不能被圈进第二个队（界面隐藏只是第一层）。"""
+    db = appdb.SessionLocal()
+    t1 = seeded["team"]
+    t2 = bd_teams.create_team(db, "汤静队", by="admin")
+    bd_teams.set_members(db, t1, [("P1", "leader")])
+    db.commit()
+    with pytest.raises(bd_teams.TeamError) as e:
+        bd_teams.set_members(db, t2.id, [("P1", "member")])
+    assert "别的队" in str(e.value) and "移出" in str(e.value)
+    db.rollback()
+    # 原队移出后就能进新队（正常调人流程）
+    bd_teams.set_members(db, t1, [])
+    db.commit()
+    bd_teams.set_members(db, t2.id, [("P1", "member")])
+    db.commit()
+    assert [m["person_code"] for m in bd_teams.team_members(db, t2.id)] == ["P1"]
+    db.close()
+
+
+def test_team_detail_candidate_scope_hint(client, seeded):
+    """页面写清"别队的人不在此列表"并把被隐藏的人数显示出来。"""
+    db = appdb.SessionLocal()
+    bd_teams.set_members(db, seeded["team"], [("P1", "leader")])
+    t2 = bd_teams.create_team(db, "汤静队", by="admin")
+    db.commit()
+    t2_id = t2.id
+    db.close()
+    _login(client, "admin")
+    p = client.get("/teams/%d" % t2_id)
+    assert p.status_code == 200
+    assert 'data-testid="pick-scope"' in p.text
+    assert 'data-testid="n-elsewhere"' in p.text
+    assert "一个队员只能在一个队" in p.text
+    # t1 的队长 P1 在编 t2 时不该出现（他已在 t1）
+    assert 'data-testid="pick-P1"' not in p.text
+    assert 'data-testid="pick-P3"' in p.text

@@ -56,6 +56,12 @@
   <p class="hint" style="margin:.1rem 0 .5rem" data-testid="leader-howto">
     {{ t('指定队长：勾上他这行的「进队」，再点「队长」——点「队长」会自动帮你勾上「进队」。一个队 1 名队长。') }}
   </p>
+  {# 「一个队员只能在一个队」：已在别队的人不进候选（用户 2026-10-03 口径） #}
+  <p class="hint" style="margin:.1rem 0 .5rem" data-testid="pick-scope">
+    {{ t('列表里只有本队队员和还没进队的人；已被其它队圈走的') }}
+    <b data-testid="n-elsewhere">{{ n_elsewhere or 0 }}</b>
+    {{ t('人不显示（一个队员只能在一个队，要调人先在他原来的队移出）。') }}
+  </p>
   <div class="tbl-wrap" style="max-height:26rem;overflow:auto">
     <table class="grid-tbl">
       <thead>

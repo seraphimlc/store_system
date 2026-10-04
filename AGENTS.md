@@ -468,6 +468,17 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   已两端修：① 点「队长」**自动勾上「进队」**（`bdLeaderPicked`，页面上写了操作说明）
   ② 后端把 `leader` 里的人**兜底并进 entries**（JS 没跑也不丢）。回归测试
   `test_leader_set_even_if_not_ticked_as_member` + `test_team_detail_leader_howto_and_autocheck`。
+- **「一个队员只能在一个队」（2026-10-03 用户口径）**：圈选候选列表 = **本队现役成员 + 自由人**；
+  已在别队的人**不显示**（提示行给出被隐藏人数 `data-testid="n-elsewhere"`）。
+  `person_options(db, team_id=...)` 传 `team_id` 才过滤（不传 = 老行为，别处复用不受影响）；
+  唯一判据来自 `bd_teams.active_team_of(db, exclude_team_id=...)`（现役成员 → 队名）。
+  **写入端也拦**（`set_members` raise「这些人已在别的队，请先在原队移出」）—— 界面隐藏只是第一层，
+  构造 POST 仍可绕。⚠️ **这条规则取消了原来的「跨队兼任」**（队长去别的队当队员、被派活），
+  互斥关系：`leader_teams()` 复数（一人带多队）与跨队担当都依赖"一人可属多队"。
+  已把 `test_leader_sees_and_reports_own_cross_team_task` 改成
+  `test_leader_cannot_be_in_two_teams_and_cannot_see_other_team_tasks`（新口径）；
+  **若用户要跨队帮忙，需做成显式功能（借调）而不是放开这条**。
+  调人流程：**先在原队把「进队」取消 → 保存 → 再到新队圈进来**。
 - **模板 HTML 结构自检 `scripts/check_templates.py`**：Jinja 不校验 HTML，切文件（head/tail 拼接）
   容易把标签切坏（当天就切掉了 `<form>` 的续行）。用法 `./.venv/bin/python scripts/check_templates.py`，
   输出"检查 N 个模板，M 个标签不配对"（0 为正常）。**改完模板顺手跑一次。**

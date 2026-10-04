@@ -106,10 +106,14 @@ def team_detail(request: Request, team_id: int,
                                 status_code=303)
     members = bd_teams.team_members(db, team_id)
     active_codes = {m["person_code"] for m in members}
+    # 候选 = 本队现役成员 + 自由人；**已被别队圈走的人不列**（用户 2026-10-03 口径）
+    people = bd_teams.person_options(db, team_id=team_id)
+    elsewhere = bd_teams.active_team_of(db, exclude_team_id=team_id)
     return templates.TemplateResponse("bd_team_detail.html", {
         "request": request, "current_user": user, "team": team,
         "members": members, "active_codes": active_codes,
-        "people": bd_teams.person_options(db),
+        "people": people,
+        "n_elsewhere": len(elsewhere),
         "status_labels": bd_teams.STATUS_LABELS(CURRENT_LANG.get()),
         "msg": msg, "err": err,
     })
