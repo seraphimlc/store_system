@@ -65,26 +65,33 @@ def start_leave(db: Session, person_code: str, start_date: date,
         raise LeaveError("结束日不能早于开始日")
     if actor_user is not None:
         by = getattr(actor_user, "username", "") or by
+    from app.services import plan_leave
     old = active_leave(db, code)
     if old is not None:
         old.status = "ended"
         if old.end_date is None or old.end_date > start_date - timedelta(days=1):
             old.end_date = start_date - timedelta(days=1)
         old.updated_at = _now()
+        plan_leave.clear_leave(db, old.id)      # 旧假期标的 × 先撤掉
     row = BdStaffLeave(person_code=code, start_date=start_date,
                        end_date=end_date, reason=(reason or "").strip(),
                        status="active", created_by=(by or ""))
     db.add(row)
     db.flush()
+    # 休假期 → 出勤计划**自动标成"不出勤"（×）**（用户 2026-10-03"可以标"）
+    st = plan_leave.apply_leave(db, code, row.id, start_date, end_date,
+                                today())
+    note = (reason or "")
+    if st["marked"]:
+        note = "%s（已标出勤计划 %d 天不出勤）" % (note, st["marked"])
     bd_log.log_op(db, actor_user, "member", "status", ref_id=row.id,
                   ref_label=code, field="假期模式",
                   old=("休假中" if old is not None else "正常"),
                   new="休假 %s ~ %s" % (start_date.isoformat(),
                                        end_date.isoformat() if end_date
                                        else "未定"),
-                  note=(reason or ""))
+                  note=note)
     return row
-
 
 def end_leave(db: Session, person_code: str, on_date: Optional[date] = None,
               by: str = "", actor_user=None) -> Optional[BdStaffLeave]:
@@ -98,11 +105,13 @@ def end_leave(db: Session, person_code: str, on_date: Optional[date] = None,
     row = active_leave(db, code)
     if row is None:
         return None
+    from app.services import plan_leave
     d = on_date or today()
     row.status = "ended"
     row.end_date = max(row.start_date, d - timedelta(days=1))
     row.updated_at = _now()
     db.flush()
+    plan_leave.clear_leave(db, row.id)          # 撤销休假自动标的 ×（恢复默认）
     bd_log.log_op(db, actor_user, "member", "status", ref_id=row.id,
                   ref_label=code, field="假期模式", old="休假中", new="已结束",
                   note="员工自己/管理员结束")

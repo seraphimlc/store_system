@@ -159,7 +159,7 @@
 
 | 页面 | 路由 | 说明 |
 |---|---|---|
-> ⚠️ 2026-10-03：`/my/plan` 页顶新增「**假期模式**」卡片（`POST /my/leave` 开启、`POST /my/leave/end` 结束；
+> ⚠️ 2026-10-03：`/my/plan` 页顶新增「**假期模式**」卡片；**开假会把休假期内的出勤计划自动标成不出勤（×，`staff_date_plans.leave_id`），结束休假按 `leave_id` 精确撤销**（写计划表只经 `app/services/plan_leave.py`）（`POST /my/leave` 开启、`POST /my/leave/end` 结束；
 > 规格见 `docs/specs-station-tasks.md` §0.4），且**队长也能用本页**（原判权 `role != "staff"` →
 > 改为 `staff`/`leader`；用户口径"队长也是员工、页面跟员工一样"）。`/my/leave` 已进中间件白名单。
 

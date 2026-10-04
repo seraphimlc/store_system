@@ -807,6 +807,10 @@ class StaffDatePlan(Base):
     available = Column(Boolean, nullable=False, default=True)   # True=可出勤 / False=不出勤
     reported = Column(Boolean, nullable=False, default=False)   # True=当天已自报出勤（□）
     source = Column(String(16), nullable=False, default="web", server_default="web")
+    #: 该行是**假期模式自动标的"不出勤"**（用户 2026-10-03"可以标"）：
+    #: 指向 `bd_staff_leave.id`；结束/替换休假时按它**精确撤销**，
+    #: 这样"员工自己点的 ×"和"休假带的 ×"分得清，不会互相抹掉。
+    leave_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now, onupdate=_now)
 

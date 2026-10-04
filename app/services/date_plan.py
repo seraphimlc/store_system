@@ -687,10 +687,12 @@ def admin_matrix(db, key: str, today=None) -> dict:
     start, end, deadline = period_bounds(key)
     days = period_days(key)
     plan_rows = (db.query(StaffDatePlan.person_code, StaffDatePlan.plan_date,
-                          StaffDatePlan.available, StaffDatePlan.reported)
+                          StaffDatePlan.available, StaffDatePlan.reported,
+                          StaffDatePlan.leave_id)
                  .filter(StaffDatePlan.plan_date >= start,
                          StaffDatePlan.plan_date <= end).all())
-    plan_map = {(c, d): (bool(a), bool(r)) for c, d, a, r in plan_rows}
+    plan_map = {(c, d): (bool(a), bool(r)) for c, d, a, r, _lv in plan_rows}
+    leave_map = {(c, d) for c, d, _a, _r, lv in plan_rows if lv}
     with_plan = {c for c, _ in plan_map}          # 有行 = 登记过（含只自报的行，下面再判）
 
     cand = _matrix_people(db)
@@ -758,6 +760,8 @@ def admin_matrix(db, key: str, today=None) -> dict:
         rows.append({
             "person_code": code, "name": cand[code]["name"] or code,
             "short_code": short_code(code),      # 页面/导出只显示后 5 位（完整编号在 title 里）
+            # 这些天是「假期模式」自动标的不出勤（页面用它区别于员工自己点的 ×）
+            "leave_days": [d for d in days if (code, d) in leave_map],
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
             "assumed_days": assumed,       # 逐日：这一格是"没填→默认可出勤"（浅色显示）

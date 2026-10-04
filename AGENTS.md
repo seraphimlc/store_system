@@ -424,10 +424,20 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   管理员特判放行（收件箱空而已）。
   ⑦ 边界不变：只写作业域表；守门测试 `test_message_send_only_writes_bd_tables`。
   迁移 `b4c5d6e7f8a9`（2 张新表 + `bd_task_progress` 加 6 列）。
-  测试 `tests_web/test_team_task.py` **66 项**；全量 `tests_web` **393 passed**。
-- 测试 `tests_web/test_team_task.py`（**66 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
-  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**/假期模式开启结束与隔离/派工提醒四态/进展确认调整与消息通知/消息收件人隔离；
-  **全量 `tests_web` 393 passed**；i18n 巡检 0 缺失 0 死键。
+  测试 `tests_web/test_team_task.py` **66 项**；全量 `tests_web` **393 passed**。（第六轮后：**69 项 / 396 passed**）
+- **第六轮增量（2026-10-03 假期模式「可以标」出勤计划）**：
+  ① 开假时把休假期内的出勤计划**自动标成不出勤（×）**：`staff_date_plans` 加 `leave_id`（可空）
+  + `source='leave'` → 管理端矩阵那几天就是 ×（**不做"谁在休假"一览页**，用户说"不要看"），
+  `title` 标「（假期模式）」区分"休假"与"自己点的不出勤"。
+  ② **三条"不抢"规则**：今天之前不标（过去看事实）/ 已自报的不标 / **员工自己点的 × 不认领**。
+  ③ **结束或替换休假 → 按 `leave_id` 精确撤销**：`reported=False` 的行删掉（恢复默认规则，
+  不伪造"已登记"），`reported=True` 只解绑保留事实。
+  ④ **表的主人仍是日期计划模块**：新增 `app/services/plan_leave.py`（`apply_leave`/`clear_leave`），
+  作业域**调用它**而不是自己 `StaffDatePlan.add/delete` → §0.3 边界放宽为"只读 + 经这一个接口写"。
+  迁移 `c5d6e7f8a9b0`（只加一列）。测试 `tests_web/test_team_task.py` **69 项**；全量 **396 passed**。
+- 测试 `tests_web/test_team_task.py`（**69 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
+  员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**/假期模式开启结束与隔离/派工提醒四态/进展确认调整与消息通知/消息收件人隔离/休假自动标计划与精确撤销；
+  **全量 `tests_web` 396 passed**；i18n 巡检 0 缺失 0 死键。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

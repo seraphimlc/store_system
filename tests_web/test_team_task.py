@@ -1269,3 +1269,72 @@ def test_leader_pending_tab_lists_reports_to_confirm(client, seeded):
     assert "駒場東大前" in p2.text, "待确认 tab 里要能看到这条"
     assert 'data-testid="confirm-%d"' % tid in p2.text
     assert "队员报 80%" in p2.text or "80%" in p2.text
+
+
+# ---------------- 假期模式 → 出勤计划自动标 ×（用户 2026-10-03「可以标」） ----------------
+
+def test_leave_marks_plan_off_and_clears_on_end(seeded):
+    """开假 → 休假期内的出勤计划**自动变成不出勤（×）**；结束休假 → **精确撤销**。"""
+    from app.models import StaffDatePlan
+    from app.services import bd_leave, plan_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    row = bd_leave.start_leave(db, "P2", today, today + timedelta(days=3),
+                               "休假", by="tangjing")
+    db.commit()
+    days = [today + timedelta(days=i) for i in range(4)]
+    rows = {r.plan_date: r for r in db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P2",
+        StaffDatePlan.plan_date.in_(days)).all()}
+    assert len(rows) == 4, "休假期内每天都该有行"
+    assert all(not r.available for r in rows.values()), "全部标成不出勤"
+    assert all(r.leave_id == row.id for r in rows.values()), "要标记来源（便于撤销）"
+    assert all(r.source == "leave" for r in rows.values())
+    # 结束休假 → 自动标的行撤销（回到默认，不再是不出勤）
+    bd_leave.end_leave(db, "P2", today, by="tangjing")
+    db.commit()
+    left = db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P2",
+        StaffDatePlan.plan_date.in_(days)).count()
+    assert left == 0, "撤销 = 删掉自动标的行（恢复默认规则）"
+    db.close()
+
+
+def test_leave_does_not_override_manual_off_or_reported(seeded):
+    """不休假不许抢：**员工自己点的 ×** 与**已自报的日期**都不被休假覆盖。"""
+    from app.models import StaffDatePlan
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    d_manual = today + timedelta(days=1)
+    d_reported = today + timedelta(days=2)
+    db.add(StaffDatePlan(person_code="P2", plan_date=d_manual,
+                         available=False, reported=False, source="web"))
+    db.add(StaffDatePlan(person_code="P2", plan_date=d_reported,
+                         available=True, reported=True, source="report"))
+    db.commit()
+    bd_leave.start_leave(db, "P2", today, today + timedelta(days=5), "", by="x")
+    db.commit()
+    rows = {r.plan_date: r for r in db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P2",
+        StaffDatePlan.plan_date.in_([d_manual, d_reported])).all()}
+    assert rows[d_manual].leave_id is None, "员工自己标的 × 不能被休假认领"
+    assert rows[d_reported].available is True, "已自报（实际出勤）不许改成不出勤"
+    db.close()
+
+
+def test_leave_marks_show_in_admin_plan_matrix(client, seeded):
+    """管理端出勤计划矩阵：休假期那几天是 ×，且 title 标明「假期模式」。"""
+    from app.services import bd_leave
+    db = appdb.SessionLocal()
+    today = bd_leave.today()
+    bd_leave.start_leave(db, "P2", today, today + timedelta(days=2), "", by="x")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    from app.services import date_plan
+    key = date_plan.current_period(today)
+    p = client.get("/staff-plans?period=%s" % key)
+    assert p.status_code == 200
+    assert 'data-testid="cell-P2-%s"' % today.isoformat() in p.text
+    assert "（假期模式）" in p.text

@@ -54,7 +54,7 @@
     {% for d in m.days %}
     <td class="c {{ r.states[d] }}{% if r.assumed_days[d] or r.assumed_off_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
         data-testid="cell-{{ r.person_code }}-{{ d }}"
-        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% else %}{{ r.marks[d] }}{% if r.assumed_days[d] %}（没填计划→按可出勤）{% elif r.assumed_off_days[d] %}（没填计划→按不出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
+        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% else %}{{ r.marks[d] }}{% if d in r.leave_days %}{{ t('（假期模式）') }}{% elif r.assumed_days[d] %}（没填计划→按可出勤）{% elif r.assumed_off_days[d] %}（没填计划→按不出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
     {% endfor %}
   </tr>
   {% else %}
