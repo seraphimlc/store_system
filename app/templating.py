@@ -26,4 +26,22 @@ def get_templates() -> Jinja2Templates:
 
     from app.forms import form_token as _ft
     tpl.env.globals["form_token"] = _ft      # 模板里 {{ form_token() }}
+    tpl.env.globals["static_ver"] = static_ver
     return tpl
+
+
+def static_ver(name: str) -> str:
+    """静态资源版本号（模板写 `/static/app.css?v={{ static_ver('app.css') }}`）。
+
+    **为什么需要**：改完 CSS/JS 后浏览器仍用旧缓存 → 页面"没样式"。
+    2026-10-03 实测踩到（管理端菜单改左侧后用户看到无样式的裸菜单）。
+    版本号 = 文件 mtime + 大小，**每次渲染 stat 一次**（本地 `--reload` 改完即生效，
+    不用重启、也不用人工改版本号）。
+    """
+    import os
+    path = os.path.join("app", "static", name)
+    try:
+        st = os.stat(path)
+        return "%x%x" % (int(st.st_mtime), st.st_size)
+    except OSError:
+        return "0"

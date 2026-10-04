@@ -6,7 +6,7 @@
 <title>{% block title %}{{ t('巡店结算系统') }}{% endblock %}</title>
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 <script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/app.css?v={{ static_ver('app.css') }}">
 </head>
 {% set _p = (request.url.path if request.url is defined else "") %}
 {% set _is_admin = current_user and current_user.role == 'admin' %}
@@ -216,7 +216,7 @@
   }, true);
 })();
 </script>
-<script src="/static/emp_select.js" defer></script>
+<script src="/static/emp_select.js?v={{ static_ver('emp_select.js') }}" defer></script>
 <script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>
 </body>
 </html>

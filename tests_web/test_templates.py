@@ -19,6 +19,9 @@ def _env():
         return "?" + "&".join(f"{k}={v}" for k, v in q.items())
     env.globals["lang_url"] = _lang_url
     env.globals["form_token"] = lambda: "ft-test"   # 一次性提交令牌存根
+    # 静态资源版本号（与 app/templating.py 的 static_ver 同源，别各写一份）
+    from app.templating import static_ver as _sv
+    env.globals["static_ver"] = _sv
     return env
 
 
@@ -125,3 +128,30 @@ def test_base_staff_tab_marks_active():
     html = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
     assert html.count('class="tab on"') == 1
+
+
+def test_static_assets_are_cache_busted():
+    """静态资源必须带 `?v=` 版本号。
+
+    ⚠️ 2026-10-03 实测踩到：改完 `app.css`（管理端菜单改左侧）后，服务端 CSS 完全正常
+    （26492 字节、规则都在、HTTP 200），但用户浏览器仍用**旧缓存** → "菜单没有样式"。
+    无 Cache-Control 的静态文件会用启发式缓存，改完不一定会重新拉。
+    """
+    import re
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req())
+    assert re.search(r'href="/static/app\.css\?v=[0-9a-f]+"', html), html[:400]
+    assert re.search(r'src="/static/emp_select\.js\?v=[0-9a-f]+"', html)
+
+
+def test_every_template_references_static_with_version():
+    """兜底：所有模板引用 `/static/*` 都必须带 `?v=`（新增页面别漏）。"""
+    import re
+    from pathlib import Path
+    bad = []
+    for p in sorted(Path("app/templates").glob("*.html")):
+        for m in re.finditer(r'(?:href|src)="/static/([^"?]+)"',
+                             p.read_text(encoding="utf-8")):
+            bad.append("%s → %s" % (p.name, m.group(0)))
+    assert not bad, "这些静态引用没带版本号（浏览器会吃旧缓存）：%s" % bad
