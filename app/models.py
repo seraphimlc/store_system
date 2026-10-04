@@ -6,7 +6,7 @@
 from datetime import datetime
 
 from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey,
-                        Integer, String, Text, UniqueConstraint, Index)
+                        Integer, String, Text, UniqueConstraint, Index, text)
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -941,13 +941,20 @@ class BdTeamMember(Base):
     """团队成员（含历史：人走了写 end_date，永不删行）。
 
     - `role`：leader 队长 / member 队员
-    - 一个人可以在多个队（多行）
+    - ⚠️ **死规定（用户 2026-10-03）**：**一个人同时只能在一个队**；跨队没有"借调"，
+      只有**先转出、再转入**（原队 `end_date` 收口 + 新队开一行）。
+      所以 `person_code` 在 `end_date IS NULL` 的行上**唯一** —— 部分唯一索引
+      `uq_bd_team_member_active_person`（SQLite/PG 都支持）。服务层判重只是第一层，
+      这条索引让任何代码路径 / 手工 SQL 都破不了。
     """
     __tablename__ = "bd_team_member"
     __table_args__ = (
         UniqueConstraint("team_id", "person_code", "start_date",
                          name="uq_bd_team_member"),
         Index("ix_bd_team_member_person", "person_code"),
+        Index("uq_bd_team_member_active_person", "person_code", unique=True,
+              sqlite_where=text("end_date IS NULL"),
+              postgresql_where=text("end_date IS NULL")),
     )
     id = Column(Integer, primary_key=True)
     team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=False)

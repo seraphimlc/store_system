@@ -12,6 +12,7 @@ from datetime import date
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import BdTeam, BdTeamMember, Person, User
@@ -288,7 +289,14 @@ def set_members(db: Session, team_id: int,
                           ref_label=_label(code), field="角色",
                           old=_role_cn(old_role), new=_role_cn(role),
                           note="队长任免")
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # 兜底：并发 / 绕过服务层时撞上「一人同时只能在一个队」的部分唯一索引
+        # （uq_bd_team_member_active_person）→ 给一句人话，别抛 500
+        db.rollback()
+        raise TeamError("保存冲突：有人刚被别的队圈走了（一个队员只能在一个队）。"
+                        "请刷新页面重试；要调人请先在他原来的队移出。")
     roles = sync_account_roles(db)
     return {"added": added, "removed": removed, "changed": changed,
             "promoted": roles["promoted"], "demoted": roles["demoted"]}

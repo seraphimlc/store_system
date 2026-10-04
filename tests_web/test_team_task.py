@@ -1445,3 +1445,39 @@ def test_team_detail_candidate_scope_hint(client, seeded):
     # t1 的队长 P1 在编 t2 时不该出现（他已在 t1）
     assert 'data-testid="pick-P1"' not in p.text
     assert 'data-testid="pick-P3"' in p.text
+
+
+def test_db_level_single_team_constraint(seeded):
+    """**死规定做到数据库层**：同一个人的**现役**行唯一（部分唯一索引）。
+
+    用户 2026-10-03："不存在跨队借调。只有转出再转入。这是死规定。"
+    → 服务层判重只是第一层；绕过服务层的任何写（脚本/手工 SQL/并发）都被索引挡住。
+    转队 = 原队 end_date 收口 + 新队开一行 → 不冲突（历史可追溯）。
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.models import BdTeamMember
+    db = appdb.SessionLocal()
+    t2 = bd_teams.create_team(db, "二队", by="admin")
+    db.add(BdTeamMember(team_id=seeded["team"], person_code="P3",
+                        role="member", start_date=date(2026, 10, 4)))
+    db.commit()
+    # 绕过服务层直接插第二个队的现役行 → 数据库拒绝
+    db.add(BdTeamMember(team_id=t2.id, person_code="P3", role="member",
+                        start_date=date(2026, 10, 4)))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+    # 正常转队（转出 → 转入）必须仍然可行
+    row = (db.query(BdTeamMember)
+           .filter(BdTeamMember.team_id == seeded["team"],
+                   BdTeamMember.person_code == "P3").one())
+    row.end_date = date(2026, 10, 4)                 # 转出
+    db.commit()
+    db.add(BdTeamMember(team_id=t2.id, person_code="P3", role="member",
+                        start_date=date(2026, 10, 5)))   # 转入
+    db.commit()
+    assert [m["person_code"] for m in bd_teams.team_members(db, t2.id)] == ["P3"]
+    assert bd_teams.team_members(db, seeded["team"]) == [] or \
+        "P3" not in [m["person_code"] for m in
+                     bd_teams.team_members(db, seeded["team"])]
+    db.close()

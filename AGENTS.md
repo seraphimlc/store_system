@@ -473,12 +473,20 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   `person_options(db, team_id=...)` 传 `team_id` 才过滤（不传 = 老行为，别处复用不受影响）；
   唯一判据来自 `bd_teams.active_team_of(db, exclude_team_id=...)`（现役成员 → 队名）。
   **写入端也拦**（`set_members` raise「这些人已在别的队，请先在原队移出」）—— 界面隐藏只是第一层，
-  构造 POST 仍可绕。⚠️ **这条规则取消了原来的「跨队兼任」**（队长去别的队当队员、被派活），
-  互斥关系：`leader_teams()` 复数（一人带多队）与跨队担当都依赖"一人可属多队"。
-  已把 `test_leader_sees_and_reports_own_cross_team_task` 改成
-  `test_leader_cannot_be_in_two_teams_and_cannot_see_other_team_tasks`（新口径）；
-  **若用户要跨队帮忙，需做成显式功能（借调）而不是放开这条**。
-  调人流程：**先在原队把「进队」取消 → 保存 → 再到新队圈进来**。
+  构造 POST 仍可绕。
+  ⚠️ **死规定（用户 2026-10-03 明确："不存在跨队借调的情况。只有转出再转入。这是死规定。"）**：
+  **已钉到数据库层** —— `bd_team_member` 部分唯一索引 `uq_bd_team_member_active_person`
+  （`person_code` 在 `end_date IS NULL` 上唯一；SQLite/PG 支持，MySQL 跳过、靠服务层）。
+  任何代码路径 / 手工 SQL / 并发想让一人同时在两队 → **IntegrityError**；
+  `set_members` 捕获它并转成一句人话（"保存冲突：有人刚被别的队圈走了…"）而不是 500。
+  于是 `leader_teams()` 复数（一人带多队）与跨队担当**都不可能再发生**；
+  旧测试 `test_leader_sees_and_reports_own_cross_team_task` 已改名改口径为
+  `test_leader_cannot_be_in_two_teams_and_cannot_see_other_team_tasks`，
+  并 +`test_db_level_single_team_constraint`（绕过服务层直插 → 数据库拒绝；转出→转入仍可行）。
+  迁移 `d6e7f8a9b0c1`。调人流程：**原队取消「进队」保存 → 新队再圈进来**。
+  自检工具 `scripts/check_single_team.py`（只读）：一人多队 / 悬空担当 / 无队长的队 / 索引是否存在，
+  有违规则非 0 退出（可当发布验收）。
+  ⓘ 2026-10-04 核查：队5（陈嘉溢队）的 7 名成员 + 队长 アサダ 是**用户自己在界面上设的**（不是脏数据）。
 - **模板 HTML 结构自检 `scripts/check_templates.py`**：Jinja 不校验 HTML，切文件（head/tail 拼接）
   容易把标签切坏（当天就切掉了 `<form>` 的续行）。用法 `./.venv/bin/python scripts/check_templates.py`，
   输出"检查 N 个模板，M 个标签不配对"（0 为正常）。**改完模板顺手跑一次。**
