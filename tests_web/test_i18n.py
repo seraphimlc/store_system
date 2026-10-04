@@ -93,3 +93,46 @@ def test_admin_set_staff_lang(client):
     db = appdb.SessionLocal()
     assert db.query(User).filter(User.username == "emp4").one().lang == "ja"
     db.close()
+
+
+def _load_prune():
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).parent.parent / "scripts" / "i18n_prune.py"
+    spec = importlib.util.spec_from_file_location("i18n_prune", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_i18n_prune_removes_single_and_multiline_keys():
+    """`i18n_prune` 必须能删**多行**词条（值在下一行）。
+
+    ⚠️ 2026-10-04 真踩到：旧正则 `"k": "[^"]*",` 只认单行 →
+    多行的死键"每次都报告已删除、实际没删"（假成功，死键一直清不掉）。
+    """
+    m = _load_prune()
+    single = '{\n    "a": "1",\n    "keep": "y",\n}'
+    multi = '{\n    "b":\n        "2",\n    "keep": "y",\n}'
+    assert m.remove_keys(single, ["a"]) == ('{\n    "keep": "y",\n}', 1, [])
+    assert m.remove_keys(multi, ["b"]) == ('{\n    "keep": "y",\n}', 1, [])
+    # 没匹配上要**报出来**，不能假装成功
+    text, n, missed = m.remove_keys(single, ["不存在"])
+    assert n == 0 and missed == ["不存在"] and text == single
+
+
+def test_i18n_dict_is_clean():
+    """字典卫生：**0 缺日文、0 死键**（CI 兜底；有死键/漏译就直接红）。
+
+    跑 `scripts/i18n_audit.py` 并解析两个计数。
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+    out = subprocess.run(
+        [sys.executable, str(Path(__file__).parent.parent
+                             / "scripts" / "i18n_audit.py")],
+        capture_output=True, text=True,
+        cwd=str(Path(__file__).parent.parent)).stdout
+    assert "模板/代码用到但字典缺失（日文界面会显示中文）: 0" in out, out
+    assert "字典里有但全仓库没人用（死键）: 0" in out, out

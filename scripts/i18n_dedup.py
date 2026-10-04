@@ -19,6 +19,8 @@ PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "app", "i18n.py")
 KEY_RE = re.compile(r'^\s*"([^"]+)":')
 ANY_KEY_RE = re.compile(r'"([^"]+)":')
+#: 抓「键 → 值」对（同一行可能多个；值必须同行，跨行的另算）
+PAIR_RE = re.compile(r'"([^"]+)":\s*"((?:[^"\\]|\\.)*)"')
 
 
 def blocks(lines):
@@ -47,26 +49,31 @@ def main():
     args = ap.parse_args()
 
     lines = open(PATH, encoding="utf-8").read().splitlines()
-    first = {}
-    dup_line = []
-    conflicts = []
+    seen = {}
+    dup_line = []          # 要删的**较早**重复块（整行单键才安全）
+    values = {}            # key → [(值, 行号)]，**按值比较**才准
+    order = []
     for start, end, keys, text in blocks(lines):
-        for key in keys:
-            if key in first:
-                if first[key].strip() != text.strip():
-                    conflicts.append((key, first[key], text))
-                if len(keys) == 1:
-                    dup_line.append((start, end, key))
+        pairs = PAIR_RE.findall(text)          # 一行可能挤着多个 key
+        for key, val in pairs:
+            if key in seen:
+                # 保留**最后一次**出现 = 当前 dict 实际生效的值，清理不改译文
+                if len(seen[key][2]) == 1:
+                    dup_line.append((seen[key][0], seen[key][3], key))
             else:
-                first[key] = text
+                order.append(key)
+            seen[key] = (start, text, keys, end)
+            values.setdefault(key, []).append((val, start + 1))
+    conflicts = [(k, values[k]) for k in order
+                 if len({v for v, _ln in values[k]}) > 1]
 
     print("重复键 %d 个；其中**同 key 不同译法** %d 个："
           % (len(dup_line) + len(conflicts), len(conflicts)))
-    for key, a, b in conflicts:
+    for key, occ in conflicts:
         print("  ⚠️ %s" % key)
-        print("      先: %s" % a.strip().replace("\n", " ")[:88])
-        print("      后: %s   ← **当前生效（dict 取最后一个）**"
-              % b.strip().replace("\n", " ")[:88])
+        for val, ln in occ:
+            mark = "   ← **当前生效（dict 取最后一个）**" if (val, ln) == occ[-1] else ""
+            print("      行%-5d %s%s" % (ln, val[:70], mark))
     print()
     print("可安全清理的单键重复行: %d 个" % len(dup_line))
     if not args.apply:
@@ -80,7 +87,8 @@ def main():
         return 0
     kept = [ln for i, ln in enumerate(lines) if i not in kill]
     open(PATH, "w", encoding="utf-8").write("\n".join(kept) + "\n")
-    print("已删除 %d 行（保留第一次出现的译法）" % len(kill))
+    print("已删除 %d 行（保留**最后一次**出现的译法 = 当前生效值，译文不变）"
+          % len(kill))
     return 0
 
 

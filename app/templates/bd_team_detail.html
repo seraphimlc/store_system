@@ -30,7 +30,10 @@
   </form>
 </div>
 
-{# 成员：勾选进队 + radio 指定队长（一个队可以有多个队长，宽松） #}
+{# 成员：勾选进队 + radio 指定队长（用户口径：一个队 1 名队长）
+   2026-10-03 用户："圈选队员的表格太丑了。做一个普通的表格不行吗？"
+   → 去掉自创的滚动小窗口/工具条/整行染色，回到**和 /车站、/任务 一样的普通表格**：
+     筛选 → 操作行 → `.tbl-wrap > table.grid-tbl` → 说明 #}
 <form method="post" action="/teams/{{ team.id }}/members" class="card"
       style="padding:.8rem 1rem" data-testid="members-form">
   <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
@@ -38,35 +41,26 @@
   <h3 style="margin-top:0">{{ t('圈选队员') }}
     <span class="hint">{{ t('勾选的人进队，没勾的移出（移出写历史，不删记录）') }}</span>
   </h3>
-  {# 工具条：筛选 + 已勾选计数 + 全不选 + 保存（表格操作按钮放一起，别沉到最底下） #}
-  <div class="pick-bar">
-    <input type="text" id="pick-filter" class="pick-q"
-           placeholder="{{ t('输入姓名或编号后 5 位筛选') }}"
-           oninput="bdFilter(this.value)" data-testid="pick-filter">
+  <label class="f">{{ t('按姓名 / 编号筛选') }}
+    <input type="text" id="pick-filter" placeholder="{{ t('输入姓名或编号后 5 位') }}"
+           style="width:260px" oninput="bdFilter(this.value)"
+           data-testid="pick-filter">
+  </label>
+  <div class="form-actions">
+    <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
+    <button class="btn ghost" type="button" onclick="bdUncheckAll()"
+            data-testid="pick-clear">{{ t('全不选') }}</button>
     <span class="hint" data-testid="pick-count">
       {{ t('已勾选') }} <b id="pick-n">0</b> / {{ people|length }} {{ t('人') }}
       · {{ t('可见') }} <span id="pick-shown">{{ people|length }}</span> {{ t('人') }}
     </span>
-    <span style="flex:1"></span>
-    <button class="btn ghost" type="button" onclick="bdUncheckAll()"
-            data-testid="pick-clear">{{ t('全不选') }}</button>
-    <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
   </div>
-  {# 队长怎么指定：说清两步（2026-10-03 用户问"如何指定队长"→ 之前确实容易漏勾「进队」） #}
-  <p class="hint" style="margin:.1rem 0 .5rem" data-testid="leader-howto">
-    {{ t('指定队长：勾上他这行的「进队」，再点「队长」——点「队长」会自动帮你勾上「进队」。一个队 1 名队长。') }}
-  </p>
-  {# 「一个队员只能在一个队」：已在别队的人不进候选（用户 2026-10-03 口径） #}
-  <p class="hint" style="margin:.1rem 0 .5rem" data-testid="pick-scope">
-    {{ t('列表里只有本队队员和还没进队的人；已被其它队圈走的') }}
-    <b data-testid="n-elsewhere">{{ n_elsewhere or 0 }}</b>
-    {{ t('人不显示（一个队员只能在一个队，要调人先在他原来的队移出）。') }}
-  </p>
-  <div class="tbl-wrap" style="max-height:26rem;overflow:auto">
+  <div class="tbl-wrap">
     <table class="grid-tbl">
       <thead>
-        <tr><th style="width:3.6rem">{{ t('进队') }}</th>
-            <th style="width:3.6rem" title="{{ t('点这里＝指定他当队长（会自动勾上「进队」）；一个队 1 名') }}">{{ t('队长') }}</th>
+        <tr><th class="pick-cell">{{ t('进队') }}</th>
+            <th class="pick-cell"
+                title="{{ t('点这里＝指定他当队长（会自动勾上「进队」）；一个队 1 名') }}">{{ t('队长') }}</th>
             <th>{{ t('姓名') }}</th>
             <th title="{{ t('鼠标悬停看完整编号') }}">{{ t('员工编号') }}</th>
             <th>{{ t('账号') }}</th>
@@ -77,38 +71,38 @@
         {% for p in people %}
         {% set on = p.code in active_codes %}
         {% set old = (members|selectattr('person_code','equalto',p.code)|list|first) %}
-        <tr class="pick{% if on %} picked{% endif %}"
-            data-name="{{ p.display_name }} {{ p.code }}"
+        <tr data-name="{{ p.display_name }} {{ p.code }}"
             data-testid="pick-row">
-          <td><input type="checkbox" name="person" value="{{ p.code }}"
+          <td class="pick-cell"><input type="checkbox" name="person" value="{{ p.code }}"
                      {% if on %}checked{% endif %} onchange="bdRowPicked(this)"
                      data-testid="pick-{{ p.code }}"></td>
-          <td><input type="radio" name="leader" value="{{ p.code }}"
+          <td class="pick-cell"><input type="radio" name="leader" value="{{ p.code }}"
                      onchange="bdLeaderPicked(this)"
                      {% if old and old.role == 'leader' %}checked{% endif %}
                      data-testid="leader-{{ p.code }}"></td>
           <td>{{ p.display_name }}</td>
           <td title="{{ p.code }}">{{ p.code[-5:] }}</td>
           <td>{% if p.has_account %}{{ t('已开通') }}{% else %}<span class="hint">{{ t('未开通') }}</span>{% endif %}</td>
-          <td data-testid="status-{{ p.code }}">
-            {% set sl = status_labels.get(p.status, p.status) if p.status else t('未开通账号') %}
-            {% if p.status == 'active' %}<span class="pill okk">{{ sl }}</span>
-            {% elif p.status == 'leave' %}<span class="pill warnk">{{ sl }}</span>
-            {% elif p.status %}<span class="pill">{{ sl }}</span>
-            {% else %}<span class="hint">{{ sl }}</span>{% endif %}
-          </td>
+          <td data-testid="status-{{ p.code }}">{{ status_labels.get(p.status, p.status) if p.status else t('未开通账号') }}</td>
           <td>{% if old %}{{ t('队长') if old.role == 'leader' else t('队员') }}{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="hint">{{ t('提示：没有账号的人看不到任务页，但仍可被记录为队员。') }}</p>
+  {# 两条说明：怎么指定队长 + 候选范围（`一个队员只能在一个队`） #}
+  <p class="hint" style="margin:.6rem 0 .2rem" data-testid="leader-howto">
+    {{ t('指定队长：勾上他这行的「进队」，再点「队长」——点「队长」会自动帮你勾上「进队」。一个队 1 名队长。') }}
+  </p>
+  <p class="hint" style="margin:0" data-testid="pick-scope">
+    {{ t('列表里只有本队队员和还没进队的人；已被其它队圈走的') }}
+    <b data-testid="n-elsewhere">{{ n_elsewhere or 0 }}</b>
+    {{ t('人不显示（一个队员只能在一个队，要调人先在他原来的队移出）。没有账号的人看不到任务页，但仍可被记录为队员。') }}
+  </p>
 </form>
-
 <script>
-/* 圈选表格（纯前端，不依赖脚本库）：
-   筛选 + 已勾选计数 + 选中行高亮 + 全不选。提交字段仍是 person[] / leader。 */
+/* 圈选表格（纯前端，不依赖脚本库）：筛选 + 已勾选计数 + 全不选。
+   提交字段仍是 person[]（进队）/ leader（队长）。样式走通用的 `.grid-tbl`，不做任何自创修饰。 */
 function bdPicked() {
   return document.querySelectorAll('input[name="person"]:checked');
 }
@@ -116,9 +110,7 @@ function bdCount() {
   var el = document.getElementById('pick-n');
   if (el) el.textContent = bdPicked().length;
 }
-function bdRowPicked(cb) {
-  var tr = cb.closest ? cb.closest('tr') : null;
-  if (tr) tr.classList.toggle('picked', cb.checked);
+function bdRowPicked() {
   bdCount();
 }
 /* 点「队长」= 指定他当队长 → **自动勾上「进队」**（后端只认「进队」勾选的人；
@@ -129,15 +121,12 @@ function bdLeaderPicked(radio) {
   var cb = tr.querySelector('input[name="person"]');
   if (cb && !cb.checked) {
     cb.checked = true;
-    tr.classList.add('picked');
     bdCount();
   }
 }
 function bdUncheckAll() {
   document.querySelectorAll('input[name="person"]').forEach(function (cb) {
     cb.checked = false;
-    var tr = cb.closest ? cb.closest('tr') : null;
-    if (tr) tr.classList.remove('picked');
   });
   bdCount();
 }

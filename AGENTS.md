@@ -491,6 +491,27 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   容易把标签切坏（当天就切掉了 `<form>` 的续行）。用法 `./.venv/bin/python scripts/check_templates.py`，
   输出"检查 N 个模板，M 个标签不配对"（0 为正常）。**改完模板顺手跑一次。**
 
+- **「圈选队员」改回普通表格（2026-10-03 用户："圈选队员的表格太丑了。做一个普通的表格不行吗？"）**：
+  上一版我自创了三样东西，都是"丑"的来源，**全部去掉**：
+  ① `.tbl-wrap` 上的 `max-height:26rem;overflow:auto`（表格被塞进小滚动窗口 + 卡内吸顶表头）；
+  ② 自创工具条 `.pick-bar`（62% 宽输入框 + 按钮混排）；
+  ③ 勾选行整行染色 `tr.picked`，以及员工状态列的**彩色药丸**（改回纯文本，跟 /团队 列表一致）。
+  现在是**标准结构**：`筛选(label.f)` → `.form-actions`（保存成员 / 全不选 / 已勾选计数）→
+  `.tbl-wrap > table.grid-tbl`（全页滚动，不用嵌套滚动区）→ 两条说明；只有
+  `.pick-cell { width:3.6rem; text-align:center }` 一个自定义类（进队/队长两列窄且居中）。
+  ⚠️ **教训：新页面优先复用既有组件与既有页面版式**（`/stations`、`/tasks` 长什么样就照做），
+  不要为单个页面自创滚动容器/工具条/彩色标记。守门测试 `test_team_detail_pick_table_plain`
+  反向断言 `.pick-bar` / `max-height:26rem` / `picked` / 彩色药丸**都不存在**。
+- **i18n 工具两个真 bug（2026-10-04 修）**：
+  ① `scripts/i18n_prune.py` 的正则只认**单行**词条 → **多行**（值在下一行）的死键
+     "每次都报告已删除、实际没删"（假成功，死键一直清不掉）。已抽出 `remove_keys()` 处理单/多行，
+     没匹配上会**明确报出来**；回归测试 `test_i18n_prune_removes_single_and_multiline_keys`。
+  ② `scripts/i18n_dedup.py` 的"译法冲突"比的是**整块文本** → 多键行（一行挤着多个 key）
+     会**误报冲突**。已改为按**键值对**比较（`PAIR_RE`）。修正后真实冲突只有 **1 个**
+     （`员工编号` 従業員番号/従業員コード，已统一为当前生效值，**译文可见行为不变**）；
+     之前报的"10 个词两套译法"是误报。清理 33 行重复键后**生效译文 0 变化**（键数 907→906 只少 1 个死键）。
+  + 新增 CI 兜底 `test_i18n_dict_is_clean`（跑 audit，缺日文/死键非 0 直接红）。
+
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

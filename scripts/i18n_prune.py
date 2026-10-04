@@ -54,12 +54,34 @@ def main():
     if not apply:
         print("\n（dry-run；加 --apply 才真删）")
         return 0
-    for k in dead:
-        text = re.sub(r'\n?\s*"%s": "[^"]*",' % re.escape(k), "", text, count=1)
+    text, removed, missed = remove_keys(text, dead)
+    for k in missed:
+        print("   ⚠️ 没匹配上（格式特殊，请人工删）：%s" % k)
     io.open(I18N, "w", encoding="utf-8").write(text)
-    print("\n已删除 %d 个死键" % len(dead))
+    print("\n已删除 %d 个死键（实际替换 %d 处）"
+          % (len(dead), removed))
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def remove_keys(text, keys):
+    """从字典文本里删掉指定键，返回 `(新文本, 删除处数, 没匹配上的键)`。
+
+    ⚠️ 必须同时吃**单行**与**多行**词条（值在下一行）：
+        单行：  "key": "值",
+        多行：  "key":
+                    "值",
+    旧版正则只认单行 → 多行的死键"报告删了其实没删"（假成功；2026-10-04 死键一直清不掉）。
+    """
+    missed = []
+    removed = 0
+    for k in keys:
+        pat = re.compile(r'\n?[ \t]*"%s":[ \t]*(?:\n[ \t]*)?'
+                         r'(?:"(?:[^"\\]|\\.)*")[ \t]*,' % re.escape(k))
+        text, n = pat.subn("", text, count=1)
+        removed += n
+        if not n:
+            missed.append(k)
+    return text, removed, missed

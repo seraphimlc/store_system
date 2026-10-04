@@ -178,8 +178,12 @@ def test_ops_tables_use_grid_tbl():
     assert not bad, "这些表格没有 grid-tbl 样式（会看起来不像表格）：%s" % bad
 
 
-def test_team_detail_pick_table_toolbar():
-    """「圈选队员」= 一张带工具条的表格：筛选 + 已勾选计数 + 全不选 + 保存按钮在工具条上。"""
+def test_team_detail_pick_table_plain():
+    """「圈选队员」= **一张普通表格**（用户 2026-10-03："太丑了。做一个普通的表格不行吗？"）。
+
+    结构 = 筛选 → 操作行（保存 / 全不选 / 计数）→ `.tbl-wrap > table.grid-tbl` → 说明；
+    **不要**上一版那些自创修饰：滚动小窗口（max-height）、工具条容器（.pick-bar）、整行染色。
+    """
     html = _env().get_template("bd_team_detail.html").render(
         current_user=SimpleNamespace(display_name="管理员", role="admin"),
         request=_req(), team=SimpleNamespace(id=1, name="一队", code="T1",
@@ -188,11 +192,16 @@ def test_team_detail_pick_table_toolbar():
                                 status="active")],
         members=[], active_codes=set(), status_labels={"active": "在岗"},
         msg="", err="")
-    assert 'class="grid-tbl"' in html
-    assert 'class="pick-bar"' in html
+    assert 'class="grid-tbl"' in html and 'class="tbl-wrap"' in html
     assert 'data-testid="pick-filter"' in html
     assert 'data-testid="pick-count"' in html and 'id="pick-n"' in html
     assert 'data-testid="pick-clear"' in html
     assert 'data-testid="members-save"' in html
     assert 'data-testid="leader-P1"' in html          # 队长仍是 radio（单人选）
     assert 'data-testid="status-P1"' in html and "在岗" in html
+    # 不再有自创修饰（上一版"丑"的来源）
+    assert 'class="pick-bar"' not in html
+    assert "max-height:26rem" not in html
+    assert "picked" not in html                        # 没有整行染色
+    assert 'class="pick-cell"' in html                 # 进队/队长两列窄且居中
+    assert "在岗" in html and 'pill okk">在岗' not in html   # 状态是纯文本，不是彩色药丸
