@@ -174,7 +174,7 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - 测试：`tests_web/test_daily_report.py`（填报/逐日/趋势/对比口径/导出）、
   `tests_web/test_report_robustness.py`（物化失效/状态机/重试护栏/可见月/编号归一/导出白名单）、
   `tests_web/test_form_token.py`（一次性令牌）、`tests_web/test_migrations.py`（迁移冒烟 + schema 一致性）；
-  AI 全程 mock 不连外网。i18n 巡检：`scripts/i18n_audit.py`（缺日文/死键）、`scripts/i18n_prune.py`（清死键）。
+  AI 全程 mock 不连外网。i18n 巡检：`scripts/i18n_audit.py`（缺日文/死键）、`scripts/i18n_prune.py`（清死键）、`scripts/i18n_dedup.py`（查重复键/译法冲突，默认只报告）。
 
 ## 日期计划（半月出勤登记，2026-10 交付 · 分支 feat/date-plan）
 - **需求**：员工在每个半月开始时登记未来半个月的出勤（每月 **3 号 / 18 号前**），管理员据此分配任务；
@@ -438,6 +438,20 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
 - 测试 `tests_web/test_team_task.py`（**69 项**：团队/成员历史/队长无重定向环/导航 gate/状态机/≤2 人/每日覆盖/
   员工可上报自己的/跨队担当可上报/开始完成日/停滞筛选/移出提醒/日志写入与时间线/数据隔离/离职不可派工/角色能力表/**域边界（列级+源码级+行为级）**/假期模式开启结束与隔离/派工提醒四态/进展确认调整与消息通知/消息收件人隔离/休假自动标计划与精确撤销；
   **全量 `tests_web` 396 passed**；i18n 巡检 0 缺失 0 死键。
+
+- **管理端导航改左侧（2026-10-03 用户："顶部的菜单换成左边的吧，顶部内容太多了，放不下了"）**：
+  管理端 `base.html` 的横排 `topnav` → **左侧分组菜单 `<aside class="sidenav">`**
+  （概览｜结算｜员工｜作业｜系统｜账号 六组；当前页高亮；消息带未读角标）；
+  顶部只留**品牌 + 账号名 + 汉堡按钮**，账号操作（改密/中日照/退出）在侧栏底部。
+  `body.has-sidenav` 让内容区 `margin-left:210px`（≥861px）；**≤860px 变左侧抽屉**
+  （`.sidenav.open` + `.nav-mask` 点空白关闭），复用同一个 `menu` 开关。
+  ⚠️ **员工/队长完全不受影响**：他们仍是顶部细条 + 底部 tabbar（`topnav` 只在非管理端渲染），
+  所以按角色取 DOM 的测试/自动化不能假设"一定有 topnav"——`test_base_mobile_hamburger_menu`
+  已改成按角色断言（管理端 `sidenav` / 员工 `topnav`）。
+- **i18n 重复键巡检工具 `scripts/i18n_dedup.py`**（默认只报告）：多轮补日文时用同一锚点插入会累积重复键。
+  Python dict 取**最后一个**值，功能不出错，但会**掩盖两种译法**——实测 10 个词有两套日文
+  （`状态` 状態/ステータス、`在岗` 在職/在籍、`员工编号` 従業員番号/従業員コード、`共` 合計/計…），
+  当前生效的是**后出现**的那个。`--apply` 只删"整行单键"的安全重复项；**同行多键的不自动改**（要人定译法）。
 
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；

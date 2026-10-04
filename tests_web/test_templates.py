@@ -57,18 +57,29 @@ def test_base_has_download_double_click_guard():
 
 
 def test_base_mobile_hamburger_menu():
-    """H5：顶栏带汉堡菜单按钮（窄屏折叠导航），导航项仍在 DOM 中。"""
-    html = _env().get_template("base.html").render(
+    """H5：汉堡菜单按钮；导航项始终在 DOM 里（窄屏折叠，不是删掉）。
+
+    ⚠️ 2026-10-03 用户："管理端顶部的菜单换成左边的吧，顶部内容太多了" →
+    **管理端 = 左侧分组菜单（`sidenav`）**，员工/队长仍是顶部 `topnav`。
+    """
+    admin = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="管理员", role="admin"),
         request=_req())
-    assert 'class="menu-btn"' in html and "☰" in html
-    assert 'class="topnav"' in html
-    assert "数据看板" in html and "绩效工资" in html  # 折叠后内容仍在 DOM
+    assert 'class="menu-btn"' in admin and "☰" in admin
+    assert 'class="sidenav"' in admin and 'data-testid="sidenav"' in admin
+    assert 'class="topnav"' not in admin, "管理端不再用顶部横排菜单"
+    # 分组标题 + 全部菜单项仍在 DOM（窄屏是抽屉，不是删掉）
+    for key in ("概览", "结算", "员工", "作业", "系统",
+                "数据看板", "绩效工资", "月度对账", "薪资找平",
+                "团队", "车站", "任务", "日志", "消息", "系统配置"):
+        assert key in admin, key
+    # 账号操作也在左侧（顶栏只留品牌+账号+汉堡）
+    assert "修改密码" in admin and "退出" in admin
     staff = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"),
         request=_req())
     assert 'class="menu-btn"' in staff and "我的绩效" in staff
-
+    assert 'class="topnav"' in staff and 'class="sidenav"' not in staff
 
 def test_base_template_anonymous():
     html = _env().get_template("base.html").render(current_user=None,

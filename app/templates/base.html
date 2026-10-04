@@ -8,54 +8,113 @@
 <script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
 <link rel="stylesheet" href="/static/app.css">
 </head>
-<body class="{% if current_user and current_user.role in ('staff', 'leader') %}has-tabbar{% endif %}">
+{% set _p = (request.url.path if request.url is defined else "") %}
+{% set _is_admin = current_user and current_user.role == 'admin' %}
+<body class="{% if current_user and current_user.role in ('staff', 'leader') %}has-tabbar{% endif %}{% if _is_admin %} has-sidenav{% endif %}">
 {% if current_user %}
-<header class="topbar" x-data="{menu:false}">
+{# 管理端导航 = **左侧分组菜单**（用户 2026-10-03："顶部内容太多了，放不下了"）：
+   顶部只留品牌 + 账号 + 汉堡；菜单、账号操作都在左侧。
+   员工/队长保持原样：顶部细条（账目操作）+ 底部 tabbar；窄屏同样用汉堡。 #}
+<div class="shell" x-data="{menu:false}">
+<header class="topbar">
   <span class="brand">{{ t('巡店结算系统') }}</span>
+  {% if _is_admin %}
+  <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
+          :aria-expanded="menu ? 'true' : 'false'">☰</button>
+  <span class="spacer"></span>
+  <span class="user">{{ current_user.display_name }}</span>
+  {% else %}
   <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
           :aria-expanded="menu ? 'true' : 'false'">☰</button>
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
-  {% if current_user.role == 'admin' %}
-  <a class="nav" href="/dashboard"><b>{{ t('数据看板') }}</b></a>
-  <a class="nav" href="/files"><b>{{ t('文件上传') }}</b></a>
-  <a class="nav" href="/perf"><b>{{ t('绩效工资') }}</b></a>
-  <a class="nav" href="/recon"><b>{{ t('月度对账') }}</b></a>
-  <a class="nav" href="/payroll-settle"><b>{{ t('薪资找平') }}</b></a>
-  <a class="nav" href="/config"><b>{{ t('系统配置') }}</b></a>
-  <span class="nav disabled">｜</span>
-  <a class="nav" href="/stores">{{ t('店铺主档') }}</a>
-  <a class="nav" href="/staff-admin">{{ t('员工管理') }}</a>
-  <a class="nav" href="/staff-reports">{{ t('填报与对比') }}</a>
-  <a class="nav" href="/staff-plans">{{ t('日期计划') }}</a>
-  <span class="nav disabled">｜</span>
-  <a class="nav" href="/teams">{{ t('团队') }}</a>
-  <a class="nav" href="/stations">{{ t('车站') }}</a>
-  <a class="nav" href="/tasks">{{ t('任务') }}</a>
-  <a class="nav" href="/logs">{{ t('日志') }}</a>
-  <a class="nav" href="/messages">{{ t('消息') }}{% if request.state.unread_messages %}（{{ request.state.unread_messages }}）{% endif %}</a>
-  <a class="nav" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
-  {% endif %}
-  <span class="spacer"></span>
-  <span class="user">{{ current_user.display_name }}</span>
-  <a class="nav" href="/my/password">{{ t('修改密码') }}</a>
-  <span class="lang-switch">
-    <a class="nav" href="{{ lang_url(request, 'zh') }}"
-       {% if request.query_params.get('lang') or not request.cookies.get('lang') %}{% endif %}>中文</a>
-    /
-    <a class="nav" href="{{ lang_url(request, 'ja') }}">日本語</a>
-  </span>
-  <form method="post" action="/logout" class="logout-form">
-    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-    <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <button class="logout" type="submit">{{ t('退出') }}</button>
-  </form>
+    <span class="spacer"></span>
+    <span class="user">{{ current_user.display_name }}</span>
+    <a class="nav" href="/my/password">{{ t('修改密码') }}</a>
+    <span class="lang-switch">
+      <a class="nav" href="{{ lang_url(request, 'zh') }}">中文</a>
+      /
+      <a class="nav" href="{{ lang_url(request, 'ja') }}">日本語</a>
+    </span>
+    <form method="post" action="/logout" class="logout-form">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <button class="logout" type="submit">{{ t('退出') }}</button>
+    </form>
   </nav>
+  {% endif %}
 </header>
+
+{% if _is_admin %}
+<aside class="sidenav" :class="{'open': menu}" @click.self="menu=false"
+       data-testid="sidenav">
+  <div class="side-group">
+    <div class="side-title">{{ t('概览') }}</div>
+    <a class="side-item {% if _p.startswith('/dashboard') %}on{% endif %}"
+       href="/dashboard">{{ t('数据看板') }}</a>
+    <a class="side-item {% if _p.startswith('/messages') %}on{% endif %}"
+       href="/messages">{{ t('消息') }}{% if request.state.unread_messages %}<span
+       class="badge">{{ request.state.unread_messages }}</span>{% endif %}</a>
+  </div>
+  <div class="side-group">
+    <div class="side-title">{{ t('结算') }}</div>
+    <a class="side-item {% if _p.startswith('/files') %}on{% endif %}"
+       href="/files">{{ t('文件上传') }}</a>
+    <a class="side-item {% if _p.startswith('/perf') %}on{% endif %}"
+       href="/perf">{{ t('绩效工资') }}</a>
+    <a class="side-item {% if _p.startswith('/recon') %}on{% endif %}"
+       href="/recon">{{ t('月度对账') }}</a>
+    <a class="side-item {% if _p.startswith('/payroll-settle') %}on{% endif %}"
+       href="/payroll-settle">{{ t('薪资找平') }}</a>
+  </div>
+  <div class="side-group">
+    <div class="side-title">{{ t('员工') }}</div>
+    <a class="side-item {% if _p.startswith('/staff-admin') %}on{% endif %}"
+       href="/staff-admin">{{ t('员工管理') }}</a>
+    <a class="side-item {% if _p.startswith('/staff-reports') %}on{% endif %}"
+       href="/staff-reports">{{ t('填报与对比') }}</a>
+    <a class="side-item {% if _p.startswith('/staff-plans') %}on{% endif %}"
+       href="/staff-plans">{{ t('日期计划') }}</a>
+  </div>
+  <div class="side-group">
+    <div class="side-title">{{ t('作业') }}</div>
+    <a class="side-item {% if _p.startswith('/teams') %}on{% endif %}"
+       href="/teams">{{ t('团队') }}</a>
+    <a class="side-item {% if _p.startswith('/stations') %}on{% endif %}"
+       href="/stations">{{ t('车站') }}</a>
+    <a class="side-item {% if _p.startswith('/tasks') %}on{% endif %}"
+       href="/tasks">{{ t('任务') }}</a>
+    <a class="side-item {% if _p.startswith('/logs') %}on{% endif %}"
+       href="/logs">{{ t('日志') }}</a>
+  </div>
+  <div class="side-group">
+    <div class="side-title">{{ t('系统') }}</div>
+    <a class="side-item {% if _p.startswith('/stores') %}on{% endif %}"
+       href="/stores">{{ t('店铺主档') }}</a>
+    <a class="side-item {% if _p.startswith('/config') %}on{% endif %}"
+       href="/config">{{ t('系统配置') }}</a>
+    <a class="side-item" href="/product" target="_blank">{{ t('产品说明') }}↗</a>
+  </div>
+  <div class="side-group side-foot">
+    <div class="side-title">{{ t('账号') }}</div>
+    <a class="side-item" href="/my/password">{{ t('修改密码') }}</a>
+    <div class="side-item side-lang">
+      <a href="{{ lang_url(request, 'zh') }}">中文</a> /
+      <a href="{{ lang_url(request, 'ja') }}">日本語</a>
+    </div>
+    <form method="post" action="/logout" class="side-logout">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <button class="side-item side-logout-btn" type="submit">{{ t('退出') }}</button>
+    </form>
+  </div>
+</aside>
+<div class="nav-mask" x-show="menu" @click="menu=false" x-cloak></div>
+{% endif %}
+</div>
 {% endif %}
 <main class="wrap">{% block content %}{% endblock %}</main>
 {# agent 友好：结构化页面状态注入，浏览器自动化直接读取（替代截图 OCR） #}
 {% if current_user and current_user.role in ('staff', 'leader') %}
-{# 员工端底部主导航（队员与队长共用）：不再藏在汉堡菜单里，窄屏尤其重要 #}
 {% set _p = (request.url.path if request.url is defined else "") %}
 {# 待填报出勤计划：中间件写入 request.state.plan_pending（无则 None） #}
 {% set _pp = (request.state.plan_pending
