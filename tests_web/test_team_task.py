@@ -393,8 +393,12 @@ def test_leader_task_page_tabs_and_assign(client, seeded):
                 'data-testid="tab-doing"', 'data-testid="tab-done"'):
         assert tid in p.text
     assert "未分配（1）" in p.text
-    # 默认 tab = 我的（队长页面与员工一样）；本队待分派去「未分配」tab 看
-    assert p.text.count('data-testid="my-task-row"') == 0
+    # ⚠️ 2026-10-06 审计：队长默认落点改了 —— 有未分配就默认进「未分配」
+    #    （旧默认「我的」，队长第一眼是空列表，看不到还有 N 个站没分人）
+    assert 'data-testid="bulk-assign-form"' in p.text, "队长默认应落在「未分配」"
+    assert p.text.count('data-testid="my-task-row"') >= 1, "默认页就是未分配列表"
+    p_mine = client.get("/my/tasks?tab=mine")
+    assert p_mine.text.count('data-testid="my-task-row"') == 0, "「我的」仍是空的"
     p2 = client.get("/my/tasks?tab=unassigned")
     # ⚠️ 2026-10-06 用户："未分配任务，可以多选，然后点一下分配，可以分配到人。
     #    这里不需要进度调整控件" → 未分配 tab 是**批量分派**（勾任务 + 选队员 + 分配）
@@ -691,7 +695,12 @@ def test_board_shows_dates_and_stale_filter(client, seeded):
     bd_tasks.save_progress(db, seeded["task"], 30, by="ogawa")
     st2 = bd_tasks.create_station(db, "池ノ上")
     bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"],
-                          assign_date=date(2026, 10, 3))     # 从没提交过 → 停滞
+                          assign_date=date(2026, 10, 3))
+    task2 = (db.query(BdTask).join(BdStation, BdStation.id == BdTask.station_id)
+             .filter(BdStation.name == "池ノ上").first())
+    # ⚠️ 2026-10-06 口径：停滞 = **已分到人** + 未完成 + ≥2 天没提交
+    #    （"还没分担当"的还没开始，谈不上没动；旧口径让停滞筛选等于不过滤）
+    bd_tasks.assign_members(db, task2.id, ["P2"], by="admin")
     db.commit()
     db.close()
     _login(client, "admin")
@@ -3378,3 +3387,403 @@ def test_ai_suggest_does_not_consume_form_token(client, seeded, monkeypatch):
     r2 = client.post("/tasks/assign", data=dict(d, team=str(seeded["team"])),
                      follow_redirects=False)
     assert r2.status_code != 400, "AI 建议不该吃掉表单令牌"
+
+
+# ============ 任务域全流程（按 docs/任务域-全流程.md 补的用例） ============
+
+def test_task_full_lifecycle_e2e(client, seeded):
+    """**端到端**：建任务 → 派队 → 分派担当 → 上报 → 确认 → 驳回 → 完成 → 汇总。
+
+    对应 `docs/任务域-全流程.md` §5；这是上线前必须绿的那条主链。
+    """
+    from app.models import BdTaskProgress
+    tid = seeded["task"]
+    # ① 定义：任务已存在（seeded 建了站+任务）
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, tid)
+    assert t is not None and t.state == "unassigned"
+    db.close()
+    # ② 派队（管理员）：seeded 已派；这里确认分配日期在
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).team_id == seeded["team"]
+    assert db.get(BdTask, tid).assign_date is not None
+    db.close()
+    # ③ 分派担当（队长，走页面端点）
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/assign", {"task_id": str(tid), "person": "P2"},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert [a.person_code for a in db.query(BdTaskAssign).filter(
+        BdTaskAssign.task_id == tid).all()] == ["P2"]
+    assert db.get(BdTask, tid).state == "doing"      # 分到人 → 进行中
+    db.close()
+    # ④ 员工上报 60%（队员端点）
+    _login(client, "tangjing")
+    r = _post(client, "/my/tasks/progress",
+              {"task_id": str(tid), "pct": "60", "note": "做了一半"},
+              from_path="/my/tasks?tab=mine")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert (row.pct, row.reported_pct, row.review_status) == (60, 60, "pending")
+    assert db.get(BdTask, tid).start_date is not None     # 首次提交=开始日
+    db.close()
+    # ⑤ 队长确认（认可原值）
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/confirm", {"task_id": str(tid), "note": ""},
+              from_path="/my/tasks?tab=pending")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert row.review_status == "confirmed" and row.pct == 60
+    db.close()
+    # ⑥ 员工报 100% → 队长驳回成 30%（保留原值 100）
+    _login(client, "tangjing")
+    _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100",
+                                        "note": "干完了"},
+          from_path="/my/tasks?tab=mine")
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).state == "done"
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/reject", {"task_id": str(tid), "pct": "30",
+                                          "note": "照片没拍全"},
+              from_path="/my/tasks?tab=pending")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, tid)
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert t.state == "doing" and t.done_date is None      # 回退清完成日
+    assert row.review_status == "rejected"
+    assert row.reported_pct == 100, "员工原值要留着（界面显示 队员报 100% → 30%）"
+    assert row.reported_by == "tangjing"
+    assert row.review_note == "照片没拍全"
+    assert row.note == "干完了", "员工备注不能被驳回理由覆盖"
+    db.close()
+    # ⑦ 再报 100% → 确认 → 完成
+    _login(client, "tangjing")
+    _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100"},
+          from_path="/my/tasks?tab=mine")
+    _login(client, "ogawa")
+    _post(client, "/my/tasks/confirm", {"task_id": str(tid), "note": ""},
+          from_path="/my/tasks?tab=pending")
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, tid)
+    assert t.state == "done" and t.done_date is not None
+    db.close()
+    # ⑧ 汇总：管理端卡片/tab/按队汇总一致，且能筛到这条
+    _login(client, "admin")
+    p = client.get("/tasks?tab=done")
+    assert p.status_code == 200 and "駒場東大前" in p.text
+    assert 'data-testid="card-done"' in p.text
+
+
+def test_tasks_export_three_sheets_match_sql(client, seeded):
+    """导出三 sheet 的**内容**要与 SQL 直查一致（用户 2026-10-06："导出excel你测试了吗"）。
+
+    自造可控 fixture：3 个物理车站，其中 1 个已派队+分人（→进行中），2 个在池子里（→未分配）。
+    """
+    import io
+    from openpyxl import load_workbook
+    from app.models import BdStationPlace
+    db = appdb.SessionLocal()
+    line, places = _place_fixture(db, line_name="导出测试线",
+                                  names=("导甲", "导乙", "导丙"))
+    db.commit()
+    # ⚠️ 这里用的是**物理车站**（place）→ 要用 create_tasks_for_places
+    r = bd_tasks.create_tasks_for_places(db, [places[0].id], by="admin",
+                                        team_id=seeded["team"],
+                                        assign_date=date(2026, 10, 3))
+    tid = r["task_ids"][0]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+
+    _login(client, "admin")
+    db = appdb.SessionLocal()
+    buf = bd_tasks.tasks_xlsx(db)
+    raw = buf.getvalue() if hasattr(buf, "getvalue") else buf
+    wb = load_workbook(io.BytesIO(raw), read_only=True)
+    assert wb.sheetnames == ["未分配", "进行中", "已完成"]
+    rows = {ws.title: list(ws.iter_rows(values_only=True)) for ws in wb.worksheets}
+    wb.close()
+    # 表头（列定义）固定
+    assert rows["未分配"][0] == ("线路", "站点")
+    assert rows["进行中"][0] == ("线路", "站点", "团队", "担当", "进展%",
+                               "分配日期", "开始日", "最后提交")
+    assert rows["已完成"][0] == ("线路", "站点", "团队", "担当", "完成日期",
+                               "开始日", "分配日期", "用时(天)")
+    # 行内容 = 该 fixture 的车站（与 SQL 口径一致）
+    pool_names = {r[1] for r in rows["未分配"][1:]}
+    doing_names = {r[1] for r in rows["进行中"][1:]}
+    assert {"导甲"} <= doing_names, "有队伍+有担当 → 进行中"
+    assert {"导乙", "导丙"} <= pool_names, "没派队的 → 车站池"
+    assert "导甲" not in pool_names
+    # 筛线路要带进导出
+    buf2 = bd_tasks.tasks_xlsx(db, line_id=line.id)
+    raw2 = buf2.getvalue() if hasattr(buf2, "getvalue") else buf2
+    wb2 = load_workbook(io.BytesIO(raw2), read_only=True)
+    n2 = {ws.title: len(list(ws.iter_rows(values_only=True))) - 1
+          for ws in wb2.worksheets}
+    wb2.close()
+    assert n2["未分配"] == 2 and n2["进行中"] == 1, "按线路筛：本线 2 个在池子、1 个在做"
+    db.close()
+
+    # 「只看停滞」要影响导出（stale_only 生效）
+    db = appdb.SessionLocal()
+    b3 = bd_tasks.tasks_xlsx(db, stale_only=True, stale_days=2)
+    raw3 = b3.getvalue() if hasattr(b3, "getvalue") else b3
+    wb3 = load_workbook(io.BytesIO(raw3), read_only=True)
+    n3 = len(list(wb3["进行中"].iter_rows(values_only=True))) - 1
+    wb3.close()
+    db.close()
+    assert n3 <= 1, "停滞后只应剩「有担当且没提交」的那条"
+
+
+def test_pool_search_matches_line_name_and_operator(client, seeded):
+    """车站池搜索要认**线路名/运营商**（审计：搜「JR」得 0，实际 355 个）。"""
+    from app.models import BdLine, BdStationPlace
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    line = BdLine(name="南武線", name_norm="南武線", operator="東日本旅客鉄道",
+                  operator_short="JR東日本", kind="jr", prefs="13", n_station=2)
+    db.add(line)
+    db.flush()
+    for nm in ("尻手", "矢向"):
+        db.add(BdStationPlace(name=nm, name_norm=nm))
+    db.flush()
+    from app.models import BdStation
+    for p in db.query(BdStationPlace).filter(
+            BdStationPlace.name.in_(["尻手", "矢向"])).all():
+        db.add(BdStation(name=p.name, name_norm=p.name, line_id=line.id,
+                         place_id=p.id, seq=1, operator="東日本旅客鉄道"))
+    db.commit()
+    bd_places.rebuild_places(db)
+    db.close()
+    from app.services import bd_tasks as _T
+    db = appdb.SessionLocal()
+    for kw in ("南武線", "JR東日本", "JR"):
+        n = _T.list_unassigned_places(db, page=1, per=1, kw=kw)["total"]
+        assert n >= 2, "搜「%s」至少要能找到这两个站（实际 %d）" % (kw, n)
+    db.close()
+
+
+def test_stale_requires_assignee(client, seeded):
+    """停滞口径：**没分担当的不算停滞**（否则筛选等于不过滤）。"""
+    tid = seeded["task"]
+    _login(client, "admin")
+    # 没担当（只有队伍）→ 不算停滞
+    p = client.get("/tasks?tab=assigned")
+    assert 'data-testid="stale-%d"' % tid not in p.text
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    p2 = client.get("/tasks?tab=assigned")
+    assert 'data-testid="stale-%d"' % tid in p2.text, "有担当且从没提交 → 算停滞"
+    assert "天没动" in p2.text
+
+
+def test_cards_match_tab_counts(client, seeded):
+    """统计卡与 tab 必须同口径（审计：同屏 "已分配 0" vs "已分配（515）"）。"""
+    _login(client, "admin")
+    p = client.get("/tasks?tab=unassigned").text
+    assert 'data-testid="card-pool"' in p and 'data-testid="card-assigned"' in p
+    # 数字与 tab_counts 一致
+    db = appdb.SessionLocal()
+    c = bd_tasks.tab_counts(db)
+    db.close()
+    import re as _r
+    pool_card = int(_r.search(r'data-testid="card-pool">(\d+)<', p).group(1))
+    asg_card = int(_r.search(r'data-testid="card-assigned">(\d+)<', p).group(1))
+    done_card = int(_r.search(r'data-testid="card-done">(\d+)<', p).group(1))
+    assert (pool_card, asg_card, done_card) == (c["unassigned"], c["assigned"], c["done"])
+
+
+def test_leader_default_tab_prefers_pending_then_unassigned(client, seeded):
+    """队长默认落点：有待确认先看它，否则未分配；都没有才「我的」。"""
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, seeded["task"], 50, "报一半", by="tangjing",
+                           actor_user=tj)
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    p = client.get("/my/tasks").text
+    assert 'data-testid="bulk-confirm-form"' in p, "有待确认 → 默认进「待确认」"
+
+
+def test_bulk_confirm_pending(client, seeded):
+    """待确认**批量确认**（审计：30 条要 30 次往返）。"""
+    from app.models import BdTaskProgress
+    db = appdb.SessionLocal()
+    ids = []
+    for nm in ("甲站", "乙站", "丙站"):
+        st = bd_tasks.create_station(db, nm)
+        bd_tasks.create_tasks(db, [st.id], by="admin", team_id=seeded["team"],
+                              assign_date=date(2026, 10, 3))
+    db.commit()
+    for t in db.query(BdTask).all():
+        bd_tasks.assign_members(db, t.id, ["P2"], by="admin")
+        bd_tasks.save_progress(db, t.id, 40, "报了 40", by="tangjing",
+                               actor_user=db.query(User).filter(
+                                   User.username == "tangjing").first())
+        ids.append(t.id)
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/confirm-bulk",
+              {"task_id": [str(i) for i in ids]},
+              from_path="/my/tasks?tab=pending")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    n = db.query(BdTaskProgress).filter(
+        BdTaskProgress.task_id.in_(ids),
+        BdTaskProgress.review_status == "confirmed").count()
+    assert n == len(ids), "一次应确认多条"
+    db.close()
+
+
+def test_reassign_and_return_pool(client, seeded):
+    """派队要可逆：改派队伍 / 退回车站池（审计：原来选错只能改库）。"""
+    from app.models import BdTeam
+    db = appdb.SessionLocal()
+    t2 = bd_teams.create_team(db, "汤静队", "TJ02", by="admin")
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/tasks/reassign",
+              {"task_id": str(seeded["task"]), "team_id": str(t2.id)},
+              from_path="/tasks?tab=assigned")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, seeded["task"]).team_id == t2.id
+    # 换队清空原担当（原担当不属新队）
+    assert db.query(BdTaskAssign).filter(
+        BdTaskAssign.task_id == seeded["task"]).count() == 0
+    db.close()
+    r2 = _post(client, "/tasks/return-pool", {"task_id": str(seeded["task"])},
+               from_path="/tasks?tab=assigned")
+    assert r2.status_code == 303
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, seeded["task"])
+    assert t.team_id is None and t.assign_date is None and t.state == "unassigned"
+    db.close()
+    # 回到车站池里能看到
+    db = appdb.SessionLocal()
+    pool = [r["name"] for r in bd_tasks.list_unassigned_places(db, per=200)["rows"]]
+    db.close()
+    assert "駒場東大前" in pool
+
+
+def test_admin_adjust_keeps_context(client, seeded):
+    """管理端修正进展后**留在原视图**（审计：原来固定跳回车站池）。"""
+    _login(client, "admin")
+    r = _post(client, "/tasks/%d/progress" % seeded["task"],
+              {"pct": "50", "note": "管理员改", "back": "/tasks?tab=assigned&line=3"},
+              from_path="/tasks?tab=assigned")
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/tasks?tab=assigned") and "msg=" in loc, loc
+    # 非法 back（外部域名）要被忽略
+    r2 = _post(client, "/tasks/%d/progress" % seeded["task"],
+               {"pct": "55", "back": "//evil.com/x"}, from_path="/tasks")
+    assert r2.headers["location"].startswith("/tasks"), "开放重定向要挡住"
+
+
+def test_ai_apply_group_covers_whole_group(client, seeded, monkeypatch):
+    """AI 建议「派给 XX」要能**整组落地**（审计：旧实现只勾当前页 → 83 站只勾上 27）。"""
+    from app.services import ai_chat as _ac
+    from app.models import BdStationPlace, BdLine
+    db = appdb.SessionLocal()
+    line = BdLine(name="建议线", name_norm="建议线", operator="测试", kind="private",
+                  prefs="13", n_station=0)
+    db.add(line)
+    db.flush()
+    pls = []
+    for nm in ("AI甲", "AI乙", "AI丙"):
+        p = BdStationPlace(name=nm, name_norm=nm)
+        db.add(p)
+        db.flush()
+        pls.append(p.id)
+    db.commit()
+    db.close()
+    monkeypatch.setattr(_ac, "configured", lambda: True)
+    ids = pls
+    team_name = appdb.SessionLocal().get(__import__("app.models", fromlist=["BdTeam"]).BdTeam,
+                                         seeded["team"]).name
+    monkeypatch.setattr(_ac, "chat", lambda *a, **k: (
+        '{"summary":"顺路","groups":[{"team":"%s","stations":["AI甲","AI乙","AI丙"],'
+        '"reason":"同一条线"}]}' % team_name, None))
+    _login(client, "admin")
+    r = _post(client, "/tasks/ai-suggest", {"line": "", "kw": ""},
+              from_path="/tasks?tab=unassigned")
+    assert r.status_code == 200
+    body = r.text
+    # 每个站的 place_id 都要出现在提交表单里（不依赖前端勾选当前页）
+    for pid in ids:
+        assert 'name="place_id"\n                 value="%d"' % pid in body or \
+            'value="%d"' % pid in body, "AI 组里的每个站都要能一键落地"
+    assert 'data-testid="ai-apply-form"' in body
+
+
+def test_business_day_is_jst(client, seeded):
+    """业务日必须是 **JST**（线上容器 UTC：用 date.today() 会在 JST 上午 9 点前写错行）。"""
+    import datetime as _dt
+    from app.services import date_plan
+    assert bd_tasks._today() == date_plan.jst_today(), "默认业务日要跟 JST 一致"
+    assert bd_tasks._today(date(2026, 1, 1)) == date(2026, 1, 1), "显式传入要照用"
+    # 进展行按 JST 落库
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, seeded["task"], 20, "早上报的", by="tangjing",
+                           actor_user=tj)
+    db.commit()
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == seeded["task"])
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert row.progress_date == date_plan.jst_today()
+    db.close()
+
+
+def test_progress_slider_has_server_value(client, seeded):
+    """进度滑块必须服务端渲染 value + 纯文本数字（CDN 挂时不至于按 50% 提交）。"""
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, seeded["task"], 40, "四十", by="tangjing",
+                           actor_user=tj)
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h = client.get("/my/tasks?tab=mine").text
+    m = re.search(r'<input type="range" name="pct"[^>]*value="(\d+)"', h)
+    assert m and m.group(1) == "40", "滑块要有服务端 value=当前进度"
+    assert re.search(r'id="pctv-%d"[^>]*>40<' % seeded["task"], h), "数字要有服务端兜底"
+    assert "oninput=" in h, "无 Alpine 时也要能更新数字"
+
+
+def test_leader_line_filter_uses_team_lines(client, seeded):
+    """队长端线路下拉只列**本队有内容的线路**，且筛选生效。"""
+    from app.models import BdLine, BdStationPlace
+    db = appdb.SessionLocal()
+    line, places = _place_fixture(db, line_name="队长筛选线", names=("队甲",))
+    db.commit()
+    bd_tasks.create_tasks_for_places(db, [places[0].id], by="admin",
+                                     team_id=seeded["team"],
+                                     assign_date=date(2026, 10, 3))
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    h = client.get("/my/tasks?tab=unassigned").text
+    assert "队长筛选线" in h, "本队有内容的线路要出现在下拉里"
+    h2 = client.get("/my/tasks?tab=unassigned&line=%d" % line.id).text
+    assert "队甲" in h2, "按线路筛选要能筛到"
+    h3 = client.get("/my/tasks?tab=unassigned&line=%d" % line.id).text
+    assert "駒場東大前" not in h3, "其它线路的站不该出现"

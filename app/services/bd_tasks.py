@@ -473,7 +473,8 @@ def _places_without_team_sub(db: Session):
     return taken.union(legacy).subquery()
 
 
-def line_options(db: Session, tab: str, stale_only: bool = False) -> dict:
+def line_options(db: Session, tab: str, stale_only: bool = False,
+                 team_ids: Optional[Sequence[int]] = None) -> dict:
     """线路下拉的选项与数量（**按 tab 给不同口径**，用户 2026-10-06）。
 
     - `unassigned`（车站池）：只列**还有未分配车站**的线路，数量 = **未分配车站数**
@@ -498,6 +499,8 @@ def line_options(db: Session, tab: str, stale_only: bool = False) -> dict:
         q = _base_query(db, team_id=None, line_id=None, date_from=None,
                         date_to=None, kw="")
         q = _apply_tab(q, db, tab)
+        if team_ids:                     # 队长端：只列自己队的线路
+            q = q.filter(BdTask.team_id.in_(list(team_ids)))
         # 任务 → 线路：物理车站口径（place→station）与历史口径（task.station_id）都算
         pl = (db.query(BdStation.place_id.label("pid"),
                        BdStation.line_id.label("lid"))
@@ -525,6 +528,44 @@ def line_options(db: Session, tab: str, stale_only: bool = False) -> dict:
     return {"total": total, "rows": out}
 
 
+def _place_kw_subquery(db: Session, kw: str):
+    """关键词命中的**物理车站 id**（站名 / 经过线路文本 / 线路名 / 运营商 / 中文线路名）。
+
+    ⚠️ 用户口径：管理员会按运营商搜（"JR"、"東武"）。旧实现只匹配站名与 lines_text
+    → 搜「JR」得 0 个未分配车站，而 SQL 同口径实际有 355 个（2026-10-06 审计）。
+    """
+    from app.models import BdLine
+    from app.services import bd_cjk
+    conds, subs = [], []
+    for v in bd_cjk.search_variants(kw):
+        k = "%%%s%%" % v
+        conds += [BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k)]
+        # 空格不敏感 + "运营商+线名"拼接（用户会输"京急本線"，而库里存的是 operator_short
+        # ="京急" + name="本線"，显示成"京急 本線"）→ 三边都去空格再比
+        v_ns = v.replace(" ", "").replace("　", "")
+        if v_ns:
+            kns = "%%%s%%" % v_ns
+            conds.append(func.replace(BdStationPlace.lines_text, " ", "").like(kns))
+            subs.append(func.replace(BdLine.name, " ", "").like(kns))
+            subs.append(func.replace(
+                func.coalesce(BdLine.operator_short, "") + BdLine.name,
+                " ", "").like(kns))
+        subs += [BdLine.name.like(k), BdLine.operator_short.like(k),
+                 BdLine.operator.like(k), BdStation.line.like(k)]
+        zh = bd_cjk.zh_line_ids(db, v)
+        if zh:
+            conds.append(BdStationPlace.id.in_(
+                db.query(BdStation.place_id)
+                .filter(BdStation.line_id.in_(list(zh)))))
+    q1 = db.query(BdStationPlace.id).filter(or_(*conds)) if conds else None
+    q2 = (db.query(BdStation.place_id)
+          .join(BdLine, BdLine.id == BdStation.line_id)
+          .filter(BdStation.place_id.isnot(None), or_(*subs))) if subs else None
+    if q1 is not None and q2 is not None:
+        return q1.union(q2)
+    return q1 if q1 is not None else q2
+
+
 def list_unassigned_places(db: Session, page: int = 1, per: Optional[int] = None,
                            kw: str = "", line_id: Optional[int] = None,
                            all_rows: bool = False) -> dict:
@@ -543,15 +584,9 @@ def list_unassigned_places(db: Session, page: int = 1, per: Optional[int] = None
         q = q.filter(BdStationPlace.id.in_(
             db.query(BdStation.place_id).filter(BdStation.line_id == line_id)))
     if kw:
-        conds = []
-        for v in bd_cjk.search_variants(kw):
-            k = "%%%s%%" % v
-            conds += [BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k)]
-            zh_ids = bd_cjk.zh_line_ids(db, v)
-            if zh_ids:
-                conds.append(BdStationPlace.id.in_(
-                    db.query(BdStation.place_id).filter(BdStation.line_id.in_(zh_ids))))
-        q = q.filter(or_(*conds)) if conds else q
+        sub = _place_kw_subquery(db, kw)
+        if sub is not None:
+            q = q.filter(BdStationPlace.id.in_(sub))
     if all_rows:
         places = q.order_by(BdStationPlace.name.asc()).all()
         pg = _pg.Pager({"rows": places, "total": len(places), "page": 1,
@@ -1096,6 +1131,63 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
             "reported_pct": orig, "notified": bool(notified)}
 
 
+def stale_count(db: Session, team_id: Optional[int] = None,
+                line_id: Optional[int] = None, date_from=None, date_to=None,
+                kw: str = "", stale_days: int = 2) -> int:
+    """停滞任务数（**已分到人** + 未完成 + ≥N 天没动）——与列表 `stale` 标记同一口径。"""
+    q = _base_query(db, team_id=team_id, line_id=line_id, date_from=date_from,
+                    date_to=date_to, kw=kw)
+    tasks = q.filter(BdTask.state != STATE_DONE,
+                     BdTask.id.in_(_has_assignee(db))).all()
+    if not tasks:
+        return 0
+    last = latest_progress(db, [t.id for t in tasks])
+    today = _today()
+    n = 0
+    for t in tasks:
+        lp = last.get(t.id)
+        base = (lp.progress_date if lp else t.assign_date)
+        days = (today - base).days if base else None
+        if lp is None or (days is not None and days >= stale_days):
+            n += 1
+    return n
+
+
+def _team_label(db: Session, team_id) -> str:
+    """队名（日志里给人看的；队被删了也不报错）。"""
+    if not team_id:
+        return ""
+    t = db.get(BdTeam, team_id)
+    return t.name if t else ""
+
+
+def return_to_pool(db: Session, task_ids: Sequence[int], by: str = "",
+                   actor_user=None) -> dict:
+    """把任务**退回车站池**（解除队伍 + 清担当 + 清分配日期）。
+
+    用户 2026-10-06 审计："派队是单向不可逆的"——选错队只能改库。
+    ⚠️ 与 `set_task_team` 的"换队清空原担当"同一口径；全部写日志（可追溯）。
+    """
+    from app.services import bd_log
+    n = 0
+    for tid in list(task_ids or []):
+        t = db.get(BdTask, tid)
+        if t is None:
+            continue
+        old_team = t.team_id
+        bd_log.log_op(db, actor_user, "task", "return_pool", ref_id=t.id,
+                      ref_label=_station_name(db, t), field="team",
+                      old=(_team_label(db, old_team) if old_team else ""),
+                      new="（车站池）", note="")
+        db.query(BdTaskAssign).filter(BdTaskAssign.task_id == tid).delete()
+        t.team_id = None
+        t.assign_date = None
+        refresh_state(db, t)
+        n += 1
+    db.flush()
+    return {"n": n}
+
+
 def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
                     lead_team_ids: Optional[Sequence[int]] = None,
                     rows: Optional[Sequence[dict]] = None) -> Dict[int, dict]:
@@ -1220,8 +1312,10 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
         # "多少天没动"：从最后一次提交算；从没提交过则按分配日期算
         base = last_d or t.assign_date
         days = (today - base).days if base else None
-        # 停滞 = 还没完成 且（从没提交 或 超过 2 天没更新）
-        stale = (t.state != STATE_DONE
+        # 停滞 = **已分到人** + 还没完成 +（从没提交 或 超过 2 天没更新）
+        # ⚠️ 审计：旧口径把"还没分担当"也算停滞 → 6 个队全部等于各自的未分担当数，
+        #    停滞筛选 515/515 条全中，等于没有筛选（2026-10-06）
+        stale = (t.state != STATE_DONE and bool(a_codes)
                  and (last_d is None or (days is not None and days >= 2)))
         out.append({
             "task": t, "station": st, "place": pl,
@@ -1265,20 +1359,21 @@ def assignees_of(db: Session, task_id: int) -> List[dict]:
     return [{"code": c, "name": names.get(c, c)} for c in codes]
 
 
-def team_tasks(db: Session, team_ids: Sequence[int],
-               tab: str = "", kw: str = "") -> List[dict]:
-    """队长视角：本队任务（可按 tab 过滤）。"""
+def team_tasks(db: Session, team_ids: Sequence[int], tab: str = "",
+               kw: str = "", line_id: Optional[int] = None) -> List[dict]:
+    """队长视角：本队任务（可按 tab / 线路 / 关键词过滤）。
+
+    ⚠️ 关键词与线路筛选**复用管理端同一条 SQL 口径**（`_base_query`）：
+    旧实现只在 Python 里按站名匹配 → 队长搜「南武線」「京急」全军覆没（2026-10-06 审计）。
+    """
     if not team_ids:
         return []
-    q = db.query(BdTask).filter(BdTask.team_id.in_(list(team_ids)))
+    q = _base_query(db, team_id=None, line_id=line_id, kw=kw).filter(
+        BdTask.team_id.in_(list(team_ids)))
     if tab in TABS:
         q = q.filter(BdTask.state == tab)
     tasks = q.order_by(BdTask.state.asc(), BdTask.id.asc()).all()
-    rows = _rows(db, tasks)
-    if kw:
-        k = kw.strip()
-        rows = [r for r in rows if k in (r["station_name"] or "")]
-    return rows
+    return _rows(db, tasks)
 
 
 def member_tasks(db: Session, person_code: Optional[str]) -> List[dict]:
@@ -1446,6 +1541,10 @@ def team_board_summary(db: Session, stale_days: int = 2) -> List[dict]:
     teams = {t.id: t.name for t in db.query(BdTeam).all()}
     today = _today()
     agg: Dict[int, dict] = {}
+    # 停滞只看**已分到人**的任务（没分人的还没开始，谈不上"没动"）
+    with_asg = {r[0] for r in db.query(BdTaskAssign.task_id)
+                .filter(BdTaskAssign.task_id.in_(
+                    [t[0] for t in tasks] or [0])).all()}
     for tid, team_id, state, assign_date in tasks:
         if team_id is None:
             continue
@@ -1458,8 +1557,8 @@ def team_board_summary(db: Session, stale_days: int = 2) -> List[dict]:
         lp = last.get(tid)
         base = (lp.progress_date if lp else assign_date)
         days = (today - base).days if base else None
-        if state != STATE_DONE and (lp is None or (days is not None
-                                                  and days >= stale_days)):
+        if (state != STATE_DONE and tid in with_asg
+                and (lp is None or (days is not None and days >= stale_days))):
             a["stale"] += 1
     return sorted(agg.values(), key=lambda x: (-x["stale"], x["team_name"]))
 
@@ -1483,7 +1582,8 @@ def board_summary(db: Session) -> dict:
 def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
                date_from: Optional[date] = None,
                date_to: Optional[date] = None, lang: str = "zh",
-               kw: str = "", line_id: Optional[int] = None):
+               kw: str = "", line_id: Optional[int] = None,
+               stale_only: bool = False, stale_days: int = 2):
     """导出（**三个 sheet**，流式写）。
 
     用户 2026-10-06："我需要'未分配'，进行中，已完成的都导出来。进行中的要显示进展。
@@ -1518,7 +1618,15 @@ def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
     # ② 进行中 = 任务（带**进展**）
     doing = task_board(db, team_id=team_id, line_id=line_id, tab=TAB_ASSIGNED,
                        date_from=date_from, date_to=date_to, kw=kw,
-                       limit=100000)
+                       limit=100000, stale_only=stale_only,
+                       stale_days=stale_days)
+    # ⚠️ `state` 以前收了不用（按队汇总点「未分配」进来，导出却是全量）→ 真正生效：
+    #    unassigned = **已派队但还没分到人**（按队汇总那一列的口径）
+    if state == STATE_UNASSIGNED:
+        doing = dict(doing, rows=[r for r in doing["rows"]
+                                 if not r.get("assignees")])
+    elif state == STATE_DONE:
+        doing = dict(doing, rows=[])
     _sheet("进行中",
            ["线路", "站点", "团队", "担当", "进展%", "分配日期", "开始日", "最后提交"],
            [[r["line"], r["station_name"], r["team_name"],

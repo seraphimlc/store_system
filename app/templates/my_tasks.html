@@ -31,8 +31,31 @@
   {{ t('我带的队：') }}{% for tm in teams %}<b>{{ tm.name }}</b>{{ '、' if not loop.last }}{% endfor %}
   · {{ t('我负责') }} <b data-testid="n-mine">{{ n_mine }}</b> {{ t('个车站') }}
   · {{ t('本队') }} {{ counts.unassigned + counts.doing + counts.done }} {{ t('个车站') }}
+  {% if counts.unassigned %}· <a href="/my/tasks?tab=unassigned"
+      data-testid="leader-unassigned-link">{{ t('待分派') }} <b>{{ counts.unassigned }}</b> {{ t('个') }}</a>{% endif %}
   {% if n_pending %}· <span class="pill warnk" data-testid="pending-hint">{{ t('待确认') }} {{ n_pending }}</span>{% endif %}
 </p>
+
+{# 待确认批量确认（用户 2026-10-06 审计：30 条要 30 次往返 + 每处理完被弹走） #}
+{% if is_leader and tab == 'pending' %}
+<form id="bulk-confirm-form" method="post" action="/my/tasks/confirm-bulk"
+      data-testid="bulk-confirm-form" style="margin-bottom:.6rem">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="back" value="/my/tasks?tab=pending">
+  <div class="card" style="padding:.7rem 1rem">
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <label class="f" style="gap:.3rem">
+        <input type="checkbox" data-testid="bc-all" style="width:auto"
+               aria-label="{{ t('全选 / 全不选') }}"> {{ t('全选') }}</label>
+      <button class="btn" type="submit" data-testid="bulk-confirm">{{ t('确认选中的上报') }}</button>
+      <span class="spacer" style="flex:1"></span>
+      <span class="hint">{{ t('已选') }} <b data-testid="bc-count">0</b> {{ t('条') }}</span>
+    </div>
+    <p class="hint" style="margin:.4rem 0 0">{{ t('勾几条 → 一次确认（认可队员上报的原值）；要改数值请单条调整。') }}</p>
+  </div>
+</form>
+{% endif %}
 
 {# 队长批量分派：勾任务 → 选队员 → 一次分配（2026-10-06 用户："未分配任务，可以多选，
    然后点一下分配，可以分配到人。这里不需要进度调整控件"）
@@ -76,7 +99,29 @@
     if (allEl) { allEl.checked = n > 0 && n === boxes.length;
                  allEl.indeterminate = n > 0 && n < boxes.length; }
   }
-  boxes.forEach(function (b) { b.addEventListener('change', refresh); });
+  /* Shift + 点 = 勾中间一整段；按住鼠标拖过多行 = 连续勾选（与管理端车站池一致） */
+  var lastIdx = null, dragging = false, dragTo = null;
+  function setRange(a, b, val) {
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    for (var i = lo; i <= hi; i++) boxes[i].checked = val;
+  }
+  boxes.forEach(function (b, i) {
+    b.addEventListener('click', function (ev) {
+      if (ev.shiftKey && lastIdx !== null) setRange(lastIdx, i, true);
+      lastIdx = i; refresh();
+    });
+    var tr = b.closest('.task-row');
+    if (tr) {
+      tr.addEventListener('mousedown', function (ev) {
+        if (ev.target.tagName === 'INPUT') return;
+        dragging = true; dragTo = !b.checked;
+      });
+      tr.addEventListener('mouseenter', function () {
+        if (dragging) { b.checked = dragTo; lastIdx = i; refresh(); }
+      });
+    }
+  });
+  document.addEventListener('mouseup', function () { dragging = false; });
   if (allEl) allEl.addEventListener('change', function () {
     boxes.forEach(function (b) { b.checked = allEl.checked; }); refresh(); });
   form.addEventListener('submit', function () {
@@ -84,6 +129,24 @@
     if (btn) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }
   });
   refresh();
+})();
+(function () {          /* 待确认批量确认：同一套勾选/计数逻辑 */
+  var form = document.getElementById('bulk-confirm-form');
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(
+    document.querySelectorAll('input[name="task_id"][form="bulk-confirm-form"]'));
+  var allEl = document.querySelector('[data-testid="bc-all"]');
+  var cntEl = document.querySelector('[data-testid="bc-count"]');
+  function refresh2() {
+    var n = boxes.filter(function (b) { return b.checked; }).length;
+    if (cntEl) cntEl.textContent = n;
+    if (allEl) { allEl.checked = n > 0 && n === boxes.length;
+                 allEl.indeterminate = n > 0 && n < boxes.length; }
+  }
+  boxes.forEach(function (b) { b.addEventListener('change', refresh2); });
+  if (allEl) allEl.addEventListener('change', function () {
+    boxes.forEach(function (b) { b.checked = allEl.checked; }); refresh2(); });
+  refresh2();
 })();
 </script>
 {% endif %}
@@ -104,7 +167,19 @@
 
 <form method="get" action="/my/tasks" style="margin-bottom:.6rem">
   <input type="hidden" name="tab" value="{{ tab }}">
-  <label class="f">{{ t('搜车站') }}<input type="text" name="kw" value="{{ kw }}" style="width:180px"></label>
+  {# ⚠️ 关键词要能搜**线路/运营商**（旧实现只匹配站名 → 队长搜"南武線"全军覆没）；
+      线路下拉只列**本队有内容的线路**（2026-10-06 审计） #}
+  <label class="f">{{ t('搜车站/线路') }}<input type="text" name="kw" value="{{ kw }}"
+      placeholder="{{ t('站名 / 线路 / 运营商') }}" style="width:180px"></label>
+  {% if line_opts %}
+  <label class="f">{{ t('线路') }}
+    <select name="line" style="max-width:15rem">
+      <option value="">{{ t('全部线路') }}（{{ line_opts.total }}）</option>
+      {% for o in line_opts.rows %}
+      <option value="{{ o.id }}" {% if line_id == o.id %}selected{% endif %}>{{ o.label }}（{{ o.n }}）</option>
+      {% endfor %}
+    </select></label>
+  {% endif %}
   <button class="btn ghost" type="submit">{{ t('查询') }}</button>
 </form>
 {% endif %}
@@ -117,7 +192,8 @@
      data-testid="tab-done">{{ labels.done }}（{{ counts.done }}）</a>
 </div>
 <p class="hint" data-testid="staff-hint">
-  {{ t('分给我的车站：') }} <b>{{ rows|length }}</b> {{ t('个') }}
+  {{ t('分给我的车站：') }} <b>{{ counts.mine + counts.done }}</b> {{ t('个') }}
+  {%- if tab == 'done' %}（{{ t('正在看：已完成') }}）{% endif %}
 </p>
 {% endif %}
 
@@ -134,6 +210,9 @@
     {% if is_leader and tab == 'unassigned' %}
     <input type="checkbox" name="task_id" value="{{ r.task.id }}" form="bulk-assign-form"
            data-testid="bulk-check-{{ r.task.id }}" style="width:auto">
+    {% elif is_leader and tab == 'pending' %}
+    <input type="checkbox" name="task_id" value="{{ r.task.id }}" form="bulk-confirm-form"
+           data-testid="bc-check-{{ r.task.id }}" style="width:auto">
     {% endif %}
     <a href="/tasks/{{ r.task.id }}"><b style="font-size:1.02rem">{{ r.station_name }}</b></a>
     {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
@@ -220,7 +299,8 @@
 
   {% else %}
   <p class="hint" style="margin:.45rem 0 0" data-testid="readonly-{{ r.task.id }}">
-    {{ t('这条不归你上报') }}
+    {% if r.state == 'done' %}{{ t('已完成，无需再报') }}
+    {% else %}{{ t('这条不归你上报') }}{% endif %}
   </p>
   {% endif %}
 
@@ -233,6 +313,8 @@
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
     <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back"
+           value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
     <span class="hint">{{ t('驳回：把 100% 退回成') }}</span>
     <input type="number" name="pct" min="0" max="99" value="90" style="width:4.5rem"
            data-testid="reject-pct-{{ r.task.id }}">
@@ -246,7 +328,9 @@
 </div>
 {% else %}
 <div class="card"><p class="empty" data-testid="no-rows">
-  {% if is_leader %}{{ t('这个分组里没有车站') }}{% else %}{{ t('当前没有分给你的车站') }}{% endif %}
+  {% if not is_leader and tab == 'done' %}{{ t('还没有已完成的车站') }}
+  {% elif is_leader %}{{ t('这个分组里没有车站') }}
+  {% else %}{{ t('当前没有分给你的车站') }}{% endif %}
 </p></div>
 {% endfor %}
 {% endblock %}

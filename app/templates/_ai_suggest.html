@@ -33,32 +33,27 @@
         <td>{{ g.stations|length }}</td>
         <td class="hint">{{ g.stations|map(attribute='name')|join('、') }}</td>
         <td class="hint">{{ g.reason }}</td>
-        <td><button class="btn ghost" type="button" data-testid="ai-pick"
-                    data-ids="{{ g.stations|map(attribute='place_id')|join(',') }}">
-              {{ t('勾选这组') }}</button></td>
+        <td>
+          {# ⚠️ 直接落地：旧实现只勾**当前页**的复选框（建议 83 站只能勾上 27，其余静默丢失）
+             → 改成把整组 place_id 交给 /tasks/assign（服务端本来就按 id 全量处理） #}
+          <form method="post" action="/tasks/assign" style="display:inline"
+                data-testid="ai-apply-form">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <input type="hidden" name="_ft" value="{{ form_token() }}">
+            <input type="hidden" name="team" value="{{ g.team_id }}">
+            {% for st in g.stations %}<input type="hidden" name="place_id"
+                 value="{{ st.place_id }}">{% endfor %}
+            <input type="hidden" name="back"
+                   value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+            <button class="btn" type="submit" data-testid="ai-pick">
+              {{ t('派给') }}{{ g.team_name }}（{{ g.stations|length }}）</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
 </div>
-<script>
-/* 「勾选这组」= 把该组建议的车站勾上（不提交；管理员确认后再按「分配给该队」） */
-document.querySelectorAll('[data-testid="ai-pick"]').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var ids = (b.getAttribute('data-ids') || '').split(',').filter(Boolean);
-    var form = document.getElementById('pool-form');
-    if (!form) return;
-    var n = 0;
-    form.querySelectorAll('input[name="place_id"]').forEach(function (cb) {
-      if (ids.indexOf(cb.value) >= 0) { cb.checked = true; n++; }
-    });
-    var cnt = document.querySelector('[data-testid="pool-count"]');
-    if (cnt) cnt.textContent = String(
-      form.querySelectorAll('input[name="place_id"]:checked').length);
-    var bar = form.querySelector('[data-testid="pool-team"]');
-    if (bar) bar.focus();
-  });
-});
-</script>
+
 {% endif %}

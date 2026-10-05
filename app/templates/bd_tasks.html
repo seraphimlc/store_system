@@ -8,21 +8,30 @@
   <span class="sub">{{ t('每个车站一个任务：在哪个队、分给谁、进展多少；可按分配日期查询') }}</span>
   <div class="actions">
     <a class="btn ghost" download data-testid="tasks-export"
-       href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&line={{ line_id or '' }}&kw={{ kw|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}">{{ t('导出 Excel') }}</a>
+       href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&line={{ line_id or '' }}&kw={{ kw|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if stale %}&stale=1{% endif %}">{{ t('导出 Excel') }}</a>
   </div>
 </div>
 
 {% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ err }}</div>{% endif %}
 
+{# ⚠️ 卡片与下面的 tab **同一口径**（2026-10-06 审计：原来卡片按 task.state 数，
+   "已分配 0" 与同屏 tab 的 "已分配（515）" 打架）。口径：车站池=还没派队的物理车站；
+   已分配=有人管（有队伍/有担当/有进度）；停滞=**已分到人**且 ≥N 天没动。 #}
 <div class="stat-grid grid" style="margin-bottom:.8rem">
-  <div class="stat-card"><div class="k">{{ t('任务总数') }}</div><div class="v">{{ sum.n_task }}</div></div>
-  <div class="stat-card {% if sum.no_team %}warnk{% endif %}">
-    <div class="k">{{ t('还没派给团队') }}</div><div class="v">{{ sum.no_team }}</div></div>
-  <div class="stat-card"><div class="k">{{ t('未分配') }}</div><div class="v">{{ sum.unassigned }}</div></div>
-  <div class="stat-card warnk"><div class="k">{{ t('已分配') }}</div><div class="v">{{ sum.doing }}</div></div>
-  <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div><div class="v">{{ sum.done }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('车站池（还没派队）') }}</div>
+    <div class="v" data-testid="card-pool">{{ cards.pool }}</div></div>
+  <div class="stat-card warnk"><div class="k">{{ t('已分配（有队伍') }}</div>
+    <div class="v" data-testid="card-assigned">{{ cards.assigned }}</div></div>
+  <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div>
+    <div class="v" data-testid="card-done">{{ cards.done }}</div></div>
+  <div class="stat-card {% if cards.stale %}warnk{% endif %}">
+    <div class="k">{{ t('停滞（≥') }}{{ stale_days }}{{ t(' 天没动）') }}</div>
+    <div class="v" data-testid="card-stale">{{ cards.stale }}</div></div>
 </div>
+<p class="hint" style="margin:-.3rem 0 .6rem">
+  {{ t('口径：车站池 = 还没派给队伍的车站；已分配 = 已派队（含还没分到人的）；停滞 = 已分到人但 ≥N 天没提交。任务总数 =') }}
+  <b>{{ cards.total }}</b></p>
 {# 三个 tab（用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"）——
    计数**只受其它筛选影响**，不受当前 tab 影响；链接保留其余筛选条件。 #}
 {# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
@@ -32,7 +41,8 @@
 <div class="card" style="margin-top:1rem" data-testid="by-team-card">
   <h3 style="margin:0 0 .5rem">{{ t('按队汇总') }}</h3>
   <p class="hint" style="margin:0 0 .6rem">
-    {{ t('点队名看该队全部；点数字看该状态的明细（「未分配」= 已派给该队但还没分到人）。') }}</p>
+    {{ t('点队名看该队全部；点数字看该状态的明细。') }}
+    {{ t('这里的「未分配」= 已派给该队但还没分到人（与上面 tab 的「车站池」不是一回事）。') }}</p>
   <div class="tbl-wrap">
     <table class="grid-tbl" data-testid="by-team">
       <thead>
@@ -130,7 +140,7 @@
   <button class="btn" type="submit" data-testid="task-search">{{ t('查询') }}</button>
   {% if tab == 'unassigned' %}
   <span class="hint" style="align-self:center" data-testid="pool-filter-hint">
-    {{ t('这一栏是「还没有派给队伍的车站」，所以按 线路 / 站名 筛；队伍/日期在这一栏不适用。') }}</span>
+    {{ t('这一栏是车站池（还没派给队伍的车站），可按 线路 / 站名 / 运营商 搜；队伍/日期在这一栏不适用。') }}</span>
   {% endif %}
 </form>
 
@@ -144,10 +154,14 @@
 {# ===== 未分配 = **车站池**（还没有队伍的物理车站）=====
    用户 2026-10-06："对于未分配，我可以选择一些车站，直接做分配" +
    "不要单独的'建任务按钮'" → 勾站 + 选队 + 按「分配」= 建任务 + 派队 一步完成。 #}
-<form method="post" action="/tasks/assign" id="pool-form" data-testid="pool-form">
+<form method="post" action="/tasks/assign" id="pool-form"
+      onsubmit="var n=document.querySelectorAll('#pool-form input[name=&#39;place_id&#39;]:checked').length; return n > 0 ? confirm(&#39;把已选的 &#39;+n+&#39; 个车站派给这个队？&#39;) : true" data-testid="pool-form">
   <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
   <input type="hidden" name="_ft" value="{{ form_token() }}">
   <input type="hidden" name="line" value="{{ line_id or '' }}">
+  {# 回跳保留当前视图（tab/队伍/线路/关键词/页码），否则派完队被弹回默认视图 #}
+  <input type="hidden" name="back"
+         value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
   <div class="card" style="padding:.7rem 1rem;margin-bottom:.6rem">
     <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
       <b>{{ t('分配') }}：</b>
@@ -272,6 +286,8 @@
       <td>{{ r.team_name or '—' }}</td>
       <td>{% if r.assignees %}{% for a in r.assignees %}{{ a.name }}{% if leave_map.get(a.code) %}<span class="pill warnk" data-testid="leave-{{ r.task.id }}-{{ a.code }}" title="{{ t('休假中（至') }} {{ leave_map[a.code].end_date.strftime('%Y-%m-%d') if leave_map[a.code].end_date else t('未定') }}）">{{ t('休') }}</span>{% endif %}{{ '、' if not loop.last }}{% endfor %}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
       <td>{{ r.pct }}%
+        {% if r.stale %}<span class="pill warnk" data-testid="stale-{{ r.task.id }}"
+              title="{{ t('超过') }} {{ stale_days }} {{ t('天没提交进展') }}">{{ r.days_since if r.days_since is not none else '—' }} {{ t('天没动') }}</span>{% endif %}
         {% if r.pending_review %}<span class="pill warnk"
               data-testid="review-{{ r.task.id }}">{{ t('待确认') }}</span>
         {% elif r.review_status == 'rejected' and r.last_reported_pct is not none %}
@@ -300,6 +316,8 @@
               style="display:flex;gap:.3rem;align-items:center">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
           <input type="hidden" name="_ft" value="{{ form_token() }}">
+          <input type="hidden" name="back"
+                 value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
           <input type="number" name="pct" min="0" max="100" value="{{ r.pct }}"
                  style="width:4.5rem">
           <input type="text" name="note" placeholder="{{ t('备注') }}" style="width:7rem">

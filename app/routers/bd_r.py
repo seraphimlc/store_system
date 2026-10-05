@@ -21,6 +21,20 @@ from app.models import User
 from app.routers.auth_r import csrf_ok, require_login
 from app.templating import get_templates
 
+def _safe_back(back: str, default: str) -> str:
+    """操作后回跳目标（只允许本站任务页，防开放重定向）。"""
+    b = (back or "").strip()
+    if b.startswith(("/tasks", "/my/tasks")) and "//" not in b and "\n" not in b:
+        return b
+    return default
+
+
+def _with_msg(url: str, key: str, text: str, default: str = "/tasks") -> str:
+    """把 msg=/err= 挂到回跳 URL 上（自动判断 ? 还是 &）。"""
+    u = _safe_back(url, default)
+    return "%s%s%s=%s" % (u, "&" if "?" in u else "?", key, _q(text))
+
+
 router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
@@ -370,6 +384,10 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     pager["rows"] = d["rows"]
     # 当日休假中的人（担当旁边标出来 —— 管理端一眼看到"活派给休假的人了"）
     leave_map = bd_leave.active_map(db)
+    # 三个 tab 的数字（**只受其它筛选影响**）——统计卡与 tab 共用同一份，避免两套口径
+    counts = bd_tasks.tab_counts(
+        db, team_id=team_id, line_id=line_id,
+        date_from=_parse_date(date_from), date_to=_parse_date(date_to), kw=kw)
     return templates.TemplateResponse("bd_tasks.html", {
         "request": request, "current_user": user,
         "rows": d["rows"], "total": d["total"], "page": pager["page"],
@@ -384,10 +402,7 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
                              if k not in ("page", "tab")]),
         "team_id": team_id, "teams": bd_teams.team_options(db),
         "tab": tab, "tabs": bd_tasks.BOARD_TABS,
-        "tab_counts": bd_tasks.tab_counts(
-            db, team_id=team_id, line_id=line_id,
-            date_from=_parse_date(date_from), date_to=_parse_date(date_to),
-            kw=kw),
+        "tab_counts": counts,
         "lines": bd_lines.line_options(db), "line_id": line_id,
         # 线路下拉：**按 tab 给口径**（未分配=未分配车站数；已分配/已完成=任务数）——
         # 只列有内容的线路（用户 2026-10-06："没有任务的就不要显示，数量只显示任务的数量"）
@@ -396,6 +411,18 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
         "stale": stale, "stale_days": d.get("stale_days", 2),
         "leave_map": leave_map,
         "sum": bd_tasks.board_summary(db),
+        # ⚠️ 统计卡与 tab **同一口径**（2026-10-06 审计：卡片按 state 数 → "已分配 0"，
+        #    同屏 tab 却是 515，管理员第一眼拿到两个矛盾的数）
+        "cards": {
+            "pool": counts["unassigned"],       # 车站池（还没派队的物理车站）
+            "assigned": counts["assigned"],     # 已派队/有人管（未完成）
+            "done": counts["done"],
+            "stale": bd_tasks.stale_count(
+                db, team_id=team_id, line_id=line_id,
+                date_from=_parse_date(date_from), date_to=_parse_date(date_to),
+                kw=kw, stale_days=d.get("stale_days", 2)),
+            "total": counts["assigned"] + counts["done"],
+        },
         "by_team": bd_tasks.team_board_summary(db),
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "msg": msg, "err": err,
@@ -471,6 +498,7 @@ def task_new_create(request: Request,
 @router.post("/tasks/{task_id}/progress")
 def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
                         note: str = Form(""), csrf_token: str = Form(""),
+                        back: str = Form(""),
                         user: Optional[User] = Depends(require_login),
                         db: Session = Depends(get_db)):
     """管理员修正某任务的今日进展。"""
@@ -486,11 +514,12 @@ def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
         r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
                                    actor_user=user)
         db.commit()
+        # ⚠️ 回跳**原视图**：原来固定 /tasks（=车站池），管理员在"已分配"里每改一条就被弹走
         return RedirectResponse(
-            "/tasks?msg=%s" % _q("已修正：%d%%" % r["pct"]), status_code=303)
+            _with_msg(back, "msg", "已修正：%d%%" % r["pct"]), status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()
-        return RedirectResponse("/tasks?err=%s" % _q(str(e)), status_code=303)
+        return RedirectResponse(_with_msg(back, "err", str(e)), status_code=303)
 
 
 @router.post("/tasks/ai-suggest", response_class=HTMLResponse)
@@ -560,7 +589,7 @@ def tasks_assign(request: Request,
 def tasks_export(user: Optional[User] = Depends(require_login),
                  db: Session = Depends(get_db), team: str = "",
                  state: str = "", date_from: str = "", date_to: str = "",
-                 kw: str = "", line: str = ""):
+                 kw: str = "", line: str = "", stale: str = ""):
     g = _admin_guard(user)
     if g:
         return g
@@ -570,11 +599,14 @@ def tasks_export(user: Optional[User] = Depends(require_login),
     except ValueError:
         team_id = None
     line_id = int(line) if str(line).strip().isdigit() else None
+    d2 = 2
     buf = bd_tasks.tasks_xlsx(db, team_id=team_id, state=state,
                               date_from=_parse_date(date_from),
                               date_to=_parse_date(date_to),
                               lang=CURRENT_LANG.get(),
-                              kw=kw, line_id=line_id)
+                              kw=kw, line_id=line_id,
+                              # 页面勾了「只看停滞」→ 导出也要一致（审计：以前导出是全量）
+                              stale_only=bool(stale), stale_days=d2)
     fname = "station_tasks_%s.xlsx" % datetime.now().strftime("%Y%m%d")
     nice = "车站任务_%s.xlsx" % datetime.now().strftime("%Y%m%d")
     # 响应头只能 latin-1：ASCII 名给 filename=，中文名走 RFC 5987 的 filename*
@@ -588,11 +620,65 @@ def tasks_export(user: Optional[User] = Depends(require_login),
 
 # ============================ 员工端：我的任务 / 队长端 ============================
 
+@router.post("/tasks/reassign")
+def tasks_reassign(request: Request, task_id: Optional[List[str]] = Form(None),
+                   team_id: str = Form(""), csrf_token: str = Form(""),
+                   back: str = Form(""),
+                   user: Optional[User] = Depends(require_login),
+                   db: Session = Depends(get_db)):
+    """**改派队伍**（用户 2026-10-06 审计：派队原本单向不可逆，选错只能改库）。
+
+    沿用 `set_task_team` 既有口径：**换队会清空不属于新队的担当**（页面提交前已提示）。
+    """
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    ids = [int(x) for x in (task_id or []) if str(x).strip().isdigit()]
+    if not ids or not str(team_id).strip().isdigit():
+        return RedirectResponse(_with_msg(back, "err", "请选择要改派的队伍"),
+                                status_code=303)
+    try:
+        r = bd_tasks.set_task_team(db, ids, int(team_id), by=user.username,
+                                   actor_user=user)
+        db.commit()
+        msg = "已改派 %d 个任务" % r.get("n_team", len(ids))
+        if r.get("n_cleared"):
+            msg += "；清空了 %d 名不属新队的担当" % r["n_cleared"]
+        return RedirectResponse(_with_msg(back, "msg", msg), status_code=303)
+    except bd_tasks.TaskError as e:
+        db.rollback()
+        return RedirectResponse(_with_msg(back, "err", str(e)), status_code=303)
+
+
+@router.post("/tasks/return-pool")
+def tasks_return_pool(request: Request, task_id: Optional[List[str]] = Form(None),
+                      csrf_token: str = Form(""), back: str = Form(""),
+                      user: Optional[User] = Depends(require_login),
+                      db: Session = Depends(get_db)):
+    """**退回车站池**（解除队伍 + 清担当 + 清分配日期）——给"派错队"一条回收路径。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    ids = [int(x) for x in (task_id or []) if str(x).strip().isdigit()]
+    if not ids:
+        return RedirectResponse(_with_msg(back, "err", "请先勾选任务"), status_code=303)
+    r = bd_tasks.return_to_pool(db, ids, by=user.username, actor_user=user)
+    db.commit()
+    return RedirectResponse(_with_msg(back, "msg", "已退回车站池：%d 个" % r["n"]),
+                            status_code=303)
+
+
 @router.get("/my/tasks", response_class=HTMLResponse)
 def my_tasks_page(request: Request,
                   user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db), tab: str = "mine",
-                  kw: str = "", msg: str = "", err: str = ""):
+                  db: Session = Depends(get_db), tab: str = "",
+                  kw: str = "", line: str = "", msg: str = "", err: str = ""):
     """员工端任务页（**队长与队员同一页**，队长多出"任务管理"）。
 
     - **队员（staff）**：只看"我的任务"（自己担当的），**每行可上报进展**（滑动条）
@@ -616,13 +702,20 @@ def my_tasks_page(request: Request,
     members = {}
     avail = {}
     bulk_avail = {}
+    line_id = int(line) if str(line).strip().isdigit() else None
     if is_leader:
-        all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw)
+        all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw,
+                                       line_id=line_id)
         counts = {k: sum(1 for r in all_rows if r["state"] == k)
                   for k in bd_tasks.STATES}
         counts[TAB_MINE] = len(my_rows)
         # 「待确认」= 队员报过、队长还没处理的（用户 2026-10-03：确认 / 调整）
         counts[TAB_PENDING] = sum(1 for r in all_rows if r.get("pending_review"))
+        # ⚠️ 队长默认落点（2026-10-06 审计：默认「我的」→ 队长第一眼是空列表，
+        #    看不到还有 82 个站没分人）→ 有待确认先看待确认，否则看未分配
+        if tab not in (TAB_MINE, TAB_PENDING, "unassigned", "doing", "done"):
+            tab = (TAB_PENDING if counts[TAB_PENDING]
+                   else ("unassigned" if counts["unassigned"] else TAB_MINE))
         if tab == TAB_MINE:
             rows = my_rows
         elif tab == TAB_PENDING:
@@ -673,6 +766,11 @@ def my_tasks_page(request: Request,
         "can_report_map": can_report_map, "can_assign_map": can_assign_map,
         "can_reject_map": can_reject_map,
         "tab_mine": TAB_MINE, "tab_pending": TAB_PENDING,
+        # 队长端线路下拉：只列**本队有内容的线路**（与管理端同口径，2026-10-06 审计）
+        "line_opts": (bd_tasks.line_options(db, tab or "assigned",
+                                            team_ids=team_ids)
+                      if is_leader else {}),
+        "line_id": line_id, "line": line,
         "my_ids": my_ids, "n_mine": len(my_rows),
         "n_pending": counts.get(TAB_PENDING, 0),
         "avail": avail, "my_leave": my_leave,
@@ -863,7 +961,7 @@ def task_detail(request: Request, task_id: int,
     """
     if user is None:
         return RedirectResponse("/login", status_code=302)
-    from app.services import bd_log, bd_tasks
+    from app.services import bd_log, bd_tasks, bd_teams
     task = db.get(bd_tasks.BdTask, task_id)
     if task is None:
         return RedirectResponse("/tasks?err=%s" % _q("任务不存在"),
@@ -884,6 +982,7 @@ def task_detail(request: Request, task_id: int,
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
         "can_adjust": bd_tasks.can_adjust(db, user, task),
+        "teams": bd_teams.team_options(db),      # 改派下拉（管理员）
         "msg": msg, "err": err,
     })
 
@@ -929,6 +1028,54 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
         "msg": msg, "err": err,
     })
+
+
+@router.post("/my/tasks/confirm-bulk")
+def my_tasks_confirm_bulk(request: Request,
+                          task_id: Optional[List[str]] = Form(None),
+                          person: Optional[List[str]] = Form(None),
+                          csrf_token: str = Form(""), back: str = Form(""),
+                          user: Optional[User] = Depends(require_login),
+                          db: Session = Depends(get_db)):
+    """**待确认批量确认**（用户 2026-10-06 审计：30 条要 30 次往返 + 每处理完被弹走）。"""
+    g = _staff_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.models import BdTaskProgress as _P
+    from app.services import bd_tasks
+    ids = [int(x) for x in (task_id or []) if str(x).strip().isdigit()]
+    back = _safe_back(back, "/my/tasks?tab=pending")
+    if not ids:
+        return RedirectResponse(_with_msg(back, "err", "请先勾选任务", "/my/tasks"),
+                                status_code=303)
+    ok, errs = 0, []
+    for tid in ids:
+        t = db.get(bd_tasks.BdTask, tid)
+        if t is None:
+            errs.append("任务不存在"); continue
+        if not bd_tasks.can_adjust(db, user, t):
+            errs.append("没有权限：%s" % (t.id,)); continue
+        pend = (db.query(_P).filter(_P.task_id == tid,
+                                    _P.review_status == "pending")
+                .order_by(_P.progress_date.desc()).first())
+        if pend is None or pend.reported_pct is None:
+            errs.append("无待确认上报：%s" % (t.id,)); continue
+        try:
+            bd_tasks.save_progress(db, tid, pend.reported_pct, pend.note or "",
+                                   by=user.username, actor_user=user,
+                                   confirm=True, on_date=pend.progress_date)
+            db.commit()
+            ok += 1
+        except bd_tasks.TaskError as e:
+            db.rollback()
+            errs.append(str(e))
+    msg = "已确认 %d 条" % ok
+    if errs:
+        msg += "；%d 条跳过（%s）" % (len(errs), errs[0])
+    return RedirectResponse(_with_msg(back, "msg" if ok else "err", msg, "/my/tasks"),
+                            status_code=303)
 
 
 @router.post("/my/tasks/confirm")

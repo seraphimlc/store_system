@@ -1,6 +1,33 @@
 {% extends "base.html" %}
 {% block title %}{{ r.station_name if r else t('任务') }}{% endblock %}
 {% block content %}
+{# 管理员：改派队伍 / 退回车站池（2026-10-06 审计：派队原本单向不可逆，选错只能改库） #}
+{% if current_user and current_user.role == 'admin' and r and r.task.team_id %}
+<div class="card" style="margin-bottom:.6rem;padding:.6rem .9rem" data-testid="task-admin-actions">
+  <form method="post" action="/tasks/reassign" style="display:inline-flex;gap:.4rem;align-items:center">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back"
+           value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <span class="hint">{{ t('改派队伍') }}：</span>
+    <select name="team_id" data-testid="reassign-team" style="max-width:13rem">
+      {% for tm in teams %}<option value="{{ tm.id }}"
+        {% if r.task.team_id == tm.id %}selected{% endif %}>{{ tm.name }}</option>{% endfor %}
+    </select>
+    <button class="btn ghost" type="submit" data-testid="reassign-btn"
+            onclick="return confirm('改派会清空不属于新队的担当，确定？')">{{ t('改派') }}</button>
+  </form>
+  <form method="post" action="/tasks/return-pool" style="display:inline-flex;margin-left:1rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back" value="/tasks?tab=unassigned">
+    <button class="btn ghost" type="submit" data-testid="return-pool-btn"
+            onclick="return confirm('退回车站池：解除队伍 + 清空担当，确定？')">{{ t('退回车站池') }}</button>
+  </form>
+</div>
+{% endif %}
 <div class="page-title">
   <h1>{{ r.station_name if r else '—' }}
     {% if r and r.line %}<span class="sub">{{ r.line }}</span>{% endif %}</h1>
