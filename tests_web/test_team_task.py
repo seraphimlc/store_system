@@ -2841,3 +2841,116 @@ def test_tasks_export_has_three_sheets(client, seeded):
     assert "导2" in pool_names and "导1" not in pool_names
     doing_names = [row[1] for row in wb["进行中"].iter_rows(min_row=2, values_only=True)]
     assert "导1" in doing_names
+
+
+# ---------------- AI 派工建议（2026-10-06） ----------------
+
+def _ai_setup(monkeypatch, payload_text):
+    """mock 模型：configured=True + chat 返回固定文本（AI 全程不连外网）。"""
+    import json as _json
+    from app.services import ai_chat
+    monkeypatch.setattr(ai_chat, "configured", lambda: True)
+
+    def fake_chat(prompt, **kw):
+        fake_chat.prompt = prompt
+        return payload_text, {"total_tokens": 123}
+    monkeypatch.setattr(ai_chat, "chat", fake_chat)
+    return fake_chat
+
+
+def test_ai_suggest_filters_hallucinations_and_writes_nothing(client, seeded,
+                                                              monkeypatch):
+    """**AI 派工建议**：只给建议（不写库）；模型编的站名/队伍/重复分站**一律丢弃**。"""
+    import json as _json
+
+    from app.models import BdStationPlace, BdTask
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="AI线", names=("AI站1", "AI站2", "AI站3"))
+    pls = {p.name: p for p in db.query(BdStationPlace).filter(
+        BdStationPlace.name.in_(["AI站1", "AI站2", "AI站3"])).all()}
+    team_name = db.query(BdTeam).filter(BdTeam.id == seeded["team"]).one().name
+    db.close()
+
+    # 模型输出：① 正常一组（队伍名少写「队」也要认）② 编造站名 ③ 不存在的队伍
+    #          ④ 重复分站（AI站3 给两次，第二次算重复）
+    payload = _json.dumps({
+        "summary": "把这 3 个站给最顺路的队",
+        "groups": [
+            {"team": team_name.replace("队", ""), "stations": ["AI站1", "AI站2"],
+             "reason": "同一条线且该队负担轻"},
+            {"team": "幽灵队", "stations": ["AI站3"], "reason": "编的队伍"},
+            {"team": team_name, "stations": ["AI站3", "不存在的站!!"],
+             "reason": "重复+编造"},
+        ]}, ensure_ascii=False)
+    fake = _ai_setup(monkeypatch, payload)
+
+    _login(client, "admin")
+    db = appdb.SessionLocal()
+    n_before = db.query(BdTask).count()
+    db.close()
+    r = _post(client, "/tasks/ai-suggest", {}, from_path="/tasks?tab=unassigned")
+    assert r.status_code == 200
+    h = r.text
+    assert 'data-testid="ai-suggest-result"' in h
+    assert h.count('data-testid="ai-suggest-row"') == 2, "两条有效建议"
+    assert "AI站1" in h and "AI站2" in h
+    assert "AI站3" in h, "重复分站算进第二条（AI站3 第一次出现就给第二组）"
+    assert "不存在的站" not in h, "编造的站名不能出现"
+    assert "幽灵队" not in h, "不存在的队伍要丢掉"
+    assert 'data-testid="ai-suggest-dropped"' in h, "要如实回报被丢弃的数量"
+    # ⚠️ 只建议、不写库
+    db = appdb.SessionLocal()
+    assert db.query(BdTask).count() == n_before, "AI 建议绝不能建任务/派队"
+    db.close()
+    # prompt 里必须有确定性数字（程序算的各队负担）与规则
+    assert "各队当前负担" in fake.prompt and "只输出 JSON" in fake.prompt
+    assert "未分配车站" in fake.prompt
+
+
+def test_ai_suggest_error_paths(client, seeded, monkeypatch):
+    """AI 未配置 / 输出不可解析 → 只显示一句话，**手动分配照常**。"""
+    from app.services import ai_chat
+    monkeypatch.setattr(ai_chat, "configured", lambda: False)
+    _login(client, "admin")
+    r = _post(client, "/tasks/ai-suggest", {}, from_path="/tasks?tab=unassigned")
+    assert r.status_code == 200
+    assert 'data-testid="ai-suggest-err"' in r.text
+    assert "AI 未配置" in r.text
+    # 页面本体不受影响
+    assert client.get("/tasks?tab=unassigned").status_code == 200
+    # 输出是垃圾 → 也是错误分支（不抛 500）
+    monkeypatch.setattr(ai_chat, "configured", lambda: True)
+    monkeypatch.setattr(ai_chat, "chat", lambda prompt, **kw: ("模型今天不想说话", {}))
+    r = _post(client, "/tasks/ai-suggest", {}, from_path="/tasks?tab=unassigned")
+    assert r.status_code == 200
+    assert 'data-testid="ai-suggest-err"' in r.text
+
+
+def test_ai_suggest_button_on_pool_tab_and_admin_only(client, seeded):
+    """按钮在未分配 tab 上；且**只有管理员**能调（员工/队长不行）。"""
+    _login(client, "admin")
+    h = client.get("/tasks?tab=unassigned").text
+    assert 'data-testid="ai-suggest"' in h
+    assert 'hx-post="/tasks/ai-suggest"' in h
+    assert 'data-testid="ai-suggest-box"' in h
+    # 员工（非管理员）→ 被中间件/守卫挡掉
+    _login(client, "tangjing")
+    r = _post(client, "/tasks/ai-suggest", {}, from_path="/my/tasks")
+    assert r.status_code in (302, 303), "员工不能调 AI 派工建议"
+
+
+def test_ai_chat_direct_by_default(monkeypatch):
+    """**AI 默认直连**（真 bug 修复）：httpx 默认读 macOS 系统代理 → 本机代理坏时
+    所有 AI 调用都失败（实测 SSL EOF）；直连 api.deepseek.com 是通的。
+    `AI_PROXY` 显式配代理；`AI_TRUST_ENV=1` 恢复老行为。
+    """
+    from app.services import ai_chat
+    monkeypatch.delenv("AI_PROXY", raising=False)
+    monkeypatch.delenv("AI_TRUST_ENV", raising=False)
+    assert ai_chat._client_kwargs() == {"trust_env": False}
+    monkeypatch.setenv("AI_PROXY", "http://127.0.0.1:7897")
+    assert ai_chat._client_kwargs() == {"trust_env": False,
+                                        "proxy": "http://127.0.0.1:7897"}
+    monkeypatch.setenv("AI_TRUST_ENV", "1")
+    assert ai_chat._client_kwargs() == {}, "AI_TRUST_ENV=1 时回到 httpx 老行为"

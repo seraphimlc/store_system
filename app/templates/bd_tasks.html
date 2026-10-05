@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ t('任务') }}{% endblock %}
 {% block content %}
+<style>.htmx-indicator{display:none}.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator{display:inline}</style>
 <div class="page-title">
   <h1>{{ t('任务') }}</h1>
   <span class="sub">{{ t('每个车站一个任务：在哪个队、分给谁、进展多少；可按分配日期查询') }}</span>
@@ -86,11 +88,20 @@
         {% endfor %}
       </select>
       <button class="btn" type="submit" data-testid="pool-assign">{{ t('分配给该队') }}</button>
+      {# AI 派工建议：htmx 局部刷新，只给建议（勾选/派队仍走这个表单） #}
+      <button class="btn ghost" type="button" data-testid="ai-suggest"
+              hx-post="/tasks/ai-suggest" hx-target="#ai-suggest-box"
+              hx-swap="innerHTML" hx-indicator="#ai-busy"
+              hx-vals='{{ {"line": (line_id or "")|string, "kw": kw,
+                           "csrf_token": request.state.csrf,
+                           "_ft": form_token()}|tojson }}'>{{ t('AI 建议') }}</button>
+      <span id="ai-busy" class="hint htmx-indicator">{{ t('AI 正在分析…') }}</span>
       <span class="spacer" style="flex:1"></span>
       <span class="hint">{{ t('已勾选') }} <b data-testid="pool-count">0</b> {{ t('个车站') }}</span>
       <button class="btn ghost" type="button" data-testid="pool-all">{{ t('全选') }}</button>
       <button class="btn ghost" type="button" data-testid="pool-none">{{ t('全不选') }}</button>
     </div>
+    <div id="ai-suggest-box" data-testid="ai-suggest-box"></div>
     <p class="hint" style="margin:.4rem 0 0">
       {{ t('勾法：点一下勾选；Shift + 点 = 勾中间一整段；按住鼠标拖过多行 = 连续勾选。派队后这些车站就变成「进行中」。') }}</p>
   </div>

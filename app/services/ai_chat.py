@@ -16,6 +16,26 @@ def _cfg():
             "max_tokens": int(os.environ.get("AI_MAX_TOKENS", "8000") or 8000)}
 
 
+def _client_kwargs():
+    """httpx 客户端参数：**代理口径**（2026-10-06 真 bug 修复）。
+
+    ⚠️ httpx 默认 `trust_env=True` → 会读 **macOS 系统代理**（`getproxies()`）。
+    本机实测：系统代理 `127.0.0.1:7897` 对 HTTPS 是坏的（SSL EOF），
+    于是**所有 AI 调用全部失败**（看板分析、报告、派工建议都受影响）——
+    而直连 `api.deepseek.com` 是通的（HTTP 401 = 正常可达）。
+
+    所以默认 **直连**（`trust_env=False`）；要代理就显式配 `AI_PROXY`。
+    旧行为可用 `AI_TRUST_ENV=1` 恢复。
+    """
+    if os.environ.get("AI_TRUST_ENV", "") in ("1", "true", "yes"):
+        return {}
+    proxy = (os.environ.get("AI_PROXY") or "").strip()
+    kw = {"trust_env": False}
+    if proxy:
+        kw["proxy"] = proxy
+    return kw
+
+
 def configured() -> bool:
     c = _cfg()
     return bool(c["key"] and c["base"])
@@ -35,13 +55,13 @@ def chat(prompt: str, timeout: int = 600, retries: int = 1,
     last = None
     for i in range(retries + 1):
         try:
-            r = httpx.post(c["base"] + "/chat/completions",
-                           headers={"Authorization": "Bearer " + c["key"]},
-                           json={"model": c["model"],
-                                 "messages": [{"role": "user",
-                                               "content": prompt}],
-                                 "max_tokens": max_tokens},
-                           timeout=timeout)
+            with httpx.Client(timeout=timeout, **_client_kwargs()) as _c:
+                r = _c.post(c["base"] + "/chat/completions",
+                            headers={"Authorization": "Bearer " + c["key"]},
+                            json={"model": c["model"],
+                                  "messages": [{"role": "user",
+                                                "content": prompt}],
+                                  "max_tokens": max_tokens})
             r.raise_for_status()
             data = r.json()
             msg = data["choices"][0].get("message", {})

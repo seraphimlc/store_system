@@ -483,6 +483,33 @@ def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
         return RedirectResponse("/tasks?err=%s" % _q(str(e)), status_code=303)
 
 
+@router.post("/tasks/ai-suggest", response_class=HTMLResponse)
+def tasks_ai_suggest(request: Request, line: str = Form(""), kw: str = Form(""),
+                     csrf_token: str = Form(""),
+                     user: Optional[User] = Depends(require_login),
+                     db: Session = Depends(get_db)):
+    """**AI 派工建议**（htmx 局部刷新）：给"未分配的车站池"出"哪几站派给哪个队 + 理由"。
+
+    ⚠️ 只**建议**、绝不写库（不建任务、不派队）：管理员看完勾选 → 走 `/tasks/assign` 才生效。
+    数字由程序算，模型只分组 + 写理由；编造的站名/队伍会被校验层丢弃（见 bd_assign_ai）。
+    """
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_assign_ai
+    line_id = int(line) if str(line).strip().isdigit() else None
+    try:
+        sug = bd_assign_ai.suggest(db, kw=kw, line_id=line_id)
+    except bd_assign_ai.SuggestError as e:
+        return templates.TemplateResponse("_ai_suggest.html", {
+            "request": request, "current_user": user, "err": str(e)})
+    return templates.TemplateResponse("_ai_suggest.html", {
+        "request": request, "current_user": user, "err": "",
+        "sug": sug, "kw": kw, "line_id": line_id})
+
+
 @router.post("/tasks/assign")
 def tasks_assign(request: Request,
                  place_id: Optional[List[str]] = Form(None),
