@@ -447,7 +447,7 @@ class MonthPerfRecord(Base):
 
 # ---------------------------------------------------------------------------
 # P1（WorkBuddy 接入）：Token / 审计 / 封账 / 重算快照
-# 设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md
+# 设计见 docs/archive/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md
 # ---------------------------------------------------------------------------
 
 class ApiToken(Base):
