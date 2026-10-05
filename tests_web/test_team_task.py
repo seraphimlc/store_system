@@ -362,16 +362,19 @@ def test_stations_page_admin(client, seeded):
     assert "新建车站" not in p.text
 
 
-def test_bulk_make_tasks_via_page(client, seeded):
-    _login(client, "admin")
+def test_bulk_make_tasks_for_all_places(seeded):
+    """批量建任务（车站页入口已删，服务层仍在）：**所有还没任务的物理车站**都建上。
+
+    用户 2026-10-06："批量建任务也不需要。这个页面只维护车站信息。"
+    → 车站页不再有这个入口；批量建任务的正式入口是 `/tasks/new`（按线路选站）。
+    """
     db = appdb.SessionLocal()
-    s2 = bd_tasks.create_station(db, "池ノ上", line="井の頭線")
+    bd_tasks.create_station(db, "池ノ上", line="井の頭線")
     db.commit()
-    db.close()
-    r = _post(client, "/stations/tasks", {"all_without": "1"},
-              from_path="/stations")
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
+    pids = bd_tasks.place_ids_without_task(db)
+    assert len(pids) == 1, "駒場東大前已有任务 → 只有池ノ上还没建（实际 %d）" % len(pids)
+    r = bd_tasks.create_tasks_for_places(db, pids, by="admin")
+    assert r["created"] == 1
     assert db.query(BdTask).count() == 2
     db.close()
 
@@ -1544,14 +1547,13 @@ def test_bulk_make_tasks_uses_all_stations_not_just_page(client, seeded):
     db.commit()
     before = db.query(BdTask).count()
     db.close()
-    _login(client, "admin")
-    r = _post(client, "/stations/tasks", {"all_without": "1"},
-              from_path="/stations")
-    assert r.status_code == 303
     db = appdb.SessionLocal()
+    pids = bd_tasks.place_ids_without_task(db)      # 全集（不受分页影响）
+    r = bd_tasks.create_tasks_for_places(db, pids, by="admin")
     after = db.query(BdTask).count()
     db.close()
-    assert after - before == 60, "全部建任务要把 60 个站都建了（不是只建 1 页）"
+    assert after - before == 60, "批量建任务要把 60 个站都建了（不是只建 1 页）"
+    assert r["created"] == 60
 
 
 def test_db_pagination_helper_bounds_and_total(seeded):
@@ -2288,14 +2290,15 @@ def test_bulk_make_tasks_from_station_page_uses_places(client, seeded):
                               pref="13", source="manual"))
     db.commit()
     pid = pl.id
-    db.close()
-    _login(client, "admin")
-    r = _post(client, "/stations/tasks", {"all_without": "1"}, from_path="/stations")
-    assert r.status_code == 303
-    db = appdb.SessionLocal()
+    # 两条线的站行 → **同一个物理车站**（去重后只 1 个）
+    rows = db.query(bd_tasks.BdStation.id).filter(bd_tasks.BdStation.name == "跨线站").all()
+    sid2 = [r[0] for r in rows]
+    pids = bd_tasks.place_ids_for_stations(db, sid2)
+    assert pids == [pid], "跨线站的两行要归到同一个物理车站"
+    r = bd_tasks.create_tasks_for_places(db, pids, by="admin")
     n = db.query(BdTask).filter(BdTask.place_id == pid).count()
-    assert n == 1, "一个物理车站只能有一个任务（跨两条线也只建一个）"
     db.close()
+    assert r["created"] == 1 and n == 1, "一个物理车站只能有一个任务（跨两条线也只建一个）"
 
 
 def test_place_task_renders_detail_and_export(client, seeded):

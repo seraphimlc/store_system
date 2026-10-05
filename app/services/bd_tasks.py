@@ -389,7 +389,12 @@ def place_ids_for_stations(db: Session, station_ids: Sequence[int]) -> List[int]
     rows = (db.query(BdStation.id, BdStation.place_id)
             .filter(BdStation.id.in_(ids)).all())
     m = {sid: pid for sid, pid in rows if pid}
-    return [m[s] for s in ids if s in m]
+    out: List[int] = []
+    for sid in ids:
+        pid = m.get(sid)
+        if pid and pid not in out:      # ⚠️ 去重：跨线站两行 → 同一个物理车站只留一个
+            out.append(pid)
+    return out
 
 
 def list_places_for_line(db: Session, line_id: int, kw: str = "") -> List[dict]:

@@ -832,8 +832,14 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
     **駅コード** / **都道府県** / **物理车站（经过哪些线）** / 状态 / 编辑。
     ⚠️ **不显示任何内部 id**（物理车站 id 也不露，用户口径"编号不用显示"）。
   - **移走的东西**：任务列（所属团队/任务状态/进度）、「还没建任务」筛选、批量建任务/批量派队两个表单、
-    「新建车站」卡片与 `POST /stations/create`（路由已删）。`/stations/tasks`、`/stations/team`
-    两个 POST **保留但无界面**（脚本/测试仍用；要彻底删再说）。
+    「新建车站」卡片与 `POST /stations/create`（**路由已删**）；`POST /stations/tasks`（批量建任务）、
+    `POST /stations/team`（批量派队）也**整块删掉**（用户 2026-10-06："批量建任务也不需要。
+    这个页面只维护车站信息"）→ 现在 `/stations` 只剩 GET 列表 / GET 导出 / POST 编辑三条路由
+    （删掉的路由被访问是 **404**）。
+    - 服务层保留（**脚本与导入器还在用**）：`create_station`（脚本/测试建站）、`create_tasks`（车站级建任务，
+      `bd_seed_team_task.py`/`bd_import_rail.py` 在用）、`place_ids_without_task`/`place_ids_for_stations`
+      （车站→物理车站映射，**已修：文档说去重，实现却返回重复 place**）。
+    - 批量建任务的**正式入口 = `/tasks/new`**（按线路选站），车站页不再承担任何任务操作。
   - ⚠️ **导出静默截断（真 bug，2026-10-06 实测抓到）**：`paging.paginate` 把 `per` 夹到
     `PER_MAX=200` → 导出若走分页**只导 200 行**（千葉県 383 条只导出 200 条）。
     修法：`list_stations(all_rows=True)` 走**不分页**路径；回归测试
