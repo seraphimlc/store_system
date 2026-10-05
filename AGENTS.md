@@ -848,6 +848,24 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   - 测试 +4（关键词覆盖运营商/駅コード/县名、四个筛选+四种排序、跨线站筛选、导出全量）；
     全量 `tests_web` **442 passed**；模板 0 错；i18n 0 缺失 0 死键（顺带清掉 14 个死键）。
 
+- **任务页布局重排（2026-10-06 用户："未分配/已分配/已完成下边**直接**显示任务/车站信息。
+  对于团队的任务信息**往下放**。你现在这么放，一没逻辑，二没规则" +
+  "我怎么看每个队的任务信息，包括已完成，未完成"）**：
+  - **问题**：原来顺序是 `tab → 按队汇总表 → 任务列表` —— 汇总把主体挤到下面，看 tab 点完看不到任务。
+  - **新顺序（固定，别再动）**：`页面标题/操作 → 概览统计卡 → 筛选卡 → **三个 tab** →
+    **任务列表（表格 + 分页）** → **按队汇总（在下面）**`。
+    同时删掉那句多余的「共 N 条（本页 M）」（分页器里本来就有「共 N 条 · 第 x/y 页」）。
+  - **按队汇总升级成可钻取的真表格**（`data-testid="by-team-card"`）：
+    列 = 队伍 / 任务 / **已完成** / **进行中** / **未分配** / 停滞 / **完成率**；
+    **每个数字都是链**（`/tasks?team=<id>`、`&tab=done|doing|unassigned`、`&stale=1`）——
+    这就是"看每个队的任务信息（含已完成/未完成）"的正式入口；队名链到该队全部。
+    数据来自 `team_board_summary()`（一次查询后在 Python 聚合，含 `team_id` 供链接用）。
+  - ⚠️ 口径提醒：**「停滞」= 未完成 且（从没提交 或 ≥2 天没动）** → 刚派下去、一个人都还没动的队，
+    停滞数会等于未分配数（这是"谁没动"的抓手，不是 bug）。
+  - 守门测试 `test_tasks_page_layout_tabs_list_then_team_summary`：**断言页面里三块的字节顺序**
+    `tab < task-row < by-team-card`，并要求按队汇总有 总数/已完成/进行中/未分配/完成率 且能钻取。
+  - 测试 `tests_web/test_team_task.py` **109 项**；全量 `tests_web` **443 passed**。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；

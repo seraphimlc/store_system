@@ -2454,3 +2454,31 @@ def test_stations_export_is_not_truncated(client, seeded):
     assert r.status_code == 200
     lines = r.content.decode("utf-8-sig").splitlines()
     assert len(lines) - 1 == 251, "导出要全量（1 seeded + 250），实际 %d" % (len(lines) - 1)
+
+
+def test_tasks_page_layout_tabs_list_then_team_summary(client, seeded):
+    """任务页布局（用户 2026-10-06："未分配/已分配/已完成**下边直接**显示任务/车站信息。
+    对于团队的任务信息**往下放**。你现在这么放，一没逻辑，二没规则"）。
+
+    断言页面里的**出现顺序**：tab → 任务列表 → 按队汇总；并且按队汇总要能看
+    **已完成 / 未完成**，且每个数字可钻取到"该队 + 该状态"的列表。
+    """
+    _login(client, "admin")
+    h = client.get("/tasks", params={"tab": "assigned"}).text   # seeded 的任务在"已分配"
+    i_tabs = h.index('data-testid="task-tabs"')
+    i_rows = h.index('data-testid="task-row"')
+    i_team = h.index('data-testid="by-team-card"')
+    assert i_tabs < i_rows < i_team, "顺序必须是 tab → 任务列表 → 按队汇总（现在是 %d/%d/%d）" % (
+        i_tabs, i_rows, i_team)
+    tid = seeded["team"]
+    # 按队汇总：总数 / 已完成 / 进行中 / 未分配 / 停滞 / 完成率 全在，而且可点
+    for t in ("by-team-name", "by-team-total", "by-team-done", "by-team-doing",
+              "by-team-unassigned", "by-team-rate"):
+        assert 'data-testid="%s-%d"' % (t, tid) in h, "按队汇总缺少 %s" % t
+    assert "按队汇总" in h and "完成率" in h
+    # 钻取：该队 + 已完成 / 未分配 都能筛出来
+    for tab in ("done", "doing", "unassigned"):
+        r = client.get("/tasks", params={"team": str(tid), "tab": tab})
+        assert r.status_code == 200, "按队钻取失败：team=%d tab=%s" % (tid, tab)
+    r = client.get("/tasks", params={"team": str(tid), "stale": "1"})
+    assert r.status_code == 200

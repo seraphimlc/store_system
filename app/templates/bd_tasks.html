@@ -69,32 +69,6 @@
   {% endfor %}
 </div>
 
-{# 按队汇总：谁在动、谁没动（任务没有分母时，这是管理端最实用的抓手） #}
-{% if by_team %}
-<div class="tbl-wrap" style="margin-bottom:.8rem">
-  <table class="grid-tbl" data-testid="by-team">
-    <thead>
-      <tr><th>{{ t('按队') }}</th><th>{{ t('任务') }}</th><th>{{ t('未分配') }}</th>
-          <th>{{ t('已分配') }}</th><th>{{ t('已完成') }}</th><th>{{ t('停滞') }}</th></tr>
-    </thead>
-    <tbody>
-      {% for b in by_team %}
-      <tr data-testid="by-team-row">
-        <td>{{ b.team_name }}</td>
-        <td>{{ b.total }}</td>
-        <td>{{ b.unassigned }}</td>
-        <td>{{ b.doing }}</td>
-        <td>{{ b.done }}</td>
-        <td>{% if b.stale %}<span class="pill warnk">{{ b.stale }}</span>{% else %}0{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-
-<p class="hint">{{ t('共') }}{{ total }} {{ t('条（本页') }}{{ rows|length }}）</p>
-
 <div class="tbl-wrap">
 <table class="grid-tbl">
   <thead>
@@ -155,5 +129,51 @@
   </tbody>
 </table>
   {% include "_pager.html" %}
+</div>
+
+{# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
+   用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"
+   → 每个数字都点得动：已完成/进行中/未分配/停滞 各自链到"该队 + 该状态"的列表。 #}
+<div class="card" style="margin-top:1rem" data-testid="by-team-card">
+  <h3 style="margin:0 0 .5rem">{{ t('按队汇总') }}</h3>
+  <p class="hint" style="margin:0 0 .6rem">
+    {{ t('点队名看该队全部；点数字看该状态的明细。') }}</p>
+  <div class="tbl-wrap">
+    <table class="grid-tbl" data-testid="by-team">
+      <thead>
+        <tr>
+          <th>{{ t('队伍') }}</th>
+          <th>{{ t('任务') }}</th>
+          <th>{{ t('已完成') }}</th>
+          <th>{{ t('进行中') }}</th>
+          <th>{{ t('未分配') }}</th>
+          <th>{{ t('停滞') }}</th>
+          <th>{{ t('完成率') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in by_team %}
+        <tr data-testid="by-team-row">
+          <td><a href="/tasks?team={{ b.team_id }}"
+                 data-testid="by-team-name-{{ b.team_id }}"><b>{{ b.team_name }}</b></a></td>
+          <td><a href="/tasks?team={{ b.team_id }}"
+                 data-testid="by-team-total-{{ b.team_id }}">{{ b.total }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=done"
+                 data-testid="by-team-done-{{ b.team_id }}">{{ b.done }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=doing"
+                 data-testid="by-team-doing-{{ b.team_id }}">{{ b.doing }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=unassigned"
+                 data-testid="by-team-unassigned-{{ b.team_id }}">{{ b.unassigned }}</a></td>
+          <td>{% if b.stale %}<a class="pill warnk" href="/tasks?team={{ b.team_id }}&stale=1"
+                 data-testid="by-team-stale-{{ b.team_id }}">{{ b.stale }}</a>{% else %}0{% endif %}</td>
+          <td data-testid="by-team-rate-{{ b.team_id }}">
+            {{ (100 * b.done // b.total) if b.total else 0 }}%</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">{{ t('还没有派给团队的任务') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
