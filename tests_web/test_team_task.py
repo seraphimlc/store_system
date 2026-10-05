@@ -2121,3 +2121,196 @@ def test_fill_seq_supports_manual_source():
     mod = _load_script("bd_fill_seq.py")
     src = open(mod.__file__, encoding="utf-8").read()
     assert "bd_line_seq_manual.json" in src and "manual:" in src
+
+
+# ---------------- 建任务（按线路选站；2026-10-05 定稿口径） ----------------
+
+def _place_fixture(db, line_name="测试建线", names=("甲站", "乙站", "丙站"), seqs=(1, 2, 3)):
+    """造一条线 + 若干物理车站（带 seq），返回 (line, places)。"""
+    from app.models import BdLine, BdStationPlace
+    from app.services import bd_places
+    line = BdLine(name=line_name, name_norm=line_name, operator="测试铁道",
+                  operator_short="测试", kind="private", prefs="13", n_station=len(names))
+    db.add(line)
+    db.flush()
+    places = []
+    for nm, sq in zip(names, seqs):
+        db.add(BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line=line_name,
+                         line_id=line.id, pref="13", seq=sq, along_km=float(sq),
+                         seq_src="osm:test", source="manual"))
+        db.flush()
+        bd_places.rebuild_places(db)
+        pl = (db.query(BdStationPlace)
+              .filter(BdStationPlace.name_norm == bd_tasks.norm_name(nm)).first())
+        places.append(pl)
+    db.commit()
+    return line, places
+
+
+def test_new_task_page_lists_places_in_line_order(client, seeded):
+    """建任务页：选线路 → 该线**物理车站**按 seq 列出；已有任务的站禁用（防重复建）。"""
+    from app.models import BdTask
+    db = appdb.SessionLocal()
+    line, places = _place_fixture(db)
+    # 给中间那个站先建一个任务 → 页面上应显示"已有任务"且勾选框 disabled
+    db.add(BdTask(place_id=places[1].id, station_id=None, source_type="station",
+                  state="unassigned", pct=0))
+    db.commit()
+    lid = line.id
+    db.close()
+
+    _login(client, "admin")
+    p = client.get("/tasks/new?line=%d" % lid)
+    assert p.status_code == 200
+    assert p.text.count('data-testid="place-row"') == 3
+    assert 'data-testid="place-check"' in p.text
+    # 顺序：甲 → 乙 → 丙（按 seq），而不是按 id/名称
+    i1, i2, i3 = (p.text.index("甲站"), p.text.index("乙站"), p.text.index("丙站"))
+    assert i1 < i2 < i3, "必须按沿線顺序排"
+    assert "已有任务" in p.text and "disabled" in p.text
+    assert 'data-testid="select-all"' in p.text and 'data-testid="select-none"' in p.text
+    assert 'data-testid="team-select"' in p.text
+
+
+def test_create_tasks_for_places_rolling_dispatch(client, seeded):
+    """**滚动派活**（用户口径）：A 队 2 个站 + B 队 1 个站 = 3 个任务，各自独立；
+    重复提交同一批 → 全部跳过（不覆盖）。"""
+    from app.models import BdTask, BdTeam
+    db = appdb.SessionLocal()
+    line, places = _place_fixture(db, names=("A1", "A2", "B1"))
+    ta = BdTeam(name="甲队", code="JA")
+    tb = BdTeam(name="乙队", code="YB")
+    db.add_all([ta, tb])
+    db.commit()
+    r1 = bd_tasks.create_tasks_for_places(db, [places[0].id, places[1].id],
+                                         by="admin", team_id=ta.id, actor_user=None)
+    r2 = bd_tasks.create_tasks_for_places(db, [places[2].id], by="admin", team_id=tb.id)
+    assert (r1["created"], r2["created"]) == (2, 1)
+    r3 = bd_tasks.create_tasks_for_places(db, [p.id for p in places], by="admin",
+                                          team_id=ta.id)
+    assert r3["created"] == 0 and r3["skipped"] == 3, "重复建必须全跳过"
+    rows = db.query(BdTask).filter(BdTask.place_id.in_([p.id for p in places])).all()
+    assert len(rows) == 3, "3 个站 = 3 个任务（不是 1 个批次任务）"
+    assert {t.team_id for t in rows} == {ta.id, tb.id}
+    assert all(t.station_id is None and t.assign_date is not None for t in rows), \
+        "新任务只挂 place，且自动写分配日期（今天）"
+    db.close()
+
+
+def test_new_task_post_creates_and_shows_in_board(client, seeded):
+    """页面提交：勾 2 个站 + 选队 → 建 2 个任务；在总表「已分配」tab 和线路筛选里都能看到。"""
+    from app.models import BdTask, BdTeam
+    db = appdb.SessionLocal()
+    line, places = _place_fixture(db, line_name="提交线", names=("申1", "申2"))
+    team = BdTeam(name="提交队", code="TJ")
+    db.add(team)
+    db.commit()
+    tid, lid = team.id, line.id
+    ids = [p.id for p in places]
+    db.close()
+
+    _login(client, "admin")
+    r = _post(client, "/tasks/new", {"place_id": [str(i) for i in ids],
+                                     "team": str(tid), "line": str(lid)},
+              from_path="/tasks/new?line=%d" % lid)
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    rows = db.query(BdTask).filter(BdTask.place_id.in_(ids)).all()
+    assert len(rows) == 2
+    assert all(t.team_id == tid for t in rows)
+    # 总表：已分配 tab + 按线路筛（线路过滤要能穿过 place）
+    board = bd_tasks.task_board(db, tab=bd_tasks.TAB_ASSIGNED, line_id=lid, limit=50)
+    names = [x["station_name"] for x in board["rows"]]
+    assert "申1" in names and "申2" in names
+    assert all(x["team_name"] == "提交队" for x in board["rows"])
+    db.close()
+    # 页面上也看得到
+    p = client.get("/tasks?tab=assigned&line=%d" % lid)
+    assert p.status_code == 200 and "申1" in p.text
+
+
+def test_new_task_dedupes_legacy_station_task(seeded):
+    """**回归**：老口径任务（只有 station_id、没有 place_id）也算"已有任务"。
+
+    不修的话会出现"同一个物理车站两个任务"（这条测试就是当时抓到这个 bug 后加的）。
+    `seeded` 里那个任务就是老口径（station_id 有值 / place_id 为空）。
+    """
+    from app.models import BdTask, BdStation
+    db = appdb.SessionLocal()
+    st = (db.query(BdStation)
+          .filter(BdStation.name_norm == bd_tasks.norm_name("駒場東大前")).first())
+    assert st is not None and st.place_id is not None
+    legacy = db.query(BdTask).filter(BdTask.station_id == st.id).first()
+    assert legacy is not None, "seeded 应该已经有一条老口径任务"
+    assert legacy.place_id is None
+    r = bd_tasks.create_tasks_for_places(db, [st.place_id], by="admin", team_id=None)
+    assert r["created"] == 0 and r["skipped"] == 1, \
+        "老任务已占了这个车站 → 不能再建（否则同一车站两个任务）"
+    n = db.query(BdTask).filter(BdTask.station_id == st.id).count()
+    assert n == 1
+    listed = bd_tasks.list_places_for_line(db, st.line_id)
+    assert [x for x in listed if x["place_id"] == st.place_id][0]["has_task"] is True, \
+        "页面上也要显示成已有任务（禁用勾选）"
+    db.close()
+
+
+def test_bulk_make_tasks_from_station_page_uses_places(client, seeded):
+    """车站页的「全部建任务」也走**物理车站**（跨线站不会建出两个任务）。"""
+    from app.models import BdTask, BdStationPlace
+    db = appdb.SessionLocal()
+    # 造一个跨线物理车站：两条线各一行，指向同一个 place
+    _line, places = _place_fixture(db, line_name="跨线甲", names=("跨线站",))
+    pl = places[0]
+    from app.models import BdLine
+    ln2 = BdLine(name="跨线乙", name_norm="跨线乙", operator="测试铁道",
+                 operator_short="测试", kind="private", prefs="13", n_station=1)
+    db.add(ln2)
+    db.flush()
+    db.add(bd_tasks.BdStation(name="跨线站", name_norm=bd_tasks.norm_name("跨线站"),
+                              line="跨线乙", line_id=ln2.id, place_id=pl.id,
+                              pref="13", source="manual"))
+    db.commit()
+    pid = pl.id
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/stations/tasks", {"all_without": "1"}, from_path="/stations")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    n = db.query(BdTask).filter(BdTask.place_id == pid).count()
+    assert n == 1, "一个物理车站只能有一个任务（跨两条线也只建一个）"
+    db.close()
+
+
+def test_place_task_renders_detail_and_export(client, seeded):
+    """挂 place 的任务在**详情页**和**导出**里都要正常（这两处最容易漏改）。"""
+    from app.models import BdTask, BdTeam
+    db = appdb.SessionLocal()
+    line, places = _place_fixture(db, line_name="渲染线", names=("渲1", "渲2"))
+    team = BdTeam(name="渲染队", code="XR")
+    db.add(team)
+    db.commit()
+    r = bd_tasks.create_tasks_for_places(db, [p.id for p in places], by="admin",
+                                        team_id=team.id)
+    tids, lid = r["task_ids"], line.id
+    db.close()
+
+    _login(client, "admin")
+    for tid in tids:
+        d = client.get("/tasks/%d" % tid)
+        assert d.status_code == 200, "任务详情页不能 500"
+        assert "渲" in d.text
+    assert client.get("/tasks/new").status_code == 200
+    e = client.get("/tasks/export?line=%d" % lid)
+    assert e.status_code == 200 and len(e.content) > 0, "导出不能空/不能 500"
+    # 员工端/队长端页面也要能渲染（含 place 任务）
+    assert client.get("/my/tasks").status_code in (200, 302)
+
+
+def test_new_task_page_is_admin_only(client, seeded):
+    """建任务页与提交都只允许管理员（队长/员工进不去）。"""
+    for uname in ("ogawa", "tangjing"):
+        _login(client, uname)
+        r = client.get("/tasks/new", follow_redirects=False)
+        assert r.status_code in (302, 303, 403), "%s 不该看到建任务页" % uname
+    _login(client, "admin")
+    assert client.get("/tasks/new").status_code == 200

@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}{{ t('建任务') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('建任务') }}</h1>
+  <span class="sub">{{ t('按线路挑站：勾中的每个车站都会各自成为一个任务') }}</span>
+  <div class="actions">
+    <a class="btn ghost" href="/tasks" data-testid="back-to-tasks">{{ t('任务列表') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok" data-testid="new-task-msg">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+{# ① 选线路（快速过滤）——标准筛选写法 #}
+<div class="card" style="margin-bottom:.8rem">
+  <form method="get" action="/tasks/new" class="form-grid" data-testid="new-task-filter">
+    <label class="fld">{{ t('线路') }}
+      <select name="line" data-testid="line-select">
+        <option value="">{{ t('请选择线路') }}</option>
+        {% for o in lines %}
+        <option value="{{ o.id }}" {% if line_id == o.id %}selected{% endif %}>
+          {{ o.operator_short }} {{ o.name }}（{{ o.n_station }}）</option>
+        {% endfor %}
+      </select></label>
+    <label class="fld">{{ t('站名') }}<input type="search" name="kw" value="{{ kw }}"
+      placeholder="{{ t('站名关键词') }}"></label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit">{{ t('查询') }}</button>
+      {% if line_id or kw %}<a class="btn ghost" href="/tasks/new">{{ t('清空') }}</a>{% endif %}
+    </div>
+  </form>
+</div>
+
+{% if not line_id %}
+<div class="card"><p class="hint" data-testid="pick-line-hint">
+  {{ t('先选一条线路') }} —— {{ t('线路只是快速过滤：选完可以在下面自由勾选站点（不必全选）。') }}</p></div>
+{% else %}
+{# ② 选站 + ③ 确认（同一个表单，提交就是建任务）#}
+<form method="post" action="/tasks/new" id="new-task-form" data-testid="new-task-form">
+  <input type="hidden" name="line" value="{{ line_id }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+
+  <div class="card" style="margin-bottom:.8rem">
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+      <h3 style="margin:0">{{ t('选要建任务的站') }}</h3>
+      <span class="hint" data-testid="new-task-counts">
+        {{ t('共') }} {{ n_all }} {{ t('站') }} ·
+        {{ t('已有任务') }} {{ n_has }} ·
+        {{ t('可建') }} {{ n_free }} ·
+        <b data-testid="selected-count">0</b> {{ t('已勾选') }}
+      </span>
+      <span style="flex:1"></span>
+      <button class="btn ghost" type="button" data-testid="select-all">{{ t('全选') }}</button>
+      <button class="btn ghost" type="button" data-testid="select-none">{{ t('全不选') }}</button>
+    </div>
+
+    <div class="tbl-wrap">
+      <table class="grid-tbl" data-testid="place-table">
+        <thead>
+          <tr>
+            <th style="width:2.6rem"></th>
+            <th style="width:7.5rem">{{ t('顺序') }}</th>
+            <th>{{ t('车站') }}</th>
+            <th>{{ t('还经过') }}</th>
+            <th style="width:9rem">{{ t('任务') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr data-testid="place-row" data-place-id="{{ r.place_id }}"
+              class="{% if r.has_task %}has-task{% endif %}">
+            <td class="pick-cell">
+              <input type="checkbox" name="place_id" value="{{ r.place_id }}"
+                     data-testid="place-check"
+                     {% if r.has_task %}disabled{% endif %}>
+            </td>
+            <td>{% if r.seq is not none %}<b>{{ r.seq }}</b>
+              {% if r.along_km is not none %}<span class="hint">{{ '%.1f'|format(r.along_km) }}km</span>{% endif %}
+              {% else %}<span class="hint">—</span>{% endif %}</td>
+            <td><b>{{ r.name }}</b>{% if r.n_line > 1 %}
+              <span class="hint">（{{ r.n_line }} {{ t('条线') }}）</span>{% endif %}</td>
+            <td class="hint">{{ r.lines_text }}</td>
+            <td>{% if r.has_task %}
+              <span class="hint" data-testid="already-task">{{ t('已有任务') }} #{{ r.task_id }}</span>
+              {% if r.team_name %}<span class="hint">· {{ r.team_name }}</span>{% endif %}
+              {% else %}<span class="hint">{{ t('未建') }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          {% if not rows %}
+          <tr><td colspan="5" class="empty">{{ t('这条线路下没有车站') }}</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <p class="hint" style="margin-top:.6rem" data-testid="pick-tips">
+      {{ t('勾法：点一下勾选；按住 Shift 再点 = 勾上中间一整段；按住鼠标拖过多行 = 连续勾选。') }}
+      {{ t('已有任务的站会灰掉（一个车站只会有一个任务）。') }}
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="form-grid">
+      <label class="fld">{{ t('派给团队') }}
+        <select name="team" data-testid="team-select">
+          <option value="">{{ t('先不派，稍后派') }}</option>
+          {% for o in teams %}
+          <option value="{{ o.id }}">{{ o.name }}</option>
+          {% endfor %}
+        </select></label>
+      <div class="form-actions" style="align-items:flex-end">
+        <span class="hint" data-testid="submit-hint">{{ t('本次将新建') }}
+          <b data-testid="selected-count-2">0</b> {{ t('个任务（分配日期=今天）') }}</span>
+        <button class="btn" type="submit" data-testid="create-btn"
+                style="margin-left:.6rem">{{ t('建任务') }}</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+<script>
+/* 建任务页的勾选交互：逐个勾 / Shift 区间 / 拖拽圈选 / 全选·全不选。
+   纯原生 JS，不依赖任何库（CDN 挂了也能用）。 */
+(function () {
+  var form = document.getElementById('new-task-form');
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(
+    form.querySelectorAll('input[name="place_id"]:not([disabled])'));
+  var countEls = [document.querySelector('[data-testid="selected-count"]'),
+                  document.querySelector('[data-testid="selected-count-2"]')];
+  var lastIdx = null, dragging = false, dragTo = null;
+
+  function nSel() { return boxes.filter(function (b) { return b.checked; }).length; }
+  function refresh() {
+    var n = nSel();
+    countEls.forEach(function (el) { if (el) el.textContent = n; });
+  }
+  function setRange(a, b, val) {
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    for (var i = lo; i <= hi; i++) boxes[i].checked = val;
+  }
+
+  boxes.forEach(function (b, i) {
+    b.addEventListener('click', function (ev) {
+      if (ev.shiftKey && lastIdx !== null) {          // Shift = 勾上中间一整段
+        setRange(lastIdx, i, true);
+      }
+      lastIdx = i;
+      refresh();
+    });
+    // 拖拽圈选：按住从一行划到另一行，把划过的行都勾上
+    b.closest('tr').addEventListener('mousedown', function (ev) {
+      if (ev.target.tagName === 'INPUT' && ev.shiftKey) return;
+      dragging = true;
+      dragTo = !b.checked;                             // 以起始行的反态作为"要刷成什么"
+      document.body.style.userSelect = 'none';
+    });
+    b.closest('tr').addEventListener('mouseenter', function () {
+      if (!dragging) return;
+      b.checked = dragTo;
+      lastIdx = i;
+      refresh();
+    });
+  });
+  document.addEventListener('mouseup', function () {
+    if (dragging) { dragging = false; document.body.style.userSelect = ''; }
+  });
+
+  var all = document.querySelector('[data-testid="select-all"]');
+  var none = document.querySelector('[data-testid="select-none"]');
+  if (all) all.addEventListener('click', function () {
+    boxes.forEach(function (b) { b.checked = true; }); refresh();
+  });
+  if (none) none.addEventListener('click', function () {
+    boxes.forEach(function (b) { b.checked = false; }); refresh();
+  });
+
+  form.addEventListener('submit', function () {
+    if (nSel() === 0) return;                          // 一个都没勾 → 服务端会给提示
+    var btn = form.querySelector('[data-testid="create-btn"]');
+    if (btn) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }
+  });
+  refresh();
+})();
+</script>
+{% endif %}
+{% endblock %}

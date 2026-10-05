@@ -173,7 +173,14 @@
     {% endfor %}
   </tbody>
 </table>
-  {% include "_pager.html" %}
+  {% if line_id %}
+<p style="margin:.5rem 0 0">
+  <a class="btn" href="/tasks/new?line={{ line_id }}"
+     data-testid="stations-to-new-task">{{ t('用这条线建任务') }}</a>
+  <span class="hint">{{ t('只建你勾选的那几个站（不必全选）') }}</span>
+</p>
+{% endif %}
+{% include "_pager.html" %}
 <p class="hint" style="margin-top:.6rem">
   {{ t('线路顺序数据') }} © <a href="https://www.openstreetmap.org/copyright" target="_blank"
   rel="noopener">OpenStreetMap</a> contributors（ODbL）</p>

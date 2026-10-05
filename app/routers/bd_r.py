@@ -320,12 +320,14 @@ def stations_make_tasks(request: Request,
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import bd_tasks
     ids = _ids(station_id)
-    if all_without:
-        ids = bd_tasks.station_ids_without_task(db)   # 批量=全集，不受分页影响
-    if not ids:
-        return RedirectResponse("/stations?err=%s" % _q("请先勾选车站"),
+    # ⚠️ 统一按**物理车站**建任务（用户 2026-10-05 定稿：1 个车站 1 个任务）——
+    #    否则同一个车站从不同线路各建一次会出现两个任务
+    pids = (bd_tasks.place_ids_without_task(db)          # 批量=全集（不受分页影响）
+            if all_without else bd_tasks.place_ids_for_stations(db, ids))
+    if not pids:
+        return RedirectResponse("/stations?err=%s" % _q("没有可建任务的车站"),
                                 status_code=303)
-    r = bd_tasks.create_tasks(db, ids, by=user.username)
+    r = bd_tasks.create_tasks_for_places(db, pids, by=user.username, actor_user=user)
     db.commit()
     return RedirectResponse(
         "/stations?msg=%s" % _q("建任务 %d 个，跳过 %d 个（已有任务）"
@@ -355,11 +357,15 @@ def stations_set_team(request: Request,
         tid = int(team_id) if str(team_id).strip() else None
     except ValueError:
         tid = None
-    # 车站 → 任务（缺则建），再派队
+    # 车站 → **物理车站** → 任务（缺则建），再派队（口径统一在新模型上）
     from app.models import BdTask
-    r = bd_tasks.create_tasks(db, ids, by=user.username)
+    pids = bd_tasks.place_ids_for_stations(db, ids)
+    if not pids:
+        return RedirectResponse("/stations?err=%s" % _q("没有可建任务的车站"),
+                                status_code=303)
+    bd_tasks.create_tasks_for_places(db, pids, by=user.username, actor_user=user)
     task_ids = [t.id for t in db.query(BdTask)
-                .filter(BdTask.station_id.in_(ids)).all()]
+                .filter(BdTask.place_id.in_(pids)).all()]
     res = bd_tasks.set_task_team(db, task_ids, tid,
                                  assign_date=_parse_date(assign_date) or date.today())
     db.commit()
@@ -424,6 +430,72 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "msg": msg, "err": err,
     })
+
+
+@router.get("/tasks/new", response_class=HTMLResponse)
+def task_new_page(request: Request, user: Optional[User] = Depends(require_login),
+                  db: Session = Depends(get_db), line: str = "", kw: str = "",
+                  msg: str = "", err: str = ""):
+    """**建任务**：选线路（快速过滤）→ 该线的物理车站按沿線顺序列出 → 勾选 → 可选派队 → 建。
+
+    用户 2026-10-05 定稿：
+    - **1 个物理车站 = 1 个任务**（跨线站只 1 个；同名异地本来就 2 个）
+    - **派活是滚动的**（"我分给 A 队的 10 个站，并不是这 10 个站作为一个整体任务跑完我再分新的，
+      而是在剩下几个站的时候，我就可以再派发新的一组给他"）→ 建完的站变"已有任务"禁用，
+      剩下的可以继续勾、换个队、再建一次
+    - 建任务**只到队伍**（担当由队长分）；**分配日期自动今天**（不做日期输入）
+    """
+    g = _admin_guard(user)
+    if g:
+        return g
+    from app.services import bd_teams, bd_tasks, bd_lines
+    line_id = int(line) if str(line).strip().isdigit() else None
+    rows = bd_tasks.list_places_for_line(db, line_id, kw=kw) if line_id else []
+    return templates.TemplateResponse("bd_task_new.html", {
+        "request": request, "current_user": user,
+        "lines": bd_lines.line_options(db), "line_id": line_id, "kw": kw,
+        "rows": rows, "n_all": len(rows),
+        "n_has": sum(1 for r in rows if r["has_task"]),
+        "n_free": sum(1 for r in rows if not r["has_task"]),
+        "teams": bd_teams.team_options(db),
+        "msg": msg, "err": err,
+    })
+
+
+@router.post("/tasks/new")
+def task_new_create(request: Request,
+                    place_id: Optional[List[str]] = Form(None),
+                    team: str = Form(""), line: str = Form(""),
+                    csrf_token: str = Form(""),
+                    user: Optional[User] = Depends(require_login),
+                    db: Session = Depends(get_db)):
+    """按勾选的物理车站**批量建任务**（已有的跳过；可选同时派队）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    ids = [int(x) for x in (place_id or []) if str(x).strip().isdigit()]
+    back = "/tasks/new?line=%s" % _q(line)
+    if not ids:
+        return RedirectResponse(back + "&err=%s" % _q("请先勾选要建任务的站"),
+                                status_code=303)
+    team_id = int(team) if str(team).strip().isdigit() else None
+    try:
+        r = bd_tasks.create_tasks_for_places(db, ids, by=user.username,
+                                             team_id=team_id, actor_user=user)
+    except bd_tasks.TaskError as e:
+        db.rollback()
+        return RedirectResponse(back + "&err=%s" % _q(str(e)), status_code=303)
+    m = "已新建 %d 个任务" % r["created"]
+    if r["team_name"]:
+        m += "（已派给「%s」，分配日期 %s）" % (r["team_name"], r["assign_date"])
+    else:
+        m += "（未派队，可在任务页派）"
+    if r["skipped"]:
+        m += "；跳过 %d 个（已有任务）" % r["skipped"]
+    return RedirectResponse(back + "&msg=%s" % _q(m), status_code=303)
 
 
 @router.post("/tasks/{task_id}/progress")

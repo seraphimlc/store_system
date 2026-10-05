@@ -18,8 +18,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.models import (BdStation, BdTask, BdTaskAssign, BdTaskProgress,
-                        BdTeam, BdTeamMember, Person)
+from app.models import (BdStation, BdStationPlace, BdTask, BdTaskAssign,
+                        BdTaskProgress, BdTeam, BdTeamMember, Person)
 
 STATE_UNASSIGNED = "unassigned"
 STATE_DOING = "doing"
@@ -288,6 +288,147 @@ def create_tasks(db: Session, station_ids: Sequence[int], by: str = "",
     return {"created": created, "skipped": skipped}
 
 
+def _place_ids_taken(db: Session):
+    """**已被任务占用的物理车站 id**（两种口径都算）。
+
+    - 新口径：`bd_task.place_id`
+    - 老口径：`bd_task.station_id` 指向的车站行 → 它的 `place_id`
+
+    ⚠️ 少了任何一边都会出现"同一个车站两个任务"（2026-10-05 测试抓到的真 bug）。
+    """
+    direct = db.query(BdTask.place_id).filter(BdTask.place_id.isnot(None))
+    via_station = (db.query(BdStation.place_id)
+                   .join(BdTask, BdTask.station_id == BdStation.id)
+                   .filter(BdStation.place_id.isnot(None)))
+    return direct.union(via_station).subquery()
+
+
+def place_ids_without_task(db: Session, line_id: Optional[int] = None) -> List[int]:
+    """**所有**"还没有任务"的物理车站 id（批量建任务用；不受分页影响）。
+
+    车站页的「全部建任务」从这里取全集。按 `place_id` 判定（任务单位是物理车站），
+    所以跨线站不会被重复建。
+    """
+    taken = _place_ids_taken(db)
+    q = (db.query(BdStationPlace.id)
+         .filter(BdStationPlace.id.notin_(db.query(taken.c[0])),
+                 BdStationPlace.status == "active"))
+    if line_id:
+        q = q.filter(BdStationPlace.id.in_(
+            db.query(BdStation.place_id).filter(BdStation.line_id == line_id)))
+    return [x for (x,) in q.all()]
+
+
+def place_ids_for_stations(db: Session, station_ids: Sequence[int]) -> List[int]:
+    """车站（站×线）id → **物理车站** id（去重，保持原有顺序）。"""
+    ids = [int(x) for x in dict.fromkeys(station_ids or [])]
+    if not ids:
+        return []
+    rows = (db.query(BdStation.id, BdStation.place_id)
+            .filter(BdStation.id.in_(ids)).all())
+    m = {sid: pid for sid, pid in rows if pid}
+    return [m[s] for s in ids if s in m]
+
+
+def list_places_for_line(db: Session, line_id: int, kw: str = "") -> List[dict]:
+    """按线路列出**可以用来建任务的物理车站**（建任务页用）。
+
+    - **顺序** = 该站在这条线上的 `seq`（OSM / 几何 / 人工三级来源）；没顺序的排最后
+    - 显示：沿線里程 / 还经过哪些线（`lines_text`）/ 是否已有任务（有 → 页面禁用勾选）
+    - 一个跨线站只会出现**一行**（任务单位是物理车站，不是站×线）
+    """
+    # ⚠️ 关联任务要**两种口径都认**（place 直连，或老任务经由 station 所属的 place）
+    #    否则页面上"已建过任务的站"会显示成"未建"，一点就重复建
+    taken = _place_ids_taken(db)
+    legacy = (db.query(BdTask.id)
+              .join(BdStation, BdStation.id == BdTask.station_id)
+              .filter(BdStation.place_id == BdStationPlace.id).exists())
+    q = (db.query(BdStation, BdStationPlace, BdTask, BdTeam.name)
+         .join(BdStationPlace, BdStationPlace.id == BdStation.place_id)
+         .outerjoin(BdTask, or_(BdTask.place_id == BdStationPlace.id,
+                                BdTask.id.in_(
+                                    db.query(BdTask.id)
+                                    .join(BdStation, BdStation.id == BdTask.station_id)
+                                    .filter(BdStation.place_id == BdStationPlace.id))))
+         .outerjoin(BdTeam, BdTeam.id == BdTask.team_id)
+         .filter(BdStation.line_id == line_id))
+    if kw:
+        k = "%%%s%%" % kw.strip()
+        q = q.filter(or_(BdStationPlace.name.like(k),
+                         BdStationPlace.lines_text.like(k)))
+    rows = (q.order_by(BdStation.seq.is_(None), BdStation.seq.asc(),
+                       BdStationPlace.name.asc()).all())
+    out, seen = [], set()
+    for st, pl, task, team_name in rows:
+        if pl.id in seen:                        # 防御：同一 place 在这条线上不该有两行
+            continue
+        seen.add(pl.id)
+        out.append({"place_id": pl.id, "name": pl.name, "seq": st.seq,
+                    "along_km": st.along_km, "lines_text": pl.lines_text,
+                    "n_line": pl.n_line, "pref": pl.pref,
+                    "task_id": (task.id if task is not None else None),
+                    "task_state": (task.state if task is not None else ""),
+                    "team_name": team_name or "",
+                    "has_task": task is not None})
+    return out
+
+
+def create_tasks_for_places(db: Session, place_ids: Sequence[int], by: str = "",
+                            team_id: Optional[int] = None,
+                            assign_date: Optional[date] = None,
+                            actor_user=None) -> dict:
+    """给**物理车站**批量建任务：已有的**跳过并回报**（不覆盖、不 500）。
+
+    用户 2026-10-05 定稿："1 个车站 = 1 个任务，各自独立状态；派活是滚动的"
+    （A 队那 10 个站还剩几个没做完，就可以再派新的一组给他）→ 所以：
+    - 一个车站一个任务（`uq_bd_task_place` 部分唯一索引兜底）
+    - **分配日期默认今天**（用户："日期不用管，有个分配日期就行"；任务会跨好几天）
+    - 建的时候可以**顺便派队**（不派也行，之后再派）；**担当不在这里定**（队长分）
+    - 派了队 → 该任务在"已分配" tab（口径：有队就算有人管）；没派队 → "未分配"
+    """
+    from app.services import bd_log
+    from app.services.date_plan import jst_today
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
+    ids = [int(x) for x in dict.fromkeys(place_ids or [])]
+    if team_id is not None and db.get(BdTeam, team_id) is None:
+        raise TaskError("团队不存在")
+    have = set()
+    if ids:
+        taken = _place_ids_taken(db)
+        have = {pid for (pid,) in db.query(taken.c[0]).filter(
+            taken.c[0].in_(ids)).all() if pid}
+    d = assign_date or jst_today()
+    created, skipped, new_ids = 0, 0, []
+    team_name = (db.get(BdTeam, team_id).name if team_id else "")
+    for pid in ids:
+        if pid in have:
+            skipped += 1
+            continue
+        pl = db.get(BdStationPlace, pid)
+        if pl is None:
+            skipped += 1
+            continue
+        t = BdTask(place_id=pid, station_id=None, source_type="station",
+                   team_id=team_id, assign_date=(d if team_id else None),
+                   state=STATE_UNASSIGNED, pct=0, created_by=by)
+        db.add(t)
+        db.flush()
+        created += 1
+        new_ids.append(t.id)
+        bd_log.log_op(db, actor_user, "task", "create", ref_id=t.id,
+                      ref_label=pl.name, field="任务",
+                      new=("新建（已派队）" if team_id else "新建（未派队）"),
+                      note="按线路选站建任务")
+        if team_id:
+            bd_log.log_op(db, actor_user, "task", "dispatch", ref_id=t.id,
+                          ref_label=pl.name, field="队伍", new=team_name,
+                          note="建任务时同时派队")
+    db.commit()
+    return {"created": created, "skipped": skipped, "task_ids": new_ids,
+            "assign_date": d, "team_name": team_name}
+
+
 def set_task_team(db: Session, task_ids: Sequence[int],
                   team_id: Optional[int], assign_date: Optional[date] = None,
                   by: str = "", actor_user=None) -> dict:
@@ -526,7 +667,17 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
 
 
 def _station_name(db: Session, task: BdTask) -> str:
-    st = db.get(BdStation, task.station_id) if task is not None else None
+    """任务单位的名字：**优先物理车站**（新口径：任务挂 place），退回老的车站行。
+
+    这个名字用在日志 ref_label / 消息文案 / 导出 —— 口径统一在这里，别处不要各写一遍。
+    """
+    if task is None:
+        return ""
+    if getattr(task, "place_id", None):
+        pl = db.get(BdStationPlace, task.place_id)
+        if pl is not None:
+            return pl.name
+    st = db.get(BdStation, task.station_id) if task.station_id else None
     return (st.name if st is not None else "") or ""
 
 
@@ -624,9 +775,13 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
     if not tasks:
         return []
     tids = [t.id for t in tasks]
-    sids = [t.station_id for t in tasks]
+    sids = [t.station_id for t in tasks if t.station_id]
+    pids = [t.place_id for t in tasks if getattr(t, "place_id", None)]
     stations = {s.id: s for s in db.query(BdStation)
                 .filter(BdStation.id.in_(sids)).all()}
+    # ⚠️ 新任务只挂 place（没有 station_id）→ 不取 place 的话页面上名字会是空的
+    places = {x.id: x for x in db.query(BdStationPlace)
+              .filter(BdStationPlace.id.in_(pids)).all()}
     teams = {t.id: t for t in db.query(BdTeam).all()}
     assigns: Dict[int, List[str]] = {}
     names = {}
@@ -655,6 +810,7 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
     today = date.today()
     for t in tasks:
         st = stations.get(t.station_id)
+        pl = places.get(getattr(t, "place_id", None))
         a_codes = assigns.get(t.id, [])
         lp = last.get(t.id)
         last_d = (lp.progress_date if lp else None)
@@ -665,9 +821,11 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
         stale = (t.state != STATE_DONE
                  and (last_d is None or (days is not None and days >= 2)))
         out.append({
-            "task": t, "station": st,
-            "station_name": (st.name if st else ""),
-            "line": (st.line if st else ""),
+            "task": t, "station": st, "place": pl,
+            # ⚠️ 键名保持 `station_name`/`line` 不变：模板/导出都在用，
+            #    这里改成"place 优先"，视图层就**不用跟着大改**（少踩坑）
+            "station_name": ((pl.name if pl else "") or (st.name if st else "")),
+            "line": ((pl.lines_text if pl else "") or (st.line if st else "")),
             "team_id": t.team_id,
             "team_name": (teams[t.team_id].name if t.team_id in teams else ""),
             "team_leaders": team_leaders.get(t.team_id, []),
@@ -780,9 +938,13 @@ def _base_query(db: Session, team_id: Optional[int] = None,
     if team_id:
         q = q.filter(BdTask.team_id == team_id)
     if line_id:
-        q = q.filter(BdTask.id.in_(
-            db.query(BdTask.id).join(BdStation, BdStation.id == BdTask.station_id)
-            .filter(BdStation.line_id == line_id)))
+        # ⚠️ 任务可能挂在 place（新）或 station（老）→ 两边都要认。
+        #    一个跨线站会出现在它经过的**每条线**的筛选结果里（这是对的）。
+        sub = (db.query(BdStation.id)
+               .filter(BdStation.line_id == line_id,
+                       or_(BdStation.id == BdTask.station_id,
+                           BdStation.place_id == BdTask.place_id)))
+        q = q.filter(sub.exists())
     if date_from is not None:
         q = q.filter(BdTask.assign_date.isnot(None), BdTask.assign_date >= date_from)
     if date_to is not None:
@@ -792,12 +954,14 @@ def _base_query(db: Session, team_id: Optional[int] = None,
         from app.models import BdLine
         k = "%%%s%%" % kw.strip()
         sub = (db.query(BdTask.id)
-               .join(BdStation, BdStation.id == BdTask.station_id)
+               .outerjoin(BdStation, BdStation.id == BdTask.station_id)
+               .outerjoin(BdStationPlace, BdStationPlace.id == BdTask.place_id)
                .outerjoin(BdTeam, BdTeam.id == BdTask.team_id)
                # ⚠️ BdLine 必须显式 join：只写 BdLine.name.like() 会跟 bd_team 笛卡尔积，
                # 结果是"任何一条线路命中 → 所有任务命中"（2026-10-05 实测：搜"井の頭"返回全部 1405）
                .outerjoin(BdLine, BdLine.id == BdStation.line_id)
                .filter(or_(BdStation.name.like(k), BdStation.line.like(k),
+                           BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k),
                            BdLine.name.like(k), BdLine.operator_short.like(k),
                            BdTeam.name.like(k))))
         q = q.filter(BdTask.id.in_(sub))

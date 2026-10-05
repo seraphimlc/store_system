@@ -5,6 +5,7 @@
   <h1>{{ t('任务') }}</h1>
   <span class="sub">{{ t('每个车站一个任务：在哪个队、分给谁、进展多少；可按分配日期查询') }}</span>
   <div class="actions">
+    <a class="btn" href="/tasks/new" data-testid="new-task-entry">{{ t('建任务') }}</a>
     <a class="btn ghost" download data-testid="tasks-export"
        href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&date_from={{ date_from }}&date_to={{ date_to }}">{{ t('导出 Excel') }}</a>
   </div>
