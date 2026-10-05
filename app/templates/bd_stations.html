@@ -37,58 +37,6 @@
         {% endfor %}
       </select>
     </label>
-    <label class="fld">{{ t('都道府県') }}
-      <select name="pref" data-testid="pref-filter">
-        <option value="">{{ t('全部') }}</option>
-        {% for o in facets.prefs %}
-        <option value="{{ o.code }}" {% if pref == o.code %}selected{% endif %}>{{ o.label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="fld">{{ t('运营公司') }}
-      <select name="operator" data-testid="operator-filter">
-        <option value="">{{ t('全部') }}</option>
-        {% for o in facets.operators %}
-        <option value="{{ o }}" {% if operator == o %}selected{% endif %}>{{ o }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="fld">{{ t('线路类型') }}
-      <select name="kind" data-testid="kind-filter">
-        <option value="">{{ t('全部') }}</option>
-        {% for o in facets.kinds %}
-        <option value="{{ o.code }}" {% if kind == o.code %}selected{% endif %}>{{ t(o.label) }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="fld">{{ t('状态') }}
-      <select name="status">
-        <option value="">{{ t('全部') }}</option>
-        <option value="active" {% if status=='active' %}selected{% endif %}>{{ t('启用') }}</option>
-        <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
-      </select>
-    </label>
-    <label class="fld">{{ t('排序') }}
-      <select name="sort" data-testid="sort-select">
-        {% for code, label in sorts %}
-        <option value="{{ code }}" {% if sort == code %}selected{% endif %}>{{ t(label) }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="fld">{{ t('每页') }}
-      <select name="per" data-testid="per-select">
-        {% for n in (20, 50, 100) %}
-        <option value="{{ n }}" {% if pager.limit == n %}selected{% endif %}>{{ n }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="fld">{{ t('只看跨线站') }}
-      <span style="display:flex;align-items:center;gap:.4rem;height:100%">
-        <input type="checkbox" name="multi" value="1" {% if multi %}checked{% endif %}
-               data-testid="multi-only" style="width:auto">
-        <span class="hint">{{ t('被多条线经过的车站') }}</span>
-      </span>
-    </label>
     <div class="form-actions" style="align-items:flex-end">
       <button class="btn" type="submit" data-testid="station-search">{{ t('查询') }}</button>
       {% if has_filter %}<a class="btn ghost" href="/stations">{{ t('清空') }}</a>{% endif %}
@@ -108,7 +56,6 @@
 <table class="grid-tbl">
   <thead>
     <tr>
-      <th>{{ t('顺序') }}</th>
       <th>{{ t('车站') }}</th>
       <th>{{ t('线路') }}</th>
       <th>{{ t('駅コード') }}</th>
@@ -121,9 +68,6 @@
   <tbody>
     {% for r in rows %}
     <tr data-testid="station-row">
-      <td>{% if r.station.seq %}<b>{{ r.station.seq }}</b>{% if r.station.along_km is not none %}
-        <span class="hint">{{ '%.1f'|format(r.station.along_km) }}km</span>{% endif %}
-        {% else %}<span class="hint">—</span>{% endif %}</td>
       <td><b>{{ r.station.name }}</b>
         {% if r.n_line > 1 %}<span class="pill" data-testid="multi-line-{{ r.station.id }}"
               title="{{ r.lines_text }}">{{ r.n_line }} {{ t('条线') }}</span>{% endif %}</td>
@@ -142,7 +86,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="empty">{{ t('没有匹配的车站') }}</td></tr>
+    <tr><td colspan="7" class="empty">{{ t('没有匹配的车站') }}</td></tr>
     {% endfor %}
   </tbody>
 </table>

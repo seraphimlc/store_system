@@ -168,8 +168,6 @@
       <span id="ai-busy" class="hint htmx-indicator">{{ t('AI 正在分析…') }}</span>
       <span class="spacer" style="flex:1"></span>
       <span class="hint">{{ t('已勾选') }} <b data-testid="pool-count">0</b> {{ t('个车站') }}</span>
-      <button class="btn ghost" type="button" data-testid="pool-all">{{ t('全选') }}</button>
-      <button class="btn ghost" type="button" data-testid="pool-none">{{ t('全不选') }}</button>
     </div>
     <div id="ai-suggest-box" data-testid="ai-suggest-box"></div>
     <p class="hint" style="margin:.4rem 0 0">
@@ -180,8 +178,10 @@
   <table class="grid-tbl">
     <thead>
       <tr>
-        <th style="width:2.6rem"></th><th style="width:7.5rem">{{ t('顺序') }}</th>
-        <th>{{ t('车站') }}</th><th>{{ t('经过线路') }}</th><th>{{ t('任务') }}</th>
+        {# 全选 / 全不选 = **表头一个复选框**（勾=全选、取消=全不选、勾了一部分=半选态） #}
+        <th class="pick-cell"><input type="checkbox" data-testid="pool-all"
+              title="{{ t('全选 / 全不选') }}" aria-label="{{ t('全选 / 全不选') }}"></th>
+        <th>{{ t('车站') }}</th><th>{{ t('经过线路') }}</th>
       </tr>
     </thead>
     <tbody>
@@ -190,17 +190,12 @@
         <td class="pick-cell">
           <input type="checkbox" name="place_id" value="{{ r.place.id }}"
                  data-testid="pool-check"></td>
-        <td>{% if r.seq %}<b>{{ r.seq }}</b>{% if r.along_km is not none %}
-          <span class="hint">{{ '%.1f'|format(r.along_km) }}km</span>{% endif %}
-          {% else %}<span class="hint">—</span>{% endif %}</td>
         <td><b>{{ r.name }}</b>{% if r.n_line > 1 %}
           <span class="hint">（{{ r.n_line }} {{ t('条线') }}）</span>{% endif %}</td>
         <td class="hint">{{ r.lines_text }}</td>
-        <td>{% if r.has_task %}<span class="hint">{{ t('已建任务·待派队') }}</span>
-          {% else %}<span class="hint">{{ t('未建任务') }}</span>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="empty">{{ t('没有未分配的车站') }}</td></tr>
+      <tr><td colspan="3" class="empty">{{ t('没有未分配的车站') }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -209,16 +204,24 @@
 </form>
 
 <script>
-/* 车站池的勾选交互：逐个 / Shift 区间 / 拖拽圈选 / 全选·全不选 */
+/* 车站池的勾选交互：逐个 / Shift 区间 / 拖拽圈选 / 表头复选框全选 */
 (function () {
   var form = document.getElementById('pool-form');
   if (!form) return;
   var boxes = Array.prototype.slice.call(
     form.querySelectorAll('input[name="place_id"]:not([disabled])'));
   var countEl = document.querySelector('[data-testid="pool-count"]');
+  var allEl = document.querySelector('[data-testid="pool-all"]');
   var lastIdx = null, dragging = false, dragTo = null;
   function nSel() { return boxes.filter(function (b) { return b.checked; }).length; }
-  function refresh() { if (countEl) countEl.textContent = nSel(); }
+  function refresh() {
+    var n = nSel();
+    if (countEl) countEl.textContent = n;
+    if (allEl) {                       /* 全选 / 半选 / 全不选 三态 */
+      allEl.checked = n > 0 && n === boxes.length;
+      allEl.indeterminate = n > 0 && n < boxes.length;
+    }
+  }
   function setRange(a, b, val) {
     var lo = Math.min(a, b), hi = Math.max(a, b);
     for (var i = lo; i <= hi; i++) boxes[i].checked = val;
@@ -241,12 +244,10 @@
   document.addEventListener('mouseup', function () {
     if (dragging) { dragging = false; document.body.style.userSelect = ''; }
   });
-  var all = document.querySelector('[data-testid="pool-all"]');
-  var none = document.querySelector('[data-testid="pool-none"]');
-  if (all) all.addEventListener('click', function () {
-    boxes.forEach(function (b) { b.checked = true; }); refresh(); });
-  if (none) none.addEventListener('click', function () {
-    boxes.forEach(function (b) { b.checked = false; }); refresh(); });
+  if (allEl) allEl.addEventListener('change', function () {
+    boxes.forEach(function (b) { b.checked = allEl.checked; });
+    lastIdx = null; refresh();
+  });
   form.addEventListener('submit', function () {
     var btn = form.querySelector('[data-testid="pool-assign"]');
     if (btn && nSel() > 0) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }

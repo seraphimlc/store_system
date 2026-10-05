@@ -343,17 +343,21 @@ def test_stations_page_admin(client, seeded):
     """车站页 = **车站资产**（车站归车站，2026-10-06 用户口径）。
 
     页面上**不再有**新建车站 / 批量建任务 / 批量派队 / 任务列（那些归任务页）。
-    查询能力要齐：关键词 / 线路 / 都道府県 / 运营公司 / 线路类型 / 只看跨线站 / 排序 / 每页。
+    ⚠️ 2026-10-06 用户："车站页面的查询条件部分太挤了，就留俩条件：关键词，线路。其它的都不用。"
     """
     _login(client, "admin")
     p = client.get("/stations")
     assert p.status_code == 200 and "駒場東大前" in p.text
     for tid in ('data-testid="station-kw"', 'data-testid="line-filter"',
-                'data-testid="pref-filter"', 'data-testid="operator-filter"',
-                'data-testid="kind-filter"', 'data-testid="multi-only"',
-                'data-testid="sort-select"', 'data-testid="per-select"',
                 'data-testid="stations-export"'):
         assert tid in p.text, "车站页缺少 %s" % tid
+    # 其它筛选条件都撤掉（太挤）
+    for gone in ('data-testid="pref-filter"', 'data-testid="operator-filter"',
+                 'data-testid="kind-filter"', 'data-testid="multi-only"',
+                 'data-testid="sort-select"', 'data-testid="per-select"'):
+        assert gone not in p.text, "车站页不该再有 %s" % gone
+    # 表格里也不该再有「顺序」列（用户："顺序列不需要"）
+    assert "<th>顺序</th>" not in p.text
     # 任务相关的东西一个都不许有（车站归车站）
     for gone in ('data-testid="station-create"', 'data-testid="make-all-tasks"',
                  'data-testid="bulk-team-form"', 'data-testid="no-task-only"',
@@ -2786,7 +2790,16 @@ def test_unassigned_tab_is_station_pool_and_assign(client, seeded):
         assert nm in h, "%s 还没派队，应该在池子里" % nm
     assert 'data-testid="pool-form"' in h and 'data-testid="pool-team"' in h
     assert 'data-testid="pool-assign"' in h
-    assert "已建任务·待派队" in h, "建了任务没派队的要标出来"
+    # ⚠️ 2026-10-06 用户："顺序，任务这两列不需要。没任何意义" → 池子只有 勾选/车站/经过线路
+    seg = h[:h.index('data-testid="pool-row"')]
+    pool_head = re.findall(r"<thead>.*?</thead>", seg, re.S)[-1]
+    for gone in ("顺序", "任务"):
+        assert ">%s</th>" % gone not in pool_head, "车站池不该再有「%s」列" % gone
+    assert ">车站</th>" in pool_head and ">经过线路</th>" in pool_head
+    assert 'data-testid="pool-all"' in pool_head, "全选要放表头那个复选框里"
+    assert 'data-testid="pool-none"' not in h, "不要再整俩按钮"
+    row0 = re.search(r'<tr data-testid="pool-row".*?</tr>', h, re.S).group(0)
+    assert row0.count("<td") == 3, "一行只该有 勾选/车站/经过线路"
     assert 'task-row' not in h, "未分配 tab 不该出现任务行"
 
     # 分配：勾 2 个站 → 派给队伍
