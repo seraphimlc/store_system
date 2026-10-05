@@ -15,6 +15,9 @@
 {# 管理端导航 = **左侧分组菜单**（用户 2026-10-03："顶部内容太多了，放不下了"）：
    顶部只留品牌 + 账号 + 汉堡；菜单、账号操作都在左侧。
    员工/队长保持原样：顶部细条（账目操作）+ 底部 tabbar；窄屏同样用汉堡。 #}
+{# 未读消息数：中间件写入 request.state.unread_messages（右上角菜单角标用） #}
+{% set _unread = (request.state.unread_messages
+                  if request.state.unread_messages is defined else 0) %}
 <div class="shell" x-data="{menu:false}">
 <header class="topbar">
   <span class="brand">{{ t('巡店结算系统') }}</span>
@@ -29,6 +32,10 @@
   <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
     <span class="spacer"></span>
     <span class="user">{{ current_user.display_name }}</span>
+    {# 2026-10-06 用户："消息不要放到底部了，底部没有位置了。核对结果也放到右上方的菜单里。" #}
+    <a class="nav" href="/messages" data-testid="nav-messages">{{ t('消息') }}{% if _unread
+      %}<span class="badge">{{ _unread }}</span>{% endif %}</a>
+    <a class="nav" href="/my/report/feedback" data-testid="nav-feedback">{{ t('核对结果') }}</a>
     <a class="nav" href="/my/password">{{ t('修改密码') }}</a>
     <span class="lang-switch">
       <a class="nav" href="{{ lang_url(request, 'zh') }}">中文</a>
@@ -119,9 +126,6 @@
 {# 待填报出勤计划：中间件写入 request.state.plan_pending（无则 None） #}
 {% set _pp = (request.state.plan_pending
               if request.state.plan_pending is defined else none) %}
-{# 未读消息数：中间件写入 request.state.unread_messages（底栏红点用） #}
-{% set _unread = (request.state.unread_messages
-                  if request.state.unread_messages is defined else 0) %}
 <nav class="tabbar" aria-label="{{ t('主导航') }}">
   <a class="tab {% if _p.startswith('/my/tasks') %}on{% endif %}"
      href="/my/tasks" data-testid="tab-tasks">
@@ -137,17 +141,6 @@
      href="/my/report" data-testid="tab-report">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
     <span>{{ t('每日填报') }}</span>
-  </a>
-  <a class="tab {% if _p.startswith('/my/report/feedback') %}on{% endif %}"
-     href="/my/report/feedback" data-testid="tab-feedback">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
-    <span>{{ t('核对结果') }}</span>
-  </a>
-  <a class="tab {% if _p.startswith('/messages') %}on{% endif %}"
-     href="/messages" data-testid="tab-messages">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H7l-3 3z"/></svg>
-    <span>{{ t('消息') }}</span>
-    {% if _unread %}<i class="dot" title="{{ t('未读消息') }}"></i>{% endif %}
   </a>
   <a class="tab {% if _p.startswith('/my/plan') %}on{% endif %}"
      href="/my/plan" data-testid="tab-plan">

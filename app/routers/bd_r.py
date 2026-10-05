@@ -641,15 +641,19 @@ def my_tasks_page(request: Request,
             for code, a in bd_leave.availability_map(db, all_codes, d).items():
                 avail["%s|%s" % (d.isoformat(), code)] = a
     else:
-        rows = my_rows
-        counts = {k: sum(1 for r in rows if r["state"] == k)
-                  for k in bd_tasks.STATES}
-    for r in rows:
-        tid = r["task"].id
-        can_report_map[tid] = bd_tasks.can_report(db, user, r["task"])
-        can_assign_map[tid] = bd_tasks.can_assign(db, user, r["task"])
-        # 驳回（用户 2026-10-06）：队员报 100% → 队长可驳回；队长确认后 → 只有管理员能驳回
-        can_reject_map[tid] = bd_tasks.can_reject(db, user, r["task"])
+        # 用户 2026-10-06："员工端只有'我的'和'已完成'。其它的员工端不需要。"
+        open_rows = [r for r in my_rows if r["state"] != "done"]
+        done_rows = [r for r in my_rows if r["state"] == "done"]
+        if tab not in ("done", TAB_MINE):
+            tab = TAB_MINE
+        counts = {TAB_MINE: len(open_rows), "done": len(done_rows)}
+        rows = done_rows if tab == "done" else open_rows
+    # ⚠️ 权限**一次算完**（逐条 can_* 会让 76 行变成 180+ 条 SQL → 页面慢）
+    perms = bd_tasks.can_reject_maps(db, user, [r["task"] for r in rows])
+    for tid, d in perms.items():
+        can_report_map[tid] = d["report"]
+        can_assign_map[tid] = d["assign"]
+        can_reject_map[tid] = d["reject"]
     my_leave = bd_leave.current(db, user.person_code, jst_today)
     return templates.TemplateResponse("my_tasks.html", {
         "request": request, "current_user": user,
@@ -661,6 +665,10 @@ def my_tasks_page(request: Request,
         "my_ids": my_ids, "n_mine": len(my_rows),
         "n_pending": counts.get(TAB_PENDING, 0),
         "avail": avail, "my_leave": my_leave,
+        # 批量分派下拉的休假/请假标签（未分配 tab 用"今天"这一档，算一次就够）
+        "bulk_avail": (bd_leave.availability_map(
+            db, all_codes, jst_today) if (is_leader and tab == "unassigned"
+                                          and all_codes) else {}),
         "avail_tags": {w: _tr(w, CURRENT_LANG.get()) for w in
                        ("休假", "计划休", "请假", "停用", "离职", "休")},
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
@@ -705,6 +713,52 @@ def my_tasks_assign(request: Request, task_id: int = Form(0),
         db.rollback()
         return RedirectResponse("/my/tasks?err=%s" % _q(str(e)),
                                 status_code=303)
+
+
+@router.post("/my/tasks/assign-bulk")
+def my_tasks_assign_bulk(request: Request,
+                         task_id: Optional[List[str]] = Form(None),
+                         person: Optional[List[str]] = Form(None),
+                         csrf_token: str = Form(""),
+                         user: Optional[User] = Depends(require_login),
+                         db: Session = Depends(get_db)):
+    """**未分配 → 批量分派到人**（用户 2026-10-06："未分配任务，可以多选，然后点一下分配，
+    可以分配到人"）。
+
+    逐条走 `bd_tasks.assign_members`（判权/在职校验/日志都在那里），
+    一条失败不影响其它条，最后回报成功几条 + 警告。
+    """
+    g = _staff_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    ids = [int(x) for x in (task_id or []) if str(x).strip().isdigit()]
+    people = [p for p in (person or []) if str(p).strip()]
+    back = "/my/tasks?tab=unassigned"
+    if not ids:
+        return RedirectResponse(back + "&err=%s" % _q("请先勾选任务"), status_code=303)
+    if not people:
+        return RedirectResponse(back + "&err=%s" % _q("请先选队员"), status_code=303)
+    ok, errs, warns = 0, [], []
+    for tid in ids:
+        try:
+            r = bd_tasks.assign_members(db, tid, people, by=user.username,
+                                        actor_user=user)
+            db.commit()          # ⚠️ assign_members 自己不 commit（由调用方提交）
+            ok += 1
+            warns += (r or {}).get("warnings") or []
+        except Exception as e:                                  # noqa: BLE001
+            db.rollback()
+            errs.append(str(e))
+    msg = "已分派 %d 个任务" % ok
+    if warns:
+        msg += "；⚠️ " + "；".join(warns[:3])
+    if errs:
+        msg += "；%d 条失败：%s" % (len(errs), errs[0])
+    q = ("msg=" + _q(msg)) if not errs else ("err=" + _q(msg))
+    return RedirectResponse("%s&%s" % (back, q), status_code=303)
 
 
 @router.post("/my/tasks/reject")

@@ -1077,6 +1077,48 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
             "reported_pct": orig, "notified": bool(notified)}
 
 
+def can_reject_maps(db: Session, user, tasks: Sequence[BdTask]) -> Dict[int, dict]:
+    """**一页任务的权限一次算完**（`can_report/can_assign/can_adjust/can_reject` 的批量版）。
+
+    ⚠️ 逐条调用那几个 `can_*` 会**每条任务查好几次库** —— 实测队长端"团队任务"tab
+    **76 行 = 180+ 条 SQL、70ms+**（用户 2026-10-06："员工端/队长端加载页面太慢"）。
+    这里改成：**担当一次查 + 我带的队一次查 + 最新进展一次查 + 能力表按角色缓存**。
+    """
+    from app.services import bd_perm, bd_teams
+    ids = [t.id for t in tasks]
+    out = {tid: {"report": False, "assign": False, "adjust": False,
+                 "reject": False} for tid in ids}
+    if user is None or not ids:
+        return out
+    if is_admin(user):
+        for tid in ids:
+            out[tid] = {"report": True, "assign": True, "adjust": True,
+                        "reject": True}
+        return out
+    cap_report = bd_perm.can(db, user, "task.report")
+    cap_assign = bd_perm.can(db, user, "task.assign")
+    cap_adjust = bd_perm.can(db, user, "task.adjust")
+    code = getattr(user, "person_code", None)
+    mine = set()
+    if code:
+        mine = {tid for (tid,) in db.query(BdTaskAssign.task_id)
+                .filter(BdTaskAssign.task_id.in_(ids),
+                        BdTaskAssign.person_code == code).all()}
+    lead_teams = {t.id for t in bd_teams.leader_teams(db, code)}
+    latest = latest_progress(db, ids)          # 一次查（驳回要看"员工原值+pending"）
+    for t in tasks:
+        is_lead = (t.team_id in lead_teams)
+        d = out[t.id]
+        d["report"] = bool(cap_report and (is_lead or t.id in mine))
+        d["assign"] = bool(cap_assign and is_lead)
+        d["adjust"] = bool(cap_adjust and is_lead)
+        row = latest.get(t.id)
+        d["reject"] = bool(t.pct == 100 and is_lead and row is not None
+                           and row.reported_pct == 100
+                           and row.review_status == "pending")
+    return out
+
+
 def can_adjust(db: Session, user, task: BdTask) -> bool:
     """调整（修正）进展：管理员 / 该任务的队长。"""
     from app.services import bd_perm

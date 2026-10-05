@@ -396,7 +396,12 @@ def test_leader_task_page_tabs_and_assign(client, seeded):
     # 默认 tab = 我的（队长页面与员工一样）；本队待分派去「未分配」tab 看
     assert p.text.count('data-testid="my-task-row"') == 0
     p2 = client.get("/my/tasks?tab=unassigned")
-    assert 'data-testid="assign-%d"' % seeded["task"] in p2.text
+    # ⚠️ 2026-10-06 用户："未分配任务，可以多选，然后点一下分配，可以分配到人。
+    #    这里不需要进度调整控件" → 未分配 tab 是**批量分派**（勾任务 + 选队员 + 分配）
+    assert 'data-testid="bulk-assign-form"' in p2.text
+    assert 'data-testid="bulk-check-%d"' % seeded["task"] in p2.text
+    assert 'data-testid="slider-%d"' % seeded["task"] not in p2.text, \
+        "未分配 tab 不该有进度控件"
     r = _post(client, "/my/tasks/assign",
               {"task_id": str(seeded["task"]), "person": "P2"},
               from_path="/my/tasks?tab=unassigned")
@@ -590,7 +595,7 @@ def test_leader_view_after_role_sync(client, seeded):
     assert r.headers["location"] == "/my/tasks"          # 队长落点
     p = client.get("/my/tasks?tab=unassigned").text
     assert 'data-testid="tab-unassigned"' in p
-    assert 'data-testid="assign-%d"' % seeded["task"] in p
+    assert 'data-testid="bulk-check-%d"' % seeded["task"] in p, "未分配 tab 用批量分派"
 
 
 # ---------------- 队长自己也要巡店（2026-10-03 用户口径） ----------------
@@ -1057,7 +1062,11 @@ def test_leader_sees_leave_tag_on_assign_picker(client, seeded):
     _login(client, "ogawa")
     p = client.get("/my/tasks?tab=unassigned")
     assert p.status_code == 200
-    assert 'data-testid="avail-%d-P2"' % seeded["task"] in p.text
+    # ⚠️ 2026-10-06：未分配 tab 改成**批量分派**（逐行候选撤了）→ 标签写在批量下拉的 option 文本里
+    opt = re.search(r'<option value="P2">([^<]*)</option>', p.text)
+    assert opt, "批量下拉里要有候选"
+    assert any(t in opt.group(1) for t in ("休假", "计划休", "请假")), \
+        "候选旁边要有休假标签（提醒不禁止）：%s" % (opt.group(1) if opt else "")
     assert "休假" in p.text
 
 
@@ -1180,7 +1189,7 @@ def test_admin_sends_to_all_and_staff_reads(client, seeded):
     p = client.get("/messages")
     assert p.status_code == 200
     assert "全体通知" in p.text and 'data-testid="msg-unread"' in p.text
-    assert 'data-testid="tab-messages"' in p.text
+    assert 'data-testid="nav-messages"' in p.text, "消息挪到右上角菜单了"
     mid = m.id
     r = _post(client, "/messages/%d/read" % mid, {}, from_path="/messages")
     assert r.status_code == 303
@@ -3117,3 +3126,89 @@ def test_line_dropdown_only_lists_lines_with_content(client, seeded):
     # 已完成：这条线没有已完成任务 → 整条线不出现
     _, o3 = opts("done")
     assert lid not in o3, "没有已完成任务的线路不该出现在下拉里"
+
+
+# ---------------- 员工/队长端（2026-10-06 用户 5 条） ----------------
+
+def test_bulk_assign_on_unassigned_tab(client, seeded):
+    """队长「未分配」= **多选 → 选队员 → 一次分配**，且**没有进度控件**（用户 2026-10-06）。"""
+    from app.models import BdTask, BdTaskAssign
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="批量线", names=("批1", "批2", "批3"))
+    from app.models import BdStationPlace
+    pls = db.query(BdStationPlace).filter(
+        BdStationPlace.name.in_(["批1", "批2", "批3"])).all()
+    r = bd_tasks.create_tasks_for_places(db, [p.id for p in pls], by="admin",
+                                        team_id=seeded["team"])
+    ids = r["task_ids"]
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    h = client.get("/my/tasks", params={"tab": "unassigned"}).text
+    assert 'data-testid="bulk-assign-form"' in h
+    for tid in ids:
+        assert 'data-testid="bulk-check-%d"' % tid in h, "未分配 tab 每行要有勾选框"
+        assert 'data-testid="slider-%d"' % tid not in h, "未分配 tab 不要进度控件"
+    assert 'data-testid="bulk-person"' in h
+    # 一次分派 3 个任务给 P2
+    p = _post(client, "/my/tasks/assign-bulk",
+              {"task_id": [str(i) for i in ids], "person": ["P2"]},
+              from_path="/my/tasks?tab=unassigned")
+    assert p.status_code == 303
+    db = appdb.SessionLocal()
+    for tid in ids:
+        t = db.get(BdTask, tid)
+        who = [a.person_code for a in db.query(BdTaskAssign).filter(
+            BdTaskAssign.task_id == tid).all()]
+        assert who == ["P2"], "批量分派要落到担当上"
+        assert t.state == "doing", "分到人之后就是进行中"
+    db.close()
+    # 分完：未分配里没了；「进行中」里能看到，而且**有进度控件**
+    h2 = client.get("/my/tasks", params={"tab": "unassigned"}).text
+    for tid in ids:
+        assert 'data-testid="bulk-check-%d"' % tid not in h2
+    h3 = client.get("/my/tasks", params={"tab": "doing"}).text
+    for tid in ids:
+        assert 'data-testid="slider-%d"' % tid in h3, "进行中要能看/调进展"
+    # 没勾任务 / 没选人 → 友好报错，不 500
+    p2 = _post(client, "/my/tasks/assign-bulk", {"person": ["P2"]},
+               from_path="/my/tasks?tab=unassigned")
+    assert p2.status_code == 303 and "err=" in p2.headers.get("location", "")
+
+
+def test_staff_has_only_two_tabs(client, seeded):
+    """员工端只有「我的」「已完成」两个 tab（用户 2026-10-06）。"""
+    from app.models import BdStationPlace
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="员工线", names=("员1",))
+    pl = db.query(BdStationPlace).filter(
+        BdStationPlace.name_norm == bd_tasks.norm_name("员1")).first()
+    r = bd_tasks.create_tasks_for_places(db, [pl.id], by="admin",
+                                        team_id=seeded["team"])
+    tid = r["task_ids"][0]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h = client.get("/my/tasks").text
+    assert 'data-testid="staff-tabs"' in h
+    assert 'data-testid="tab-mine"' in h and 'data-testid="tab-done"' in h
+    for gone in ("tab-unassigned", "tab-doing", "tab-pending", "bulk-assign-form"):
+        assert 'data-testid="%s"' % gone not in h, "员工端不该有 %s" % gone
+    # 已完成 tab 只放已完成的
+    h2 = client.get("/my/tasks", params={"tab": "done"}).text
+    assert 'data-testid="my-task-row"' not in h2 or 'data-testid="slider-%d"' % tid not in h2
+
+
+def test_messages_and_feedback_moved_to_top_menu(client, seeded):
+    """底栏腾位置：消息 / 核对结果 挪到右上角菜单（用户 2026-10-06）。"""
+    _login(client, "tangjing")
+    h = client.get("/my/tasks").text
+    for gone in ("tab-messages", "tab-feedback"):
+        assert 'data-testid="%s"' % gone not in h, "底栏不该再有 %s" % gone
+    assert 'data-testid="nav-messages"' in h
+    assert 'data-testid="nav-feedback"' in h
+    assert 'href="/my/report/feedback"' in h and 'href="/messages"' in h
+    # 底栏仍保留 4 项
+    for tid in ("tab-tasks", "tab-perf", "tab-report", "tab-plan"):
+        assert 'data-testid="%s"' % tid in h

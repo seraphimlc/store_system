@@ -96,13 +96,17 @@ def test_base_staff_bottom_tabs():
     staff = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"), request=_req())
     assert 'class="tabbar"' in staff and 'has-tabbar' in staff
-    for tid in ("tab-perf", "tab-report", "tab-feedback"):
+    # ⚠️ 2026-10-06 用户："消息不要放到底部了，底部没有位置了。核对结果也放到右上方的菜单里。"
+    for tid in ("tab-tasks", "tab-perf", "tab-report", "tab-plan"):
         assert 'data-testid="%s"' % tid in staff
+    for gone in ("tab-messages", "tab-feedback"):
+        assert 'data-testid="%s"' % gone not in staff, "底栏不该再有 %s" % gone
     assert 'href="/my/perf"' in staff and 'href="/my/report"' in staff
+    # 消息 / 核对结果 → 右上角菜单
+    assert 'data-testid="nav-messages"' in staff
+    assert 'data-testid="nav-feedback"' in staff
     assert 'href="/my/report/feedback"' in staff
-    # 顶栏不再重复这三项
     assert staff.count('>我的绩效<') == 1 and staff.count('>每日填报<') == 1
-    assert staff.count('>核对结果<') == 1
     assert "我的 Token" not in staff          # 员工端 token 自助页已删除（2026-09-28）
     admin = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="管理员", role="admin"), request=_req())
@@ -114,20 +118,21 @@ def test_base_staff_tab_marks_active():
     class _URL:
         def __init__(self, path):
             self.path = path
+    # ⚠️ 2026-10-06：核对结果不在底栏了（挪到右上角菜单）→ 只验底栏这三个
     for path, on_testid in (("/my/perf", "tab-perf"), ("/my/report", "tab-report"),
-                            ("/my/report/feedback", "tab-feedback")):
+                            ("/my/tasks", "tab-tasks"), ("/my/plan", "tab-plan")):
         req = _req()
         req.url = _URL(path)
         html = _env().get_template("base.html").render(
             current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
         i = html.index('data-testid="%s"' % on_testid)
         assert 'class="tab on"' in html[max(0, i - 90):i], path
-    # 核对页 → 填报 Tab 不能同时高亮（两个 Tab 互斥）
+    # 核对页 → 底栏**一个都不高亮**（它已经不在底栏；填报 Tab 也不能误高亮）
     req = _req()
     req.url = _URL("/my/report/feedback")
     html = _env().get_template("base.html").render(
         current_user=SimpleNamespace(display_name="甲", role="staff"), request=req)
-    assert html.count('class="tab on"') == 1
+    assert html.count('class="tab on"') == 0, "核对页不该让底栏任何 tab 高亮"
 
 
 def test_static_assets_are_cache_busted():
