@@ -1,6 +1,6 @@
 # 部署手册（store.visitworld.me）
 
-完整设计见 `docs/archive/superpowers/specs/2026-09-04-store-visitworld-deployment-design.md`。
+部署要点见 `docs/索引.md` §部署。
 服务器：8.216.43.224（root 经 `~/.ssh/default.pem`，Ubuntu 24.04，Docker+Compose 已装）。
 
 ## 上线步骤

@@ -2,7 +2,7 @@
 """核对结果物化：staff_report_compare_person（人×区间）+ staff_report_compare_day（人×日）。
 
 报告生成时落表；员工端核对页只读本表（不再实时跑 compare），见
-docs/archive/superpowers/specs/2026-09-27-staff-daily-report-design.md。
+docs/记录-员工填报.md。
 """
 from alembic import op
 import sqlalchemy as sa

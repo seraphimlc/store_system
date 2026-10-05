@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """员工每日填报（staff_daily_reports）+ 对比分析报告（staff_report_analyses）。
 
-规格：docs/archive/superpowers/specs/2026-09-27-staff-daily-report-design.md（v7 §5）。
+规格：docs/记录-员工填报.md。
 两张新表，不改动任何现有表；填报数据不参与工资计算。
 """
 from alembic import op
