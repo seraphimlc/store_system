@@ -161,63 +161,125 @@ def update_station(db: Session, station_id: int, name: Optional[str] = None,
     return st
 
 
-def list_stations(db: Session, kw: str = "", status: str = "",
-                  only_without_task: bool = False, page: int = 1,
-                  per: int = None, line_id: Optional[int] = None) -> dict:
-    """车站列表 + 任务概要（**分页**；本页内的任务/队名一次查询，避免 N+1）。
+#: 车站列表排序方式（车站页下拉）；文案用中文，模板 t() 翻日文
+STATION_SORTS = (
+    ("line", "线路 + 顺序"),    # 默认：按线路分组、组内按沿線顺序（用户 2026-10-05 要的顺序）
+    ("name", "站名"),
+    ("pref", "都道府県"),
+    ("ekicode", "駅コード"),
+)
 
-    2026-10-03 用户要求分页：515 个车站以前是**全量铺一屏**。
-    `only_without_task` 改在 **SQL 里**过滤（子查询 NOT EXISTS）——
-    否则分页只对"过滤后的 Python 列表"生效，`total` 会算错。
+#: 线路类型的中文标签（代码见 `bd_lines.KIND_LABELS`：jr/private/…）
+KIND_LABELS_ZH = {
+    "jr": "JR在来线", "shinkansen": "新干线", "private": "私营铁路",
+    "public": "公营", "third": "第三部门", "monorail": "单轨",
+    "agt": "新交通", "tram": "有轨电车", "cable": "钢索铁路",
+}
 
-    **按线路查时按 `seq`（沿線顺序）排序**（用户 2026-10-05："后面我们查的时候就拿这列做
-    order 排序"）—— 顺序来自 OSM 的运行系统线路（`bd_fill_seq.py`），取不到的排最后。
+
+def list_stations(db: Session, page: int = 1, per: Optional[int] = None,
+                  kw: str = "", line_id: Optional[int] = None, pref: str = "",
+                  operator: str = "", kind: str = "", multi_only: bool = False,
+                  status: str = "", sort: str = "line",
+                  all_rows: bool = False) -> dict:
+    """**车站资产列表**（车站页专用）—— 只出车站信息，**不带任务**。
+
+    用户 2026-10-06：
+    - "车站归车站，任务归任务，车站这边只是维护车站信息"
+      → 任务列/任务筛选/批量建任务派队都从这里移走（任务去 `/tasks`，建任务去 `/tasks/new`）
+    - "你再看看车站的功能，缺失很多，我查都查不到"
+      → **关键词一个框搜全部**：站名 / 駅コード / 运营商（JR東日本・都営…）/ 线路名 /
+        还经过哪些线（物理车站层）/ **都道府県名**（以前只存代码，所以"千葉県"搜不到）
+    - 默认排序 = **线路 + 沿線顺序**（以前按 id 排，1920 行毫无规律 → "查不到"的体感来源）
     """
+    from app.models import BdLine, BdStationPlace
+    from app.services import bd_lines
     from app.services import paging as _pg
-    q = db.query(BdStation)
+    q = (db.query(BdStation)
+         .outerjoin(BdLine, BdLine.id == BdStation.line_id)
+         .outerjoin(BdStationPlace, BdStationPlace.id == BdStation.place_id))
     if kw:
-        like = "%%%s%%" % kw.strip()
-        q = q.filter(or_(BdStation.name.like(like), BdStation.line.like(like)))
+        k = kw.strip()
+        like = "%%%s%%" % k
+        conds = [BdStation.name.like(like), BdStation.line.like(like),
+                 BdStation.ekicode.like(like), BdStation.operator.like(like),
+                 BdLine.name.like(like), BdLine.operator_short.like(like),
+                 BdStationPlace.lines_text.like(like)]
+        pref_hits = [c for c, lbl in bd_lines.PREF_LABELS.items() if k in lbl]
+        if pref_hits:                      # 搜"千葉県"→ 命中 pref 代码 12
+            conds.append(BdStation.pref.in_(pref_hits))
+        q = q.filter(or_(*conds))
+    if pref:
+        q = q.filter(BdStation.pref == pref)
+    if operator:
+        q = q.filter(BdLine.operator_short == operator)
+    if kind:
+        q = q.filter(BdLine.kind == kind)
+    if multi_only:                          # 只看跨线站（一个物理车站被多条线经过）
+        q = q.filter(BdStationPlace.n_line > 1)
     if status in ("active", "closed"):
         q = q.filter(BdStation.status == status)
     if line_id:
         q = q.filter(BdStation.line_id == line_id)
-    if only_without_task:
-        sub = db.query(BdTask.id).filter(BdTask.station_id == BdStation.id)
-        q = q.filter(~sub.exists())
-    # 选了线路 → 按沿線顺序排（seq 空的排最后）；否则按 id（老行为）
-    order = ([BdStation.seq.is_(None), BdStation.seq.asc(), BdStation.id.asc()]
-             if line_id else [BdStation.id.asc()])
-    pg = _pg.paginate(q.order_by(*order), page, per or _pg.PER_DEFAULT)
-    stations = pg["rows"]
-    task_map = {}
-    if stations:
-        tasks = (db.query(BdTask)
-                 .filter(BdTask.station_id.in_([s.id for s in stations])).all())
-        task_map = {t.station_id: t for t in tasks}
-    team_names = {t.id: t.name for t in db.query(BdTeam).all()}
-    from app.models import BdLine, BdStationPlace
-    line_names = {l.id: "%s %s" % (l.operator_short, l.name)
-                  for l in db.query(BdLine).all()}
-    # 物理车站层（资产）：给列表带出"N 条线经过"
+    if sort == "name":
+        order = [BdStation.name.asc(), BdStation.id.asc()]
+    elif sort == "pref":
+        order = [BdStation.pref.asc(), BdLine.operator_short.asc(), BdLine.name.asc(),
+                 BdStation.seq.is_(None), BdStation.seq.asc(), BdStation.name.asc()]
+    elif sort == "ekicode":
+        order = [BdStation.ekicode.is_(None), BdStation.ekicode.asc()]
+    else:                                   # line（默认）
+        order = [BdLine.operator_short.asc(), BdLine.name.asc(),
+                 BdStation.seq.is_(None), BdStation.seq.asc(), BdStation.name.asc()]
+    if all_rows:
+        # ⚠️ 导出必须走这里：`paging.paginate` 把 per 夹到 PER_MAX(200) →
+        #    直接传 per=100000 会**静默只导 200 行**（2026-10-06 实测：千葉县 383 条只导出 200 条）
+        stations = q.order_by(*order).all()
+        pg = _pg.Pager({"rows": stations, "total": len(stations), "page": 1,
+                        "per": max(1, len(stations)), "pages": 1,
+                        "start": 1, "end": len(stations), "has_prev": False,
+                        "has_next": False, "prev_page": 1, "next_page": 1})
+    else:
+        pg = _pg.paginate(q.order_by(*order), page, per or _pg.PER_DEFAULT)
+        stations = pg["rows"]
+    lines_map = {l.id: l for l in db.query(BdLine).all()}
     places = {pl.id: pl for pl in db.query(BdStationPlace).filter(
-        BdStationPlace.id.in_([s.place_id for s in stations if s.place_id] or [0])).all()}
+        BdStationPlace.id.in_([x.place_id for x in stations if x.place_id] or [0])).all()}
     out = []
-    for s in stations:
-        t = task_map.get(s.id)
-        pl = places.get(s.place_id)
-        out.append({"station": s, "task": t, "place": pl,
-                    "n_line": (pl.n_line if pl else 0),
-                    "lines_text": (pl.lines_text if pl else ""),
-                    "line_label": line_names.get(s.line_id, s.line or ""),
-                    "team_name": (team_names.get(t.team_id) if t else "") or "",
-                    "state": (t.state if t else ""),
-                    "pct": (t.pct if t else 0)})
+    for st in stations:
+        ln = lines_map.get(st.line_id)
+        pl = places.get(st.place_id)
+        out.append({
+            "station": st, "line": ln, "place": pl,
+            "line_label": (("%s %s" % (ln.operator_short, ln.name)) if ln
+                           else (st.line or "")),
+            "operator": ((ln.operator_short if ln else "") or st.operator or ""),
+            "kind": (ln.kind if ln else ""),
+            "kind_label": KIND_LABELS_ZH.get(ln.kind if ln else "", ""),
+            "pref_label": bd_lines.PREF_LABELS.get(st.pref or "", st.pref or ""),
+            "n_line": (pl.n_line if pl else 0),
+            "lines_text": (pl.lines_text if pl else ""),
+            "city": (pl.city if pl else ""),
+        })
     pg["rows"] = out
     return pg
 
 
-# ---------------- 任务 ----------------
+def station_facets(db: Session) -> dict:
+    """车站页筛选下拉的选项（都从数据现取，不写死）。"""
+    from app.models import BdLine
+    from app.services import bd_lines
+    ops = [r[0] for r in db.query(BdLine.operator_short).distinct()
+           .order_by(BdLine.operator_short.asc()).all() if r[0]]
+    kinds = [r[0] for r in db.query(BdLine.kind).distinct().all() if r[0]]
+    prefs = [r[0] for r in db.query(BdStation.pref).distinct().all() if r[0]]
+    return {
+        "operators": ops,
+        "kinds": [{"code": k, "label": KIND_LABELS_ZH.get(k, k)} for k in kinds],
+        "prefs": [{"code": c, "label": bd_lines.PREF_LABELS.get(c, c)}
+                  for c in sorted(prefs)],
+    }
+
 
 def recompute_state(pct: int, n_assign: int) -> str:
     """状态唯一口径（优先级：已完成 > 进行中 > 未分配）：

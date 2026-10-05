@@ -340,10 +340,26 @@ def test_change_team_clears_assignees(seeded):
 
 
 def test_stations_page_admin(client, seeded):
+    """车站页 = **车站资产**（车站归车站，2026-10-06 用户口径）。
+
+    页面上**不再有**新建车站 / 批量建任务 / 批量派队 / 任务列（那些归任务页）。
+    查询能力要齐：关键词 / 线路 / 都道府県 / 运营公司 / 线路类型 / 只看跨线站 / 排序 / 每页。
+    """
     _login(client, "admin")
     p = client.get("/stations")
     assert p.status_code == 200 and "駒場東大前" in p.text
-    assert 'data-testid="bulk-team-form"' in p.text
+    for tid in ('data-testid="station-kw"', 'data-testid="line-filter"',
+                'data-testid="pref-filter"', 'data-testid="operator-filter"',
+                'data-testid="kind-filter"', 'data-testid="multi-only"',
+                'data-testid="sort-select"', 'data-testid="per-select"',
+                'data-testid="stations-export"'):
+        assert tid in p.text, "车站页缺少 %s" % tid
+    # 任务相关的东西一个都不许有（车站归车站）
+    for gone in ('data-testid="station-create"', 'data-testid="make-all-tasks"',
+                 'data-testid="bulk-team-form"', 'data-testid="no-task-only"',
+                 'data-testid="make-task"'):
+        assert gone not in p.text, "车站页不该再出现 %s" % gone
+    assert "新建车站" not in p.text
 
 
 def test_bulk_make_tasks_via_page(client, seeded):
@@ -512,7 +528,6 @@ def test_leader_cannot_post_admin_bulk_endpoints(client, seeded):
     for path, data in (("/stations/team", {"station_id": str(seeded["station"]),
                                           "team_id": str(seeded["team"])}),
                        ("/stations/tasks", {"all_without": "1"}),
-                       ("/stations/create", {"name": "X"}),
                        ("/tasks/%d/progress" % seeded["task"], {"pct": "50"}),
                        ("/teams/create", {"name": "Y"})):
         r = client.post(path, data=data, follow_redirects=False)
@@ -1971,6 +1986,8 @@ def test_stations_page_shows_asset_and_no_task_id(client, seeded):
     for word in ("物理车站", "跨线车站", "车站（站×线）"):
         assert word in p.text, "资产统计卡要有「%s」" % word
     assert "#%d" % seeded["task"] not in p.text, "不许显示任务编号（#id）"
+    assert "山手線" in p.text and "井の頭線" in p.text, "跨线站要显示经过哪些线"
+    assert seeded["team"] is not None  # 任务相关的变量在这里不再用到（车站页不显示任务）
 
 
 # ---------------- 沿線顺序（OSM 数据源，2026-10-05） ----------------
@@ -2314,3 +2331,123 @@ def test_new_task_page_is_admin_only(client, seeded):
         assert r.status_code in (302, 303, 403), "%s 不该看到建任务页" % uname
     _login(client, "admin")
     assert client.get("/tasks/new").status_code == 200
+
+
+# ---------------- 车站资产页：查询能力（2026-10-06 用户："我查都查不到"） ----------------
+
+def _station_asset_fixture(db):
+    """造两条线 + 两个站（一个 JR 千葉、一个都営 東京），带 駅コード/都道府県。"""
+    from app.models import BdLine, BdStation
+    l1 = BdLine(name="京葉線", name_norm="京葉線", operator="東日本旅客鉄道",
+                operator_short="JR東日本", kind="jr", prefs="12", n_station=1)
+    l2 = BdLine(name="12号線大江戸線", name_norm="12号線大江戸線", operator="東京都",
+                operator_short="都営", kind="public", prefs="13", n_station=1)
+    db.add_all([l1, l2])
+    db.flush()
+    db.add_all([
+        BdStation(name="海浜幕張", name_norm=bd_tasks.norm_name("海浜幕張"), line="京葉線",
+                  line_id=l1.id, operator="東日本旅客鉄道", pref="12",
+                  ekicode="003785", lat=35.648, lon=140.041, source="mlit"),
+        BdStation(name="都庁前", name_norm=bd_tasks.norm_name("都庁前"), line="12号線大江戸線",
+                  line_id=l2.id, operator="東京都", pref="13",
+                  ekicode="004012", lat=35.689, lon=139.692, source="mlit"),
+    ])
+    db.commit()
+    return l1, l2
+
+
+def test_station_search_covers_operator_ekicode_pref(client, seeded):
+    """关键词**一个框搜全部**：站名 / 駅コード / 运营商 / 线路名 / 都道府県名。
+
+    修之前实测：搜 `JR東日本`、`都営`、`千葉県`、`003785` **全部 0 命中**（只搜站名+线路文本）。
+    """
+    db = appdb.SessionLocal()
+    _station_asset_fixture(db)
+    db.close()
+    _login(client, "admin")
+    for kw, want in (("海浜", "海浜幕張"), ("JR東日本", "海浜幕張"),
+                     ("003785", "海浜幕張"), ("千葉県", "海浜幕張"),
+                     ("京葉線", "海浜幕張"), ("都営", "都庁前"),
+                     ("004012", "都庁前"), ("東京都", "都庁前")):
+        p = client.get("/stations", params={"kw": kw})
+        assert p.status_code == 200 and want in p.text, "搜「%s」应命中 %s" % (kw, want)
+    p = client.get("/stations", params={"kw": "ざぶとん"})
+    assert "没有匹配的车站" in p.text
+
+
+def test_station_filters_pref_operator_kind_and_sort(client, seeded):
+    """都道府県 / 运营公司 / 线路类型 筛选 + 排序参数都能用。"""
+    db = appdb.SessionLocal()
+    _station_asset_fixture(db)
+    db.close()
+    _login(client, "admin")
+    p = client.get("/stations", params={"pref": "12"})
+    assert "海浜幕張" in p.text and "都庁前" not in p.text, "pref=12 只该有千葉"
+    p = client.get("/stations", params={"operator": "都営"})
+    assert "都庁前" in p.text and "海浜幕張" not in p.text
+    p = client.get("/stations", params={"kind": "jr"})
+    assert "海浜幕張" in p.text and "都庁前" not in p.text
+    # 排序：站名 / 线路+顺序（默认）都要 200，且行还在
+    for sort in ("line", "name", "pref", "ekicode"):
+        r = client.get("/stations", params={"sort": sort})
+        assert r.status_code == 200 and "海浜幕張" in r.text, "排序 %s 不能用" % sort
+    # 跨线站筛选（两个同 group_code 的站合并成一个物理车站）
+    from app.models import BdLine, BdStation
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    l3 = BdLine(name="山手線", name_norm="山手線", operator="東日本旅客鉄道",
+                operator_short="JR東日本", kind="jr", prefs="13", n_station=1)
+    l4 = BdLine(name="井の頭線", name_norm="井の頭線", operator="京王電鉄",
+                operator_short="京王", kind="private", prefs="13", n_station=1)
+    db.add_all([l3, l4])
+    db.flush()
+    # 跨线站：两行同名 + 同 group_code → 合并成一个物理车站（n_line=2）
+    db.add_all([
+        BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"), line="山手線",
+                  line_id=l3.id, operator="東日本旅客鉄道", pref="13",
+                  group_code="GX99", lat=35.658, lon=139.701, source="mlit"),
+        BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"), line="井の頭線",
+                  line_id=l4.id, operator="京王電鉄", pref="13",
+                  group_code="GX99", lat=35.658, lon=139.701, source="mlit")])
+    db.commit()
+    bd_places.rebuild_places(db)
+    db.commit()
+    db.close()
+    p = client.get("/stations", params={"multi": "1"})
+    assert p.status_code == 200 and "渋谷" in p.text
+    assert "海浜幕張" not in p.text, "只看跨线站时，单线站不该出现"
+
+
+def test_stations_export_csv(client, seeded):
+    """导出当前筛选结果（CSV，UTF-8 BOM，Excel 能直接打开）。"""
+    db = appdb.SessionLocal()
+    _station_asset_fixture(db)
+    db.close()
+    _login(client, "admin")
+    r = client.get("/stations/export", params={"pref": "12"})
+    assert r.status_code == 200
+    assert "csv" in r.headers["content-type"]
+    body = r.content.decode("utf-8-sig")
+    head = body.splitlines()[0]
+    for col in ("都道府県", "駅名", "駅コード", "线路"):
+        assert col in head, "导出表头缺少 %s" % col
+    assert "海浜幕張" in body and "003785" in body
+    assert "都庁前" not in body, "导出要跟着筛选条件走"
+
+
+def test_stations_export_is_not_truncated(client, seeded):
+    """⚠️ 回归：`paging.paginate` 把 `per` 夹到 200 → 导出若走分页会**静默只导 200 行**。
+
+    2026-10-06 实测抓到：千葉県 383 条只导出了 200 条（跟 /stores/entities 的 limit(500)
+    是同一类"看着成功、实际丢数据"的 bug）。
+    """
+    db = appdb.SessionLocal()
+    for i in range(250):
+        bd_tasks.create_station(db, "导出站%03d" % i)
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    r = client.get("/stations/export")
+    assert r.status_code == 200
+    lines = r.content.decode("utf-8-sig").splitlines()
+    assert len(lines) - 1 == 251, "导出要全量（1 seeded + 250），实际 %d" % (len(lines) - 1)

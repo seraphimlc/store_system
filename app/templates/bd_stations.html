@@ -3,38 +3,61 @@
 {% block content %}
 <div class="page-title">
   <h1>{{ t('车站') }}</h1>
-  <span class="sub">{{ t('一个车站 = 一个任务；派给团队、分给队员、按进展推进') }}</span>
+  <span class="sub">{{ t('车站资产：线路 / 站×线 / 物理车站；派任务请到「任务」页') }}</span>
+  <div class="actions">
+    <a class="btn ghost" download data-testid="stations-export"
+       href="/stations/export?kw={{ kw }}&status={{ status }}&line={{ line_id or '' }}&pref={{ pref }}&operator={{ operator }}&kind={{ kind }}&multi={{ multi }}&sort={{ sort }}">{{ t('导出 CSV') }}</a>
+  </div>
 </div>
 
 {% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
 {% if err %}<div class="msg err">{{ err }}</div>{% endif %}
 
-<div class="stat-grid grid" style="margin-bottom:.8rem">
-  {# 车站数据资产（三层：线路 / 站×线 / 物理车站）—— 用户 2026-10-05："车站数据是数据资产" #}
+{# 车站数据资产（三层：线路 / 站×线 / 物理车站）—— 用户 2026-10-05："车站数据是数据资产" #}
+<div class="stat-grid grid" style="margin-bottom:.8rem" data-testid="station-asset">
   <div class="stat-card"><div class="k">{{ t('线路') }}</div><div class="v">{{ asset.n_line }}</div></div>
   <div class="stat-card"><div class="k">{{ t('车站（站×线）') }}</div><div class="v">{{ asset.n_station }}</div></div>
   <div class="stat-card"><div class="k">{{ t('物理车站') }}</div><div class="v">{{ asset.n_place }}</div></div>
   <div class="stat-card"><div class="k">{{ t('跨线车站') }}</div><div class="v">{{ asset.n_multi_line }}</div></div>
-  <div class="stat-card"><div class="k">{{ t('任务') }}</div><div class="v">{{ sum.n_task }}</div></div>
-  <div class="stat-card {% if sum.no_team %}warnk{% endif %}">
-    <div class="k">{{ t('还没派给团队') }}</div><div class="v">{{ sum.no_team }}</div></div>
-  <div class="stat-card"><div class="k">{{ t('未分配') }}</div><div class="v">{{ sum.unassigned }}</div></div>
-  <div class="stat-card"><div class="k">{{ t('已分配') }}</div><div class="v">{{ sum.doing }}</div></div>
-  <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div><div class="v">{{ sum.done }}</div></div>
 </div>
 
+{# 筛选：标准写法（form.form-grid + label.fld + form-actions）
+   关键词 = 一个框搜全部：站名 / 駅コード / 运营商 / 线路名 / 还经过 / 都道府県名 #}
 <div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
-  {# 筛选：标准写法（form.form-grid + label.fld + form-actions） #}
-  <form method="get" class="form-grid">
-    <label class="fld">{{ t('车站 / 线路') }}
-      <input type="text" name="kw" value="{{ kw }}"
-             placeholder="{{ t('输入车站名或线路') }}" data-testid="station-kw">
+  <form method="get" class="form-grid" data-testid="station-filter">
+    <label class="fld">{{ t('关键词') }}
+      <input type="search" name="kw" value="{{ kw }}"
+             placeholder="{{ t('站名 / 駅コード / 运营商 / 线路') }}" data-testid="station-kw">
     </label>
     <label class="fld">{{ t('线路') }}
       <select name="line" data-testid="line-filter">
         <option value="">{{ t('全部线路') }}</option>
         {% for ln in lines %}
         <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %}>{{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="fld">{{ t('都道府県') }}
+      <select name="pref" data-testid="pref-filter">
+        <option value="">{{ t('全部') }}</option>
+        {% for o in facets.prefs %}
+        <option value="{{ o.code }}" {% if pref == o.code %}selected{% endif %}>{{ o.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="fld">{{ t('运营公司') }}
+      <select name="operator" data-testid="operator-filter">
+        <option value="">{{ t('全部') }}</option>
+        {% for o in facets.operators %}
+        <option value="{{ o }}" {% if operator == o %}selected{% endif %}>{{ o }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="fld">{{ t('线路类型') }}
+      <select name="kind" data-testid="kind-filter">
+        <option value="">{{ t('全部') }}</option>
+        {% for o in facets.kinds %}
+        <option value="{{ o.code }}" {% if kind == o.code %}selected{% endif %}>{{ t(o.label) }}</option>
         {% endfor %}
       </select>
     </label>
@@ -45,123 +68,73 @@
         <option value="closed" {% if status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
       </select>
     </label>
-    <label class="fld">{{ t('只看还没建任务的') }}
+    <label class="fld">{{ t('排序') }}
+      <select name="sort" data-testid="sort-select">
+        {% for code, label in sorts %}
+        <option value="{{ code }}" {% if sort == code %}selected{% endif %}>{{ t(label) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="fld">{{ t('每页') }}
+      <select name="per" data-testid="per-select">
+        {% for n in (20, 50, 100) %}
+        <option value="{{ n }}" {% if pager.limit == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="fld">{{ t('只看跨线站') }}
       <span style="display:flex;align-items:center;gap:.4rem;height:100%">
-        <input type="checkbox" name="no_task" value="1" {% if no_task %}checked{% endif %}
-               data-testid="no-task-only" style="width:auto">
-        <span class="hint">{{ t('勾上后只列没任务的站') }}</span>
+        <input type="checkbox" name="multi" value="1" {% if multi %}checked{% endif %}
+               data-testid="multi-only" style="width:auto">
+        <span class="hint">{{ t('被多条线经过的车站') }}</span>
       </span>
     </label>
     <div class="form-actions" style="align-items:flex-end">
       <button class="btn" type="submit" data-testid="station-search">{{ t('查询') }}</button>
-      {% if kw or status or no_task %}<a class="btn ghost" href="/stations">{{ t('清空') }}</a>{% endif %}
+      {% if has_filter %}<a class="btn ghost" href="/stations">{{ t('清空') }}</a>{% endif %}
     </div>
   </form>
 </div>
 
-<div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
-  <h3 style="margin:0 0 .6rem">{{ t('新建车站') }}</h3>
-  {# 新建：一行对齐 #}
-  <form method="post" action="/stations/create" class="form-grid">
-    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-    <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <label class="fld">{{ t('车站名') }}
-      <input type="text" name="name" required data-testid="station-name"
-             placeholder="{{ t('如 駒場東大前') }}">
-    </label>
-    <label class="fld">{{ t('线路') }}
-      <select name="line_id">
-        <option value="">{{ t('（不指定线路）') }}</option>
-        {% for ln in lines %}
-        <option value="{{ ln.id }}">{{ ln.operator_short }} {{ ln.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="fld">{{ t('备注（可空）') }}
-      <input type="text" name="note">
-    </label>
-    <label class="fld">{{ t('同时建任务') }}
-      <span style="display:flex;align-items:center;gap:.4rem;height:100%">
-        <input type="checkbox" name="make_task" value="1" checked
-               data-testid="make-task" style="width:auto">
-        <span class="hint">{{ t('建站后立刻生成任务') }}</span>
-      </span>
-    </label>
-    <div class="form-actions" style="align-items:flex-end">
-      <button class="btn" type="submit" data-testid="station-create">{{ t('新增') }}</button>
-    </div>
-  </form>
-</div>
-<form id="bulk-task" method="post" action="/stations/tasks" class="card"
-      style="padding:.7rem 1rem;margin-bottom:.8rem">
-  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-  <input type="hidden" name="_ft" value="{{ form_token() }}">
-  <input type="hidden" name="all_without" value="1">
-  <b>{{ t('批量建任务') }}</b>
-  <span class="hint">{{ t('把还没有任务的车站一次性建成任务') }}</span>
-  <button class="btn" type="submit" data-testid="make-all-tasks">{{ t('全部建任务') }}</button>
-</form>
-
-<form id="bulk-team" method="post" action="/stations/team" class="card"
-      style="padding:.7rem 1rem;margin-bottom:.8rem"
-      data-testid="bulk-team-form">
-  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-  <input type="hidden" name="_ft" value="{{ form_token() }}">
-  <b>{{ t('批量派给团队') }}</b>
-  <label class="f">{{ t('团队') }}
-    <select name="team_id" data-testid="bulk-team-select">
-      <option value="">{{ t('（不派队）') }}</option>
-      {% for t in teams %}
-      <option value="{{ t.id }}">{{ t.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label class="f">{{ t('分配日期') }}
-    <input type="date" name="assign_date" data-testid="bulk-assign-date">
-  </label>
-  <button class="btn" type="submit" data-testid="bulk-team-submit">{{ t('派队') }}</button>
-  <span class="hint">{{ t('勾选下面的车站（一个车站一个任务）；换队会清空原担当') }}</span>
-</form>
+{% if line_id %}
+<p style="margin:0 0 .6rem">
+  <a class="btn" href="/tasks/new?line={{ line_id }}"
+     data-testid="stations-to-new-task">{{ t('用这条线建任务') }}</a>
+  <span class="hint">{{ t('只建你勾选的那几个站（不必全选）') }}</span>
+</p>
+{% endif %}
 
 <div class="tbl-wrap">
 <table class="grid-tbl">
   <thead>
     <tr>
-      <th style="width:2.6rem"></th>
-      <th>{{ t('顺序') }}</th><th>{{ t('车站') }}</th><th>{{ t('线路') }}</th>
-      <th>{{ t('所属团队') }}</th><th>{{ t('状态') }}</th><th>{{ t('进度') }}</th>
+      <th>{{ t('顺序') }}</th>
+      <th>{{ t('车站') }}</th>
+      <th>{{ t('线路') }}</th>
+      <th>{{ t('駅コード') }}</th>
+      <th>{{ t('都道府県') }}</th>
+      <th>{{ t('物理车站 / 还经过') }}</th>
+      <th>{{ t('状态') }}</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
     <tr data-testid="station-row">
-      <td><input type="checkbox" name="station_id" value="{{ r.station.id }}"
-                 form="bulk-team"></td>
       <td>{% if r.station.seq %}<b>{{ r.station.seq }}</b>{% if r.station.along_km is not none %}
         <span class="hint">{{ '%.1f'|format(r.station.along_km) }}km</span>{% endif %}
         {% else %}<span class="hint">—</span>{% endif %}</td>
       <td><b>{{ r.station.name }}</b>
         {% if r.n_line > 1 %}<span class="pill" data-testid="multi-line-{{ r.station.id }}"
               title="{{ r.lines_text }}">{{ r.n_line }} {{ t('条线') }}</span>{% endif %}</td>
-      <td>{{ r.line_label or '—' }}</td>
-      <td>{{ r.team_name or '—' }}</td>
+      <td>{{ r.line_label or '—' }}
+        {% if r.kind_label %}<span class="hint">{{ t(r.kind_label) }}</span>{% endif %}</td>
+      <td>{% if r.station.ekicode %}<span data-testid="ekicode-{{ r.station.id }}">{{ r.station.ekicode }}</span>{% else %}<span class="hint">—</span>{% endif %}</td>
+      <td>{{ r.pref_label or '—' }}</td>
+      <td>{% if r.n_line > 1 %}<span class="hint">{{ r.n_line }} {{ t('条线') }}：
+        {{ r.lines_text }}</span>{% else %}<span class="hint">—</span>{% endif %}</td>
+      <td>{% if r.station.status == 'active' %}{{ t('启用') }}{% else %}{{ t('停用') }}{% endif %}</td>
       <td>
-        {% if not r.task %}—
-        {% elif r.state == 'unassigned' %}<span class="pill">{{ t('未分配') }}</span>
-        {% elif r.state == 'doing' %}<span class="pill warnk">{{ t('已分配') }}</span>
-        {% else %}<span class="pill okk">{{ t('已完成') }}</span>{% endif %}
-      </td>
-      <td>{% if r.task %}{{ r.pct }}%{% else %}—{% endif %}</td>
-      <td>
-        {% if not r.task %}
-        <form method="post" action="/stations/tasks" style="display:inline">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
-          <input type="hidden" name="_ft" value="{{ form_token() }}">
-          <input type="hidden" name="station_id" value="{{ r.station.id }}">
-          <button class="btn ghost" type="submit">{{ t('建任务') }}</button>
-        </form>
-        {% endif %}
         <button class="btn ghost" type="button"
                 onclick="bdEditStation({{ r.station.id }}, {{ r.station.name|tojson }}, {{ (r.station.line or '')|tojson }}, {{ (r.station.note or '')|tojson }}, {{ r.station.status|tojson }})">
           {{ t('编辑') }}
@@ -169,23 +142,17 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="empty">{{ t('没有车站，先新建或用脚本导入') }}</td></tr>
+    <tr><td colspan="8" class="empty">{{ t('没有匹配的车站') }}</td></tr>
     {% endfor %}
   </tbody>
 </table>
-  {% if line_id %}
-<p style="margin:.5rem 0 0">
-  <a class="btn" href="/tasks/new?line={{ line_id }}"
-     data-testid="stations-to-new-task">{{ t('用这条线建任务') }}</a>
-  <span class="hint">{{ t('只建你勾选的那几个站（不必全选）') }}</span>
-</p>
-{% endif %}
 {% include "_pager.html" %}
 <p class="hint" style="margin-top:.6rem">
   {{ t('线路顺序数据') }} © <a href="https://www.openstreetmap.org/copyright" target="_blank"
   rel="noopener">OpenStreetMap</a> contributors（ODbL）</p>
 </div>
 
+{# 编辑：只改备注/状态/别名，**不新建车站**（车站是官方数据资产，用户 2026-10-06："车站不是我说建就建的"） #}
 <dialog id="st-dlg" class="edit-dlg" data-testid="station-edit-dialog">
   <form method="post" id="st-form" action="">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">

@@ -226,57 +226,82 @@ def team_members_save(request: Request, team_id: int,
 def stations_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), kw: str = "",
-                  status: str = "", no_task: str = "", line: str = "",
-                  page: int = 1, per: int = 0,
+                  status: str = "", line: str = "", pref: str = "",
+                  operator: str = "", kind: str = "", multi: str = "",
+                  sort: str = "line", page: int = 1, per: int = 0,
                   msg: str = "", err: str = ""):
+    """**车站资产**页（车站归车站：只维护车站信息，任务不在这里）。
+
+    用户 2026-10-06：
+    - "车站归车站，任务归任务，车站这边只是维护车站信息"
+      → 任务列/任务筛选/批量建任务·派队 全部移走（去 `/tasks` 与 `/tasks/new`）
+    - "你再看看车站的功能，缺失很多，我查都查不到"
+      → 关键词一个框搜全部（站名 / 駅コード / 运营商 / 线路名 / 还经过 / **都道府県名**）+
+        都道府県・运营公司・线路类型・只看跨线站 四个筛选 + 默认按**线路+沿線顺序**排
+    """
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_teams, bd_tasks, bd_lines, bd_places, paging
+    from app.services import bd_tasks, bd_lines, bd_places, paging
     line_id = int(line) if str(line).strip().isdigit() else None
-    pager = bd_tasks.list_stations(db, kw, status,
-                                   only_without_task=bool(no_task),
-                                   page=page, per=per or paging.PER_DEFAULT,
-                                   line_id=line_id)
+    sort = sort if sort in dict(bd_tasks.STATION_SORTS) else "line"
+    filters = {"kw": kw, "status": status, "line_id": line_id, "pref": pref,
+               "operator": operator, "kind": kind, "multi_only": bool(multi),
+               "sort": sort}
+    pager = bd_tasks.list_stations(db, page=page, per=per or paging.PER_DEFAULT,
+                                   **filters)
     return templates.TemplateResponse("bd_stations.html", {
         "request": request, "current_user": user, "rows": pager["rows"],
         "pager": pager, "page_qs": paging.qs(request.query_params),
-        "kw": kw, "status": status, "no_task": no_task,
+        "kw": kw, "status": status, "pref": pref, "operator": operator,
+        "kind": kind, "multi": multi, "sort": sort,
+        "sorts": bd_tasks.STATION_SORTS,
+        "facets": bd_tasks.station_facets(db),
         "lines": bd_lines.line_options(db), "line_id": line_id,
-        "teams": bd_teams.team_options(db),
-        "sum": bd_tasks.board_summary(db),
         "asset": bd_places.asset_stats(db),   # 车站数据资产（三层规模）
+        "has_filter": any([kw, status, pref, operator, kind, multi, line_id]),
         "msg": msg, "err": err,
     })
 
 
-@router.post("/stations/create")
-def station_create(request: Request, name: str = Form(""),
-                   line: str = Form(""), note: str = Form(""),
-                   line_id: str = Form(""), make_task: str = Form(""),
-                   csrf_token: str = Form(""),
-                   user: Optional[User] = Depends(require_login),
-                   db: Session = Depends(get_db)):
+@router.get("/stations/export")
+def stations_export(request: Request,
+                    user: Optional[User] = Depends(require_login),
+                    db: Session = Depends(get_db), kw: str = "",
+                    status: str = "", line: str = "", pref: str = "",
+                    operator: str = "", kind: str = "", multi: str = "",
+                    sort: str = "line"):
+    """把**当前筛选结果**导成 CSV（车站资产；UTF-8 BOM，Excel 直接打开）。"""
     g = _admin_guard(user)
     if g:
         return g
-    if not csrf_ok(request, csrf_token):
-        return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import bd_tasks
-    try:
-        st = bd_tasks.create_station(db, name, line, note, by=user.username,
-                                     line_id=int(line_id) if line_id.strip().isdigit() else None)
-        extra = ""
-        if make_task:
-            r = bd_tasks.create_tasks(db, [st.id], by=user.username)
-            extra = "，已建任务 %d" % r["created"]
-        db.commit()
-        return RedirectResponse("/stations?msg=%s" % _q("已新增车站" + extra),
-                                status_code=303)
-    except bd_tasks.TaskError as e:
-        db.rollback()
-        return RedirectResponse("/stations?err=%s" % _q(str(e)),
-                                status_code=303)
+    line_id = int(line) if str(line).strip().isdigit() else None
+    d = bd_tasks.list_stations(db, kw=kw, status=status, line_id=line_id, pref=pref,
+                               operator=operator, kind=kind, multi_only=bool(multi),
+                               sort=sort if sort in dict(bd_tasks.STATION_SORTS) else "line",
+                               all_rows=True)      # ⚠️ 全量（分页会把 per 夹到 200 → 会截断）
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["都道府県", "线路", "顺序", "里程km", "駅名", "駅コード",
+                "物理车站ID", "还经过", "緯度", "経度", "状態", "備考"])
+    for r in d["rows"]:
+        st = r["station"]
+        w.writerow([r["pref_label"], r["line_label"], st.seq or "",
+                    ("%.1f" % st.along_km) if st.along_km is not None else "",
+                    st.name, st.ekicode or "", st.place_id or "",
+                    r["lines_text"], st.lat or "", st.lon or "",
+                    ("启用" if st.status == "active" else "停用"), st.note or ""])
+    data = buf.getvalue().encode("utf-8-sig")
+    from urllib.parse import quote as _quote
+    fn = "stations.csv"
+    return StreamingResponse(
+        _io.BytesIO(data), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 "attachment; filename=%s; filename*=UTF-8''%s"
+                 % (fn, _quote("车站资产.csv"))})
 
 
 @router.post("/stations/{station_id}/edit")

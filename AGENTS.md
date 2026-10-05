@@ -811,6 +811,37 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
     班次**不停西船橋**（它在支线上）。所以页面显示「—」但仍可勾选 —— 正好验证"没顺序也能用"的口径。
 
 
+- **车站页重做（2026-10-06 用户："车站归车站，任务归任务，车站这边只是维护车站信息" +
+  "你再看看车站的功能，缺失很多，我查都查不到" + "新建车站---不需要。车站不是我说建就建的"）**：
+  - **两条口径**：① 车站页**只维护车站资产**，任务的东西全部移走；② **不提供新建车站**
+    （车站是官方数据资产，由 `scripts/bd_import_rail.py` 从 N02 导入 / 脚本维护，
+    `create_station()` 服务函数**保留**给脚本与测试用，只是**界面上没有入口**）。
+  - **实测"查不到"的原因（修之前）**：关键词只搜 `bd_station.name` + `line` 两个文本列 →
+    搜 `JR東日本`、`都営`、`千葉県`、`003785`（駅コード）**全部 0 命中**；
+    而且默认按 `id` 排序（1,920 行 / 39 页，毫无规律）。
+  - **修后（一个框搜全部 + 四个筛选 + 可控排序/分页）**：
+    - **关键词**：站名 / **駅コード** / **运营商** / 线路名 / **都道府県名** / 还经过哪些线
+      （`bd_station.name|line|ekicode|operator` + `bd_line.name|operator_short` +
+      `bd_station_place.lines_text` + `PREF_LABELS` 反查县名 → 命中 `pref` 代码）
+    - **筛选**：线路（131 条）/ **都道府県** / **运营公司** / **线路类型** / 状态 / **只看跨线站**
+      （`bd_station_place.n_line > 1`）；选项由 `bd_tasks.station_facets(db)` 从数据现取
+    - **排序**（`STATION_SORTS`）：**线路 + 顺序**（默认，`operator_short, line, seq`）/
+      站名 / 都道府県 / 駅コード；**每页 20/50/100**
+    - **导出 CSV**（`/stations/export`，UTF-8 BOM）：**跟着当前筛选**导全量
+  - 表格列（资产视角）：顺序+里程 / 车站（跨线站标「N 条线」）/ 线路（+类型）/
+    **駅コード** / **都道府県** / **物理车站（经过哪些线）** / 状态 / 编辑。
+    ⚠️ **不显示任何内部 id**（物理车站 id 也不露，用户口径"编号不用显示"）。
+  - **移走的东西**：任务列（所属团队/任务状态/进度）、「还没建任务」筛选、批量建任务/批量派队两个表单、
+    「新建车站」卡片与 `POST /stations/create`（路由已删）。`/stations/tasks`、`/stations/team`
+    两个 POST **保留但无界面**（脚本/测试仍用；要彻底删再说）。
+  - ⚠️ **导出静默截断（真 bug，2026-10-06 实测抓到）**：`paging.paginate` 把 `per` 夹到
+    `PER_MAX=200` → 导出若走分页**只导 200 行**（千葉県 383 条只导出 200 条）。
+    修法：`list_stations(all_rows=True)` 走**不分页**路径；回归测试
+    `test_stations_export_is_not_truncated`（250 个站必须导出 251 行）。
+    与 `/stores/entities` 的 `limit(500)` 是同一类"看着成功、实际丢数据"的 bug。
+  - 测试 +4（关键词覆盖运营商/駅コード/县名、四个筛选+四种排序、跨线站筛选、导出全量）；
+    全量 `tests_web` **442 passed**；模板 0 错；i18n 0 缺失 0 死键（顺带清掉 14 个死键）。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
