@@ -19,7 +19,10 @@ from app.db import get_db
 CTX: ContextVar[Optional[dict]] = ContextVar("form_ctx", default=None)
 
 # 机器端点 / 无需令牌的路径（登录页本身没有会话）
+#: 只读端点也豁免一次性令牌：它们不改数据，但会**消耗**掉页面表单共用的那个 token
+#: （2026-10-06 审计：AI 派工建议与车站池表单共用 _ft → 点完 AI 再点「分配给该队」必 400）
 EXEMPT_PREFIXES = ("/login", "/logout", "/oauth/", "/.well-known/",
+                   "/tasks/ai-suggest",
                    "/healthz", "/static", "/favicon")
 
 

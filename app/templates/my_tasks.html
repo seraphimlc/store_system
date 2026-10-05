@@ -150,6 +150,10 @@
     {% elif r.review_status == 'adjusted' and r.last_reported_pct is not none %}
     <span class="pill" data-testid="review-state-{{ r.task.id }}">{{ t('已调整') }}
       {%- if r.last_reported_pct != r.pct %} <span class="hint">{{ t('队员报') }} {{ r.last_reported_pct }}%</span>{% endif %}</span>
+    {% elif r.review_status == 'rejected' and r.last_reported_pct is not none %}
+    <span class="pill errk" data-testid="review-state-{{ r.task.id }}">{{ t('被驳回') }}
+      <span class="hint">{{ t('队员报') }} {{ r.last_reported_pct }}% → {{ r.pct }}%</span></span>
+    {% if r.review_note %}<span class="hint">{{ r.review_note }}</span>{% endif %}
     {% endif %}
     {% if r.start_date %}<span class="hint">{{ t('开始日') }} {{ r.start_date.strftime('%m-%d') }}</span>{% endif %}
     {% if r.done_date %}<span class="hint">{{ t('完成日') }} {{ r.done_date.strftime('%m-%d') }}</span>{% endif %}
@@ -197,9 +201,14 @@
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
     <input type="hidden" name="task_id" value="{{ r.task.id }}">
-    <input type="range" name="pct" min="0" max="100" step="5" x-model.number="v"
-           style="flex:1;min-width:150px" data-testid="slider-{{ r.task.id }}">
-    <b style="min-width:3.2rem;text-align:right"><span x-text="v"></span>%</b>
+    {# ⚠️ 必须有 `value`：CDN 拉不到 Alpine 时按 HTML 规范会以 50 提交（数据污染）；
+       数字同时写服务端初值 + oninput 兜底，没 JS 也看得见 #}
+    <input type="range" name="pct" min="0" max="100" step="5" value="{{ r.pct }}"
+           x-model.number="v" style="flex:1;min-width:150px;min-height:2.6rem"
+           data-testid="slider-{{ r.task.id }}"
+           oninput="var s=document.getElementById('pctv-{{ r.task.id }}');if(s)s.textContent=this.value">
+    <b style="min-width:3.2rem;text-align:right"><span
+        id="pctv-{{ r.task.id }}" x-text="v">{{ r.pct }}</span>%</b>
     <input type="text" name="note" placeholder="{{ t('备注（可空）') }}" style="width:11rem">
     <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
     {# 队长/管理员：一键**确认**队员的上报（认可原值，会发消息给队员） #}

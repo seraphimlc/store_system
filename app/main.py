@@ -1,8 +1,25 @@
 # -*- coding: utf-8 -*-
 """FastAPI 应用工厂与入口。"""
+import re as _re
 from sqlalchemy import text as _text
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+
+
+_TASK_DETAIL_RE = _re.compile(r"^/tasks/\d+/?$")
+
+
+def _staff_path_ok(path: str, method: str, allowed) -> bool:
+    """员工/队长能不能访问这个路径。
+
+    特例：`/tasks/<id>` **只有 GET** 放行（任务详情页，路由内还有 can_report 数据隔离）；
+    同前缀的写端点一律走管理端守卫。
+    """
+    if path.startswith("/tasks/"):
+        if method != "GET":
+            return False
+        return bool(_TASK_DETAIL_RE.match(path))
+    return path.startswith(allowed)
 
 
 def create_app() -> FastAPI:
@@ -45,6 +62,11 @@ def create_app() -> FastAPI:
                      # 车站任务：队员看"分给我的车站"，队长在**同一页**分派 + 提交每日进展
                      # （两处写端点 `/my/tasks/assign`、`/my/tasks/progress` 由路由内做角色校验）
                      "/my/tasks",
+                     # 任务详情页（进展历史 + 变更日志）——**驳回原因/谁改的只有这里能看**。
+                     # ⚠️ 白名单是**前缀匹配且不看方法**，所以这里只放行 `GET /tasks/<id>`；
+                     # 同前缀下的写端点（/tasks/<id>/progress、/tasks/assign、/tasks/new）
+                     # 仍归管理端，由路由守卫拒绝（放行整段会让它们先撞令牌校验 → 400）
+                     "/tasks/",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")
 
@@ -169,7 +191,7 @@ def create_app() -> FastAPI:
                         allowed = (LEADER_ALLOWED
                                    if getattr(snap, "role", "") == "leader"
                                    else STAFF_ALLOWED)
-                        if not path.startswith(allowed):
+                        if not _staff_path_ok(path, request.method, allowed):
                             from app.services import home as _home
                             return _RR(_home.landing_home(s, snap), status_code=302)
                 finally:

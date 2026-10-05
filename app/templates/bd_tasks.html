@@ -274,6 +274,9 @@
       <td>{{ r.pct }}%
         {% if r.pending_review %}<span class="pill warnk"
               data-testid="review-{{ r.task.id }}">{{ t('待确认') }}</span>
+        {% elif r.review_status == 'rejected' and r.last_reported_pct is not none %}
+        <span class="pill errk" data-testid="review-{{ r.task.id }}">{{ t('被驳回') }}
+          <span class="hint">{{ r.last_reported_pct }}% → {{ r.pct }}%</span></span>
         {% elif r.last_reported_pct is not none and r.last_reported_pct != r.pct %}
         <span class="hint" data-testid="review-{{ r.task.id }}">{{ t('队员报') }}
           {{ r.last_reported_pct }}%</span>{% endif %}</td>

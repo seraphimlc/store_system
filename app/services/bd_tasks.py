@@ -78,7 +78,16 @@ def norm_name(s: Optional[str]) -> str:
 
 
 def _today(today: Optional[date] = None) -> date:
-    return today or date.today()
+    """业务日 = **JST**。
+
+    ⚠️ 线上容器是 UTC（deploy 没设 TZ），旧写法 `date.today()` 会在 JST 00:00–08:59
+    把进展写到**前一天**那一行（UNIQUE(task_id, progress_date) 直接覆盖），
+    而派队/驳回同一时刻走的是 jst_today() → 同一天两套日期（2026-10-06 审计）。
+    """
+    if today:
+        return today
+    from app.services.date_plan import jst_today
+    return jst_today()
 
 
 def state_labels(lang: str = "zh") -> dict:
@@ -861,20 +870,25 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         db.flush()
     else:
         row.pct = p
-        row.note = (note or "").strip()
+        if (note or "").strip():
+            row.note = note.strip()      # 只有真填了才覆盖（别把已有备注清掉）
         row.submitted_by = (by or "")
         row.updated_at = datetime.utcnow()
     notified = None
     review_action = ""
     orig_reported = row.reported_pct
     if staff_report:
-        # 员工上报 → 记录原值，等队长确认（重新报会再次进入待确认）
-        row.reported_pct = p
-        row.reported_by = (by or "")
-        row.review_status = "pending"
-        row.reviewed_by = ""
-        row.reviewed_at = None
-        row.review_note = ""
+        # 员工上报 → 记录原值，等队长确认。
+        # ⚠️ **同值重复提交不重开审核**：队长确认/调整（或驳回）之后，滑块的预置值就是当前值，
+        #    员工手滑再点一次会把队长的处理打回 pending、备注也被清空（2026-10-06 审计）
+        _same = (row.reported_pct is not None and int(row.reported_pct) == p)
+        if not (_same and row.review_status in ("confirmed", "adjusted", "rejected")):
+            row.reported_pct = p
+            row.reported_by = (by or "")
+            row.review_status = "pending"
+            row.reviewed_by = ""
+            row.reviewed_at = None
+            row.review_note = ""
     elif leader_review:
         if row.reported_pct is None:
             row.review_status = "adjusted"     # 队长直接填（没有员工上报可比）
@@ -1052,10 +1066,15 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
     if row is None:
         row = BdTaskProgress(task_id=task_id, progress_date=d)
         db.add(row)
+    # ⚠️ 驳回**不是**员工重新上报：原值/原上报人必须留住，否则记录会挂到操作人名下
+    #    （旧代码写 `row.by_user` —— BdTaskProgress 根本没这个列，静默丢失；
+    #     还把驳回理由塞进 `note`，覆盖掉员工自己写的备注 —— 2026-10-06 审计）
+    if row.reported_pct is None:
+        row.reported_pct = t.pct
+    if not (row.reported_by or "").strip():
+        row.reported_by = row.submitted_by or ""
     orig = row.reported_pct if row.reported_pct is not None else t.pct
     row.pct = pct
-    row.by_user = (by or "")
-    row.note = (note or "").strip()
     row.review_status = "rejected"
     row.reviewed_by = (by or "")
     row.reviewed_at = datetime.utcnow()
@@ -1191,7 +1210,7 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
         for team_id, code, disp in lrows:
             team_leaders.setdefault(team_id, []).append(disp or code)
     out = []
-    today = date.today()
+    today = _today()
     for t in tasks:
         st = stations.get(t.station_id)
         pl = places.get(getattr(t, "place_id", None))
@@ -1400,7 +1419,7 @@ def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
         q = _apply_tab(q, db, tab)
     if stale_only:
         from datetime import timedelta as _td
-        cutoff = date.today() - _td(days=max(0, stale_days))
+        cutoff = _today() - _td(days=max(0, stale_days))
         recent = (db.query(BdTaskProgress.task_id)
                   .filter(BdTaskProgress.progress_date >= cutoff))
         q = q.filter(BdTask.state != STATE_DONE, BdTask.id.notin_(recent))
@@ -1425,7 +1444,7 @@ def team_board_summary(db: Session, stale_days: int = 2) -> List[dict]:
                      BdTask.assign_date).all()
     last = latest_progress(db, [t[0] for t in tasks])
     teams = {t.id: t.name for t in db.query(BdTeam).all()}
-    today = date.today()
+    today = _today()
     agg: Dict[int, dict] = {}
     for tid, team_id, state, assign_date in tasks:
         if team_id is None:

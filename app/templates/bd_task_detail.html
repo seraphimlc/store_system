@@ -51,14 +51,23 @@
 <div class="tbl-wrap" style="margin-bottom:1rem">
   <table class="grid-tbl" data-testid="progress-history">
     <thead><tr><th>{{ t('日期') }}</th><th>{{ t('进度') }}</th>
-      <th>{{ t('备注') }}</th><th>{{ t('上报人') }}</th></tr></thead>
+      <th>{{ t('备注') }}</th><th>{{ t('上报人') }}</th>
+      <th>{{ t('处理') }}</th></tr></thead>
     <tbody>
       {% for p in progress %}
       <tr><td>{{ p.progress_date.strftime('%Y-%m-%d') }}</td>
         <td>{{ p.pct }}%</td><td>{{ p.note or '—' }}</td>
-        <td>{{ p.submitted_by or '—' }}</td></tr>
+        <td>{{ p.reported_by or p.submitted_by or '—' }}</td>
+        <td>
+          {% if p.review_status == 'confirmed' %}<span class="pill okk">{{ t('已确认') }}</span>
+          {% elif p.review_status == 'adjusted' %}<span class="pill">{{ t('已调整') }}</span>
+          {% elif p.review_status == 'rejected' %}<span class="pill errk">{{ t('被驳回') }}</span>
+          {% else %}<span class="pill warnk">{{ t('待确认') }}</span>{% endif %}
+          {% if p.reviewed_by %}<span class="hint">{{ p.reviewed_by }}</span>{% endif %}
+          {% if p.review_note %}<span class="hint">{{ p.review_note }}</span>{% endif %}
+        </td></tr>
       {% else %}
-      <tr><td colspan="4" class="empty">{{ t('还没有进展记录') }}</td></tr>
+      <tr><td colspan="5" class="empty">{{ t('还没有进展记录') }}</td></tr>
       {% endfor %}
     </tbody>
   </table>

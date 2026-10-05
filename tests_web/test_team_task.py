@@ -3212,3 +3212,169 @@ def test_messages_and_feedback_moved_to_top_menu(client, seeded):
     # 底栏仍保留 4 项
     for tid in ("tab-tasks", "tab-perf", "tab-report", "tab-plan"):
         assert 'data-testid="%s"' % tid in h
+
+
+# ---------------- 2026-10-06 多角度审计后的修复（Batch 1：安全/数据正确性） ----------------
+
+def test_assign_bulk_requires_leader_or_admin(client, seeded):
+    """⚠️ 审计 P0：批量分派原来**不校验权限** → 任何队员都能改本队分工。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    t = db.get(BdTask, tid)
+    bd_tasks.set_task_team(db, [tid], seeded["team"], assign_date=date(2026, 10, 3))
+    db.commit()
+    db.close()
+    # 队员（P2 汤静，staff）批量分派 → 一条都不许生效
+    _login(client, "tangjing")
+    r = _post(client, "/my/tasks/assign-bulk",
+              {"task_id": [str(tid)], "person": ["P2"]},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    who = [a.person_code for a in db.query(BdTaskAssign).filter(
+        BdTaskAssign.task_id == tid).all()]
+    db.close()
+    assert who == [], "队员不该能把任务分派给自己"
+    # 队长可以
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/assign-bulk",
+              {"task_id": [str(tid)], "person": ["P2"]},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    who = [a.person_code for a in db.query(BdTaskAssign).filter(
+        BdTaskAssign.task_id == tid).all()]
+    db.close()
+    assert who == ["P2"]
+
+
+def test_reject_keeps_reporter_and_note(client, seeded):
+    """⚠️ 审计：驳回原来写不存在的 `row.by_user` → 记录挂到员工名下、员工备注被覆盖。"""
+    from app.models import BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    # 员工报 100% 并写备注
+    r = bd_tasks.save_progress(db, tid, 100, "全部干完了", by="tangjing",
+                               actor_user=db.query(User).filter(
+                                   User.username == "tangjing").first())
+    db.commit()
+    # 队长驳回成 40% 并写理由
+    og = db.query(User).filter(User.username == "ogawa").first()
+    out = bd_tasks.reject_progress(db, tid, 40, "照片没拍全", by="ogawa",
+                                   actor_user=og)
+    db.commit()
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert row.review_status == "rejected"
+    assert row.reported_pct == 100, "员工原值要留住（界面要显示 队员报 100% → 40%）"
+    assert row.reported_by == "tangjing", "上报人不能变成驳回操作人"
+    assert row.submitted_by == "tangjing"
+    assert row.reviewed_by == "ogawa"
+    assert row.review_note == "照片没拍全", "驳回理由进 review_note"
+    assert row.note == "全部干完了", "员工自己的备注不能被驳回理由覆盖"
+    db.close()
+
+
+def test_admin_adjust_marks_review_and_notifies(client, seeded):
+    """⚠️ 审计：管理端「修正进展」没传 actor_user → 不写审核状态、不发消息。"""
+    from app.models import BdTaskProgress, BdMessage
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 80, "报 80", by="tangjing", actor_user=tj)
+    db.commit()
+    ad = db.query(User).filter(User.username == "admin").first()
+    bd_tasks.save_progress(db, tid, 60, "管理员修正", by="admin", actor_user=ad)
+    db.commit()
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert row.review_status == "adjusted", "管理员修正要留审核痕迹"
+    assert row.reviewed_by == "admin"
+    assert db.query(BdMessage).count() >= 1, "要通知队员"
+    db.close()
+
+
+def test_confirm_works_across_days(client, seeded):
+    """⚠️ 审计：员工昨天下班报、队长第二天点「确认」→ 旧实现另造一行，那条永远 pending。"""
+    from app.models import BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    # 假装是昨天报的
+    bd_tasks.save_progress(db, tid, 70, "昨天报的", by="tangjing", actor_user=tj,
+                           on_date=bd_tasks._today() - timedelta(days=1))
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/confirm", {"task_id": str(tid), "note": ""},
+              from_path="/my/tasks?tab=pending")
+    assert r.status_code == 303 and "msg=" in r.headers.get("location", "")
+    db = appdb.SessionLocal()
+    rows = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+            .order_by(BdTaskProgress.progress_date.asc()).all())
+    assert len(rows) == 1, "不该另造一条今天的行"
+    assert rows[0].review_status == "confirmed"
+    assert rows[0].reported_pct == 70
+    assert rows[0].reported_by == "tangjing"
+    db.close()
+
+
+def test_same_value_resubmit_does_not_reopen_review(client, seeded):
+    """⚠️ 审计：队长确认后员工手滑再点一次 → 旧实现把队长的确认打回待确认。"""
+    from app.models import BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 60, "报了 60", by="tangjing", actor_user=tj)
+    db.commit()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.progress_date.desc()).first())
+    assert row.review_status == "confirmed"
+    # 员工同值再点一次
+    bd_tasks.save_progress(db, tid, 60, "", by="tangjing", actor_user=tj)
+    db.commit()
+    db.refresh(row)
+    assert row.review_status == "confirmed", "同值重复提交不该打回待确认"
+    assert row.reported_pct == 60
+    db.close()
+
+
+def test_staff_and_leader_can_open_task_detail(client, seeded):
+    """⚠️ 审计：中间件白名单漏了 /tasks/ → 员工/队长点车站名被静默弹到每日填报页。"""
+    tid = seeded["task"]
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")     # P2 = 汤静(队员)
+    db.commit()
+    db.close()
+    _login(client, "tangjing")          # 担当 → 能看（驳回原因/进展历史只有这里能看）
+    r = client.get("/tasks/%d" % tid, follow_redirects=False)
+    assert r.status_code == 200, "担当要能打开任务详情"
+    _login(client, "ganzijie")         # 不是担当、也不是队长 → 仍要隔离
+    r = client.get("/tasks/%d" % tid, follow_redirects=False)
+    assert r.status_code == 302, "非担当/非该队队长要挡住（数据隔离不能破）"
+    _login(client, "ogawa")             # 该队队长
+    r = client.get("/tasks/%d" % tid, follow_redirects=False)
+    assert r.status_code == 200
+
+
+def test_ai_suggest_does_not_consume_form_token(client, seeded, monkeypatch):
+    """⚠️ 审计：AI 建议与派队表单共用一次性令牌 → 点完 AI 再派队必 400。"""
+    from app.services import ai_chat as _ac
+    monkeypatch.setattr(_ac, "configured", lambda: True)
+    monkeypatch.setattr(_ac, "chat", lambda *a, **k: ('{"groups": []}', None))
+    _login(client, "admin")
+    ft = form_token(client, "/tasks?tab=unassigned")
+    d = {"_ft": ft, "csrf_token": _csrf(client, "/tasks?tab=unassigned"), "line": ""}
+    r1 = client.post("/tasks/ai-suggest", data=d, follow_redirects=False)
+    assert r1.status_code == 200
+    # 同一个 token 还能用于派队（不该被只读端点消耗掉）
+    r2 = client.post("/tasks/assign", data=dict(d, team=str(seeded["team"])),
+                     follow_redirects=False)
+    assert r2.status_code != 400, "AI 建议不该吃掉表单令牌"

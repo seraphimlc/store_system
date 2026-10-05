@@ -481,7 +481,10 @@ def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import bd_tasks
     try:
-        r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username)
+        # ⚠️ 必须传 actor_user：否则 save_progress 两个审核分支都不进
+        #    （不写 review_status、不发消息，队长一点确认还会用员工原值覆盖管理员刚改的值）
+        r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
+                                   actor_user=user)
         db.commit()
         return RedirectResponse(
             "/tasks?msg=%s" % _q("已修正：%d%%" % r["pct"]), status_code=303)
@@ -739,16 +742,28 @@ def my_tasks_assign_bulk(request: Request,
         return g
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import bd_tasks
+    from app.services import bd_tasks, bd_teams
     ids = [int(x) for x in (task_id or []) if str(x).strip().isdigit()]
     people = [p for p in (person or []) if str(p).strip()]
     back = "/my/tasks?tab=unassigned"
+    # ⚠️ **判权**：管理员 / 该任务的队长（队员不能分派）—— 与单条 /my/tasks/assign 的
+    #    can_assign 同一口径。漏了它会变成「任何队员都能改本队分工」（2026-10-06 审计 P0）
+    _is_admin = bd_tasks.is_admin(user)
+    _lead = set() if _is_admin else {
+        t.id for t in bd_teams.leader_teams(db, user.person_code)}
     if not ids:
         return RedirectResponse(back + "&err=%s" % _q("请先勾选任务"), status_code=303)
     if not people:
         return RedirectResponse(back + "&err=%s" % _q("请先选队员"), status_code=303)
-    ok, errs, warns = 0, [], []
+    ok, errs, warns, denied = 0, [], [], 0
     for tid in ids:
+        _t = db.get(bd_tasks.BdTask, tid)
+        if _t is None:
+            errs.append("任务 %d 不存在" % tid)
+            continue
+        if not (_is_admin or _t.team_id in _lead):
+            denied += 1
+            continue
         try:
             r = bd_tasks.assign_members(db, tid, people, by=user.username,
                                         actor_user=user)
@@ -761,6 +776,8 @@ def my_tasks_assign_bulk(request: Request,
     msg = "已分派 %d 个任务" % ok
     if warns:
         msg += "；⚠️ " + "；".join(warns[:3])
+    if denied:
+        msg += "；%d 条不在你的队里，已跳过" % denied
     if errs:
         msg += "；%d 条失败：%s" % (len(errs), errs[0])
     q = ("msg=" + _q(msg)) if not errs else ("err=" + _q(msg))
@@ -933,17 +950,28 @@ def my_tasks_confirm(request: Request, task_id: int = Form(0),
         return RedirectResponse("/my/tasks?err=%s"
                                 % _q("只有该队队长或管理员能确认"),
                                 status_code=303)
+    # ⚠️ 跨天确认：找**还挂着 pending 的那条上报行**，把它的日期一起传下去。
+    #    旧写法锚定"今天"→ 员工昨天下班报、队长第二天点确认会另造一条 adjusted 行，
+    #    昨天那条永远停在 pending，待确认 tab 里也消失了（2026-10-06 审计）
+    from app.models import BdTaskProgress as _P
+    pend = (db.query(_P).filter(_P.task_id == task_id,
+                                _P.review_status == "pending")
+            .order_by(_P.progress_date.desc()).first())
+    if pend is None or pend.reported_pct is None:
+        return RedirectResponse("/my/tasks?tab=pending&err=%s"
+                                % _q("这条还没有队员上报，未确认"), status_code=303)
     try:
-        r = bd_tasks.save_progress(db, task_id, task.pct, note, by=user.username,
-                                   actor_user=user, confirm=True)
+        r = bd_tasks.save_progress(db, task_id, pend.reported_pct,
+                                   pend.note or note, by=user.username,
+                                   actor_user=user, confirm=True,
+                                   on_date=pend.progress_date)
         db.commit()
         msg = "已确认 %s%%" % r["pct"]
-        if r.get("reported_pct") is None:
-            msg = "这条还没有队员上报，未确认"
         if r.get("notified"):
             msg += "；已通知队员"
-        return RedirectResponse("/my/tasks?tab=%s&msg=%s"
-                                % (r["state"], _q(msg)), status_code=303)
+        # 处理完**留在待确认队列**（队长通常要连着处理一串）
+        return RedirectResponse("/my/tasks?tab=pending&msg=%s" % _q(msg),
+                                status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()
         return RedirectResponse("/my/tasks?err=%s" % _q(str(e)),
