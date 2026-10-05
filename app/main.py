@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """FastAPI 应用工厂与入口。"""
+from sqlalchemy import text as _text
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -31,7 +32,6 @@ def create_app() -> FastAPI:
 
     from fastapi import Depends
     from fastapi.responses import JSONResponse
-    from sqlalchemy import text
     from app.db import get_db
     from sqlalchemy.orm import Session
 
@@ -56,6 +56,44 @@ def create_app() -> FastAPI:
 
     from app.forms import reset_ctx as _reset_form_ctx
 
+    def _auth_snapshot(request):
+        """当前请求的身份快照（只取列值，**每请求最多查一次**）。
+
+        中间件与依赖共用：语言中间件要 `lang`，员工隔离中间件要
+        `role/status/must_change_password/person_code`，route 里再由 `require_login`
+        取一次 ORM 对象（那是唯一需要真对象的地方——改密码/改语言要写回）。
+        ⚠️ 不要跨 session 传递 ORM 对象（detach 后写入静默丢失）。
+        """
+        snap = getattr(request.state, "auth_snap", None)
+        if snap is not None:
+            return snap          # 可能是 None（未登录）或 SimpleNamespace
+        from types import SimpleNamespace as _NS
+        snap = None
+        token = request.cookies.get("ss")
+        if token:
+            from app.auth import read_session_token as _read
+            from app.db import SessionLocal as _SL
+            data = _read(token)
+            if data:
+                s = _SL()
+                try:
+                    row = s.execute(_text(
+                        "SELECT id, role, lang, person_code, status, "
+                        "must_change_password FROM users WHERE id = :i"),
+                        {"i": data["uid"]}).first()
+                    if row is not None:
+                        # 极简对象：`landing_home/staff_home` 只读 role/person_code
+                        # （dict 不行——它们用属性访问）
+                        snap = _NS(uid=row[0], role=row[1] or "", lang=row[2] or "",
+                                   person_code=row[3], status=row[4] or "",
+                                   must_change_password=bool(row[5]),
+                                   can_login=(row[4] or "") not in
+                                   ("resigned", "disabled"))
+                finally:
+                    s.close()
+        request.state.auth_snap = snap
+        return snap
+
     @app.middleware("http")
     async def lang_middleware(request, call_next):
         """解析当前语言（URL→cookie→账号级→浏览器→默认）并注入 contextvar。
@@ -72,13 +110,7 @@ def create_app() -> FastAPI:
         if token:
             data = _read(token)
             if data:
-                s = _SL()
-                try:
-                    u = s.get(_User, data["uid"])
-                    if u is not None:
-                        user_lang = u.lang or ""
-                finally:
-                    s.close()
+                user_lang = getattr(_auth_snapshot(request), "lang", "") or ""
         lang = _resolve(query=request.query_params.get("lang", ""),
                         cookie=request.cookies.get("lang", ""),
                         user_lang=user_lang,
@@ -111,33 +143,35 @@ def create_app() -> FastAPI:
         token = request.cookies.get("ss")
         if token and not path.startswith("/static"):
             data = _read(token)
-            if data:
+            snap = _auth_snapshot(request) if data else {}
+            if snap:
                 s = _SL()
                 try:
-                    u = s.get(_User, data["uid"])
-                    if u is not None and u.role in ("staff", "leader"):
+                    # 这里只读"待填报计划/未读消息"，用户对象由 require_login 按需取
+                    if getattr(snap, "role", "") in ("staff", "leader"):
                         # 已登录员工/队长且「待改密」（首登/口令被重置）：
                         # 除改密页与登出外一律拦到改密页（队长同一规则，别漏）
-                        if u.must_change_password:
+                        if getattr(snap, "must_change_password", False):
                             if not (path.startswith("/my/password")
                                     or path == "/logout"):
                                 return _RR("/my/password?must=1", status_code=302)
                         # 待填报出勤计划 → 员工端提示；越权访问非白名单页 → 回各角色首页
                         from app.services import date_plan as _dp
                         request.state.plan_pending = _dp.needs_plan(
-                            s, u.person_code) or None
+                            s, getattr(snap, "person_code", None)) or None
                         # 未读消息数（底栏红点；一次 COUNT，模板直接读）
                         try:
                             from app.services import bd_msg as _bm
                             request.state.unread_messages = _bm.unread_count(
-                                s, u.person_code)
+                                s, getattr(snap, "person_code", None))
                         except Exception:        # 表还没建也不该 500
                             request.state.unread_messages = 0
-                        allowed = (LEADER_ALLOWED if u.role == "leader"
+                        allowed = (LEADER_ALLOWED
+                                   if getattr(snap, "role", "") == "leader"
                                    else STAFF_ALLOWED)
                         if not path.startswith(allowed):
                             from app.services import home as _home
-                            return _RR(_home.landing_home(s, u), status_code=302)
+                            return _RR(_home.landing_home(s, snap), status_code=302)
                 finally:
                     s.close()
         return await call_next(request)
@@ -145,7 +179,7 @@ def create_app() -> FastAPI:
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)):
         try:
-            db.execute(text("SELECT 1"))
+            db.execute(_text("SELECT 1"))
         except Exception:
             return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True}

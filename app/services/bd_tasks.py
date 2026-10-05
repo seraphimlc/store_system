@@ -1077,7 +1077,9 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
             "reported_pct": orig, "notified": bool(notified)}
 
 
-def can_reject_maps(db: Session, user, tasks: Sequence[BdTask]) -> Dict[int, dict]:
+def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
+                    lead_team_ids: Optional[Sequence[int]] = None,
+                    rows: Optional[Sequence[dict]] = None) -> Dict[int, dict]:
     """**一页任务的权限一次算完**（`can_report/can_assign/can_adjust/can_reject` 的批量版）。
 
     ⚠️ 逐条调用那几个 `can_*` 会**每条任务查好几次库** —— 实测队长端"团队任务"tab
@@ -1104,18 +1106,27 @@ def can_reject_maps(db: Session, user, tasks: Sequence[BdTask]) -> Dict[int, dic
         mine = {tid for (tid,) in db.query(BdTaskAssign.task_id)
                 .filter(BdTaskAssign.task_id.in_(ids),
                         BdTaskAssign.person_code == code).all()}
-    lead_teams = {t.id for t in bd_teams.leader_teams(db, code)}
-    latest = latest_progress(db, ids)          # 一次查（驳回要看"员工原值+pending"）
+    # 调用方给了就不重复查（同一请求里这两份数据页面已经查过了）
+    lead_teams = (set(lead_team_ids) if lead_team_ids is not None
+                  else {t.id for t in bd_teams.leader_teams(db, code)})
+    by_row = {r["task"].id: r for r in (rows or [])}
+    latest = {} if by_row else latest_progress(db, ids)
     for t in tasks:
         is_lead = (t.team_id in lead_teams)
         d = out[t.id]
         d["report"] = bool(cap_report and (is_lead or t.id in mine))
         d["assign"] = bool(cap_assign and is_lead)
         d["adjust"] = bool(cap_adjust and is_lead)
-        row = latest.get(t.id)
-        d["reject"] = bool(t.pct == 100 and is_lead and row is not None
-                           and row.reported_pct == 100
-                           and row.review_status == "pending")
+        if by_row:                      # 用页面已经装好的字段（last_reported_pct/review_status）
+            r0 = by_row.get(t.id) or {}
+            d["reject"] = bool(t.pct == 100 and is_lead
+                               and r0.get("last_reported_pct") == 100
+                               and r0.get("review_status") == "pending")
+        else:
+            row = latest.get(t.id)
+            d["reject"] = bool(t.pct == 100 and is_lead and row is not None
+                               and row.reported_pct == 100
+                               and row.review_status == "pending")
     return out
 
 

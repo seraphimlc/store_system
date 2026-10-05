@@ -612,6 +612,7 @@ def my_tasks_page(request: Request,
     can_report_map, can_assign_map, can_reject_map = {}, {}, {}
     members = {}
     avail = {}
+    bulk_avail = {}
     if is_leader:
         all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw)
         counts = {k: sum(1 for r in all_rows if r["state"] == k)
@@ -637,9 +638,15 @@ def my_tasks_page(request: Request,
         dates = sorted({(max(r["task"].assign_date, jst_today)
                          if r["task"].assign_date else jst_today)
                         for r in rows})
+        # ⚠️ 每个日期只算一次可用性；`bulk_avail`（未分配 tab 的下拉）直接复用今天那一档
         for d in dates:
-            for code, a in bd_leave.availability_map(db, all_codes, d).items():
+            m = bd_leave.availability_map(db, all_codes, d)
+            for code, a in m.items():
                 avail["%s|%s" % (d.isoformat(), code)] = a
+            if d == jst_today:
+                bulk_avail = m
+        if not bulk_avail and (is_leader and tab == "unassigned") and all_codes:
+            bulk_avail = bd_leave.availability_map(db, all_codes, jst_today)
     else:
         # 用户 2026-10-06："员工端只有'我的'和'已完成'。其它的员工端不需要。"
         open_rows = [r for r in my_rows if r["state"] != "done"]
@@ -649,7 +656,8 @@ def my_tasks_page(request: Request,
         counts = {TAB_MINE: len(open_rows), "done": len(done_rows)}
         rows = done_rows if tab == "done" else open_rows
     # ⚠️ 权限**一次算完**（逐条 can_* 会让 76 行变成 180+ 条 SQL → 页面慢）
-    perms = bd_tasks.can_reject_maps(db, user, [r["task"] for r in rows])
+    perms = bd_tasks.can_reject_maps(db, user, [r["task"] for r in rows],
+                                    lead_team_ids=team_ids, rows=rows)
     for tid, d in perms.items():
         can_report_map[tid] = d["report"]
         can_assign_map[tid] = d["assign"]
@@ -666,9 +674,7 @@ def my_tasks_page(request: Request,
         "n_pending": counts.get(TAB_PENDING, 0),
         "avail": avail, "my_leave": my_leave,
         # 批量分派下拉的休假/请假标签（未分配 tab 用"今天"这一档，算一次就够）
-        "bulk_avail": (bd_leave.availability_map(
-            db, all_codes, jst_today) if (is_leader and tab == "unassigned"
-                                          and all_codes) else {}),
+        "bulk_avail": bulk_avail,
         "avail_tags": {w: _tr(w, CURRENT_LANG.get()) for w in
                        ("休假", "计划休", "请假", "停用", "离职", "休")},
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),

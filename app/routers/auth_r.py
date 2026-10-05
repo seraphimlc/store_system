@@ -40,6 +40,13 @@ def _set_session(response, uid: int):
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> Optional[User]:
+    """当前用户。**同一请求只加载一次**（中间件已加载就复用）。
+
+    ⚠️ 2026-10-06 实测：中间件（语言 / 员工隔离）与 `require_login` 各查一次 → 一个页面
+    **同一个 User 被查 3 遍**。这里复用 `request.state.user`，省掉重复查询。
+    """
+    # ⚠️ 别复用中间件缓存的 ORM 对象：它绑在中间件那个**已关闭的 session** 上（detach），
+    #    路由里改 `user.password_hash` 再 commit 会静默不生效（2026-10-06 实测红了 3 个测试）。
     data = read_session_token(request.cookies.get(SESSION_COOKIE))
     if not data:
         return None

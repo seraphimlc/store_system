@@ -30,6 +30,10 @@
 - 新增表单必须放 `{{ form_token() }}` + `csrf_token`；表格 `class="grid-tbl"` 且外包 `.tbl-wrap`；
   文案用 `t('中文')`（i18n 键**不能含双引号**，引用词用「」）。
 - 改完跑：`scripts/check_templates.py`、`scripts/i18n_audit.py`（要 0 缺失 0 死键）、相关 `pytest`。
+- **别跨 session 传 ORM 对象**（中间件 session 已关闭 → 对象 detach → 路由里改属性再 commit
+  **静默不生效**，实测把改密码改坏了）；中间件要数据就传**列值快照**。
+- **页面 SQL 要"常数条"而不是"N+1"**：批量任务列表的权限/进展/可用性一律**一次算完**
+  （`bd_tasks.can_reject_maps`），别在循环里调 `can_*`（实测 76 行 = 188 条 SQL）。
 
 
 ## 一句话

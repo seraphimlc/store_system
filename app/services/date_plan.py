@@ -403,6 +403,9 @@ def roster_start_map(db, codes: Optional[List[str]] = None) -> Dict[str, date]:
     渲染路径"只读计划表"的约定不受影响；查询全是单表聚合，没有 join。）
     """
     from sqlalchemy import func
+    if codes and len(codes) == 1:
+        d = roster_start_fast(db, list(codes)[0])
+        return {list(codes)[0]: d} if d else {}
     out: Dict[str, date] = {}
     q1 = (db.query(User.person_code, func.min(User.created_at))
           .filter(User.role == "staff", User.person_code.isnot(None)))
@@ -429,10 +432,38 @@ def roster_start_map(db, codes: Optional[List[str]] = None) -> Dict[str, date]:
     return out
 
 
-def roster_start(db, person_code: Optional[str]) -> Optional[date]:
+def _coerce_dt(v):
+    """原生 SQL 在 SQLite 上取回的是字符串 → 解析成 datetime（ORM 会自动转，裸 SQL 不会）。"""
+    from datetime import datetime as _dt
+    if isinstance(v, str):
+        try:
+            return _dt.fromisoformat(v.replace(" ", "T", 1))
+        except ValueError:
+            return None
+    return v
+
+
+def roster_start_fast(db, person_code: Optional[str]) -> Optional[date]:
+    """单人版：**一条 SQL**（三个标量子查询）——中间件每请求都要用，省两次往返。
+
+    结果与 `roster_start()` 完全一致（都是"三者取最早"）。
+    """
     if not person_code:
         return None
-    return roster_start_map(db, [person_code]).get(person_code)
+    from sqlalchemy import text
+    row = db.execute(text(
+        "SELECT (SELECT MIN(created_at) FROM users "
+        "         WHERE role = 'staff' AND person_code = :c), "
+        "       (SELECT created_at FROM persons WHERE code = :c), "
+        "       (SELECT MIN(plan_date) FROM staff_date_plans WHERE person_code = :c)"
+    ), {"c": person_code}).first()
+    days = [d for d in (_jst_date(_coerce_dt(x)) for x in (row or ())) if d]
+    return min(days) if days else None
+
+
+def roster_start(db, person_code: Optional[str]) -> Optional[date]:
+    """单人「名册起点」（≈入职日）：users/persons/plans 三者最早（JST）。"""
+    return roster_start_fast(db, person_code)
 
 
 def personal_window_state(db, person_code: Optional[str], key: str,
