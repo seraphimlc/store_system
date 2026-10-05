@@ -450,6 +450,130 @@ def list_places_for_line(db: Session, line_id: int, kw: str = "") -> List[dict]:
     return out
 
 
+def _places_without_team_sub(db: Session):
+    """**已经有队伍的物理车站**（子查询：未分配 = 不在这里面的）。"""
+    taken = (db.query(BdTask.place_id)
+             .filter(BdTask.place_id.isnot(None), BdTask.team_id.isnot(None)))
+    legacy = (db.query(BdStation.place_id)
+              .join(BdTask, BdTask.station_id == BdStation.id)
+              .filter(BdStation.place_id.isnot(None), BdTask.team_id.isnot(None)))
+    return taken.union(legacy).subquery()
+
+
+def list_unassigned_places(db: Session, page: int = 1, per: Optional[int] = None,
+                           kw: str = "", line_id: Optional[int] = None,
+                           all_rows: bool = False) -> dict:
+    """**未分配的车站池**（建任务页的正式形态，用户 2026-10-06 口径）。
+
+    "未分配" = 该**物理车站还没有队伍**（没建过任务 / 建了任务但没派队都算）——
+    所以在这一栏勾站 + 选队 + 按「分配」，就等于"建任务 + 派队"一步完成。
+    """
+    from app.models import BdLine, BdStationPlace
+    from app.services import bd_cjk, paging as _pg
+    taken = _places_without_team_sub(db)
+    q = db.query(BdStationPlace).filter(
+        BdStationPlace.id.notin_(db.query(taken.c[0])),
+        BdStationPlace.status == "active")
+    if line_id:
+        q = q.filter(BdStationPlace.id.in_(
+            db.query(BdStation.place_id).filter(BdStation.line_id == line_id)))
+    if kw:
+        conds = []
+        for v in bd_cjk.search_variants(kw):
+            k = "%%%s%%" % v
+            conds += [BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k)]
+            zh_ids = bd_cjk.zh_line_ids(db, v)
+            if zh_ids:
+                conds.append(BdStationPlace.id.in_(
+                    db.query(BdStation.place_id).filter(BdStation.line_id.in_(zh_ids))))
+        q = q.filter(or_(*conds)) if conds else q
+    if all_rows:
+        places = q.order_by(BdStationPlace.name.asc()).all()
+        pg = _pg.Pager({"rows": places, "total": len(places), "page": 1,
+                        "per": max(1, len(places)), "pages": 1, "start": 1,
+                        "end": len(places), "has_prev": False, "has_next": False,
+                        "prev_page": 1, "next_page": 1})
+    else:
+        # 选了线路 → 按该线的沿線顺序排；否则按站名
+        if line_id:
+            seq_map = {pid: (sq, km) for pid, sq, km in db.query(
+                BdStation.place_id, BdStation.seq, BdStation.along_km)
+                .filter(BdStation.line_id == line_id,
+                        BdStation.place_id.isnot(None)).all()}
+            places = q.all()
+            places.sort(key=lambda x: ((seq_map.get(x.id, (None, None))[0] is None),
+                                       seq_map.get(x.id, (10 ** 9, 0))[0],
+                                       x.name))
+            total = len(places)
+            per_n = max(1, min(int(per or _pg.PER_DEFAULT), _pg.PER_MAX))
+            pages = max(1, (total + per_n - 1) // per_n)
+            p = max(1, min(int(page or 1), pages))
+            pg = _pg.Pager({"rows": places[(p - 1) * per_n:p * per_n], "total": total,
+                            "page": p, "per": per_n, "pages": pages,
+                            "start": (p - 1) * per_n + 1,
+                            "end": min(p * per_n, total), "has_prev": p > 1,
+                            "has_next": p < pages, "prev_page": max(1, p - 1),
+                            "next_page": min(pages, p + 1)})
+        else:
+            pg = _pg.paginate(q.order_by(BdStationPlace.name.asc()), page,
+                              per or _pg.PER_DEFAULT)
+    rows = []
+    line_names = {l.id: ("%s %s" % (l.operator_short, l.name))
+                  for l in db.query(BdLine).all()}
+    for pl in pg["rows"]:
+        st = (db.query(BdStation)
+              .filter(BdStation.place_id == pl.id,
+                      BdStation.line_id == line_id if line_id else True)
+              .order_by(BdStation.seq.is_(None), BdStation.seq.asc()).first())
+        rows.append({"place": pl, "name": pl.name,
+                     "lines_text": pl.lines_text, "n_line": pl.n_line,
+                     "line_label": (line_names.get(st.line_id, st.line or "")
+                                    if st else ""),
+                     "seq": (st.seq if st else None),
+                     "along_km": (st.along_km if st else None),
+                     "has_task": bool(db.query(BdTask.id)
+                                      .filter(BdTask.place_id == pl.id).first())})
+    pg["rows"] = rows
+    return pg
+
+
+def assign_team_to_places(db: Session, place_ids: Sequence[int],
+                          team_id: Optional[int], by: str = "",
+                          actor_user=None) -> dict:
+    """**给车站派队**（未分配 tab 的动作）：没任务的**建任务**，然后把队伍写上。
+
+    用户 2026-10-06："未分配…我可以选择一些车站，直接做分配" —— 这就是"建任务 + 派队"合并的一步。
+    """
+    from app.services import bd_log
+    ids = [int(x) for x in dict.fromkeys(place_ids or [])]
+    if not ids:
+        raise TaskError("请先勾选车站")
+    if team_id is None:
+        raise TaskError("请选择要派给的队伍")
+    if db.get(BdTeam, team_id) is None:
+        raise TaskError("团队不存在")
+    team_name = db.get(BdTeam, team_id).name
+    # ① 没任务的先建（跳过判定用两种口径，避免同一车站两个任务）
+    created = create_tasks_for_places(db, ids, by=by, team_id=None,
+                                      actor_user=actor_user)["created"]
+    # ② 把队伍写上（含本次新建的与原先"建了任务没派队"的）
+    task_ids = []
+    for t in (db.query(BdTask)
+              .filter(or_(BdTask.place_id.in_(ids),
+                          BdTask.station_id.in_(
+                              db.query(BdStation.id).filter(
+                                  BdStation.place_id.in_(ids))))).all()):
+        task_ids.append(t.id)
+    # ⚠️ 分配日期默认今天（用户："日期不用管，有个分配日期就行"）——
+    #    不传的话"先建任务、后派队"的车站会留下空分配日期（测试实测抓到）
+    from app.services.date_plan import jst_today
+    res = set_task_team(db, task_ids, team_id, assign_date=jst_today(),
+                        by=by, actor_user=actor_user)
+    db.commit()
+    return {"created": created, "assigned": len(task_ids),
+            "team_name": team_name, "cleared": res.get("cleared", 0)}
+
+
 def create_tasks_for_places(db: Session, place_ids: Sequence[int], by: str = "",
                             team_id: Optional[int] = None,
                             assign_date: Optional[date] = None,
@@ -1071,9 +1195,18 @@ def _apply_tab(q, db: Session, tab: str):
 def tab_counts(db: Session, team_id: Optional[int] = None,
                line_id: Optional[int] = None, date_from=None, date_to=None,
                kw: str = "") -> dict:
-    """三个 tab 的数字（**只受其它筛选影响，不受 tab 自己影响**）。"""
+    """三个 tab 的数字（**只受其它筛选影响，不受 tab 自己影响**）。
+
+    ⚠️ 「未分配」= **车站池**（还没有队伍的物理车站，含"没建过任务"的），
+    与另两个 tab（任务口径）不是一回事 —— 用户 2026-10-06："未分配的查询的是车站"。
+    """
     out = {}
     for tab in BOARD_TABS:
+        if tab == TAB_UNASSIGNED:
+            # 车站池的数字：只认线路/关键词筛选（队伍筛选对"没队伍的站"无意义）
+            out[tab] = list_unassigned_places(
+                db, page=1, per=1, kw=kw, line_id=line_id)["total"]
+            continue
         q = _base_query(db, team_id=team_id, line_id=line_id,
                         date_from=date_from, date_to=date_to, kw=kw)
         out[tab] = _apply_tab(q, db, tab).count()
@@ -1221,38 +1354,72 @@ def board_summary(db: Session) -> dict:
 
 def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
                date_from: Optional[date] = None,
-               date_to: Optional[date] = None, lang: str = "zh"):
-    """导出（**流式写**，不在内存里留整份工作簿）。"""
+               date_to: Optional[date] = None, lang: str = "zh",
+               kw: str = "", line_id: Optional[int] = None):
+    """导出（**三个 sheet**，流式写）。
+
+    用户 2026-10-06："我需要'未分配'，进行中，已完成的都导出来。进行中的要显示进展。
+    已完成的显示完成日期。未分配的只显示线路/站点。"
+    → 一个文件三个 sheet，各自列不同，**跟着当前筛选**（线路/队伍/关键词/日期区间）。
+    """
     from io import BytesIO
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
     labels = state_labels(lang)
-    data = task_board(db, team_id=team_id, state=state, date_from=date_from,
-                      date_to=date_to, limit=100000)
     wb = Workbook(write_only=True)
-    ws = wb.create_sheet("车站任务")
-    head = ["车站", "线路", "团队", "担当", "状态", "进度%",
-            "分配日期", "开始日", "完成日", "最后提交", "多少天没动", "备注"]
-    ws.append(head)
-    for c in range(1, len(head) + 1):
-        ws.column_dimensions[get_column_letter(c)].width = 18
 
     def _d(v):
         return v.strftime("%Y-%m-%d") if v else ""
 
-    for r in data["rows"]:
-        ws.append([r["station_name"], r["line"], r["team_name"],
-                   "、".join(a["name"] for a in r["assignees"]),
-                   labels.get(r["state"], r["state"]), r["pct"],
-                   _d(r["assign_date"]), _d(r["start_date"]), _d(r["done_date"]),
-                   _d(r["last_date"]),
-                   ("" if r["days_since"] is None else r["days_since"]),
-                   r["last_note"]])
+    def _sheet(title, head, rows, widths=None):
+        ws = wb.create_sheet(title)
+        ws.append(head)
+        for c in range(1, len(head) + 1):
+            ws.column_dimensions[get_column_letter(c)].width = (
+                widths[c - 1] if widths else 18)
+        for r in rows:
+            ws.append(r)
+        return ws
+
+    # ① 未分配 = **车站池**（只给 线路 / 站点）
+    pool = list_unassigned_places(db, kw=kw, line_id=line_id, all_rows=True)
+    _sheet("未分配", ["线路", "站点"],
+           [[r["lines_text"] or r["line_label"], r["name"]] for r in pool["rows"]],
+           widths=[34, 20])
+
+    # ② 进行中 = 任务（带**进展**）
+    doing = task_board(db, team_id=team_id, line_id=line_id, tab=TAB_ASSIGNED,
+                       date_from=date_from, date_to=date_to, kw=kw,
+                       limit=100000)
+    _sheet("进行中",
+           ["线路", "站点", "团队", "担当", "进展%", "分配日期", "开始日", "最后提交"],
+           [[r["line"], r["station_name"], r["team_name"],
+             "、".join(a["name"] for a in r["assignees"]), r["pct"],
+             _d(r["assign_date"]), _d(r["start_date"]), _d(r["last_date"])]
+            for r in doing["rows"]],
+           widths=[26, 18, 12, 14, 8, 12, 12, 12])
+
+    # ③ 已完成 = 任务（带**完成日期**与用时）
+    done = task_board(db, team_id=team_id, line_id=line_id, tab=TAB_DONE,
+                      date_from=date_from, date_to=date_to, kw=kw,
+                      limit=100000)
+    rows = []
+    for r in done["rows"]:
+        days = ""
+        if r["start_date"] and r["done_date"]:
+            days = (r["done_date"] - r["start_date"]).days
+        rows.append([r["line"], r["station_name"], r["team_name"],
+                     "、".join(a["name"] for a in r["assignees"]),
+                     _d(r["done_date"]), _d(r["start_date"]),
+                     _d(r["assign_date"]), days])
+    _sheet("已完成",
+           ["线路", "站点", "团队", "担当", "完成日期", "开始日", "分配日期", "用时(天)"],
+           rows, widths=[26, 18, 12, 14, 12, 12, 12, 10])
+
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf
-
 
 def station_ids_without_task(db: Session, kw: str = "",
                             status: str = "",

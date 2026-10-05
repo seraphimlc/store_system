@@ -5,7 +5,6 @@
   <h1>{{ t('任务') }}</h1>
   <span class="sub">{{ t('每个车站一个任务：在哪个队、分给谁、进展多少；可按分配日期查询') }}</span>
   <div class="actions">
-    <a class="btn" href="/tasks/new" data-testid="new-task-entry">{{ t('建任务') }}</a>
     <a class="btn ghost" download data-testid="tasks-export"
        href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&date_from={{ date_from }}&date_to={{ date_to }}">{{ t('导出 Excel') }}</a>
   </div>
@@ -69,6 +68,112 @@
   {% endfor %}
 </div>
 
+{% if tab == 'unassigned' %}
+{# ===== 未分配 = **车站池**（还没有队伍的物理车站）=====
+   用户 2026-10-06："对于未分配，我可以选择一些车站，直接做分配" +
+   "不要单独的'建任务按钮'" → 勾站 + 选队 + 按「分配」= 建任务 + 派队 一步完成。 #}
+<form method="post" action="/tasks/assign" id="pool-form" data-testid="pool-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="line" value="{{ line_id or '' }}">
+  <div class="card" style="padding:.7rem 1rem;margin-bottom:.6rem">
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <b>{{ t('分配') }}：</b>
+      <select name="team" data-testid="pool-team" style="max-width:14rem">
+        <option value="">{{ t('选择队伍') }}</option>
+        {% for tm in teams %}
+        <option value="{{ tm.id }}">{{ tm.name }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn" type="submit" data-testid="pool-assign">{{ t('分配给该队') }}</button>
+      <span class="spacer" style="flex:1"></span>
+      <span class="hint">{{ t('已勾选') }} <b data-testid="pool-count">0</b> {{ t('个车站') }}</span>
+      <button class="btn ghost" type="button" data-testid="pool-all">{{ t('全选') }}</button>
+      <button class="btn ghost" type="button" data-testid="pool-none">{{ t('全不选') }}</button>
+    </div>
+    <p class="hint" style="margin:.4rem 0 0">
+      {{ t('勾法：点一下勾选；Shift + 点 = 勾中间一整段；按住鼠标拖过多行 = 连续勾选。派队后这些车站就变成「进行中」。') }}</p>
+  </div>
+
+  <div class="tbl-wrap">
+  <table class="grid-tbl">
+    <thead>
+      <tr>
+        <th style="width:2.6rem"></th><th style="width:7.5rem">{{ t('顺序') }}</th>
+        <th>{{ t('车站') }}</th><th>{{ t('经过线路') }}</th><th>{{ t('任务') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in pool_rows %}
+      <tr data-testid="pool-row" data-place-id="{{ r.place.id }}">
+        <td class="pick-cell">
+          <input type="checkbox" name="place_id" value="{{ r.place.id }}"
+                 data-testid="pool-check"></td>
+        <td>{% if r.seq %}<b>{{ r.seq }}</b>{% if r.along_km is not none %}
+          <span class="hint">{{ '%.1f'|format(r.along_km) }}km</span>{% endif %}
+          {% else %}<span class="hint">—</span>{% endif %}</td>
+        <td><b>{{ r.name }}</b>{% if r.n_line > 1 %}
+          <span class="hint">（{{ r.n_line }} {{ t('条线') }}）</span>{% endif %}</td>
+        <td class="hint">{{ r.lines_text }}</td>
+        <td>{% if r.has_task %}<span class="hint">{{ t('已建任务·待派队') }}</span>
+          {% else %}<span class="hint">{{ t('未建任务') }}</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">{{ t('没有未分配的车站') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+    {% include "_pager.html" %}
+  </div>
+</form>
+
+<script>
+/* 车站池的勾选交互：逐个 / Shift 区间 / 拖拽圈选 / 全选·全不选 */
+(function () {
+  var form = document.getElementById('pool-form');
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(
+    form.querySelectorAll('input[name="place_id"]:not([disabled])'));
+  var countEl = document.querySelector('[data-testid="pool-count"]');
+  var lastIdx = null, dragging = false, dragTo = null;
+  function nSel() { return boxes.filter(function (b) { return b.checked; }).length; }
+  function refresh() { if (countEl) countEl.textContent = nSel(); }
+  function setRange(a, b, val) {
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    for (var i = lo; i <= hi; i++) boxes[i].checked = val;
+  }
+  boxes.forEach(function (b, i) {
+    b.addEventListener('click', function (ev) {
+      if (ev.shiftKey && lastIdx !== null) setRange(lastIdx, i, true);
+      lastIdx = i; refresh();
+    });
+    b.closest('tr').addEventListener('mousedown', function (ev) {
+      if (ev.target.tagName === 'INPUT' && ev.shiftKey) return;
+      dragging = true; dragTo = !b.checked;
+      document.body.style.userSelect = 'none';
+    });
+    b.closest('tr').addEventListener('mouseenter', function () {
+      if (!dragging) return;
+      b.checked = dragTo; lastIdx = i; refresh();
+    });
+  });
+  document.addEventListener('mouseup', function () {
+    if (dragging) { dragging = false; document.body.style.userSelect = ''; }
+  });
+  var all = document.querySelector('[data-testid="pool-all"]');
+  var none = document.querySelector('[data-testid="pool-none"]');
+  if (all) all.addEventListener('click', function () {
+    boxes.forEach(function (b) { b.checked = true; }); refresh(); });
+  if (none) none.addEventListener('click', function () {
+    boxes.forEach(function (b) { b.checked = false; }); refresh(); });
+  form.addEventListener('submit', function () {
+    var btn = form.querySelector('[data-testid="pool-assign"]');
+    if (btn && nSel() > 0) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }
+  });
+  refresh();
+})();
+</script>
+{% else %}
 <div class="tbl-wrap">
 <table class="grid-tbl">
   <thead>
@@ -146,8 +251,10 @@
   {% include "_pager.html" %}
 </div>
 
+{% endif %}
+
 {# ⚠️ 当前 tab 没结果、但别的 tab 有匹配 → 必须提示（否则用户以为"搜不到"） #}
-{% if not rows %}
+{% if empty_current %}
   {% set others = [] %}
   {% for k in tabs %}{% if k != tab and tab_counts[k] %}
     {% set _ = others.append((k, tab_counts[k])) %}
@@ -167,6 +274,7 @@
 {# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
    用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"
    → 每个数字都点得动：已完成/进行中/未分配/停滞 各自链到"该队 + 该状态"的列表。 #}
+{% if by_team and tab != 'unassigned' %}
 <div class="card" style="margin-top:1rem" data-testid="by-team-card">
   <h3 style="margin:0 0 .5rem">{{ t('按队汇总') }}</h3>
   <p class="hint" style="margin:0 0 .6rem">
@@ -209,4 +317,5 @@
     </table>
   </div>
 </div>
+{% endif %}
 {% endblock %}

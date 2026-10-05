@@ -353,12 +353,18 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     tab = tab if tab in bd_tasks.BOARD_TABS else bd_tasks.TAB_UNASSIGNED
     limit = paging.PER_DEFAULT
     page = max(1, int(page or 1))
-    d = bd_tasks.task_board(db, team_id=team_id, state=state, tab=tab,
-                            line_id=line_id,
-                            date_from=_parse_date(date_from),
-                            date_to=_parse_date(date_to), kw=kw,
-                            stale_only=bool(stale),
-                            limit=limit, offset=(page - 1) * limit)
+    if tab == bd_tasks.TAB_UNASSIGNED:
+        # ⚠️ 「未分配」= **车站池**（还没队伍的物理车站，含"没建过任务"的）——
+        #    在这一栏勾站 + 选队 + 分配 = "建任务 + 派队"一步完成（用户 2026-10-06）
+        d = bd_tasks.list_unassigned_places(db, page=page, per=limit, kw=kw,
+                                           line_id=line_id)
+    else:
+        d = bd_tasks.task_board(db, team_id=team_id, state=state, tab=tab,
+                                line_id=line_id,
+                                date_from=_parse_date(date_from),
+                                date_to=_parse_date(date_to), kw=kw,
+                                stale_only=bool(stale),
+                                limit=limit, offset=(page - 1) * limit)
     pager = paging.info_from(d["total"], d["page"] if "page" in d else page, limit)
     pager["rows"] = d["rows"]
     # 当日休假中的人（担当旁边标出来 —— 管理端一眼看到"活派给休假的人了"）
@@ -366,6 +372,10 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     return templates.TemplateResponse("bd_tasks.html", {
         "request": request, "current_user": user,
         "rows": d["rows"], "total": d["total"], "page": pager["page"],
+        # 未分配 tab 用的是"车站池"（不同的行结构：place/seq/along_km/has_task）
+        "pool_rows": (d["rows"] if tab == bd_tasks.TAB_UNASSIGNED else []),
+        # "当前这一栏没结果"（未分配看车站池，其余看任务行）—— 跨 tab 提示用它
+        "empty_current": (not d["rows"]),
         "limit": limit, "pager": pager,
         "page_qs": paging.qs(request.query_params),
         "team_id": team_id, "teams": bd_teams.team_options(db),
@@ -376,7 +386,7 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
             kw=kw),
         "lines": bd_lines.line_options(db), "line_id": line_id,
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
-        "stale": stale, "stale_days": d["stale_days"],
+        "stale": stale, "stale_days": d.get("stale_days", 2),
         "leave_map": leave_map,
         "sum": bd_tasks.board_summary(db),
         "by_team": bd_tasks.team_board_summary(db),
@@ -473,10 +483,47 @@ def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
         return RedirectResponse("/tasks?err=%s" % _q(str(e)), status_code=303)
 
 
+@router.post("/tasks/assign")
+def tasks_assign(request: Request,
+                 place_id: Optional[List[str]] = Form(None),
+                 team: str = Form(""), line: str = Form(""),
+                 csrf_token: str = Form(""),
+                 user: Optional[User] = Depends(require_login),
+                 db: Session = Depends(get_db)):
+    """**未分配 → 分配**：勾选的车站直接派给队伍（没任务的顺便建任务，一步完成）。
+
+    用户 2026-10-06："对于未分配，我可以选择一些车站，直接做分配" +
+    "不要单独的'建任务按钮'"。
+    """
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    ids = [int(x) for x in (place_id or []) if str(x).strip().isdigit()]
+    back = "/tasks?tab=%s&line=%s" % (bd_tasks.TAB_UNASSIGNED, _q(line))
+    if not ids:
+        return RedirectResponse(back + "&err=%s" % _q("请先勾选要分配的车站"),
+                                status_code=303)
+    tid = int(team) if str(team).strip().isdigit() else None
+    try:
+        r = bd_tasks.assign_team_to_places(db, ids, tid, by=user.username,
+                                          actor_user=user)
+    except bd_tasks.TaskError as e:
+        db.rollback()
+        return RedirectResponse(back + "&err=%s" % _q(str(e)), status_code=303)
+    return RedirectResponse(
+        back + "&msg=%s" % _q("已派给「%s」：新建任务 %d 个，派队 %d 个"
+                              % (r["team_name"], r["created"], r["assigned"])),
+        status_code=303)
+
+
 @router.get("/tasks/export")
 def tasks_export(user: Optional[User] = Depends(require_login),
                  db: Session = Depends(get_db), team: str = "",
-                 state: str = "", date_from: str = "", date_to: str = ""):
+                 state: str = "", date_from: str = "", date_to: str = "",
+                 kw: str = "", line: str = ""):
     g = _admin_guard(user)
     if g:
         return g
@@ -485,10 +532,12 @@ def tasks_export(user: Optional[User] = Depends(require_login),
         team_id = int(team) if str(team).strip() else None
     except ValueError:
         team_id = None
+    line_id = int(line) if str(line).strip().isdigit() else None
     buf = bd_tasks.tasks_xlsx(db, team_id=team_id, state=state,
                               date_from=_parse_date(date_from),
                               date_to=_parse_date(date_to),
-                              lang=CURRENT_LANG.get())
+                              lang=CURRENT_LANG.get(),
+                              kw=kw, line_id=line_id)
     fname = "station_tasks_%s.xlsx" % datetime.now().strftime("%Y%m%d")
     nice = "车站任务_%s.xlsx" % datetime.now().strftime("%Y%m%d")
     # 响应头只能 latin-1：ASCII 名给 filename=，中文名走 RFC 5987 的 filename*

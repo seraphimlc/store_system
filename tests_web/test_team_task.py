@@ -1809,6 +1809,9 @@ def test_task_line_filter_and_kw_search_in_sql(client, seeded):
         db.flush()
         ids.append(st.id)
     bd_tasks.create_tasks(db, ids, by="admin")
+    # ⚠️ 车站池是**物理车站**口径 → 测完要重建 place（否则这些站没 place，池子里看不到）
+    from app.services import bd_places
+    bd_places.rebuild_places(db)
     db.commit()
     line_id = line.id
     total_line = bd_tasks.task_board(db, line_id=line_id, tab="unassigned")["total"]
@@ -1821,11 +1824,12 @@ def test_task_line_filter_and_kw_search_in_sql(client, seeded):
     assert kw_miss["total"] == 0
 
     _login(client, "admin")
+    # 默认 tab = 未分配 = 车站池（这 60 个站没派队 → 都在池子里）
     p = client.get("/tasks?line=%d" % line_id)
     assert p.status_code == 200
     assert 'data-testid="line-filter"' in p.text
     assert "普通駅00" in p.text
-    assert "駒場東大前" not in p.text, "别的线路的任务不该出现"
+    assert "駒場東大前" not in p.text, "别的线路的车站不该出现"
     # 分页条也要在（60 条 > 50/页）
     assert 'data-testid="page-next"' in p.text
     assert client.get("/tasks?line=%d&page=2" % line_id).status_code == 200
@@ -2732,3 +2736,108 @@ def test_reject_route_permissions(client, seeded):
     t = db.get(BdTask, tid)
     assert t.pct == 60 and t.state == "doing" and t.done_date is None
     db.close()
+
+
+# ---------------- 任务页三 tab 工作台（2026-10-06 用户口径） ----------------
+
+def test_unassigned_tab_is_station_pool_and_assign(client, seeded):
+    """「未分配」= **车站池**：勾站 + 选队 + 分配 = 建任务 + 派队 一步完成。
+
+    用户 2026-10-06："对于未分配，我可以选择一些车站，直接做分配" +
+    "不要单独的'建任务按钮'"。
+    """
+    from app.models import BdLine, BdStation, BdStationPlace
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    line = BdLine(name="池线", name_norm="池线", operator="测试铁道",
+                  operator_short="测试", kind="private", prefs="13", n_station=3)
+    db.add(line)
+    db.flush()
+    for i, nm in enumerate(("池站A", "池站B", "池站C")):
+        db.add(BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line="池线",
+                         line_id=line.id, operator="测试铁道", pref="13",
+                         seq=i + 1, along_km=float(i), source="mlit"))
+    db.commit()
+    bd_places.rebuild_places(db)
+    # 池站A 先建好任务但**不派队** → 也必须出现在车站池（未分配 = 没队伍）
+    pl_a = db.query(BdStationPlace).filter(
+        BdStationPlace.name_norm == bd_tasks.norm_name("池站A")).first()
+    bd_tasks.create_tasks_for_places(db, [pl_a.id], by="admin")
+    db.commit()
+    lid = line.id
+    ids = [r[0] for r in db.query(BdStationPlace.id).filter(
+        BdStationPlace.name_norm.in_([bd_tasks.norm_name(x)
+                                      for x in ("池站A", "池站B", "池站C")])).all()]
+    db.close()
+
+    _login(client, "admin")
+    h = client.get("/tasks", params={"tab": "unassigned", "line": str(lid)}).text
+    assert 'data-testid="pool-row"' in h, "未分配 tab 要显示车站池"
+    for nm in ("池站A", "池站B", "池站C"):
+        assert nm in h, "%s 还没派队，应该在池子里" % nm
+    assert 'data-testid="pool-form"' in h and 'data-testid="pool-team"' in h
+    assert 'data-testid="pool-assign"' in h
+    assert "已建任务·待派队" in h, "建了任务没派队的要标出来"
+    assert 'task-row' not in h, "未分配 tab 不该出现任务行"
+
+    # 分配：勾 2 个站 → 派给队伍
+    r = _post(client, "/tasks/assign",
+              {"place_id": [str(ids[0]), str(ids[1])],
+               "team": str(seeded["team"]), "line": str(lid)},
+              from_path="/tasks?tab=unassigned&line=%d" % lid)
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    for pid in ids[:2]:
+        tasks = db.query(BdTask).filter(BdTask.place_id == pid).all()
+        assert len(tasks) == 1, "一个物理车站只能有一个任务（池站A 原本就有，不能重复建）"
+        assert tasks[0].team_id == seeded["team"], "要派上队伍"
+        assert tasks[0].assign_date is not None
+    db.close()
+    # 分完队：池子里只剩池站C，进行中 tab 能看到那 2 个
+    h2 = client.get("/tasks", params={"tab": "unassigned", "line": str(lid)}).text
+    assert "池站C" in h2 and "池站A" not in h2 and "池站B" not in h2
+    h3 = client.get("/tasks", params={"tab": "assigned", "line": str(lid)}).text
+    assert "池站A" in h3 and "池站B" in h3
+
+
+def test_tasks_page_has_no_create_task_button(client, seeded):
+    """用户 2026-10-06："不要单独的'建任务按钮'"（建任务 = 未分配里勾站 + 分配）。"""
+    _login(client, "admin")
+    h = client.get("/tasks").text
+    assert 'data-testid="new-task-entry"' not in h
+    assert 'href="/tasks/new"' not in h, "不该再有独立的「建任务」入口（建任务=未分配里勾站+分配）"
+
+
+def test_tasks_export_has_three_sheets(client, seeded):
+    """导出 = **一个文件三个 sheet**：未分配（只有线路/站点）、进行中（带进展）、已完成（带完成日期）。"""
+    from app.models import BdStationPlace
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="导出线", names=("导1", "导2"))
+    pls = db.query(BdStationPlace).filter(
+        BdStationPlace.name_norm.in_([bd_tasks.norm_name("导1"),
+                                      bd_tasks.norm_name("导2")])).all()
+    # 导1：派队（进行中）；导2：不派（留在未分配池）
+    bd_tasks.create_tasks_for_places(db, [pls[0].id], by="admin",
+                                    team_id=seeded["team"])
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    r = client.get("/tasks/export")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    import io as _io
+    from openpyxl import load_workbook
+    wb = load_workbook(_io.BytesIO(r.content))
+    assert wb.sheetnames == ["未分配", "进行中", "已完成"], wb.sheetnames
+    head_pool = [c.value for c in wb["未分配"][1]]
+    assert head_pool == ["线路", "站点"], "未分配只给线路/站点"
+    head_doing = [c.value for c in wb["进行中"][1]]
+    assert "进展%" in head_doing and "担当" in head_doing
+    head_done = [c.value for c in wb["已完成"][1]]
+    assert "完成日期" in head_done and "用时(天)" in head_done
+    # 未分配 sheet 里要有没派队的导2
+    pool_names = [row[1] for row in wb["未分配"].iter_rows(min_row=2, values_only=True)]
+    assert "导2" in pool_names and "导1" not in pool_names
+    doing_names = [row[1] for row in wb["进行中"].iter_rows(min_row=2, values_only=True)]
+    assert "导1" in doing_names
