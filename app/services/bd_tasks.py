@@ -907,7 +907,10 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         row.pct = p
         if (note or "").strip():
             row.note = note.strip()      # 只有真填了才覆盖（别把已有备注清掉）
-        row.submitted_by = (by or "")
+        # ⚠️ `submitted_by` 只在**员工上报**时更新；队长确认/调整只写 `reviewed_by`，
+        #    否则「谁上报的」会被操作人覆盖（2026-10-06 浏览器试跑实测：确认后变成队长）
+        if staff_report:
+            row.submitted_by = (by or "")
         row.updated_at = datetime.utcnow()
     notified = None
     review_action = ""
@@ -1515,7 +1518,13 @@ def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
         cutoff = _today() - _td(days=max(0, stale_days))
         recent = (db.query(BdTaskProgress.task_id)
                   .filter(BdTaskProgress.progress_date >= cutoff))
-        q = q.filter(BdTask.state != STATE_DONE, BdTask.id.notin_(recent))
+        # ⚠️ 这里必须与「行里的 stale 标记」「统计卡的 stale_count」**同一口径**：
+        #    **已分到人** + 未完成 + 最近 N 天没进展。
+        #    2026-10-06 浏览器试跑实测：SQL 用宽松口径 → total=511，而列表只有 1 行，
+        #    页面出现「共 511 条」却几乎空白的怪象。
+        q = q.filter(BdTask.state != STATE_DONE,
+                     BdTask.id.in_(_has_assignee(db)),
+                     BdTask.id.notin_(recent))
     total = q.count()
     tasks = (q.order_by(BdTask.assign_date.desc().nullslast(),
                         BdTask.id.asc())

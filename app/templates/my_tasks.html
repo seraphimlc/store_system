@@ -87,7 +87,10 @@
   </div>
 </form>
 <script>
-(function () {
+/* ⚠️ 这段脚本在**行渲染之前**（模板上方）→ 必须等 DOM 就绪，否则
+   `boxes` 抓到 0 个复选框：表头全选 / Shift 区间 / 拖拽 / "已选 N" 全是死的
+   （2026-10-06 浏览器实跑抓到；手动勾选提交仍能work，所以单测没发现） */
+document.addEventListener('DOMContentLoaded', function () {
   var form = document.getElementById('bulk-assign-form');
   if (!form) return;
   var boxes = Array.prototype.slice.call(document.querySelectorAll('input[name="task_id"][form="bulk-assign-form"]'));
@@ -129,8 +132,9 @@
     if (btn) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }
   });
   refresh();
-})();
-(function () {          /* 待确认批量确认：同一套勾选/计数逻辑 */
+});
+document.addEventListener('DOMContentLoaded', function () {
+  /* 待确认批量确认：同一套勾选/计数逻辑（同样要等 DOM 就绪） */
   var form = document.getElementById('bulk-confirm-form');
   if (!form) return;
   var boxes = Array.prototype.slice.call(
@@ -143,11 +147,14 @@
     if (allEl) { allEl.checked = n > 0 && n === boxes.length;
                  allEl.indeterminate = n > 0 && n < boxes.length; }
   }
-  boxes.forEach(function (b) { b.addEventListener('change', refresh2); });
+  boxes.forEach(function (b) {
+    b.addEventListener('click', refresh2);
+    b.addEventListener('change', refresh2);      /* 真实点击两个事件都会派发 */
+  });
   if (allEl) allEl.addEventListener('change', function () {
     boxes.forEach(function (b) { b.checked = allEl.checked; }); refresh2(); });
   refresh2();
-})();
+});
 </script>
 {% endif %}
 

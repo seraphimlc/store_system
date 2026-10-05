@@ -3850,3 +3850,49 @@ def test_expired_form_token_recovers_gracefully(client, seeded):
     loc = second.headers["location"]
     assert loc.startswith("/tasks?tab=assigned") and "err=" in loc
     assert "application/json" not in second.headers.get("content-type", "")
+
+
+def test_leader_bulk_scripts_wait_for_dom(client, seeded):
+    """⚠️ 浏览器实跑抓到的真 bug：队长页两段内联脚本在**行渲染之前**执行 →
+    `boxes` 抓到 0 个复选框 → 表头全选 / Shift 区间 / 拖拽 / 「已选 N」**全是死的**
+    （手动勾选仍能提交，所以单测没发现；只有真浏览器点才会暴露）。
+
+    修法：包在 `DOMContentLoaded` 里。这里守住它，并防止再出现
+    `document.addEventListener(...) is not a function`（`})();` 收尾写错）那类错误。
+    """
+    import re as _re
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    h = client.get("/my/tasks?tab=unassigned").text
+    assert h.count("DOMContentLoaded") >= 2, "两段批量脚本都要等 DOM 就绪"
+    bad = _re.search(r"DOMContentLoaded[\s\S]{0,3000}?\n\}\)\(\);", h)
+    assert bad is None, "DOMContentLoaded 块不能用 `})();` 收尾（会报 not a function）"
+    # 表头全选与计数元素都在
+    assert 'data-testid="bulk-all"' in h and 'data-testid="bulk-count"' in h
+
+
+def test_stale_filter_total_matches_rows_and_card(client, seeded):
+    """⚠️ 浏览器试跑抓到的真 bug：`stale=1` 的 total 用宽松口径（511），
+    而行级用新口径（1 行）→ 页面「共 511 条」但几乎空白。三者必须同一口径。"""
+    db = appdb.SessionLocal()
+    st2 = bd_tasks.create_station(db, "池ノ上")
+    task2 = (db.query(BdTask).order_by(BdTask.id.desc()).first())
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"],
+                          assign_date=date(2026, 10, 1))
+    db.commit()
+    task2 = db.query(BdTask).order_by(BdTask.id.desc()).first()
+    # ① 没担当的（不该算停滞）
+    # ② 有担当 + 从没提交（该算停滞）
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    db.commit()
+    n_card = bd_tasks.stale_count(db)
+    d = bd_tasks.task_board(db, tab="assigned", stale_only=True, limit=50)
+    db.close()
+    assert d["total"] == len(d["rows"]), \
+        "total(%d) 必须等于实际行数(%d)" % (d["total"], len(d["rows"]))
+    assert d["total"] == n_card, "列表口径(%d) 要等于统计卡口径(%d)" % (d["total"], n_card)
+    assert all(r["stale"] for r in d["rows"]), "列表里每行都应是真停滞"
+    assert all(r["assignees"] for r in d["rows"]), "没分担当的不算停滞"
