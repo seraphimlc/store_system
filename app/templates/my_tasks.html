@@ -170,7 +170,7 @@
   {# ⚠️ 关键词要能搜**线路/运营商**（旧实现只匹配站名 → 队长搜"南武線"全军覆没）；
       线路下拉只列**本队有内容的线路**（2026-10-06 审计） #}
   <label class="f">{{ t('搜车站/线路') }}<input type="text" name="kw" value="{{ kw }}"
-      placeholder="{{ t('站名 / 线路 / 运营商') }}" style="width:180px"></label>
+      placeholder="{{ t('站名 / 线路') }}" style="width:180px"></label>
   {% if line_opts %}
   <label class="f">{{ t('线路') }}
     <select name="line" style="max-width:15rem">

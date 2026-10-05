@@ -550,8 +550,8 @@ def _place_kw_subquery(db: Session, kw: str):
             subs.append(func.replace(
                 func.coalesce(BdLine.operator_short, "") + BdLine.name,
                 " ", "").like(kns))
-        subs += [BdLine.name.like(k), BdLine.operator_short.like(k),
-                 BdLine.operator.like(k), BdStation.line.like(k)]
+        # ⚠️ 用户 2026-10-06："运营商的搜索我们不需要，按线路就行" → 不再匹配 operator
+        subs += [BdLine.name.like(k), BdStation.line.like(k)]
         zh = bd_cjk.zh_line_ids(db, v)
         if zh:
             conds.append(BdStationPlace.id.in_(
@@ -1476,7 +1476,7 @@ def _base_query(db: Session, team_id: Optional[int] = None,
                .filter(or_(*[c for k in klike for c in (
                            BdStation.name.like(k), BdStation.line.like(k),
                            BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k),
-                           BdLine.name.like(k), BdLine.operator_short.like(k),
+                           BdLine.name.like(k),
                            BdTeam.name.like(k),
                            # ⚠️ place 任务的 `station_id` 是 NULL → 上面的 join 取不到线路/运营商，
                            #    必须再按"这个物理车站被哪些线经过"找一遍（实测：搜 JR東日本 曾经 0 命中）
@@ -1484,9 +1484,7 @@ def _base_query(db: Session, team_id: Optional[int] = None,
                                db.query(BdStation.place_id)
                                .join(BdLine, BdLine.id == BdStation.line_id)
                                .filter(BdStation.place_id.isnot(None),
-                                       or_(BdLine.name.like(k),
-                                           BdLine.operator_short.like(k),
-                                           BdLine.operator.like(k)))))]
+                                       or_(BdLine.name.like(k)))))]
                            + ([BdStation.line_id.in_(zh_ids)] if zh_ids else []))))
         q = q.filter(BdTask.id.in_(sub))
     return q

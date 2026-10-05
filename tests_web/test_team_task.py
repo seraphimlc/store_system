@@ -2627,7 +2627,9 @@ def test_tasks_page_hints_other_tabs_when_empty(client, seeded):
 
 
 def test_tasks_keyword_searches_operator_and_line_for_place_tasks(seeded):
-    """⚠️ 回归：挂 **place** 的任务（`station_id=NULL`）也要能按**运营商/线路名**搜到。
+    """⚠️ 回归：挂 **place** 的任务（`station_id=NULL`）也要能按**线路名**搜到。
+
+    （用户 2026-10-06：运营商维度的搜索不需要 → 只验线路名/站名。）
 
     实测踩到：`/tasks` 搜「JR東日本」→ 0 命中（老口径是经 `station_id` join 的，
     而 place 任务没有 station_id）。修法：再按"该物理车站被哪些线经过"查一遍。
@@ -2648,7 +2650,7 @@ def test_tasks_keyword_searches_operator_and_line_for_place_tasks(seeded):
     pl = db.query(BdStationPlace).filter(BdStationPlace.name_norm ==
                                         bd_tasks.norm_name("渋谷")).first()
     bd_tasks.create_tasks_for_places(db, [pl.id], by="admin", team_id=seeded["team"])
-    for kw in ("渋谷", "涩谷", "JR東日本", "山手線"):
+    for kw in ("山手線", "山手"):
         d = bd_tasks.task_board(db, kw=kw, tab=bd_tasks.TAB_ASSIGNED, limit=50)
         assert d["total"] >= 1, "搜「%s」应该命中place任务（运营商/线路名也要搜得到）" % kw
     db.close()
@@ -3545,7 +3547,7 @@ def test_tasks_export_three_sheets_match_sql(client, seeded):
 
 
 def test_pool_search_matches_line_name_and_operator(client, seeded):
-    """车站池搜索要认**线路名/运营商**（审计：搜「JR」得 0，实际 355 个）。"""
+    """车站池搜索要认**线路名**（审计：搜线路名得 0；用户 2026-10-06：运营商维度不需要）。"""
     from app.models import BdLine, BdStationPlace
     from app.services import bd_places
     db = appdb.SessionLocal()
@@ -3566,7 +3568,8 @@ def test_pool_search_matches_line_name_and_operator(client, seeded):
     db.close()
     from app.services import bd_tasks as _T
     db = appdb.SessionLocal()
-    for kw in ("南武線", "JR東日本", "JR"):
+    # ⚠️ 用户 2026-10-06："运营商的搜索我们不需要，按线路就行" → 只验**线路名**（含空格不敏感）
+    for kw in ("南武線", "南武"):
         n = _T.list_unassigned_places(db, page=1, per=1, kw=kw)["total"]
         assert n >= 2, "搜「%s」至少要能找到这两个站（实际 %d）" % (kw, n)
     db.close()
