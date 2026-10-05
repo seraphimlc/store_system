@@ -15,6 +15,7 @@
   'use strict';
 
   var HINT = '输入编号后5位 或 姓名一个字';
+  var HINT_CB = '输入名称（支持中文/日文）';
 
   function norm(s) {
     s = s || '';
@@ -27,9 +28,13 @@
     sel.dataset.empFilterDone = '1';
 
     var opts = Array.prototype.slice.call(sel.options).map(function (o) {
-      return { value: o.value, label: o.textContent };
+      // ⚠️ 中日字形：选项上可挂 data-zh（中文名，服务端现算）→ 搜索时一并匹配。
+      //    没有 data-zh 的（员工下拉）行为完全不变。
+      var zh = o.dataset.zh || o.dataset.alt || '';
+      return { value: o.value, label: o.textContent, zh: zh,
+               hay: norm(o.textContent + ' ' + zh) };
     });
-    var hint = sel.dataset.empFilterHint || HINT;
+    var hint = sel.dataset.empFilterHint || (sel.dataset.cbFilter !== undefined && !sel.dataset.empFilter ? HINT_CB : HINT);
 
     var box = document.createElement('div');
     box.className = 'emp-cb';
@@ -80,7 +85,7 @@
     function items() {
       var q = norm(search.value);
       return opts.filter(function (o) {
-        return !q || !o.value || norm(o.label).indexOf(q) >= 0;
+        return !q || !o.value || o.hay.indexOf(q) >= 0;
       });
     }
     function render() {
@@ -156,7 +161,9 @@
   }
 
   function scan(root) {
-    (root || document).querySelectorAll('select[data-emp-filter]').forEach(mount);
+    // `data-emp-filter`（员工下拉）/ `data-cb-filter`（通用：线路下拉等，用户 2026-10-06）
+    (root || document).querySelectorAll('select[data-emp-filter],select[data-cb-filter]')
+      .forEach(mount);
   }
 
   document.addEventListener('DOMContentLoaded', function () { scan(document); });

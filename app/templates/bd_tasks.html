@@ -34,10 +34,10 @@
     </select>
   </label>
   <label class="f">{{ t('线路') }}
-    <select name="line" data-testid="line-filter">
+    <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-filter">
       <option value="">{{ t('全部线路') }}</option>
       {% for ln in lines %}
-      <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %}>
+      <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %} data-zh="{{ line_zh(ln.name) }}">
         {{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
       {% endfor %}
     </select>
@@ -130,6 +130,24 @@
 </table>
   {% include "_pager.html" %}
 </div>
+
+{# ⚠️ 当前 tab 没结果、但别的 tab 有匹配 → 必须提示（否则用户以为"搜不到"） #}
+{% if not rows %}
+  {% set others = [] %}
+  {% for k in tabs %}{% if k != tab and tab_counts[k] %}
+    {% set _ = others.append((k, tab_counts[k])) %}
+  {% endif %}{% endfor %}
+  {% if others %}
+  <div class="card" style="padding:.7rem 1rem;margin-bottom:.8rem" data-testid="other-tabs-hint">
+    <b>{{ t('当前这一栏没有匹配') }}</b>
+    <span class="hint">{{ t('但别的栏里有：') }}</span>
+    {% for k, n in others %}
+    <a class="btn ghost" href="/tasks?{{ page_qs }}tab={{ k }}"
+       data-testid="other-tab-{{ k }}">{{ labels[k] }} {{ n }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endif %}
 
 {# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
    用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"

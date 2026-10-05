@@ -2482,3 +2482,138 @@ def test_tasks_page_layout_tabs_list_then_team_summary(client, seeded):
         assert r.status_code == 200, "按队钻取失败：team=%d tab=%s" % (tid, tab)
     r = client.get("/tasks", params={"team": str(tid), "stale": "1"})
     assert r.status_code == 200
+
+
+# ---------------- 中日字形归一（2026-10-06 用户："我输入的是中文，是不是这里有问题"） ----------------
+
+def test_cjk_glyph_helpers():
+    """简体/繁体 → 日文新字体的映射（**搜索**用；用户实测：中文输入 0 命中）。"""
+    from app.services import bd_cjk as c
+    pairs = (("京叶线", "京葉線"), ("东京", "東京"), ("涩谷", "渋谷"),
+             ("海滨幕张", "海浜幕張"), ("东横线", "東横線"),
+             ("半藏门线", "半蔵門線"), ("樱木町", "桜木町"), ("台场", "台場"),
+             ("秋叶原", "秋葉原"), ("横滨", "横浜"), ("大宫", "大宮"),
+             ("千叶", "千葉"), ("户冢", "戸塚"), ("关内", "関内"),
+             ("热海", "熱海"), ("船桥", "船橋"), ("松户", "松戸"),
+             ("藤泽", "藤沢"), ("平冢", "平塚"), ("舞滨", "舞浜"),
+             ("葛西临海公园", "葛西臨海公園"), ("银座线", "銀座線"),
+             ("大江户线", "大江戸線"), ("有乐町线", "有楽町線"),
+             ("丸之内线", "丸ノ内線"),   # 汉字映射管不到 → 走整串别名
+             ("町屋站前", "町屋駅前"),   # 駅 ⇄ 站
+             ("小机", "小机"))           # 例外：日文就是「机」
+    for zh, jp in pairs:
+        assert c.to_jp(zh) == jp, "%s 应转成 %s，实际 %s" % (zh, jp, c.to_jp(zh))
+    # 反向（显示用；不落库）
+    for jp, zh in (("京葉線", "京叶线"), ("渋谷", "涩谷"), ("海浜幕張", "海滨幕张")):
+        assert c.line_zh(jp) == zh or c.to_zh(jp) == zh, "%s → %s" % (jp, zh)
+    # 幂等：日文形再转一次不变
+    for jp in ("京葉線", "東京", "海浜幕張", "丸ノ内線"):
+        assert c.to_jp(jp) == jp
+
+
+def _cjk_station_fixture(db):
+    """造数据：日文名的线路 + 车站（用来验中文输入能不能搜到）。"""
+    from app.models import BdLine, BdStation
+    data = (("京葉線", "JR東日本", "jr", "12", "東京", "海浜幕張"),
+            ("東横線", "東急", "private", "13", "渋谷", "桜木町"),
+            ("半蔵門線", "東京メトロ", "private", "13", "渋谷", "青山一丁目"),
+            ("丸ノ内線", "東京メトロ", "private", "13", "東京", "銀座"))
+    for i, (ln, op, kind, pref, s1, s2) in enumerate(data):
+        line = BdLine(name=ln, name_norm=ln, operator=op, operator_short=op,
+                      kind=kind, prefs=pref, n_station=2)
+        db.add(line)
+        db.flush()
+        for nm in (s1, s2):
+            db.add(BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line=ln,
+                             line_id=line.id, operator=op, pref=pref,
+                             ekicode="00%04d" % (1000 + i), source="mlit"))
+    db.commit()
+
+
+def test_station_search_accepts_chinese_input(client, seeded):
+    """**中文输入也要搜得到**（这是用户报的问题：搜「京叶线」0 命中）。
+
+    矩阵覆盖：线路名 / 站名 / 运营商 / 都道府県 的中文形 + 繁体 + 部分匹配。
+    """
+    db = appdb.SessionLocal()
+    _cjk_station_fixture(db)
+    db.close()
+    _login(client, "admin")
+    cases = (
+        ("京叶线", "東京"), ("京葉線", "東京"),          # 中文 / 日文
+        ("东京", "東京"), ("海滨幕张", "海浜幕張"),
+        ("涩谷", "渋谷"), ("东横线", "渋谷"),
+        ("半藏门线", "青山一丁目"), ("樱木町", "桜木町"),
+        ("丸之内线", "銀座"),                          # 汉字映射管不到的
+        ("東京メトロ", "銀座"),                        # 运营商（日文）
+        ("千叶县", "海浜幕張"),                        # 都道府県中文名
+        ("JR東日本", "東京"),                          # 运营商
+        ("東", "東京"),                                # 单字部分匹配
+    )
+    for kw, want in cases:
+        p = client.get("/stations", params={"kw": kw})
+        assert p.status_code == 200, kw
+        assert want in p.text, "搜「%s」应该命中 %s" % (kw, want)
+    # 反向：确实不存在的词仍然空
+    p = client.get("/stations", params={"kw": "不存在站名xyz"})
+    assert "没有匹配的车站" in p.text
+
+
+def test_line_selects_are_searchable_with_chinese(client, seeded):
+    """线路下拉 = 可搜索 combobox，且每个 option 挂**中文名**（data-zh）→ 输中文也能筛。"""
+    db = appdb.SessionLocal()
+    _cjk_station_fixture(db)          # 没有线路数据的话下拉是空的（测不到 data-zh）
+    db.close()
+    _login(client, "admin")
+    for path, marker in (("/stations", 'data-testid="line-filter"'),
+                         ("/tasks", 'data-testid="line-filter"'),
+                         ("/tasks/new", 'data-testid="line-select"')):
+        h = client.get(path).text
+        assert marker in h, path
+        assert 'data-cb-filter' in h, "%s 的线路下拉没有挂可搜索" % path
+        assert 'data-zh=' in h, "%s 的线路 option 没有中文名" % path
+
+
+def test_tasks_page_hints_other_tabs_when_empty(client, seeded):
+    """当前 tab 没匹配、但别的 tab 有 → 必须提示（**否则用户以为"搜不到"**）。
+
+    2026-10-06 实测踩到：在「未分配」tab 搜「涩谷」→ 0 行（任务在「已分配」里），
+    看起来就像搜索坏了。服务层其实是对的（`task_board(kw='涩谷')` 命中 1）。
+    """
+    _login(client, "admin")
+    # seeded：一个站 + 一个有队伍的任务 → 已分配 1 / 未分配 0
+    p = client.get("/tasks", params={"tab": "unassigned", "kw": "駒場"})
+    assert p.status_code == 200
+    assert 'data-testid="other-tabs-hint"' in p.text, "没结果时要提示别的 tab"
+    assert 'data-testid="other-tab-assigned"' in p.text
+    # 切到已分配就能看到（链接目标可用）
+    q = client.get("/tasks", params={"tab": "assigned", "kw": "駒場"})
+    assert "駒場東大前" in q.text
+
+
+def test_tasks_keyword_searches_operator_and_line_for_place_tasks(seeded):
+    """⚠️ 回归：挂 **place** 的任务（`station_id=NULL`）也要能按**运营商/线路名**搜到。
+
+    实测踩到：`/tasks` 搜「JR東日本」→ 0 命中（老口径是经 `station_id` join 的，
+    而 place 任务没有 station_id）。修法：再按"该物理车站被哪些线经过"查一遍。
+    """
+    from app.models import BdLine, BdStation, BdStationPlace
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    line = BdLine(name="山手線", name_norm="山手線", operator="東日本旅客鉄道",
+                  operator_short="JR東日本", kind="jr", prefs="13", n_station=1)
+    db.add(line)
+    db.flush()
+    db.add(BdStation(name="渋谷", name_norm=bd_tasks.norm_name("渋谷"), line="山手線",
+                     line_id=line.id, operator="東日本旅客鉄道", pref="13",
+                     group_code="GX77", source="mlit"))
+    db.commit()
+    bd_places.rebuild_places(db)
+    db.commit()
+    pl = db.query(BdStationPlace).filter(BdStationPlace.name_norm ==
+                                        bd_tasks.norm_name("渋谷")).first()
+    bd_tasks.create_tasks_for_places(db, [pl.id], by="admin", team_id=seeded["team"])
+    for kw in ("渋谷", "涩谷", "JR東日本", "山手線"):
+        d = bd_tasks.task_board(db, kw=kw, tab=bd_tasks.TAB_ASSIGNED, limit=50)
+        assert d["total"] >= 1, "搜「%s」应该命中place任务（运营商/线路名也要搜得到）" % kw
+    db.close()

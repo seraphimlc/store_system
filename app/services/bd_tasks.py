@@ -199,16 +199,23 @@ def list_stations(db: Session, page: int = 1, per: Optional[int] = None,
          .outerjoin(BdLine, BdLine.id == BdStation.line_id)
          .outerjoin(BdStationPlace, BdStationPlace.id == BdStation.place_id))
     if kw:
-        k = kw.strip()
-        like = "%%%s%%" % k
-        conds = [BdStation.name.like(like), BdStation.line.like(like),
-                 BdStation.ekicode.like(like), BdStation.operator.like(like),
-                 BdLine.name.like(like), BdLine.operator_short.like(like),
-                 BdStationPlace.lines_text.like(like)]
-        pref_hits = [c for c, lbl in bd_lines.PREF_LABELS.items() if k in lbl]
-        if pref_hits:                      # 搜"千葉県"→ 命中 pref 代码 12
-            conds.append(BdStation.pref.in_(pref_hits))
-        q = q.filter(or_(*conds))
+        # ⚠️ 用户输入可能是**中文**（京叶线/涩谷/东京），数据是日文新字体 →
+        #    每个变体都 OR 上去（见 app/services/bd_cjk.py；用户 2026-10-06 实测反馈）
+        from app.services import bd_cjk
+        conds = []
+        for v in bd_cjk.search_variants(kw):
+            like = "%%%s%%" % v
+            conds += [BdStation.name.like(like), BdStation.line.like(like),
+                      BdStation.ekicode.like(like), BdStation.operator.like(like),
+                      BdLine.name.like(like), BdLine.operator_short.like(like),
+                      BdStationPlace.lines_text.like(like)]
+            zh_ids = bd_cjk.zh_line_ids(db, v)     # 「丸之内线」这类汉字映射管不到的
+            if zh_ids:
+                conds.append(BdStation.line_id.in_(zh_ids))
+            pref_hits = [c for c, lbl in bd_lines.PREF_LABELS.items() if v in lbl]
+            if pref_hits:                           # 搜"千葉県"→ 命中 pref 代码 12
+                conds.append(BdStation.pref.in_(pref_hits))
+        q = q.filter(or_(*conds)) if conds else q
     if pref:
         q = q.filter(BdStation.pref == pref)
     if operator:
@@ -420,9 +427,12 @@ def list_places_for_line(db: Session, line_id: int, kw: str = "") -> List[dict]:
          .outerjoin(BdTeam, BdTeam.id == BdTask.team_id)
          .filter(BdStation.line_id == line_id))
     if kw:
-        k = "%%%s%%" % kw.strip()
-        q = q.filter(or_(BdStationPlace.name.like(k),
-                         BdStationPlace.lines_text.like(k)))
+        from app.services import bd_cjk
+        conds = []
+        for v in bd_cjk.search_variants(kw):
+            k = "%%%s%%" % v
+            conds += [BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k)]
+        q = q.filter(or_(*conds)) if conds else q
     rows = (q.order_by(BdStation.seq.is_(None), BdStation.seq.asc(),
                        BdStationPlace.name.asc()).all())
     out, seen = [], set()
@@ -1017,9 +1027,15 @@ def _base_query(db: Session, team_id: Optional[int] = None,
     if date_to is not None:
         q = q.filter(BdTask.assign_date.isnot(None), BdTask.assign_date <= date_to)
     if kw:
-        # ⚠️ 必须在 SQL 里过滤：1920 个任务 + 分页，只在当前页过滤等于"搜不到"
+        # ⚠️ 必须在 SQL 里过滤：任务多 + 分页，只在当前页过滤等于"搜不到"
+        # ⚠️ 同样要认中文输入（京叶线/涩谷…），见 app/services/bd_cjk.py
         from app.models import BdLine
-        k = "%%%s%%" % kw.strip()
+        from app.services import bd_cjk
+        klike = []
+        zh_ids = []
+        for v in bd_cjk.search_variants(kw):
+            klike.append("%%%s%%" % v)
+            zh_ids += bd_cjk.zh_line_ids(db, v)
         sub = (db.query(BdTask.id)
                .outerjoin(BdStation, BdStation.id == BdTask.station_id)
                .outerjoin(BdStationPlace, BdStationPlace.id == BdTask.place_id)
@@ -1027,10 +1043,21 @@ def _base_query(db: Session, team_id: Optional[int] = None,
                # ⚠️ BdLine 必须显式 join：只写 BdLine.name.like() 会跟 bd_team 笛卡尔积，
                # 结果是"任何一条线路命中 → 所有任务命中"（2026-10-05 实测：搜"井の頭"返回全部 1405）
                .outerjoin(BdLine, BdLine.id == BdStation.line_id)
-               .filter(or_(BdStation.name.like(k), BdStation.line.like(k),
+               .filter(or_(*[c for k in klike for c in (
+                           BdStation.name.like(k), BdStation.line.like(k),
                            BdStationPlace.name.like(k), BdStationPlace.lines_text.like(k),
                            BdLine.name.like(k), BdLine.operator_short.like(k),
-                           BdTeam.name.like(k))))
+                           BdTeam.name.like(k),
+                           # ⚠️ place 任务的 `station_id` 是 NULL → 上面的 join 取不到线路/运营商，
+                           #    必须再按"这个物理车站被哪些线经过"找一遍（实测：搜 JR東日本 曾经 0 命中）
+                           BdTask.place_id.in_(
+                               db.query(BdStation.place_id)
+                               .join(BdLine, BdLine.id == BdStation.line_id)
+                               .filter(BdStation.place_id.isnot(None),
+                                       or_(BdLine.name.like(k),
+                                           BdLine.operator_short.like(k),
+                                           BdLine.operator.like(k)))))]
+                           + ([BdStation.line_id.in_(zh_ids)] if zh_ids else []))))
         q = q.filter(BdTask.id.in_(sub))
     return q
 

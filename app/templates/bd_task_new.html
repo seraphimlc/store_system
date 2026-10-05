@@ -16,10 +16,11 @@
 <div class="card" style="margin-bottom:.8rem">
   <form method="get" action="/tasks/new" class="form-grid" data-testid="new-task-filter">
     <label class="fld">{{ t('线路') }}
-      <select name="line" data-testid="line-select">
+      <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-select">
         <option value="">{{ t('请选择线路') }}</option>
         {% for o in lines %}
-        <option value="{{ o.id }}" {% if line_id == o.id %}selected{% endif %}>
+        <option value="{{ o.id }}" data-zh="{{ line_zh(o.name) }}"
+                {% if line_id == o.id %}selected{% endif %}>
           {{ o.operator_short }} {{ o.name }}（{{ o.n_station }}）</option>
         {% endfor %}
       </select></label>

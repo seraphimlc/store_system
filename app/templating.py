@@ -14,6 +14,12 @@ from app.i18n import LANG_NAMES, t
 def get_templates() -> Jinja2Templates:
     tpl = Jinja2Templates(directory="app/templates")
     tpl.env.globals["t"] = t
+    # 中日字形归一（用户 2026-10-06："我输入的是中文，是不是这里有问题"）：
+    # 线路下拉要挂 data-zh（中文名）给**前端 combobox** 匹配用；中文名一律现算，不落库。
+    from app.services.bd_cjk import line_zh as _line_zh
+    from app.services.bd_cjk import to_zh as _to_zh
+    tpl.env.globals["line_zh"] = _line_zh
+    tpl.env.globals["to_zh"] = _to_zh
     tpl.env.globals["LANG_NAMES"] = LANG_NAMES
 
     def _lang_url(request, lang: str) -> str:

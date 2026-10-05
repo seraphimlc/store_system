@@ -30,10 +30,10 @@
              placeholder="{{ t('站名 / 駅コード / 运营商 / 线路') }}" data-testid="station-kw">
     </label>
     <label class="fld">{{ t('线路') }}
-      <select name="line" data-testid="line-filter">
+      <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-filter">
         <option value="">{{ t('全部线路') }}</option>
         {% for ln in lines %}
-        <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %}>{{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
+        <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %} data-zh="{{ line_zh(ln.name) }}">{{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
         {% endfor %}
       </select>
     </label>
