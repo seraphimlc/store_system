@@ -57,7 +57,7 @@ app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→�
 app/templates/bd_team_detail.html	作业域·模板	团队详情：圈选队员（一人一队）	6207
 app/templates/bd_teams.html	作业域·模板	团队列表页	3819
 app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	40714
-AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	5934
+AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	5895
 README.md	入口文档		2768
 conftest.py	其它		75
 store_settle/__init__.py	其它		22
@@ -94,16 +94,7 @@ app/__init__.py	应用其它		0
 app/cli.py	应用其它	命令行工具：create-admin（幂等）。	3484
 app/product_doc.md	应用其它		7318
 data/backup_tasks_20261005_011638.csv	数据		123161
-data/station_place_sample10.csv	数据		939
-data/stations_lines.csv	数据		157071
-data/stations_places.csv	数据		100472
-data/verify/README.md	数据		1436
-data/verify/tools_build_live.py	数据	E2E 真实库：从零建库 → 导入 4 份真实 8 月文件 → V3 判定 → finalize →	3428
-data/verify/tools_finalize_aug.py	数据	aug5 续：模拟全部任务超时自动认可 → 逐文件 finalize → 绩效/工资对账基准。	2017
-data/verify/tools_reason_dup.py	数据	逐行归因基准重复表 533 行：判定它被滤的原因类别，并核对总数。	3468
-data/verify/tools_rebuild_aug3.py	数据	aug3: 只导入各文件 modified=2026-08 的行（7 月行视为上月已结算）。	2377
-data/verify/tools_rebuild_aug6_full.py	数据	aug6: 全量导入（含 7 月行，模拟真实上传四文件），跑 V3 判定，统计 8 月口径。	1929
-data/verify/tools_rebuild_aug8.py	数据	aug8: 全量导入四文件(含7月行) + 按「店名trim×结算月」窗口 judge，统计8月口径。	1840
+data/verify/README.md	数据		1584
 migrations/README	数据库迁移		38
 migrations/env.py	数据库迁移	 ｜ Alembic 环境：URL 取自 app.config（环境变量 DATABASE_URL），元数据来自 app.models。	1337
 migrations/script.py.mako	数据库迁移		635
@@ -170,21 +161,8 @@ migrations/versions/f6c7d8e9f0a1_users_lang.py	数据库迁移	rev f6c7d8e9f0a1 
 migrations/versions/f7e8d9c0b1a2_oauth_tables.py	数据库迁移	rev f7e8d9c0b1a2 ｜ ↓a4b5c6d7e8f9 ｜ MCP OAuth（SSO）三表：oauth_clients / oauth_codes / oauth_refresh_tokens。	3789
 migrations/versions/f9a8b7c6d5e4_一都三県线路与车站.py	数据库迁移	rev f9a8b7c6d5e4 ｜ ↓d6e7f8a9b0c1 ｜ 一都三県「线路 + 车站」全量入池（用户 2026-10-03："把一都三县所有的地铁线和车站都收集进来"）。	6217
 docs/MCP对接手册.md	文档	MCP 对接手册（可复用）	12981
-docs/README.md	文档	文档地图（先看这里）	1448
+docs/README.md	文档	文档地图（先看这里）	1461
 docs/TODO-问题与排期.md	文档	问题与需求清单（进度跟踪）	1359
-docs/archive/README.md	文档	归档（历史过程稿，别当现状读）	836
-docs/archive/V3-技术架构.md	文档	V3 技术架构（按 结算主流程设计-v3.md）	1966
-docs/archive/workbuddy-mcp-feedback.md	文档	巡店系统 MCP 服务改造需求（WorkBuddy 反馈）	2873
-docs/archive/workbuddy-mcp-tool-cleanup.md	文档	工具冗余清理计划（WorkBuddy 反馈 v2，2026-09-25）	1639
-docs/archive/workbuddy-p0-验证记录.md	文档	WorkBuddy × 巡店结算系统 · P0 验证记录	3575
-docs/archive/发布恢复计划.md	文档	发布恢复计划（数据恢复 + 程序恢复）	6155
-docs/archive/发布计划-MCP上线.md	文档	MCP 上线发布清单（含新表迁移与回填）	3829
-docs/archive/发布计划-找平台账迁移.md	文档	线上发布计划：找平台账 + 无对账口径（数据迁移方案）	2099
-docs/archive/发布计划-线上新表迁移.md	文档	线上数据迁移方案（不重导，只建表 + 重建新表数据）	2566
-docs/archive/谷歌地图API申请流程.md	文档	Google Maps Platform API Key 申请流程（员工打卡功能用）	6617
-docs/archive/阿里云OSS开通清单.md	文档	阿里云 OSS 开通清单（员工打卡照片存储用）	4803
-docs/archive/项目索引.md	文档	项目索引（结构地图）	5849
-docs/archive/验证清单.md	文档	QA 验证清单（本地 · 2026-09）	2841
 docs/specs-bd-ops-layer.md	文档	BD 作业管理层 · 设计方案（片区 / 派活 / 待扫清单 / 过程）	28024
 docs/specs-date-plan.md	文档	规格 · 日期计划（半月出勤登记）	13446
 docs/specs-mcp-identity.md	文档	MCP 身份认证规格（每用户一身份）	2767
@@ -195,8 +173,8 @@ docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24357
 docs/specs-team-management.md	文档	规格 · 团队管理（第一期）	13683
 docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产品设计（系统逻辑全览）	9614
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
-docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	33863
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	33330
+docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32461
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31928
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26539
 docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141

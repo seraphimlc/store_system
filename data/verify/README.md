@@ -39,3 +39,6 @@
 
 promote/anchor 仍维护 store_entities 主/从档与 raw_data_id（文档要求的
 实体层，供展示、人工调档、追溯）；judge 判重不依赖它（以上述行级键为准）。
+
+> ⓘ 2026-10-06：本目录下的一次性验证工具（`tools_*.py`）与 `recon_cache.json` 已删除（可从 git 历史取回）。
+> 现役自洽检查用 `scripts/verify_payroll_logic.py`（或 MCP `visit_verify`）。
