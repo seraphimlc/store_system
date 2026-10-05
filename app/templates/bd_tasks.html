@@ -112,6 +112,20 @@
         {% else %}{{ r.days_since }}{% endif %}
       </td>
       <td>
+        {% if r.state == 'done' %}{# 已完成 → 只能「驳回」（把 100% 退回，用户 2026-10-06） #}
+        <form method="post" action="/my/tasks/reject"
+              style="display:flex;gap:.3rem;align-items:center"
+              data-testid="reject-form-{{ r.task.id }}">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
+          <input type="hidden" name="task_id" value="{{ r.task.id }}">
+          <input type="number" name="pct" min="0" max="99" value="90"
+                 style="width:4.5rem" data-testid="reject-pct-{{ r.task.id }}">
+          <input type="text" name="note" placeholder="{{ t('驳回原因') }}" style="width:7rem">
+          <button class="btn ghost" type="submit"
+                  data-testid="reject-btn-{{ r.task.id }}">{{ t('驳回') }}</button>
+        </form>
+        {% else %}
         <form method="post" action="/tasks/{{ r.task.id }}/progress"
               style="display:flex;gap:.3rem;align-items:center">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
@@ -121,6 +135,7 @@
           <input type="text" name="note" placeholder="{{ t('备注') }}" style="width:7rem">
           <button class="btn ghost" type="submit">{{ t('存') }}</button>
         </form>
+        {% endif %}
       </td>
     </tr>
     {% else %}

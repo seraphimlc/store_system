@@ -897,6 +897,28 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   - 测试 +5（字形助手 / 车站页中文矩阵 / 线路下拉可搜索+data-zh / 跨 tab 提示 / place 任务运营商搜索）；
     全量 `tests_web` **447 passed**；模板 0 错；i18n 0 缺失 0 死键。映射对 **844**。
 
+- **驳回（2026-10-06 用户："可以退回的，比如队员报了100%，队长可以驳回，队长确认了以后，
+  管理员可以驳回。驳回就是把100%的进度改成不到100%"）**：
+  - **判权唯一入口 `bd_tasks.can_reject`**：队员报了 100%（`reported_pct==100` 且
+    `review_status=='pending'`）→ **该任务的队长**可以驳回；**队长确认之后 → 只有管理员**能驳回
+    （队长不能再改回，避免"自己确认自己驳回"）；员工不能驳回。
+  - **动作 `bd_tasks.reject_progress(task_id, pct, note)`**：
+    - 只对 `pct == 100` 的任务有效；**新进度必须 0–99**（改成 100 会被拒）
+    - 写**今天**这条进展（当天有则覆盖），`review_status='rejected'`，
+      ⚠️ **员工上报的原值 `reported_pct` 保留**（界面上能看到"队员报 100% → 被驳回改 80%"）
+    - **回退清完成日**（`done_date=None`）+ 状态回到进行中（与"进度回退"的既有口径一致）
+    - 写 `bd_log`（action=`reject`，old `100%` → new `NN%`）+ **给担当发消息**
+      （`bd_msg.notify_task_progress(action='rejected')`，文案含原值→新值与操作人）
+  - **路由 `POST /my/tasks/reject`**（`task_id` 走表单，与 `/my/tasks/confirm` 一致）：
+    ⚠️ **必须挂在 `/my/` 下** —— **队长被中间件挡在 `/tasks/*` 外**（他只能在 `/my/*` 操作），
+    管理端页面也提交到这里；判权在路由里用 `can_reject` 再查一次（不信任界面）。
+  - **界面**：管理端 `/tasks` 的**已完成**行的操作列从"修正进展"换成**「驳回」**（数字默认 90 + 原因）；
+    队长端 `/my/tasks` 在**待确认** tab 给同样的驳回表单（`data-testid="reject-form-<id>"`）。
+  - 测试 +4（判权矩阵 leader→admin 两段 / 驳回后 pct<100 + 清完成日 + 原值保留 + 不能驳成 100 /
+    路由权限（员工被中间件挡、队长能驳回）/ 两个页面都有驳回表单）。
+  - ⚠️ 踩坑记录：`save_progress` **自己不 commit**（由路由 commit）—— 测试里直接调服务必须自己 `db.commit()`；
+    `_login` 的默认口令是 `pw123456`（不是 demo123）。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；

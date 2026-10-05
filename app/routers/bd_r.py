@@ -526,7 +526,7 @@ def my_tasks_page(request: Request,
     team_ids = [t.id for t in teams]
     my_rows = bd_tasks.member_tasks(db, user.person_code)     # 我担当的（跨队）
     my_ids = {r["task"].id for r in my_rows}
-    can_report_map, can_assign_map = {}, {}
+    can_report_map, can_assign_map, can_reject_map = {}, {}, {}
     members = {}
     avail = {}
     if is_leader:
@@ -565,12 +565,15 @@ def my_tasks_page(request: Request,
         tid = r["task"].id
         can_report_map[tid] = bd_tasks.can_report(db, user, r["task"])
         can_assign_map[tid] = bd_tasks.can_assign(db, user, r["task"])
+        # 驳回（用户 2026-10-06）：队员报 100% → 队长可驳回；队长确认后 → 只有管理员能驳回
+        can_reject_map[tid] = bd_tasks.can_reject(db, user, r["task"])
     my_leave = bd_leave.current(db, user.person_code, jst_today)
     return templates.TemplateResponse("my_tasks.html", {
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
         "can_report_map": can_report_map, "can_assign_map": can_assign_map,
+        "can_reject_map": can_reject_map,
         "tab_mine": TAB_MINE, "tab_pending": TAB_PENDING,
         "my_ids": my_ids, "n_mine": len(my_rows),
         "n_pending": counts.get(TAB_PENDING, 0),
@@ -619,6 +622,40 @@ def my_tasks_assign(request: Request, task_id: int = Form(0),
         db.rollback()
         return RedirectResponse("/my/tasks?err=%s" % _q(str(e)),
                                 status_code=303)
+
+
+@router.post("/my/tasks/reject")
+def task_reject(request: Request, task_id: int = Form(0), pct: str = Form("0"),
+                note: str = Form(""), csrf_token: str = Form(""),
+                user: Optional[User] = Depends(require_login),
+                db: Session = Depends(get_db)):
+    """**驳回**：把已完成的 100% 退回成不到 100%。
+
+    用户 2026-10-06："队员报了100%，队长可以驳回，队长确认了以后，管理员可以驳回。
+    驳回就是把100%的进度改成不到100%"。判权唯一入口 `bd_tasks.can_reject`。
+
+    ⚠️ 路径挂在 `/my/` 下：**队长被中间件挡在 `/tasks/*` 外**（他只能在 `/my/*` 操作），
+    与既有的 `/my/tasks/confirm`、`/my/tasks/progress` 保持一致；管理端页面也提交到这里。
+    """
+    if user is None:
+        return RedirectResponse("/login", status_code=302)
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    t = db.get(bd_tasks.BdTask, task_id)
+    if t is None or not bd_tasks.can_reject(db, user, t):
+        return RedirectResponse("/login", status_code=302)
+    try:
+        r = bd_tasks.reject_progress(db, task_id, int(pct or 0), note,
+                                     by=user.username, actor_user=user)
+    except bd_tasks.TaskError as e:
+        db.rollback()
+        back = "/my/tasks" if user.role != "admin" else "/tasks"
+        return RedirectResponse("%s?err=%s" % (back, _q(str(e))), status_code=303)
+    back = "/my/tasks" if user.role != "admin" else "/tasks?tab=done"
+    return RedirectResponse(
+        "%s?msg=%s" % (back, _q("已驳回：进度改为 %d%%" % r["pct"])),
+        status_code=303)
 
 
 @router.post("/my/tasks/progress")

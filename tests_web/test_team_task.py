@@ -14,7 +14,7 @@ import pytest
 import app.db as appdb
 from app.auth import hash_password
 from app.db import Base
-from app.models import (BdStation, BdTask, BdTaskAssign, BdTaskProgress,
+from app.models import (User, BdStation, BdTask, BdTaskAssign, BdTaskProgress,
                         BdTeam, BdTeamMember, Person, User)
 from app.services import bd_teams, bd_tasks
 from tests.helpers import form_token
@@ -2616,4 +2616,119 @@ def test_tasks_keyword_searches_operator_and_line_for_place_tasks(seeded):
     for kw in ("渋谷", "涩谷", "JR東日本", "山手線"):
         d = bd_tasks.task_board(db, kw=kw, tab=bd_tasks.TAB_ASSIGNED, limit=50)
         assert d["total"] >= 1, "搜「%s」应该命中place任务（运营商/线路名也要搜得到）" % kw
+    db.close()
+
+
+def test_reject_flow_leader_then_admin(client, seeded):
+    """**驳回**（用户 2026-10-06）：队员报 100% → 队长可驳回；队长确认后 → 只有管理员能驳回。
+
+    "驳回就是把100%的进度改成不到100%"。
+    """
+    from app.models import BdTask, BdTaskProgress
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="驳回线", names=("驳1",))
+    from app.models import BdStationPlace
+    pl = db.query(BdStationPlace).filter(
+        BdStationPlace.name_norm == bd_tasks.norm_name("驳1")).first()
+    r = bd_tasks.create_tasks_for_places(db, [pl.id], by="admin",
+                                        team_id=seeded["team"])
+    tid = r["task_ids"][0]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")          # 汤静 = 队员
+    db.commit()
+    # ① 队员报 100%
+    bd_tasks.save_progress(db, tid, 100, "", by="P2",
+                           actor_user=db.query(User).filter(User.username == "tangjing").one())
+    t = db.get(BdTask, tid)
+    assert t.pct == 100 and t.done_date is not None and t.state == "done"
+    row = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).first()
+    assert row.review_status == "pending" and row.reported_pct == 100
+    # ② 队长可驳回；员工/无关的人不行
+    leader = db.query(User).filter(User.username == "ogawa").one()
+    staff = db.query(User).filter(User.username == "tangjing").one()
+    assert bd_tasks.can_reject(db, leader, t) is True
+    assert bd_tasks.can_reject(db, staff, t) is False
+    # ③ 队长驳回 → 改成 80%
+    res = bd_tasks.reject_progress(db, tid, 80, "还有两家没扫", by="ogawa",
+                                   actor_user=leader)
+    t = db.get(BdTask, tid)
+    assert res["pct"] == 80 and t.pct == 80
+    assert t.state == "doing" and t.done_date is None, "驳回要清完成日、回到进行中"
+    row = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid,
+                                         BdTaskProgress.review_status == "rejected").first()
+    assert row is not None and row.reported_pct == 100, "员工原值 100 要保留"
+    assert bd_tasks.can_reject(db, leader, t) is False, "已经不是 100% 了，不能再驳回"
+    # ④ 队员再报 100% → 队长确认 → 队长不能再驳回，管理员可以
+    bd_tasks.save_progress(db, tid, 100, "", by="P2",
+                           actor_user=db.query(User).filter(User.username == "tangjing").one())
+    bd_tasks.save_progress(db, tid, 100, "ok", by="ogawa", actor_user=leader,
+                           confirm=True)
+    t = db.get(BdTask, tid)
+    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
+           .order_by(BdTaskProgress.id.desc()).first())
+    assert row.review_status == "confirmed"
+    assert bd_tasks.can_reject(db, leader, t) is False, "队长确认后不能再驳回（避免自审自驳）"
+    admin = db.query(User).filter(User.username == "admin").one()
+    assert bd_tasks.can_reject(db, admin, t) is True
+    res = bd_tasks.reject_progress(db, tid, 50, "管理员核实没完成", by="admin",
+                                   actor_user=admin)
+    assert res["pct"] == 50 and res["notified"] is True, "要发消息通知担当"
+    t = db.get(BdTask, tid)
+    assert t.pct == 50 and t.state == "doing" and t.done_date is None
+    # ⑤ 新进度必须 < 100
+    bd_tasks.save_progress(db, tid, 100, "", by="P2",
+                           actor_user=db.query(User).filter(User.username == "tangjing").one())
+    try:
+        bd_tasks.reject_progress(db, tid, 100, "", by="admin", actor_user=admin)
+        raise AssertionError("驳回成 100% 应该被拒")
+    except bd_tasks.TaskError:
+        pass
+    db.rollback()
+    db.close()
+
+
+def test_reject_route_permissions(client, seeded):
+    """驳回路由 `/my/tasks/reject`：队长能调；员工（担当本人）不能。
+
+    ⚠️ 路径在 `/my/` 下：队长被中间件挡在 `/tasks/*` 外（与 /my/tasks/confirm 一致）。
+    """
+    from app.models import BdStationPlace
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="驳回路由线", names=("驳路1",))
+    pl = db.query(BdStationPlace).filter(
+        BdStationPlace.name_norm == bd_tasks.norm_name("驳路1")).first()
+    r = bd_tasks.create_tasks_for_places(db, [pl.id], by="admin",
+                                        team_id=seeded["team"])
+    tid = r["task_ids"][0]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    bd_tasks.save_progress(db, tid, 100, "", by="P2",
+                           actor_user=db.query(User)
+                           .filter(User.username == "tangjing").one())
+    db.commit()
+    assert db.get(BdTask, tid).pct == 100, "先造一个已完成（100%）的任务"
+    db.close()
+    # ⓪ 界面上也要有「驳回」（队长端与管理端，已完成的行）
+    _login(client, "ogawa")
+    h = client.get("/my/tasks", params={"tab": "pending"}).text   # 待确认：队员报的还没处理
+    assert 'data-testid="reject-form-%d"' % tid in h, "队长端要有驳回表单"
+    assert 'data-testid="reject-btn-%d"' % tid in h
+    _login(client, "admin")
+    h = client.get("/tasks", params={"tab": "done"}).text
+    assert 'data-testid="reject-form-%d"' % tid in h, "管理端已完成 tab 要有驳回表单"
+    # ① 员工（担当本人）不能驳回
+    _login(client, "tangjing")
+    p = _post(client, "/my/tasks/reject", {"task_id": str(tid), "pct": "50"},
+              from_path="/my/tasks")
+    assert p.status_code in (302, 303)
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).pct == 100, "员工不该能驳回"
+    db.close()
+    # ② 队长可以（他只能在 /my/* 操作）
+    _login(client, "ogawa")
+    p = _post(client, "/my/tasks/reject",
+              {"task_id": str(tid), "pct": "60", "note": "没做完"},
+              from_path="/my/tasks")
+    assert p.status_code == 303
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, tid)
+    assert t.pct == 60 and t.state == "doing" and t.done_date is None
     db.close()

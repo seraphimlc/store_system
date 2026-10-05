@@ -152,7 +152,7 @@ def notify_task_progress(db: Session, task, action: str, old_pct,
                          station: str = "") -> Optional[BdMessage]:
     """任务进展的**确认/调整结果通知员工**（用户明确要求）。
 
-    `action`：`confirmed`（认可）/ `adjusted`（改了值）
+    `action`：`confirmed`（认可）/ `adjusted`（改了值）/ `rejected`（**驳回**：把 100% 退回）
     """
     from app.services import bd_tasks
     rows = bd_tasks.assignees_of(db, task.id)
@@ -164,6 +164,11 @@ def notify_task_progress(db: Session, task, action: str, old_pct,
     if action == "confirmed":
         title = "任务进展已确认：%s" % station
         body = "你上报的 %s%% 已被%s确认。" % (new_pct, who or "队长")
+    elif action == "rejected":
+        title = "任务进展被驳回：%s" % station
+        body = ("你上报的 %s%% 被%s驳回，进度改回 %s%%。%s"
+                % (old_pct if old_pct is not None else "—", who or "队长",
+                   new_pct, note or ""))
     else:
         title = "任务进展已调整：%s" % station
         body = ("你上报的 %s%%，被%s调整为 %s%%。%s"

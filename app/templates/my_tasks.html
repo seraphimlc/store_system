@@ -140,6 +140,25 @@
             data-testid="confirm-{{ r.task.id }}">{{ t('确认（认可队员上报）') }}</button>
     {% endif %}
   </form>
+
+  {# 驳回（用户 2026-10-06："队员报了100%，队长可以驳回…就是改成不到100%"）：
+     队长对**队员报的 100% 且还没处理**的驳回；管理员对已确认的也能驳回。 #}
+  {% if can_reject_map.get(r.task.id) %}
+  <form method="post" action="/my/tasks/reject"
+        style="margin-top:.4rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap"
+        data-testid="reject-form-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <span class="hint">{{ t('驳回：把 100% 退回成') }}</span>
+    <input type="number" name="pct" min="0" max="99" value="90" style="width:4.5rem"
+           data-testid="reject-pct-{{ r.task.id }}">
+    <span class="hint">%</span>
+    <input type="text" name="note" placeholder="{{ t('驳回原因') }}" style="width:11rem">
+    <button class="btn ghost" type="submit"
+            data-testid="reject-btn-{{ r.task.id }}">{{ t('驳回') }}</button>
+  </form>
+  {% endif %}
   {% else %}
   <p class="hint" style="margin:.45rem 0 0" data-testid="readonly-{{ r.task.id }}">
     {{ t('这条不归你上报') }}

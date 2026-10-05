@@ -823,6 +823,80 @@ def can_assign(db: Session, user, task: BdTask) -> bool:
     return _is_team_leader(db, user, task.team_id)
 
 
+def can_reject(db: Session, user, task: BdTask) -> bool:
+    """**驳回**权限（用户 2026-10-06 口径）：
+
+    - 队员报了 100% → **该任务的队长**可以驳回（此时员工上报还没被处理，`pending`）
+    - 队长确认之后 → **管理员**可以驳回（队长自己不能再改回，避免"自己确认自己驳回"）
+    - 员工不能驳回
+    """
+    if user is None or task is None:
+        return False
+    if is_admin(user):
+        return True
+    if task.pct != 100:
+        return False                      # 只有"已完成"才谈得上驳回
+    if not _is_team_leader(db, user, task.team_id):
+        return False
+    row = latest_progress(db, [task.id]).get(task.id)
+    return bool(row is not None and row.reported_pct == 100
+                and row.review_status == "pending")
+
+
+def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
+                    by: str = "", actor_user=None) -> dict:
+    """**驳回**：把已完成的 100% 退回成不到 100%（用户 2026-10-06 口径）。
+
+    - 只对 `pct == 100` 的任务有效；新进度**必须 < 100**
+    - 写**今天**这条进展（当天已有则覆盖），`review_status='rejected'`，
+      **员工上报的原值 `reported_pct` 保留**（能展示"队员报 100% → 被驳回改 80%"）
+    - **回退清完成日**（与"进度回退"的既有口径一致），状态回到进行中
+    - 写日志 + **给担当发消息**（含原值 → 新值与操作人）
+    """
+    from app.services import bd_log, bd_msg
+    from app.services.date_plan import jst_today
+    t = db.get(BdTask, task_id)
+    if t is None:
+        raise TaskError("任务不存在")
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
+    if t.pct != 100:
+        raise TaskError("只能驳回已完成的（100%）任务")
+    pct = int(pct)
+    if not (0 <= pct < 100):
+        raise TaskError("驳回后的进度必须在 0–99% 之间（不能还是 100%）")
+    d = jst_today()
+    row = (db.query(BdTaskProgress)
+           .filter(BdTaskProgress.task_id == task_id,
+                   BdTaskProgress.progress_date == d).first())
+    if row is None:
+        row = BdTaskProgress(task_id=task_id, progress_date=d)
+        db.add(row)
+    orig = row.reported_pct if row.reported_pct is not None else t.pct
+    row.pct = pct
+    row.by_user = (by or "")
+    row.note = (note or "").strip()
+    row.review_status = "rejected"
+    row.reviewed_by = (by or "")
+    row.reviewed_at = datetime.utcnow()
+    row.review_note = (note or "").strip()
+    row.updated_at = datetime.utcnow()
+    t.pct = pct
+    t.done_date = None                    # ⚠️ 回退清完成日
+    refresh_state(db, t)
+    bd_log.log_op(db, actor_user, "task", "reject", ref_id=t.id,
+                  ref_label=_station_name(db, t), field="进度",
+                  old="100%%", new="%d%%" % pct, note=(note or ""))
+    notified = None
+    if orig is not None and orig != pct:
+        notified = bd_msg.notify_task_progress(
+            db, t, "rejected", orig, pct, by_user=actor_user,
+            note=(note or ""), station=_station_name(db, t))
+    db.commit()
+    return {"pct": pct, "state": t.state, "done_date": t.done_date,
+            "reported_pct": orig, "notified": bool(notified)}
+
+
 def can_adjust(db: Session, user, task: BdTask) -> bool:
     """调整（修正）进展：管理员 / 该任务的队长。"""
     from app.services import bd_perm
