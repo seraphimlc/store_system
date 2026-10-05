@@ -350,7 +350,8 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     except ValueError:
         team_id = None
     line_id = int(line) if str(line).strip().isdigit() else None
-    tab = tab if tab in bd_tasks.BOARD_TABS else bd_tasks.TAB_UNASSIGNED
+    # ⚠️ 允许 `all`（"该队全部任务"入口用）；其它非法值一律回「未分配」
+    tab = tab if tab in bd_tasks.BOARD_TABS_ALL else bd_tasks.TAB_UNASSIGNED
     limit = paging.PER_DEFAULT
     page = max(1, int(page or 1))
     if tab == bd_tasks.TAB_UNASSIGNED:
@@ -378,6 +379,9 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
         "empty_current": (not d["rows"]),
         "limit": limit, "pager": pager,
         "page_qs": paging.qs(request.query_params),
+        # tab 链接专用：**去掉 tab 自己**（否则出现 ?tab=assigned&tab=done 这种重复参数）
+        "tab_qs": paging.qs([(k, v) for k, v in request.query_params.multi_items()
+                             if k not in ("page", "tab")]),
         "team_id": team_id, "teams": bd_teams.team_options(db),
         "tab": tab, "tabs": bd_tasks.BOARD_TABS,
         "tab_counts": bd_tasks.tab_counts(

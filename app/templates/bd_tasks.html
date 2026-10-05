@@ -8,7 +8,7 @@
   <span class="sub">{{ t('每个车站一个任务：在哪个队、分给谁、进展多少；可按分配日期查询') }}</span>
   <div class="actions">
     <a class="btn ghost" download data-testid="tasks-export"
-       href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&date_from={{ date_from }}&date_to={{ date_to }}">{{ t('导出 Excel') }}</a>
+       href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&line={{ line_id or '' }}&kw={{ kw|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}">{{ t('导出 Excel') }}</a>
   </div>
 </div>
 
@@ -23,9 +23,75 @@
   <div class="stat-card warnk"><div class="k">{{ t('已分配') }}</div><div class="v">{{ sum.doing }}</div></div>
   <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div><div class="v">{{ sum.done }}</div></div>
 </div>
+{# 三个 tab（用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"）——
+   计数**只受其它筛选影响**，不受当前 tab 影响；链接保留其余筛选条件。 #}
+<div class="tabs" data-testid="task-tabs" style="margin-bottom:.6rem">
+  {% for k in tabs %}
+  <a class="{% if tab == k %}on{% endif %}"
+     href="/tasks?{{ tab_qs }}tab={{ k }}"
+     data-testid="tab-{{ k }}">{{ labels[k] }}（{{ tab_counts[k] }}）</a>
+  {% endfor %}
+</div>
+
+{# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
+   用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"
+   → 每个数字都点得动：已完成/进行中/未分配/停滞 各自链到"该队 + 该状态"的列表。 #}
+{% if by_team %}
+<div class="card" style="margin-top:1rem" data-testid="by-team-card">
+  <h3 style="margin:0 0 .5rem">{{ t('按队汇总') }}</h3>
+  <p class="hint" style="margin:0 0 .6rem">
+    {{ t('点队名看该队全部；点数字看该状态的明细（「未分配」= 已派给该队但还没分到人）。') }}</p>
+  <div class="tbl-wrap">
+    <table class="grid-tbl" data-testid="by-team">
+      <thead>
+        <tr>
+          <th>{{ t('队伍') }}</th>
+          <th>{{ t('任务') }}</th>
+          <th>{{ t('已完成') }}</th>
+          <th>{{ t('进行中') }}</th>
+          <th>{{ t('未分配') }}</th>
+          <th>{{ t('停滞') }}</th>
+          <th>{{ t('完成率') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in by_team %}
+        <tr data-testid="by-team-row">
+          <td><a href="/tasks?team={{ b.team_id }}&tab=all"
+                 data-testid="by-team-name-{{ b.team_id }}"><b>{{ b.team_name }}</b></a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=all"
+                 data-testid="by-team-total-{{ b.team_id }}">{{ b.total }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=done"
+                 data-testid="by-team-done-{{ b.team_id }}">{{ b.done }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=assigned"
+                 data-testid="by-team-doing-{{ b.team_id }}"
+                 title="{{ t('该队未完成的任务（进行中）') }}">{{ b.doing }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=assigned&state=unassigned"
+                 data-testid="by-team-unassigned-{{ b.team_id }}"
+                 title="{{ t('该队已派下去、但还没分到人的任务') }}">{{ b.unassigned }}</a></td>
+          <td>{% if b.stale %}<a class="pill warnk"
+                 href="/tasks?team={{ b.team_id }}&tab=assigned&stale=1"
+                 data-testid="by-team-stale-{{ b.team_id }}">{{ b.stale }}</a>{% else %}0{% endif %}</td>
+          <td data-testid="by-team-rate-{{ b.team_id }}">
+            {{ (100 * b.done // b.total) if b.total else 0 }}%</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">{{ t('还没有派给团队的任务') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 
 <form method="get" action="/tasks" class="card"
       style="padding:.7rem 1rem;margin-bottom:.8rem" data-testid="task-filter">
+  {# ⚠️ 必须带 tab（否则点「查询」会跳回默认的「未分配」= 车站池，看着就是"查询没用"）；
+     已分配/已完成才认 团队/日期/停滞（车站池是"还没有队伍的车站"，队伍筛选对它无意义）。 #}
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <input type="hidden" name="state" value="{{ state }}">
+  {% if tab != 'unassigned' %}
   <label class="f">{{ t('团队') }}
     <select name="team">
       <option value="">{{ t('全部') }}</option>
@@ -34,6 +100,7 @@
       {% endfor %}
     </select>
   </label>
+  {% endif %}
   <label class="f">{{ t('线路') }}
     <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-filter">
       <option value="">{{ t('全部线路') }}</option>
@@ -43,32 +110,35 @@
       {% endfor %}
     </select>
   </label>
+  {% if tab != 'unassigned' %}
   <label class="f">{{ t('分配日期从') }}
     <input type="date" name="date_from" value="{{ date_from }}" data-testid="date-from">
   </label>
   <label class="f">{{ t('到') }}
     <input type="date" name="date_to" value="{{ date_to }}" data-testid="date-to">
   </label>
+  {% endif %}
   <label class="f">{{ t('关键词') }}
     <input type="text" name="kw" value="{{ kw }}" style="width:150px">
   </label>
+  {% if tab != 'unassigned' %}
   <label class="f">
     <input type="checkbox" name="stale" value="1" {% if stale %}checked{% endif %}
            data-testid="stale-only">
     {{ t('只看多少天没动的') }}（≥{{ stale_days }} {{ t('天') }}）
   </label>
+  {% endif %}
   <button class="btn" type="submit" data-testid="task-search">{{ t('查询') }}</button>
+  {% if tab == 'unassigned' %}
+  <span class="hint" style="align-self:center" data-testid="pool-filter-hint">
+    {{ t('这一栏是「还没有派给队伍的车站」，所以按 线路 / 站名 筛；队伍/日期在这一栏不适用。') }}</span>
+  {% endif %}
 </form>
 
-{# 三个 tab（用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"）——
-   计数**只受其它筛选影响**，不受当前 tab 影响；链接保留其余筛选条件。 #}
-<div class="tabs" data-testid="task-tabs" style="margin-bottom:.6rem">
-  {% for k in tabs %}
-  <a class="{% if tab == k %}on{% endif %}"
-     href="/tasks?{{ page_qs }}tab={{ k }}"
-     data-testid="tab-{{ k }}">{{ labels[k] }}（{{ tab_counts[k] }}）</a>
-  {% endfor %}
-</div>
+{% if tab == 'all' %}
+<p class="hint" style="margin:0 0 .5rem" data-testid="all-tasks-hint">
+  {{ t('当前看的是「该队全部任务」（含已完成）——点上面的 tab 可只看某一类。') }}</p>
+{% endif %}
 
 {% if tab == 'unassigned' %}
 {# ===== 未分配 = **车站池**（还没有队伍的物理车站）=====
@@ -280,53 +350,5 @@
     {% endfor %}
   </div>
   {% endif %}
-{% endif %}
-
-{# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
-   用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"
-   → 每个数字都点得动：已完成/进行中/未分配/停滞 各自链到"该队 + 该状态"的列表。 #}
-{% if by_team and tab != 'unassigned' %}
-<div class="card" style="margin-top:1rem" data-testid="by-team-card">
-  <h3 style="margin:0 0 .5rem">{{ t('按队汇总') }}</h3>
-  <p class="hint" style="margin:0 0 .6rem">
-    {{ t('点队名看该队全部；点数字看该状态的明细。') }}</p>
-  <div class="tbl-wrap">
-    <table class="grid-tbl" data-testid="by-team">
-      <thead>
-        <tr>
-          <th>{{ t('队伍') }}</th>
-          <th>{{ t('任务') }}</th>
-          <th>{{ t('已完成') }}</th>
-          <th>{{ t('进行中') }}</th>
-          <th>{{ t('未分配') }}</th>
-          <th>{{ t('停滞') }}</th>
-          <th>{{ t('完成率') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for b in by_team %}
-        <tr data-testid="by-team-row">
-          <td><a href="/tasks?team={{ b.team_id }}"
-                 data-testid="by-team-name-{{ b.team_id }}"><b>{{ b.team_name }}</b></a></td>
-          <td><a href="/tasks?team={{ b.team_id }}"
-                 data-testid="by-team-total-{{ b.team_id }}">{{ b.total }}</a></td>
-          <td><a href="/tasks?team={{ b.team_id }}&tab=done"
-                 data-testid="by-team-done-{{ b.team_id }}">{{ b.done }}</a></td>
-          <td><a href="/tasks?team={{ b.team_id }}&tab=doing"
-                 data-testid="by-team-doing-{{ b.team_id }}">{{ b.doing }}</a></td>
-          <td><a href="/tasks?team={{ b.team_id }}&tab=unassigned"
-                 data-testid="by-team-unassigned-{{ b.team_id }}">{{ b.unassigned }}</a></td>
-          <td>{% if b.stale %}<a class="pill warnk" href="/tasks?team={{ b.team_id }}&stale=1"
-                 data-testid="by-team-stale-{{ b.team_id }}">{{ b.stale }}</a>{% else %}0{% endif %}</td>
-          <td data-testid="by-team-rate-{{ b.team_id }}">
-            {{ (100 * b.done // b.total) if b.total else 0 }}%</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="empty">{{ t('还没有派给团队的任务') }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
 {% endif %}
 {% endblock %}

@@ -2472,7 +2472,8 @@ def test_tasks_page_layout_tabs_list_then_team_summary(client, seeded):
     i_tabs = h.index('data-testid="task-tabs"')
     i_rows = h.index('data-testid="task-row"')
     i_team = h.index('data-testid="by-team-card"')
-    assert i_tabs < i_rows < i_team, "顺序必须是 tab → 任务列表 → 按队汇总（现在是 %d/%d/%d）" % (
+    # ⚠️ 2026-10-06 用户改口径：队伍汇总上移成**第二层**（tab → 汇总 → 筛选 → 列表）
+    assert i_tabs < i_team < i_rows, "顺序必须是 tab → 队伍汇总 → 筛选/列表（现在是 %d/%d/%d）" % (
         i_tabs, i_rows, i_team)
     tid = seeded["team"]
     # 按队汇总：总数 / 已完成 / 进行中 / 未分配 / 停滞 / 完成率 全在，而且可点
@@ -2954,3 +2955,63 @@ def test_ai_chat_direct_by_default(monkeypatch):
                                         "proxy": "http://127.0.0.1:7897"}
     monkeypatch.setenv("AI_TRUST_ENV", "1")
     assert ai_chat._client_kwargs() == {}, "AI_TRUST_ENV=1 时回到 httpx 老行为"
+
+
+# ---------------- 任务页筛选/汇总（2026-10-06 用户反馈） ----------------
+
+def test_task_filter_keeps_current_tab(client, seeded):
+    """「查询」必须**留在当前 tab**（用户："任务页面查询没有用"）。
+
+    根因：筛选表单没带 `tab` → 提交后回到默认的「未分配」（车站池），
+    而车站池不认队伍筛选 → 看起来"查询没用"、也看不到"某队未完成"。
+    """
+    _login(client, "admin")
+    for tab in ("assigned", "done"):
+        h = client.get("/tasks", params={"tab": tab}).text
+        assert 'name="tab" value="%s"' % tab in h, "筛选表单要带 tab"
+        assert 'name="state" value=""' in h
+    # 车站池那栏：队伍/日期不适用 → 隐藏，并给一句说明
+    h = client.get("/tasks", params={"tab": "unassigned"}).text
+    assert 'data-testid="pool-filter-hint"' in h
+    assert 'data-testid="date-from"' not in h, "车站池不需要分配日期筛选"
+    # tab 链接不能出现重复 tab（?tab=x&tab=y）
+    h = client.get("/tasks", params={"tab": "done", "team": "2"}).text
+    assert "tab=done&tab=" not in h and "tab=2&amp;tab=" not in h
+
+
+def test_by_team_links_use_valid_tabs(client, seeded):
+    """汇总表每个数字都要点得动：**tab 必须是合法值**。
+
+    ⚠️ 曾经写成 `tab=doing` —— 它不是 BOARD_TABS 的值 → 路由当未知 → 掉回车站池，
+    看起来就是"点了没反应"（用户反馈的就是这个）。
+    """
+    import re as _re
+    from app.services import bd_tasks
+    _login(client, "admin")
+    h = client.get("/tasks", params={"tab": "assigned", "team": str(seeded["team"])}).text
+    hrefs = _re.findall(r'href="(/tasks\?team=\d+[^"]*)"[^>]*data-testid="by-team-', h)
+    assert hrefs, "汇总表要有链接"
+    ok = set(bd_tasks.BOARD_TABS_ALL)
+    for href in hrefs:
+        u = href.replace("&amp;", "&")
+        m = _re.search(r"[?&]tab=([a-z]+)", u)
+        assert m, "每个链接都要带 tab：%s" % u
+        assert m.group(1) in ok, "非法 tab=%s（会掉回车站池）：%s" % (m.group(1), u)
+    # 该队"未分配"= 已派给该队但还没分到人 → 必须带 state=unassigned
+    assert "state=unassigned" in h.replace("&amp;", "&")
+    # 点进去真能看到任务（不是车站池）
+    r = client.get("/tasks", params={"tab": "assigned", "team": str(seeded["team"])})
+    assert 'data-testid="task-row"' in r.text
+    assert 'data-testid="pool-row"' not in r.text
+
+
+def test_by_team_summary_is_second_layer(client, seeded):
+    """队伍汇总上移到**第二层**（tab 下面、筛选上面），并且三个 tab 都在。"""
+    _login(client, "admin")
+    for tab in ("unassigned", "assigned", "done"):
+        h = client.get("/tasks", params={"tab": tab}).text
+        i_sum = h.find('data-testid="by-team-card"')
+        i_tabs = h.find('data-testid="task-tabs"')
+        i_filter = h.find('data-testid="task-filter"')
+        assert i_sum > 0, "%s tab 也要能看到队伍汇总（它是入口）" % tab
+        assert i_tabs < i_sum < i_filter, "顺序要是：tab → 队伍汇总 → 筛选"

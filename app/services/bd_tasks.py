@@ -33,6 +33,10 @@ TAB_DONE = "done"
 TABS = (TAB_UNASSIGNED, TAB_DOING, TAB_DONE)
 #: 管理端任务总表的 tab（用户 2026-10-05："任务分为已完成，已分配，未分配"）
 BOARD_TABS = (TAB_UNASSIGNED, TAB_ASSIGNED, TAB_DONE)
+#: 「全部」= 不加状态过滤（**不进 tab 栏**，只给"按队汇总 → 该队全部任务"这类入口用）
+TAB_ALL = "all"
+#: 路由允许的 tab 值（含 all）
+BOARD_TABS_ALL = BOARD_TABS + (TAB_ALL,)
 
 MAX_ASSIGN = 2
 
