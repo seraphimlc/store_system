@@ -14,6 +14,7 @@ from app.i18n import LANG_NAMES, t
 def get_templates() -> Jinja2Templates:
     tpl = Jinja2Templates(directory="app/templates")
     tpl.env.globals["t"] = t
+    tpl.env.globals["mt"] = _mt
     # 中日字形归一（用户 2026-10-06："我输入的是中文，是不是这里有问题"）：
     # 线路下拉要挂 data-zh（中文名）给**前端 combobox** 匹配用；中文名一律现算，不落库。
     from app.services.bd_cjk import line_zh as _line_zh
@@ -51,3 +52,9 @@ def static_ver(name: str) -> str:
         return "%x%x" % (int(st.st_mtime), st.st_size)
     except OSError:
         return "0"
+
+
+def _mt(key: str, *args) -> str:
+    """模板里渲染**带参数的消息**（如 `{{ mt('已改派 %d 个任务', n) }}`）。"""
+    from app.i18n import render_msg
+    return render_msg(key, *args)

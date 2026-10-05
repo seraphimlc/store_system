@@ -198,6 +198,31 @@ def create_app() -> FastAPI:
                     s.close()
         return await call_next(request)
 
+    # ⚠️ 一次性表单令牌失效（返回键 / 双开 / 超时）→ 回跳原页并给一句**人话**，
+    #    不要把整页变成一行 JSON（`{"detail":"表单已提交过或已过期…"}`）
+    #    —— 2026-10-06 审计：员工弱网/双开时看到的就是这串 JSON，像"页面坏了"。
+    from starlette.exceptions import HTTPException as _StarletteHTTP
+    from fastapi.exception_handlers import (
+        http_exception_handler as _default_http_handler)
+
+    @app.exception_handler(_StarletteHTTP)
+    async def _friendly_http_error(request, exc):
+        detail = str(getattr(exc, "detail", "") or "")
+        if exc.status_code == 400 and "表单" in detail:
+            from urllib.parse import quote as _quote
+            from app.i18n import render_msg as _rm
+            from fastapi.responses import HTMLResponse as _HR
+            from fastapi.responses import RedirectResponse as _RD
+            msg = _rm("表单已过期，请重试")
+            if request.headers.get("hx-request"):
+                return _HR('<div class="msg err">%s</div>' % msg, status_code=200)
+            ref = request.headers.get("referer", "")
+            if ref.startswith("/") and not ref.startswith("//"):
+                sep = "&" if "?" in ref else "?"
+                return _RD("%s%serr=%s" % (ref, sep, _quote(msg)), status_code=303)
+            return _HR("<p>%s</p><p><a href='/'>←</a></p>" % msg, status_code=400)
+        return await _default_http_handler(request, exc)
+
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)):
         try:

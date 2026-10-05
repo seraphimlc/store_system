@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ t('巡店结算系统') }}{% endblock %}</title>
-<script src="https://unpkg.com/htmx.org@2.0.4"></script>
-<script src="https://unpkg.com/alpinejs@3.14.8" defer></script>
+{# ⚠️ 2026-10-06 审计：原来从 unpkg CDN 拉 htmx/alpine —— 现场网络（公司网关/离线）拦掉后
+   窄屏汉堡菜单、进度数字、出勤弹窗全废。已**本地化**（app/static/），带版本号防缓存。 #}
+<script src="/static/htmx.min.js?v={{ static_ver('htmx.min.js') }}"></script>
+<script src="/static/alpine.min.js?v={{ static_ver('alpine.min.js') }}" defer></script>
 <link rel="stylesheet" href="/static/app.css?v={{ static_ver('app.css') }}">
 </head>
 {% set _p = (request.url.path if request.url is defined else "") %}
@@ -18,18 +20,18 @@
 {# 未读消息数：中间件写入 request.state.unread_messages（右上角菜单角标用） #}
 {% set _unread = (request.state.unread_messages
                   if request.state.unread_messages is defined else 0) %}
-<div class="shell" x-data="{menu:false}">
+<div class="shell">
 <header class="topbar">
   <span class="brand">{{ t('巡店结算系统') }}</span>
   {% if _is_admin %}
-  <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
-          :aria-expanded="menu ? 'true' : 'false'">☰</button>
+  <button type="button" class="menu-btn" onclick="bdMenuToggle(this)" aria-label="菜单"
+          aria-expanded="false">☰</button>
   <span class="spacer"></span>
   <span class="user">{{ current_user.display_name }}</span>
   {% else %}
-  <button type="button" class="menu-btn" @click="menu=!menu" aria-label="菜单"
-          :aria-expanded="menu ? 'true' : 'false'">☰</button>
-  <nav class="topnav" :class="{'open': menu}" @click.self="menu=false">
+  <button type="button" class="menu-btn" onclick="bdMenuToggle(this)" aria-label="菜单"
+          aria-expanded="false">☰</button>
+  <nav class="topnav" onclick="if(event.target===this)bdMenuClose()">
     <span class="spacer"></span>
     <span class="user">{{ current_user.display_name }}</span>
     {# 2026-10-06 用户："消息不要放到底部了，底部没有位置了。核对结果也放到右上方的菜单里。" #}
@@ -52,7 +54,7 @@
 </header>
 
 {% if _is_admin %}
-<aside class="sidenav" :class="{'open': menu}" @click.self="menu=false"
+<aside class="sidenav" onclick="if(event.target===this)bdMenuClose()"
        data-testid="sidenav">
   <div class="side-group">
     <div class="side-title">{{ t('概览') }}</div>
@@ -115,7 +117,7 @@
     </form>
   </div>
 </aside>
-<div class="nav-mask" x-show="menu" @click="menu=false" x-cloak></div>
+<div class="nav-mask" onclick="bdMenuClose()" hidden></div>
 {% endif %}
 </div>
 {% endif %}
@@ -152,7 +154,7 @@
 {% endif %}
 {# 员工端：本期出勤计划还没登记 → 弹窗提示（不是硬拦截，「稍后再说」可关掉） #}
 {% if current_user and current_user.role == 'staff' and _pp and _p != '/my/plan' %}
-<div class="modal-mask" x-data="{open: true}" x-show="open"
+<div class="modal-mask" x-data="{open: true}" x-show="open" x-cloak
      data-testid="plan-prompt" data-period="{{ _pp.key }}">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="plan-prompt-t">
     <h3 id="plan-prompt-t">{{ t('出勤计划还没登记') }}</h3>
@@ -208,6 +210,26 @@
     setTimeout(function () { delete a.dataset.busy; }, 2000);
   }, true);
 })();
+</script>
+<script>
+/* 窄屏菜单：**原生 JS**（不依赖 alpine/htmx，断网也能开合） */
+function bdMenuToggle(btn) {
+  var shell = document.querySelector('.shell');
+  if (!shell) return;
+  var on = shell.classList.toggle('menu-open');
+  var nav = document.querySelector('.topnav'), side = document.querySelector('.sidenav');
+  var mask = document.querySelector('.nav-mask');
+  if (nav) nav.classList.toggle('open', on);
+  if (side) side.classList.toggle('open', on);
+  if (mask) mask.hidden = !on;
+  if (btn) btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+function bdMenuClose() {
+  var shell = document.querySelector('.shell');
+  if (shell && shell.classList.contains('menu-open')) bdMenuToggle(null);
+  var b = document.querySelector('.menu-btn');
+  if (b) b.setAttribute('aria-expanded', 'false');
+}
 </script>
 <script src="/static/emp_select.js?v={{ static_ver('emp_select.js') }}" defer></script>
 <script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>

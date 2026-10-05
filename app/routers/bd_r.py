@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.forms import require_form_token as _dep_form_token
-from app.i18n import CURRENT_LANG, translate as _tr
+from app.i18n import CURRENT_LANG, render_msg as _m, translate as _tr
 from app.models import User
 from app.routers.auth_r import csrf_ok, require_login
 from app.templating import get_templates
@@ -116,7 +116,7 @@ def team_detail(request: Request, team_id: int,
     from app.models import BdTeam
     team = db.get(BdTeam, team_id)
     if team is None:
-        return RedirectResponse("/teams?err=%s" % _q("团队不存在"),
+        return RedirectResponse("/teams?err=%s" % _q(_m("团队不存在")),
                                 status_code=303)
     members = bd_teams.team_members(db, team_id)
     active_codes = {m["person_code"] for m in members}
@@ -147,7 +147,7 @@ def team_create(request: Request, name: str = Form(""), code: str = Form(""),
     try:
         t = bd_teams.create_team(db, name, code, note, by=user.username)
         db.commit()
-        return RedirectResponse("/teams/%d?msg=%s" % (t.id, _q("已建队")),
+        return RedirectResponse("/teams/%d?msg=%s" % (t.id, _q(_m("已建队"))),
                                 status_code=303)
     except bd_teams.TeamError as e:
         db.rollback()
@@ -170,7 +170,7 @@ def team_edit(request: Request, team_id: int, name: str = Form(""),
         bd_teams.update_team(db, team_id, name=name, code=code, note=note,
                              status=status)
         db.commit()
-        return RedirectResponse("/teams/%d?msg=%s" % (team_id, _q("已保存")),
+        return RedirectResponse("/teams/%d?msg=%s" % (team_id, _q(_m("已保存"))),
                                 status_code=303)
     except bd_teams.TeamError as e:
         db.rollback()
@@ -336,7 +336,7 @@ def station_edit(request: Request, station_id: int, name: str = Form(""),
                                 status=status,
                                 line_id=int(line_id) if line_id.strip().isdigit() else None)
         db.commit()
-        return RedirectResponse("/stations?msg=%s" % _q("已保存"),
+        return RedirectResponse("/stations?msg=%s" % _q(_m("已保存")),
                                 status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()
@@ -476,7 +476,7 @@ def task_new_create(request: Request,
     ids = [int(x) for x in (place_id or []) if str(x).strip().isdigit()]
     back = "/tasks/new?line=%s" % _q(line)
     if not ids:
-        return RedirectResponse(back + "&err=%s" % _q("请先勾选要建任务的站"),
+        return RedirectResponse(back + "&err=%s" % _q(_m("请先勾选要建任务的站")),
                                 status_code=303)
     team_id = int(team) if str(team).strip().isdigit() else None
     try:
@@ -516,7 +516,7 @@ def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
         db.commit()
         # ⚠️ 回跳**原视图**：原来固定 /tasks（=车站池），管理员在"已分配"里每改一条就被弹走
         return RedirectResponse(
-            _with_msg(back, "msg", "已修正：%d%%" % r["pct"]), status_code=303)
+            _with_msg(back, "msg", _m("已修正：%d%%", r["pct"])), status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()
         return RedirectResponse(_with_msg(back, "err", str(e)), status_code=303)
@@ -570,7 +570,7 @@ def tasks_assign(request: Request,
     ids = [int(x) for x in (place_id or []) if str(x).strip().isdigit()]
     back = "/tasks?tab=%s&line=%s" % (bd_tasks.TAB_UNASSIGNED, _q(line))
     if not ids:
-        return RedirectResponse(back + "&err=%s" % _q("请先勾选要分配的车站"),
+        return RedirectResponse(back + "&err=%s" % _q(_m("请先勾选要分配的车站")),
                                 status_code=303)
     tid = int(team) if str(team).strip().isdigit() else None
     try:
@@ -580,8 +580,7 @@ def tasks_assign(request: Request,
         db.rollback()
         return RedirectResponse(back + "&err=%s" % _q(str(e)), status_code=303)
     return RedirectResponse(
-        back + "&msg=%s" % _q("已派给「%s」：新建任务 %d 个，派队 %d 个"
-                              % (r["team_name"], r["created"], r["assigned"])),
+        back + "&msg=%s" % _q(_m("已派给「%s」：新建任务 %d 个，派队 %d 个", r["team_name"], r["created"], r["assigned"])),
         status_code=303)
 
 
@@ -644,7 +643,7 @@ def tasks_reassign(request: Request, task_id: Optional[List[str]] = Form(None),
         r = bd_tasks.set_task_team(db, ids, int(team_id), by=user.username,
                                    actor_user=user)
         db.commit()
-        msg = "已改派 %d 个任务" % r.get("n_team", len(ids))
+        msg = _m("已改派 %d 个任务", r.get("n_team", len(ids)))
         if r.get("n_cleared"):
             msg += "；清空了 %d 名不属新队的担当" % r["n_cleared"]
         return RedirectResponse(_with_msg(back, "msg", msg), status_code=303)
@@ -670,7 +669,7 @@ def tasks_return_pool(request: Request, task_id: Optional[List[str]] = Form(None
         return RedirectResponse(_with_msg(back, "err", "请先勾选任务"), status_code=303)
     r = bd_tasks.return_to_pool(db, ids, by=user.username, actor_user=user)
     db.commit()
-    return RedirectResponse(_with_msg(back, "msg", "已退回车站池：%d 个" % r["n"]),
+    return RedirectResponse(_with_msg(back, "msg", _m("已退回车站池：%d 个", r["n"])),
                             status_code=303)
 
 
@@ -799,17 +798,17 @@ def my_tasks_assign(request: Request, task_id: int = Form(0),
     task = db.get(bd_tasks.BdTask, task_id)
     back = "/my/tasks?tab=%s"
     if task is None:
-        return RedirectResponse(back % "doing" + "&err=" + _q("任务不存在"),
+        return RedirectResponse(back % "doing" + "&err=" + _q(_m("任务不存在")),
                                 status_code=303)
     if not bd_tasks.can_assign(db, user, task):
         return RedirectResponse(back % "doing" + "&err="
-                                + _q("只有该队队长或管理员能分派"),
+                                + _q(_m("只有该队队长或管理员能分派")),
                                 status_code=303)
     try:
         r = bd_tasks.assign_members(db, task_id, person or (), by=user.username,
                                     actor_user=user)
         db.commit()
-        msg = "已分派 %d 人" % r["n"]
+        msg = _m("已分派 %d 人", r["n"])
         if r.get("warnings"):
             # 出勤计划 / 假期模式 → **提醒但不阻断**（用户 2026-10-03 口径）
             msg += "；⚠️ " + "；".join(r["warnings"])
@@ -850,9 +849,9 @@ def my_tasks_assign_bulk(request: Request,
     _lead = set() if _is_admin else {
         t.id for t in bd_teams.leader_teams(db, user.person_code)}
     if not ids:
-        return RedirectResponse(back + "&err=%s" % _q("请先勾选任务"), status_code=303)
+        return RedirectResponse(back + "&err=%s" % _q(_m("请先勾选任务")), status_code=303)
     if not people:
-        return RedirectResponse(back + "&err=%s" % _q("请先选队员"), status_code=303)
+        return RedirectResponse(back + "&err=%s" % _q(_m("请先选队员")), status_code=303)
     ok, errs, warns, denied = 0, [], [], 0
     for tid in ids:
         _t = db.get(bd_tasks.BdTask, tid)
@@ -871,7 +870,7 @@ def my_tasks_assign_bulk(request: Request,
         except Exception as e:                                  # noqa: BLE001
             db.rollback()
             errs.append(str(e))
-    msg = "已分派 %d 个任务" % ok
+    msg = _m("已分派 %d 个任务", ok)
     if warns:
         msg += "；⚠️ " + "；".join(warns[:3])
     if denied:
@@ -912,7 +911,7 @@ def task_reject(request: Request, task_id: int = Form(0), pct: str = Form("0"),
         return RedirectResponse("%s?err=%s" % (back, _q(str(e))), status_code=303)
     back = "/my/tasks" if user.role != "admin" else "/tasks?tab=done"
     return RedirectResponse(
-        "%s?msg=%s" % (back, _q("已驳回：进度改为 %d%%" % r["pct"])),
+        "%s?msg=%s" % (back, _q(_m("已驳回：进度改为 %d%%", r["pct"]))),
         status_code=303)
 
 
@@ -930,18 +929,18 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
     from app.services import bd_tasks
     task = db.get(bd_tasks.BdTask, task_id)
     if task is None:
-        return RedirectResponse("/my/tasks?err=" + _q("任务不存在"),
+        return RedirectResponse("/my/tasks?err=" + _q(_m("任务不存在")),
                                 status_code=303)
     if not bd_tasks.can_report(db, user, task):
         return RedirectResponse("/my/tasks?err="
-                                + _q("只能上报自己担当的任务"),
+                                + _q(_m("只能上报自己担当的任务")),
                                 status_code=303)
     try:
         r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
                                    actor_user=user)
         db.commit()
         return RedirectResponse(
-            "/my/tasks?tab=%s&msg=%s" % (r["state"], _q("已提交 %d%%" % r["pct"])),
+            "/my/tasks?tab=%s&msg=%s" % (r["state"], _q(_m("已提交 %d%%", r["pct"]))),
             status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()
@@ -964,7 +963,7 @@ def task_detail(request: Request, task_id: int,
     from app.services import bd_log, bd_tasks, bd_teams
     task = db.get(bd_tasks.BdTask, task_id)
     if task is None:
-        return RedirectResponse("/tasks?err=%s" % _q("任务不存在"),
+        return RedirectResponse("/tasks?err=%s" % _q(_m("任务不存在")),
                                 status_code=303)
     if not bd_tasks.can_report(db, user, task):
         # 越权（别的队、也不是担当）→ 回各自首页，不泄露内容
@@ -1071,7 +1070,7 @@ def my_tasks_confirm_bulk(request: Request,
         except bd_tasks.TaskError as e:
             db.rollback()
             errs.append(str(e))
-    msg = "已确认 %d 条" % ok
+    msg = _m("已确认 %d 条", ok)
     if errs:
         msg += "；%d 条跳过（%s）" % (len(errs), errs[0])
     return RedirectResponse(_with_msg(back, "msg" if ok else "err", msg, "/my/tasks"),
@@ -1091,11 +1090,11 @@ def my_tasks_confirm(request: Request, task_id: int = Form(0),
     from app.services import bd_tasks
     task = db.get(bd_tasks.BdTask, task_id)
     if task is None:
-        return RedirectResponse("/my/tasks?err=%s" % _q("任务不存在"),
+        return RedirectResponse("/my/tasks?err=%s" % _q(_m("任务不存在")),
                                 status_code=303)
     if not bd_tasks.can_adjust(db, user, task):
         return RedirectResponse("/my/tasks?err=%s"
-                                % _q("只有该队队长或管理员能确认"),
+                                % _q(_m("只有该队队长或管理员能确认")),
                                 status_code=303)
     # ⚠️ 跨天确认：找**还挂着 pending 的那条上报行**，把它的日期一起传下去。
     #    旧写法锚定"今天"→ 员工昨天下班报、队长第二天点确认会另造一条 adjusted 行，
@@ -1106,7 +1105,7 @@ def my_tasks_confirm(request: Request, task_id: int = Form(0),
             .order_by(_P.progress_date.desc()).first())
     if pend is None or pend.reported_pct is None:
         return RedirectResponse("/my/tasks?tab=pending&err=%s"
-                                % _q("这条还没有队员上报，未确认"), status_code=303)
+                                % _q(_m("这条还没有队员上报，未确认")), status_code=303)
     try:
         r = bd_tasks.save_progress(db, task_id, pend.reported_pct,
                                    pend.note or note, by=user.username,

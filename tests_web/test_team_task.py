@@ -3787,3 +3787,63 @@ def test_leader_line_filter_uses_team_lines(client, seeded):
     assert "队甲" in h2, "按线路筛选要能筛到"
     h3 = client.get("/my/tasks?tab=unassigned&line=%d" % line.id).text
     assert "駒場東大前" not in h3, "其它线路的站不该出现"
+
+
+# ============ Batch 3：上线阻塞项（日语反馈 / 本地库 / 令牌友好化） ============
+
+def test_ja_operation_feedback_is_japanese(client, seeded):
+    """日语界面下，操作反馈必须是日文（审计：msg/err 原来直接输出中文）。"""
+    from urllib.parse import unquote
+    _login(client, "admin")
+    # 带 ?lang=ja 执行一次真实操作（派队）→ 回跳 URL 里的 msg 应是日文
+    ft = form_token(client, "/tasks?tab=unassigned&lang=ja")
+    cs = _csrf(client, "/tasks?lang=ja")
+    r = client.post("/tasks/assign?lang=ja",
+                    data={"_ft": ft, "csrf_token": cs,
+                          "team": str(seeded["team"])},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    loc = unquote(r.headers["location"])
+    assert "err=" in loc or "msg=" in loc
+    text = loc.split("err=")[-1] if "err=" in loc else loc.split("msg=")[-1]
+    assert any("\u3040" <= ch <= "\u30ff" for ch in text), \
+        "日语界面下的反馈应是日文（拿到：%s）" % text
+    # 中文界面仍是中文（⚠️ 上一步写了语言 cookie，这里显式指定 ?lang=zh）
+    ft2 = form_token(client, "/tasks?tab=unassigned&lang=zh")
+    r2 = client.post("/tasks/assign?lang=zh",
+                     data={"_ft": ft2, "csrf_token": _csrf(client, "/tasks?lang=zh"),
+                           "team": str(seeded["team"])}, follow_redirects=False)
+    txt2 = unquote(r2.headers.get("location", ""))
+    assert ("已" in txt2 or "请" in txt2) and "選択" not in txt2, txt2
+
+
+def test_js_libs_are_local_not_cdn(client, seeded):
+    """htmx/alpine 必须**本地**引用（现场网络拦 CDN 时导航/滑块不能废）。"""
+    import os
+    _login(client, "tangjing")
+    h = client.get("/my/tasks").text
+    assert "unpkg.com" not in h, "不能再依赖 CDN"
+    assert "/static/htmx.min.js?v=" in h and "/static/alpine.min.js?v=" in h
+    for fn in ("htmx.min.js", "alpine.min.js"):
+        p = os.path.join("app", "static", fn)
+        assert os.path.exists(p) and os.path.getsize(p) > 10000, "%s 要真在仓库里" % fn
+        assert client.get("/static/" + fn).status_code == 200
+    # 菜单不再依赖 Alpine（原生 onclick）
+    assert "bdMenuToggle(" in h and 'x-data="{menu:false}"' not in h
+
+
+def test_expired_form_token_recovers_gracefully(client, seeded):
+    """令牌失效（返回键/双开）→ 回跳原页 + 人话，不再是裸 JSON 400。"""
+    _login(client, "admin")
+    path = "/tasks?tab=unassigned"
+    ft = form_token(client, path)
+    cs = _csrf(client, path)
+    d = {"_ft": ft, "csrf_token": cs, "team": str(seeded["team"])}
+    first = client.post("/tasks/assign", data=d, follow_redirects=False)
+    assert first.status_code == 303
+    second = client.post("/tasks/assign", data=d, follow_redirects=False,
+                         headers={"referer": "/tasks?tab=assigned"})
+    assert second.status_code == 303, "浏览器（带 Referer）应回跳而不是 400"
+    loc = second.headers["location"]
+    assert loc.startswith("/tasks?tab=assigned") and "err=" in loc
+    assert "application/json" not in second.headers.get("content-type", "")
