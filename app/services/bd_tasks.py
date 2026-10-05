@@ -464,6 +464,58 @@ def _places_without_team_sub(db: Session):
     return taken.union(legacy).subquery()
 
 
+def line_options(db: Session, tab: str, stale_only: bool = False) -> dict:
+    """线路下拉的选项与数量（**按 tab 给不同口径**，用户 2026-10-06）。
+
+    - `unassigned`（车站池）：只列**还有未分配车站**的线路，数量 = **未分配车站数**
+    - 其它（已分配/已完成/all）：只列**有任务的线路**，数量 = **任务数**
+
+    ⚠️ 只按 tab 算，**不叠加其它筛选**（队伍/关键词/日期）——它是"选线路"的选择器，
+    数字要能跟"点进去的结果"对上（叠加筛选的话数字会一直变，看着像坏了）。
+    跨线车站会同时算进它经过的每条线（与线路筛选的语义一致）。
+    """
+    from app.models import BdLine, BdStation, BdStationPlace
+    out = []
+    if tab == TAB_UNASSIGNED:
+        taken = _places_without_team_sub(db)
+        rows = (db.query(BdStation.line_id,
+                         func.count(func.distinct(BdStation.place_id)))
+                .filter(BdStation.line_id.isnot(None),
+                        BdStation.place_id.isnot(None),
+                        BdStation.place_id.notin_(db.query(taken.c[0])))
+                .group_by(BdStation.line_id).all())
+        total = list_unassigned_places(db, per=1)["total"]
+    else:
+        q = _base_query(db, team_id=None, line_id=None, date_from=None,
+                        date_to=None, kw="")
+        q = _apply_tab(q, db, tab)
+        # 任务 → 线路：物理车站口径（place→station）与历史口径（task.station_id）都算
+        pl = (db.query(BdStation.place_id.label("pid"),
+                       BdStation.line_id.label("lid"))
+              .filter(BdStation.place_id.isnot(None),
+                      BdStation.line_id.isnot(None)).subquery())
+        st = (db.query(BdStation.id.label("sid"), BdStation.line_id.label("lid"))
+              .filter(BdStation.line_id.isnot(None)).subquery())
+        acc = {}
+        for lid, n in (q.join(pl, pl.c.pid == BdTask.place_id)
+                       .with_entities(pl.c.lid, func.count()).group_by(pl.c.lid).all()):
+            acc[lid] = acc.get(lid, 0) + n
+        for lid, n in (q.join(st, st.c.sid == BdTask.station_id)
+                       .with_entities(st.c.lid, func.count()).group_by(st.c.lid).all()):
+            acc[lid] = acc.get(lid, 0) + n
+        rows = list(acc.items())
+        total = q.count()
+    names = {l.id: (l.operator_short, l.name)
+             for l in db.query(BdLine).filter(BdLine.id.in_(
+                 [lid for lid, _ in rows] or [0])).all()}
+    for lid, n in rows:
+        op, nm = names.get(lid, ("", ""))
+        out.append({"id": lid, "name": nm, "operator_short": op, "n": n,
+                    "label": ("%s %s" % (op, nm)).strip()})
+    out.sort(key=lambda x: (-x["n"], x["label"]))
+    return {"total": total, "rows": out}
+
+
 def list_unassigned_places(db: Session, page: int = 1, per: Optional[int] = None,
                            kw: str = "", line_id: Optional[int] = None,
                            all_rows: bool = False) -> dict:

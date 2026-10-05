@@ -389,6 +389,9 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
             date_from=_parse_date(date_from), date_to=_parse_date(date_to),
             kw=kw),
         "lines": bd_lines.line_options(db), "line_id": line_id,
+        # 线路下拉：**按 tab 给口径**（未分配=未分配车站数；已分配/已完成=任务数）——
+        # 只列有内容的线路（用户 2026-10-06："没有任务的就不要显示，数量只显示任务的数量"）
+        "line_opts": bd_tasks.line_options(db, tab),
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
         "stale": stale, "stale_days": d.get("stale_days", 2),
         "leave_map": leave_map,

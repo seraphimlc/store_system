@@ -25,14 +25,6 @@
 </div>
 {# 三个 tab（用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"）——
    计数**只受其它筛选影响**，不受当前 tab 影响；链接保留其余筛选条件。 #}
-<div class="tabs" data-testid="task-tabs" style="margin-bottom:.6rem">
-  {% for k in tabs %}
-  <a class="{% if tab == k %}on{% endif %}"
-     href="/tasks?{{ tab_qs }}tab={{ k }}"
-     data-testid="tab-{{ k }}">{{ labels[k] }}（{{ tab_counts[k] }}）</a>
-  {% endfor %}
-</div>
-
 {# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
    用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"
    → 每个数字都点得动：已完成/进行中/未分配/停滞 各自链到"该队 + 该状态"的列表。 #}
@@ -83,7 +75,13 @@
   </div>
 </div>
 {% endif %}
-
+<div class="tabs" data-testid="task-tabs" style="margin-bottom:.6rem">
+  {% for k in tabs %}
+  <a class="{% if tab == k %}on{% endif %}"
+     href="/tasks?{{ tab_qs }}tab={{ k }}"
+     data-testid="tab-{{ k }}">{{ labels[k] }}（{{ tab_counts[k] }}）</a>
+  {% endfor %}
+</div>
 
 <form method="get" action="/tasks" class="card"
       style="padding:.7rem 1rem;margin-bottom:.8rem" data-testid="task-filter">
@@ -103,10 +101,11 @@
   {% endif %}
   <label class="f">{{ t('线路') }}
     <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-filter">
-      <option value="">{{ t('全部线路') }}</option>
-      {% for ln in lines %}
+      {# 只列**有内容的线路**：未分配 tab = 还有未分配车站的线；其它 tab = 有任务的线 #}
+      <option value="">{{ t('全部线路') }}（{{ line_opts.total }}）</option>
+      {% for ln in line_opts.rows %}
       <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %} data-zh="{{ line_zh(ln.name) }}">
-        {{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
+        {{ ln.label }}（{{ ln.n }}）</option>
       {% endfor %}
     </select>
   </label>
@@ -134,6 +133,7 @@
     {{ t('这一栏是「还没有派给队伍的车站」，所以按 线路 / 站名 筛；队伍/日期在这一栏不适用。') }}</span>
   {% endif %}
 </form>
+
 
 {% if tab == 'all' %}
 <p class="hint" style="margin:0 0 .5rem" data-testid="all-tasks-hint">

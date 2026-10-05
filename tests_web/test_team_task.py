@@ -2463,20 +2463,21 @@ def test_stations_export_is_not_truncated(client, seeded):
 
 
 def test_tasks_page_layout_tabs_list_then_team_summary(client, seeded):
-    """任务页布局（用户 2026-10-06："未分配/已分配/已完成**下边直接**显示任务/车站信息。
-    对于团队的任务信息**往下放**。你现在这么放，一没逻辑，二没规则"）。
+    """任务页布局（口径随用户多次调整，**以最新为准**）。
 
-    断言页面里的**出现顺序**：tab → 任务列表 → 按队汇总；并且按队汇总要能看
-    **已完成 / 未完成**，且每个数字可钻取到"该队 + 该状态"的列表。
+    用户 2026-10-06 最新口径："按队汇总放在 tab 的**上面**，不要看着像在 tab 里面"
+    → 最终顺序：**按队汇总 → tab 栏 → 筛选 → 列表**。
+    并且按队汇总要能看 **已完成 / 未完成**，且每个数字可钻取到"该队 + 该状态"的列表。
     """
     _login(client, "admin")
     h = client.get("/tasks", params={"tab": "assigned"}).text   # seeded 的任务在"已分配"
     i_tabs = h.index('data-testid="task-tabs"')
     i_rows = h.index('data-testid="task-row"')
     i_team = h.index('data-testid="by-team-card"')
-    # ⚠️ 2026-10-06 用户改口径：队伍汇总上移成**第二层**（tab → 汇总 → 筛选 → 列表）
-    assert i_tabs < i_team < i_rows, "顺序必须是 tab → 队伍汇总 → 筛选/列表（现在是 %d/%d/%d）" % (
-        i_tabs, i_rows, i_team)
+    i_filter = h.index('data-testid="task-filter"')
+    assert i_team < i_tabs < i_filter < i_rows, (
+        "顺序必须是 队伍汇总 → tab → 筛选 → 列表（现在是 %d/%d/%d/%d）"
+        % (i_team, i_tabs, i_filter, i_rows))
     tid = seeded["team"]
     # 按队汇总：总数 / 已完成 / 进行中 / 未分配 / 停滞 / 完成率 全在，而且可点
     for t in ("by-team-name", "by-team-total", "by-team-done", "by-team-doing",
@@ -2534,6 +2535,11 @@ def _cjk_station_fixture(db):
             db.add(BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line=ln,
                              line_id=line.id, operator=op, pref=pref,
                              ekicode="00%04d" % (1000 + i), source="mlit"))
+    db.commit()
+    # ⚠️ 线路下拉是"按 tab 给口径"的：未分配 tab 只列**还有未分配车站**的线（车站池是物理车站口径）
+    #    → 造完站要重建 place，否则这些线在下拉里不出现（测不到 data-zh）
+    from app.services import bd_places
+    bd_places.rebuild_places(db)
     db.commit()
 
 
@@ -3016,7 +3022,8 @@ def test_by_team_summary_is_second_layer(client, seeded):
         i_tabs = h.find('data-testid="task-tabs"')
         i_filter = h.find('data-testid="task-filter"')
         assert i_sum > 0, "%s tab 也要能看到队伍汇总（它是入口）" % tab
-        assert i_tabs < i_sum < i_filter, "顺序要是：tab → 队伍汇总 → 筛选"
+        # 用户 2026-10-06："按队汇总放在 tab 的上面，不要看着像在 tab 里面"
+        assert i_sum < i_tabs < i_filter, "顺序要是：队伍汇总 → tab → 筛选"
 
 
 def test_task_table_columns_are_slim(client, seeded):
@@ -3044,3 +3051,56 @@ def test_task_table_columns_are_slim(client, seeded):
     assert row.count("<td>") == 6, "任务行也要 6 个单元格"
     # 停滞信号保留（整行高亮 + 筛选），但不占列
     assert 'data-testid="stale-only"' in h
+
+
+def test_line_dropdown_only_lists_lines_with_content(client, seeded):
+    """线路下拉**只列有内容的线路**，数量 = 当前 tab 的口径（用户 2026-10-06）。
+
+    "已分配tab，按线路查询里的线路，只是有任务的线路。没有任务的就不要显示，
+     另外，数量只显示任务的数量。"
+    → 未分配 tab：只列还有未分配车站的线，数字 = 未分配车站数；
+      已分配/已完成：只列有任务的线，数字 = 任务数；**不出现数量为 0 的线**。
+    """
+    import re as _re
+    from app.models import BdLine, BdStation, BdStationPlace
+    from app.services import bd_places
+    db = appdb.SessionLocal()
+    line = BdLine(name="口径线", name_norm="口径线", operator="测试铁道",
+                  operator_short="测试", kind="private", prefs="13", n_station=3)
+    db.add(line)
+    db.flush()
+    for i, nm in enumerate(("口径A", "口径B", "口径C")):
+        db.add(BdStation(name=nm, name_norm=bd_tasks.norm_name(nm), line="口径线",
+                         line_id=line.id, operator="测试铁道", pref="13",
+                         seq=i + 1, along_km=float(i), source="mlit"))
+    db.commit()
+    bd_places.rebuild_places(db)
+    lid = line.id
+    # 口径A/B 派队（有任务）→ 未分配只剩 口径C
+    pls = {p.name: p.id for p in db.query(BdStationPlace).filter(
+        BdStationPlace.name.in_(["口径A", "口径B", "口径C"])).all()}
+    bd_tasks.create_tasks_for_places(db, [pls["口径A"], pls["口径B"]], by="admin",
+                                     team_id=seeded["team"])
+    db.commit()
+    db.close()
+
+    _login(client, "admin")
+
+    def opts(tab):
+        h = client.get("/tasks", params={"tab": tab}).text
+        m = _re.search(r'data-testid="line-filter".*?</select>', h, _re.S)
+        return (re.search(r'<option value="">全部线路（(\d+)）</option>', m.group(0)),
+                {int(a): int(c) for a, b, c in _re.findall(
+                    r'<option value="(\d+)"[^>]*>\s*([^<（）]+)（(\d+)）', m.group(0))})
+    # 未分配：只有 口径C 还在池子里 → 这条线记 1
+    allopt, o = opts("unassigned")
+    assert o.get(lid) == 1, "未分配 tab 的线路数量应是**未分配车站数**（1），实际 %s" % o.get(lid)
+    # 「全部线路」= 当前 tab 的总数（池子里只剩 口径C 1 个；seeded 的站已派队不在池子里）
+    assert int(allopt.group(1)) == 1, "全部线路 = 当前 tab 的总数（未分配=1）"
+    # 已分配：这条线有 2 个任务 → 记 2；且不存在数量为 0 的线
+    allopt2, o2 = opts("assigned")
+    assert o2.get(lid) == 2, "已分配 tab 的线路数量应是**任务数**（2），实际 %s" % o2.get(lid)
+    assert all(v > 0 for v in o2.values()), "不该出现数量为 0 的线路"
+    # 已完成：这条线没有已完成任务 → 整条线不出现
+    _, o3 = opts("done")
+    assert lid not in o3, "没有已完成任务的线路不该出现在下拉里"
