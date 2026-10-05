@@ -688,7 +688,9 @@ def test_board_shows_dates_and_stale_filter(client, seeded):
     _login(client, "admin")
     p = client.get("/tasks?tab=assigned")
     assert p.status_code == 200
-    assert date.today().strftime("%Y-%m-%d") in p.text, "开始日要显示"
+    # ⚠️ 2026-10-06 用户删掉 开始日/完成日/最后提交/多少天没动 等列 →
+    #    停滞改成看**整行高亮**（`data-stale="1"`）+ `stale=1` 筛选；日期在任务详情页/导出里
+    assert 'data-stale="1"' in p.text, "停滞行要高亮"
     assert 'data-testid="by-team"' in p.text, "按队汇总要在"
     assert 'data-testid="stale-only"' in p.text
     # 停滞筛选：只应留下"从没提交过"的那条
@@ -3015,3 +3017,30 @@ def test_by_team_summary_is_second_layer(client, seeded):
         i_filter = h.find('data-testid="task-filter"')
         assert i_sum > 0, "%s tab 也要能看到队伍汇总（它是入口）" % tab
         assert i_tabs < i_sum < i_filter, "顺序要是：tab → 队伍汇总 → 筛选"
+
+
+def test_task_table_columns_are_slim(client, seeded):
+    """任务表只要 6 列（用户 2026-10-06："队长/状态/开始日/完成日/确认/最后提交/多少天没动 都不需要"）。
+
+    这些信息没丢：时间线在任务详情页、导出 Excel 里按 sheet 给全，停滞靠整行高亮 + 筛选。
+    """
+    import re as _re
+    from app.models import BdStationPlace
+    db = appdb.SessionLocal()
+    _place_fixture(db, line_name="列线", names=("列1",))
+    pl = db.query(BdStationPlace).filter(
+        BdStationPlace.name_norm == bd_tasks.norm_name("列1")).first()
+    bd_tasks.create_tasks_for_places(db, [pl.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    h = client.get("/tasks", params={"tab": "assigned"}).text
+    head = _re.search(r"<th>车站</th>.*?</tr>", h, _re.S).group(0)
+    assert _re.findall(r"<th>(.*?)</th>", head) == ["车站", "团队", "担当", "进度",
+                                                   "分配日期", "修正进展"]
+    for gone in ("队长", "状态", "开始日", "完成日", "确认", "最后提交", "多少天没动"):
+        assert "<th>%s</th>" % gone not in h, "「%s」列应该去掉" % gone
+    row = _re.search(r'<tr data-testid="task-row".*?</tr>', h, _re.S).group(0)
+    assert row.count("<td>") == 6, "任务行也要 6 个单元格"
+    # 停滞信号保留（整行高亮 + 筛选），但不占列
+    assert 'data-testid="stale-only"' in h

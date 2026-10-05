@@ -1003,6 +1003,17 @@ DATABASE_URL="sqlite:///file:$PWD/store_settle_live.db?mode=ro&uri=true" \
   - ⚠️ **再踩一次 i18n 引号坑**：把含**双引号**的中文写进 `app/i18n.py` 的键 → 文件语法坏掉
     （页面 500）。**规矩：模板文案里要引用词就用「」，别用 `"`**，否则 i18n 键没法安全落库。
 
+- **任务表瘦身（2026-10-06 用户："队长、状态、开始日、完成日、确认、最后提交、多少天没动 这些列都不需要"）**：
+  管理端 `/tasks` 的任务表**只留 6 列**：**车站 / 团队 / 担当 / 进度 / 分配日期 / 修正进展**
+  （空态 `colspan` 同步 13→6；行内单元格 13→6）。
+  - **被删掉的 7 列信息没丢**：完整时间线（开始/完成/最后提交/停滞天数/确认状态）在
+    **任务详情页 `/tasks/{id}`** 与**导出 Excel**（进行中带进展、已完成带完成日期与用时）；
+  - 保留的"不占列"信号：**进度**格里带 `待确认` 药丸或 `队员报 X%`（`data-testid="review-<id>"`）；
+    **停滞**靠整行高亮 + `stale=1` 筛选（不再有"多少天没动"列）；
+  - 测试：新增 `test_task_table_columns_are_slim`（列名与单元格数都锁住）；
+    原 `test_board_shows_dates_and_stale_filter` 的"开始日要显示"断言改成"停滞行高亮"。
+  - 全量 `tests_web` **461 passed**（仅 oauth 环境用例失败）；模板 0 错；i18n 0 缺失 0 死键。
+
 ## 发布流程（生产 = 新机，ssh 别名 store-prod；旧机已退服不再发布）
 1. 本地测试过 → commit → `git push origin main`；
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
