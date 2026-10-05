@@ -1105,11 +1105,17 @@ class BdStation(Base):
 class BdTask(Base):
     """任务 = 一件要做的活；**来源可以是车站，将来也可以是片区**。
 
-    - 现在：**一个车站一个任务**（`UNIQUE(station_id)`），用户口径「车站即任务」
+    - **任务单位 = 物理车站**（用户 2026-10-05 定稿）：`UNIQUE(place_id)`，
+      「1 个车站 = 1 个任务，各自独立状态」。用户原话："我分给 A 队的 10 个站，
+      **并不是他这 10 个站作为一个整体任务跑完我再分新的**，而是在剩下几个站的时候，
+      我就可以再派发新的一组任务给他" → **派活是滚动的**，所以任务必须细到站、状态独立。
+      （京葉線 10 站给 A 队 + 8 站给 B 队 = **18 个任务**，不是 2 个）
+    - `station_id` 保留（老数据/站×线口径仍可用），**新任务只填 `place_id`**；
+      `UNIQUE(station_id)` 对 NULL 不生效（SQLite/PG 里 NULL 互不相等），所以两者能共存
     - `source_type`：任务来源判别（今天恒为 `station`）。将来以**片区**当任务时：
-      加 `zone_id`（可空）+ `station_id` 改可空 + `source_type='zone'`，任务表别的都不动
-    - `assign_date`：**分配日期**（管理员把任务派给团队的日期）→ 管理端按区间查询
-    - `assign_date`：**分配日期**（管理员把任务派给团队的日期）→ 管理端按区间查询
+      加 `zone_id`（可空）+ `place_id` 改可空 + `source_type='zone'`，任务表别的都不动
+    - `assign_date`：**分配日期**（管理员把任务派给团队的日期；**默认今天**，
+      用户："一个任务是要好几天才能执行完的"）→ 管理端按区间查询
     - `state`：unassigned 未分配 / doing 进行中 / done 已完成
       （由担当 + 进度推导，服务层统一维护）
     - `pct`：当前进展 0–100（最近一次提交的值，冗余在此便于列表直读）
@@ -1117,6 +1123,9 @@ class BdTask(Base):
     __tablename__ = "bd_task"
     __table_args__ = (
         UniqueConstraint("station_id", name="uq_bd_task_station"),
+        Index("uq_bd_task_place", "place_id", unique=True,
+              sqlite_where=text("place_id IS NOT NULL"),
+              postgresql_where=text("place_id IS NOT NULL")),
         Index("ix_bd_task_team", "team_id"),
         Index("ix_bd_task_assign_date", "assign_date"),
         Index("ix_bd_task_state", "state"),
@@ -1125,7 +1134,10 @@ class BdTask(Base):
     #: 任务来源判别：station（现在）/ zone（将来片区）—— 车站与片区都是任务的**输入源**
     source_type = Column(String(16), nullable=False, default="station",
                          server_default="station")
-    station_id = Column(Integer, ForeignKey("bd_station.id"), nullable=False)
+    #: 老口径（站×线）；新任务只填 `place_id`，此列留空
+    station_id = Column(Integer, ForeignKey("bd_station.id"), nullable=True)
+    #: **物理车站**（任务单位）：1 个车站 1 个任务（跨线站也只 1 个）
+    place_id = Column(Integer, ForeignKey("bd_station_place.id"), nullable=True)
     team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=True)
     assign_date = Column(Date, nullable=True)        # 分配日期（派给团队那天）
     state = Column(String(16), nullable=False, default="unassigned",
