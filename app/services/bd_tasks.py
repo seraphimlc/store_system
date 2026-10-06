@@ -1219,7 +1219,7 @@ def _team_label(db: Session, team_id) -> str:
 
 
 def return_to_pool(db: Session, task_ids: Sequence[int], by: str = "",
-                   actor_user=None) -> dict:
+                   actor_user=None, force: bool = False) -> dict:
     """把任务**退回车站池**（解除队伍 + 清担当 + 清分配日期）。
 
     用户 2026-10-06 审计："派队是单向不可逆的"——选错队只能改库。
@@ -1227,9 +1227,20 @@ def return_to_pool(db: Session, task_ids: Sequence[int], by: str = "",
     """
     from app.services import bd_log
     n = 0
+    skipped: List[dict] = []
     for tid in list(task_ids or []):
         t = db.get(BdTask, tid)
         if t is None:
+            continue
+        if t.team_id is None:
+            skipped.append({"task_id": tid, "why": "还没派给队伍"})
+            continue
+        n_asg = (db.query(func.count(BdTaskAssign.id))
+                 .filter(BdTaskAssign.task_id == tid).scalar() or 0)
+        if n_asg and not force:
+            # 用户 2026-10-06 口径：管理员撤回的是"**已派队但还没分到人**"（含有进展没分人）
+            # 有担当的任务要**队长先回收/改派**，不然等于把队员手上的活静默抽走
+            skipped.append({"task_id": tid, "why": "还有担当，请让队长先回收或改派"})
             continue
         old_team = t.team_id
         bd_log.log_op(db, actor_user, "task", "return_pool", ref_id=t.id,
@@ -1242,7 +1253,23 @@ def return_to_pool(db: Session, task_ids: Sequence[int], by: str = "",
         refresh_state(db, t)
         n += 1
     db.flush()
-    return {"n": n}
+    return {"n": n, "skipped": skipped}
+
+
+def can_return_pool(db: Session, user, task: BdTask) -> bool:
+    """**管理员撤回**（回车站池）能不能点：只针对"已派队但**没分到人**"的任务。
+
+    用户 2026-10-06："对于已经分配到团队，但还没有分配到队员的任务，管理员可以撤回"、
+    "对于有进展但还是没有分配队员的任务，管理员也可以撤回并重新分配"。
+    有担当的走队长回收/改派（避免把队员手上的活静默抽走）。
+    """
+    if user is None or task is None or not is_admin(user):
+        return False
+    if task.team_id is None:
+        return False
+    n = (db.query(func.count(BdTaskAssign.id))
+         .filter(BdTaskAssign.task_id == task.id).scalar() or 0)
+    return n == 0
 
 
 def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],

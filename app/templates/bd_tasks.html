@@ -270,6 +270,22 @@
 })();
 </script>
 {% else %}
+{# **批量撤回**（用户 2026-10-06：管理员可撤回"已派队但还没分到人"的任务，含已有进展的） #}
+{% if tab == 'assigned' %}
+<form method="post" action="/tasks/return-pool" id="return-pool-form"
+      data-testid="return-pool-form" style="margin-bottom:.6rem"
+      onsubmit="return confirm('{{ t('把选中的任务退回车站池？（进展会保留）') }}')">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="back"
+         value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+  <div class="card" style="padding:.6rem 1rem;display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
+    <button class="btn ghost" type="submit" data-testid="return-pool-bulk">
+      {{ t('撤回选中的任务（回到车站池）') }}</button>
+    <span class="hint">{{ t('只能撤回「还没分到队员」的（有担当的请让队长先回收）') }}</span>
+  </div>
+</form>
+{% endif %}
 <div class="tbl-wrap">
 <table class="grid-tbl">
   <thead>
@@ -282,7 +298,10 @@
   <tbody>
     {% for r in rows %}
     <tr data-testid="task-row" {% if r.stale %}class="stale-row" data-stale="1"{% endif %}>
-      <td><a href="/tasks/{{ r.task.id }}" data-testid="task-link-{{ r.task.id }}"><b>{{ r.station_name }}</b></a>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
+      <td>{% if return_map.get(r.task.id) %}<input type="checkbox" name="task_id"
+            value="{{ r.task.id }}" form="return-pool-form" style="width:auto"
+            data-testid="return-check-{{ r.task.id }}"
+            aria-label="{{ t('选中以撤回') }}"> {% endif %}<a href="/tasks/{{ r.task.id }}" data-testid="task-link-{{ r.task.id }}"><b>{{ r.station_name }}</b></a>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>{% if r.assignees %}{% for a in r.assignees %}{{ a.name }}{% if leave_map.get(a.code) %}<span class="pill warnk" data-testid="leave-{{ r.task.id }}-{{ a.code }}" title="{{ t('休假中（至') }} {{ leave_map[a.code].end_date.strftime('%Y-%m-%d') if leave_map[a.code].end_date else t('未定') }}）">{{ t('休') }}</span>{% endif %}{{ '、' if not loop.last }}{% endfor %}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
       <td>{{ r.pct }}%

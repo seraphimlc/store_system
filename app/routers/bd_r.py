@@ -387,6 +387,15 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     # 「修正进展」能不能点：管理员**只能改队长确认/处理过的**（用户 2026-10-06）
     # ⚠️ 一次算完（批量），别在模板里逐条判
     # ⚠️ 未分配 tab 的行是**车站池**（没有 task 键）→ 不参与
+    # 「撤回」能不能勾：本页任务里**没有担当**的（一次分组查询，避免 N+1）
+    from app.services.bd_tasks import BdTaskAssign as _BTA
+    from sqlalchemy import func as _fn
+    _ids = [r["task"].id for r in d["rows"]] if tab != bd_tasks.TAB_UNASSIGNED else []
+    _n_asg = dict(db.query(_BTA.task_id, _fn.count(_BTA.id))
+                  .filter(_BTA.task_id.in_(_ids)).group_by(_BTA.task_id).all()) if _ids else {}
+    return_map = {r["task"].id: bool(r["task"].team_id is not None
+                                     and not _n_asg.get(r["task"].id, 0))
+                  for r in (d["rows"] if tab != bd_tasks.TAB_UNASSIGNED else [])}
     adjust_map = ({tid: v.get("adjust", False) for tid, v in
                    bd_tasks.can_reject_maps(db, user,
                                             [r["task"] for r in d["rows"]],
@@ -417,7 +426,7 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
         "line_opts": bd_tasks.line_options(db, tab),
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
         "stale": stale, "stale_days": d.get("stale_days", 2),
-        "adjust_map": adjust_map,
+        "adjust_map": adjust_map, "return_map": return_map,
         "leave_map": leave_map,
         "sum": bd_tasks.board_summary(db),
         # ⚠️ 统计卡与 tab **同一口径**（2026-10-06 审计：卡片按 state 数 → "已分配 0"，
@@ -678,6 +687,14 @@ def tasks_return_pool(request: Request, task_id: Optional[List[str]] = Form(None
         return RedirectResponse(_with_msg(back, "err", "请先勾选任务"), status_code=303)
     r = bd_tasks.return_to_pool(db, ids, by=user.username, actor_user=user)
     db.commit()
+    if r.get("skipped"):
+        # 有担当的不能撤（要让队长先回收）→ 明确告诉管理员，别静默少撤
+        return RedirectResponse(
+            _with_msg(back, "err", _m("已退回 %d 个；%d 个还有担当，请让队长先回收或改派",
+                                      r["n"], len(r["skipped"]))), status_code=303)
+    if r["n"] == 0:
+        return RedirectResponse(_with_msg(back, "err", _m("没有可撤回的任务")),
+                                status_code=303)
     return RedirectResponse(_with_msg(back, "msg", _m("已退回车站池：%d 个", r["n"])),
                             status_code=303)
 

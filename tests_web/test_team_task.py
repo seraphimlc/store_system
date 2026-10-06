@@ -4304,3 +4304,39 @@ def test_leader_return_task_with_progress(client, seeded):
     r3 = _post(client, "/my/tasks/return", {"task_id": str(tid)},
                from_path="/my/tasks?tab=mine")
     assert r3.status_code == 303 and "err=" in r3.headers["location"]
+
+
+def test_admin_bulk_return_pool_only_without_assignees(client, seeded):
+    """**A6 管理员按线路批量撤回**（用户 2026-10-06 第 2/3 条）：
+    只能撤回"已派队但**还没分到人**"的（含已有进展的）；有担当的要让队长先回收。"""
+    db = appdb.SessionLocal()
+    t1 = seeded["task"]                       # 已派队、无担当、无进展
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id   # 有担当
+    bd_tasks.assign_members(db, t2, ["P2"], by="admin")
+    # t1 造一点进展（"有进展但没分人"也要能撤）
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, t1, 30, "干了点", by="tangjing", actor_user=tj)
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    # 行上只给"无担当"的勾选框
+    h = client.get("/tasks?tab=assigned").text
+    assert 'data-testid="return-check-%d"' % t1 in h, "无担当的要有勾选框"
+    assert 'data-testid="return-check-%d"' % t2 not in h, "有担当的不该给勾选框"
+    r = _post(client, "/tasks/return-pool",
+              {"task_id": [str(t1), str(t2)], "back": "/tasks?tab=assigned"},
+              from_path="/tasks?tab=assigned")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    loc = _uq(r.headers["location"])
+    assert "已退回 1 个" in loc and "还有担当" in loc, loc
+    db = appdb.SessionLocal()
+    t1r, t2r = db.get(BdTask, t1), db.get(BdTask, t2)
+    assert t1r.team_id is None and t1r.assign_date is None, "无担当的应回车站池"
+    assert t2r.team_id == seeded["team"], "有担当的不该被抽走"
+    # 进展保留
+    assert bd_tasks.day_progress_map(db, [t1]).get(t1).pct == 30
+    db.close()
