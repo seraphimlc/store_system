@@ -177,13 +177,13 @@ docs/specs-mcp-tools-scenario.md	文档	MCP 工具场景化重构设计稿（49 
 docs/specs-messages.md	文档	站内消息 + 任务进展「确认 / 调整」（2026-10-03 交付）	3238
 docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24647
 docs/specs-team-management.md	文档	规格 · 团队管理（第一期）	13867
-docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7059
+docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7168
 docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产品设计（系统逻辑全览）	9614
 docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8662
 docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7092
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
-docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32023
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31516
+docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32092
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31585
 docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务）	10101
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887
@@ -303,7 +303,6 @@ app/services/flow.py	结算域	文件流水线：入表→判定→正式表→�
 app/services/perf.py	结算域	绩效：点数/工资/看板统计	13969
 app/services/period.py	结算域	月度分期对账偏差表（薪资找平）：	30883
 app/services/recon.py	结算域	V3 月度对账：导入对账 Excel，与正式数据(正式表/绩效)比对，生成差异。	47038
-scripts/_tmp_tr2.py	脚本	转队：路由 + 两个界面入口（未分配批量转 / 任务详情页单条转）+ i18n	6791
 scripts/backfill_prod_new_tables.py	脚本	线上新表数据回填（**不重导**：只用线上现有数据重建新表）。	6857
 scripts/bd_backfill_lines.py	脚本	把 `scripts/bd_station_lines.json` 里的「线路 → 站名」补到 `bd_station.line`。	2898
 scripts/bd_extract_lines.py	脚本	从「A3整线放射图及执行说明」PDF 抽「**线路 → 站名**」映射，落成 JSON 数据文件。	4221
