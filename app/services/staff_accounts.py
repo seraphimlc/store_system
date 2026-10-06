@@ -92,7 +92,9 @@ def accounts_xlsx(db, *, only_active: bool = False, base_url: str = ""):
     from app.config import get_settings
     from app.models import User
 
-    q = db.query(User).filter(User.role == "staff")
+    # ⚠️ 2026-10-06：原来只导 `role == 'staff'` → **队长不出现在账号表里**
+    #    （管理端「员工管理」页早就是 ("staff","leader")，导出漏了；用户口径"队长不也是staff嘛"）
+    q = db.query(User).filter(User.role.in_(("staff", "leader")))
     if only_active:
         q = q.filter(User.status == "active", User.is_active.is_(True))
     rows = q.order_by(User.status, User.person_code).all()

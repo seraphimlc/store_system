@@ -408,7 +408,7 @@ def roster_start_map(db, codes: Optional[List[str]] = None) -> Dict[str, date]:
         return {list(codes)[0]: d} if d else {}
     out: Dict[str, date] = {}
     q1 = (db.query(User.person_code, func.min(User.created_at))
-          .filter(User.role == "staff", User.person_code.isnot(None)))
+          .filter(User.role.in_(ATTEND_ROLES), User.person_code.isnot(None)))
     if codes:
         q1 = q1.filter(User.person_code.in_(list(codes)))
     for code, ts in q1.group_by(User.person_code).all():
@@ -453,7 +453,7 @@ def roster_start_fast(db, person_code: Optional[str]) -> Optional[date]:
     from sqlalchemy import text
     row = db.execute(text(
         "SELECT (SELECT MIN(created_at) FROM users "
-        "         WHERE role = 'staff' AND person_code = :c), "
+        "         WHERE role IN ('staff', 'leader') AND person_code = :c), "
         "       (SELECT created_at FROM persons WHERE code = :c), "
         "       (SELECT MIN(plan_date) FROM staff_date_plans WHERE person_code = :c)"
     ), {"c": person_code}).first()
@@ -674,6 +674,10 @@ def save_plan(db, user, key: str, unavailable: Iterable = (), today=None,
 
 # ---------------- 管理端矩阵与导出 ----------------
 
+#: **要出勤的人**：员工 + 队长（用户 2026-10-06："队长不也是staff嘛"）。
+#:  队长同样在一线巡店、要报自己的点数 → 出勤计划/名册起点都要算他们。
+#:  ⚠️ 原来三处写死 `role == 'staff'` → 队长进不了名册（只能靠"有登记记录"补行、名字还丢了）。
+ATTEND_ROLES = ("staff", "leader")
 SHORT_CODE_LEN = 5      # 页面/导出只显示编号后 5 位（用户 2026-10-01："取后5位就行"）
 
 
@@ -684,13 +688,17 @@ def short_code(code: Optional[str], n: int = SHORT_CODE_LEN) -> str:
 
 
 def _matrix_people(db) -> List[dict]:
-    """矩阵里的"员工"= 有账号的在岗/请假员工 ∪ 本期有登记记录的人。
+    """矩阵里的"员工"= 有账号的在岗/请假**员工与队长** ∪ 本期有登记记录的人。
+
+    ⚠️ 2026-10-06 修正：原来只取 `role == 'staff'` → **队长**（也在一线巡店、也报点数）
+    进不了名册，只能从"本期有登记记录"补行 → 名字还是编号（用户实测"前六条全是数字"）。
+    现按 `ATTEND_ROLES = ("staff", "leader")` 取。
 
     **不在职（停用/离职）**的账号：**一期数据都没有就不进矩阵**（用户 2026-10-01："没有本期数据的
     就过滤掉"）；只要本期有数据（登记/自报过）就仍然显示——否则他们的数据会被静默吞掉。
     行里带 `status` / `can_login`，矩阵据此把他们的"今天及以后"一律画成 ×。
     """
-    users = db.query(User).filter(User.role == "staff").all()
+    users = db.query(User).filter(User.role.in_(ATTEND_ROLES)).all()
     names = dict(db.query(Person.code, Person.display_name).all())
     cand: Dict[str, dict] = {}
     for u in users:

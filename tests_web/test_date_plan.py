@@ -1309,6 +1309,25 @@ def test_single_month_employee_gets_analysis(client, monkeypatch):
     db.close()
 
 
+def test_matrix_includes_active_leader_without_records(client):
+    """队长也在一线巡店（用户 2026-10-06："队长不也是staff嘛"）→
+    **没有任何登记记录的在职队长也要进名册**（原来只取 role=='staff' → 队长进不来）。"""
+    from app.models import Person, User
+    db = appdb.SessionLocal()
+    db.add(Person(code="LEAD9", display_name="陈嘉溢", created_at=ROSTER))
+    db.add(User(username="chenjiayi", display_name="陈嘉溢", role="leader",
+                person_code="LEAD9", password_hash="x", is_active=True,
+                status="active", created_at=ROSTER))
+    db.commit()
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 10))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    assert "LEAD9" in rows, "在职队长要进名册（哪怕这期没有任何登记）"
+    assert rows["LEAD9"]["name"] == "陈嘉溢"
+    # 名册起点也算上队长账号的创建时间
+    assert date_plan.roster_start(db, "LEAD9") == ROSTER.date()
+    db.close()
+
+
 def test_matrix_shows_name_for_leader_with_plan(client):
     """⚠️ 用户 2026-10-06："出勤计划里，前六条没有姓名，全是数字"。
 

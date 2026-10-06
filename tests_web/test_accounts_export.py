@@ -232,3 +232,25 @@ def test_delete_file_purges_empty_month_derived_data(client):
     assert db.query(StoreEntity).filter(StoreEntity.id == ent_id).count() == 0
     assert db.query(FormalRecord).count() == 0
     db.close()
+
+
+def test_export_includes_leaders(client):
+    """⚠️ 2026-10-06：账号表导出原来只导 `role == 'staff'` → **队长不在里面**。
+
+    管理端「员工管理」页早就是 `("staff","leader")`（能看到并管理队长），导出漏了 ——
+    用户口径："队长不也是staff嘛"。
+    """
+    from io import BytesIO
+    from openpyxl import load_workbook
+    _mk(None, "admin2", "管理员", "ADM2", role="admin")
+    _mk(None, "emp9", "普通员工", "E9")
+    _mk(None, "lead9", "陈嘉溢", "L9", role="leader")
+    _login(client, "admin2")
+    r = client.get("/staff-admin/accounts-export")
+    assert r.status_code == 200
+    wb = load_workbook(BytesIO(r.content))
+    assert "员工登录名" in wb.sheetnames
+    vals = [list(x) for x in wb["员工登录名"].iter_rows(values_only=True)]
+    text = " ".join(str(c) for row in vals for c in row if c)
+    assert "陈嘉溢" in text, "队长必须出现在账号表里：%s" % vals[:3]
+    assert "普通员工" in text

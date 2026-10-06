@@ -28,7 +28,7 @@ mcp_service/tokens.py	MCP 服务	MCP Token 解析 → Actor。spec §5。	5589
 mcp_service/tools.py	MCP 服务	MCP 工具注册（适配层）。	3955
 mcp_service/write_ops.py	MCP 服务	写操作能力层：上传 / 出表 / 重算 / 改单价。	9621
 mcp_service/write_tools.py	MCP 服务	P1 写能力层：finalize_file / rebuild_preview / rebuild_month / set_per_point。	9609
-app/services/staff_accounts.py	主档/员工	手工新建员工：编号即身份键（规格 D19/D20）。	6781
+app/services/staff_accounts.py	主档/员工	手工新建员工：编号即身份键（规格 D19/D20）。	6922
 app/services/store_master.py	主档/员工	店铺主档服务：从 raw 同步实体、构建候选对、合并/拆分与审计。	22707
 .gitignore	仓库配置		870
 alembic.ini	仓库配置		3722
@@ -191,11 +191,11 @@ docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141
 docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	75556
 docs/记录-员工填报.md	文档	记录 · 员工每日填报 + 对比 + AI 报告	6963
-docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	6674
+docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	8912
 docs/试跑报告-任务域.md	文档	试跑报告 · 任务域（真库 · 2026-10-06）	3216
 docs/试跑清单-任务域.md	文档	试跑清单 · 任务域（真库 · 2026-10-06）	4677
 docs/问题单-已核实缺陷.md	文档	已核实缺陷清单（2026-09-30）	7104
-app/services/date_plan.py	日期计划	日期计划：半月窗口/格状态/写透/矩阵	34753
+app/services/date_plan.py	日期计划	日期计划：半月窗口/格状态/写透/矩阵	35624
 app/services/plan_leave.py	日期计划	假期模式 → 出勤计划：把休假期**自动标成"不出勤"（×）**，结束/替换时**精确撤销**。	3277
 app/services/__init__.py	服务层		0
 app/services/ai_batch.py	服务层	B组 AI 批判（批处理，OpenAI 兼容接口，可插拔）。	5355
@@ -261,7 +261,7 @@ mcp_service/tests/test_task_ops.py	测试·MCP	作业域 MCP 工具的能力层�
 mcp_service/tests/test_tokens.py	测试·MCP	Token 解析：前缀定位 + 摘要校验 + 撤销 + scope + bootstrap 只读（spec §5）。	4817
 mcp_service/tests/test_write_tools.py	测试·MCP	写工具四道闸门与信封（spec §6/§7）。	8701
 tests_web/conftest.py	测试·Web	Web 测试共用 fixture：内存 sqlite（StaticPool 共享连接）+ TestClient。	986
-tests_web/test_accounts_export.py	测试·Web	员工登录名导出 + 「首登强制改密」流程（发号前的整套检查）。	10157
+tests_web/test_accounts_export.py	测试·Web	员工登录名导出 + 「首登强制改密」流程（发号前的整套检查）。	10963
 tests_web/test_ai_batch.py	测试·Web	AI 批判服务测试（mock 模型响应，不触网）。	2561
 tests_web/test_ai_recon.py	测试·Web	AI 表头解析（对账文件表头自适应，模型优先、规则兜底）。	8224
 tests_web/test_ai_visit.py	测试·Web	AI 布局解析（巡店表头通用能力）与 loader 坐标模式测试。	13987
@@ -269,7 +269,7 @@ tests_web/test_auth.py	测试·Web	登录/会话测试。	2456
 tests_web/test_autocreate.py	测试·Web	导入自动建员工账号测试（不再需要手动创建员工）。	4578
 tests_web/test_bd_ops.py	测试·Web	BD 作业域 P0 测试：行政区划基底（`bd_area`）+ 门店宇宙（`bd_store`）。	8242
 tests_web/test_daily_report.py	测试·Web	员工每日填报 + 区间对比分析报告（规格 v7）。	54668
-tests_web/test_date_plan.py	测试·Web	日期计划（半月出勤登记）测试：规格 `docs/specs-date-plan.md`。	56827
+tests_web/test_date_plan.py	测试·Web	日期计划（半月出勤登记）测试：规格 `docs/specs-date-plan.md`。	59305
 tests_web/test_defensive.py	测试·Web	防御性校验回归测试（QA 走查 3 处缺陷）：	10492
 tests_web/test_first_login_password.py	测试·Web	首次登录/口令重置后必须改密测试。	4831
 tests_web/test_flow.py	测试·Web	V3 文件处理流程测试：店铺主从档 + 判定 + 有效自动入绩效 + 绩效申诉 + 入正式表。	31658
