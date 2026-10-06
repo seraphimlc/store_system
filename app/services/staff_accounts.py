@@ -44,8 +44,11 @@ def suggest_login_name(db, name: str, code: str = "") -> dict:
 
 
 def create_staff(db, *, code: str, name: str, username: str = "",
-                 password: str = "") -> Person:
-    """建 Person + User（staff）；编号重复 → CodeExists。"""
+                 password: str = "", role: str = "staff") -> Person:
+    """建 Person + User（staff / leader）；编号重复 → CodeExists。
+
+    `role`：`staff` 队员 / `leader` 队长 —— **不允许建 admin**（管理员账号不从这里出）。
+    """
     from app.auth import hash_password
     from app.config import get_settings
     from app.services import login_names
@@ -66,7 +69,9 @@ def create_staff(db, *, code: str, name: str, username: str = "",
     uname = login_names.unique_username(db, name, code, base=uname)
     db.add(User(username=uname,
                 password_hash=hash_password(password or get_settings().default_staff_password),
-                display_name=name, role="staff", person_code=code,
+                display_name=name,
+                role=("leader" if role == "leader" else "staff"),
+                person_code=code,
                 is_active=True, status="active", must_change_password=True))
     db.commit()
     return db.get(Person, code)
@@ -138,10 +143,13 @@ class UsernameExists(Exception):
 
 def update_staff(db, user, *, name: str = None, username: str = None,
                  status: str = None, lang: str = None,
-                 password: str = None) -> dict:
-    """编辑员工（弹窗一次提交）：**姓名 / 登录名 / 状态 / 界面语言 / 重置口令**。
+                 password: str = None, role: str = None) -> dict:
+    """编辑员工（弹窗一次提交）：**姓名 / 登录名 / 状态 / 界面语言 / 重置口令 / 角色**。
 
     只传需要改的字段（None = 不改）。返回改动说明，用于页面提示。
+
+    `role` 只允许 `staff`（队员）/ `leader`（队长）——**不允许改成 admin**，
+    避免误把普通员工提成管理员（规格 `docs/specs-team-management.md` Q4）。
 
     ⚠️ **人员编号不支持在这里改**（2026-10-01 用户决定）：编号是身份键，改它要级联改
     `persons` + 近 20 张引用表（计划/自报/绩效/工资/分析/对账），风险远大于收益，先不做。
@@ -173,6 +181,9 @@ def update_staff(db, user, *, name: str = None, username: str = None,
     if lang is not None and lang != (user.lang or ""):
         user.lang = lang
         changed.append("语言 → %s" % (lang or "自动"))
+    if role in ("staff", "leader") and role != user.role:
+        user.role = role
+        changed.append("角色 → %s" % ("队长" if role == "leader" else "队员"))
     if password:
         user.password_hash = hash_password(password)
         user.must_change_password = True

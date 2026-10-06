@@ -24,10 +24,18 @@ from mcp_service import envelope
 # tools/list 按身份裁剪（mcp_service/auth.py）直接读本集合 → 自动跟随。
 STAFF_ALLOWED = frozenset({
     "visit_whoami", "visit_my_perf", "visit_my_pay",
+    # 作业域（2026-10-06 用户："mcp tools 你也要跟着更新"）
+    "visit_my_tasks", "visit_self_report", "visit_task_report",
+})
+
+#: **队长档**（新增）：员工能用的 + 本队任务管理（派工/确认/驳回/回收）。
+#: ⚠️ 原来只有"员工 / 管理员"两档 → 队长工具只能给管理员用、队长自己反而用不了。
+LEADER_ALLOWED = frozenset(set(STAFF_ALLOWED) | {
+    "visit_team_tasks", "visit_task_assign", "visit_task_confirm",
 })
 
 # “我的”系列工具：只能看本人（服务端强制过滤，不给越权留入口）
-MY_TOOLS = frozenset({"visit_my_perf", "visit_my_pay"})
+MY_TOOLS = frozenset({"visit_my_perf", "visit_my_pay", "visit_my_tasks"})
 
 # “我的”工具里可能被客户端显式传入的 person 参数名（一律服务端校验/忽略）
 _MY_PERSON_KEYS = ("person", "person_code", "person_id")
@@ -38,14 +46,21 @@ AUTH_REQUIRED_TOOLS = frozenset({
     # 写
     "visit_upload", "visit_payroll_export", "visit_rebuild",
     "visit_staff", "visit_config", "visit_store",
+    # 作业域写（2026-10-06）
+    "visit_self_report", "visit_task_report", "visit_task_assign",
+    "visit_task_confirm", "visit_task_return",
     # 导出（现有行为：无身份 → UNAUTHORIZED）
     "visit_recon_export",
 })
 
 
 def require_role(tool: str) -> str:
-    """工具所需角色：`STAFF_ALLOWED`（员工可用）或 `ADMIN_ONLY`（默认拒绝）。"""
-    return "STAFF_ALLOWED" if tool in STAFF_ALLOWED else "ADMIN_ONLY"
+    """工具所需角色：`STAFF_ALLOWED` / `LEADER_ALLOWED` / `ADMIN_ONLY`（默认拒绝）。"""
+    if tool in STAFF_ALLOWED:
+        return "STAFF_ALLOWED"
+    if tool in LEADER_ALLOWED:
+        return "LEADER_ALLOWED"
+    return "ADMIN_ONLY"
 
 
 def _forbidden(message: str, hint: str) -> dict:
@@ -84,13 +99,22 @@ def enforce(tool: str, actor, params: dict | None) -> dict | None:
     if actor.role == "admin":
         return None
 
+    if actor.role == "leader":
+        if tool in LEADER_ALLOWED:
+            return None
+        return _forbidden(
+            "该操作仅限管理员",
+            "队长可用：我的绩效/找平/任务、本队任务（visit_team_tasks）、"
+            "派工（visit_task_assign）、确认/驳回（visit_task_confirm）；"
+            "其余仅管理员")
+
     if actor.role == "staff":
         if tool in STAFF_ALLOWED:
             return None
         return _forbidden(
             "该操作仅限管理员",
-            "该操作仅管理员，普通员工无权调用；查询个人绩效/找平请用 "
-            "visit_my_perf / visit_my_pay / visit_whoami")
+            "该操作仅管理员，普通员工无权调用；查询个人绩效/找平/我的任务请用 "
+            "visit_my_perf / visit_my_pay / visit_whoami / visit_my_tasks")
 
     # 未知角色：保守拒绝
     return _forbidden("该操作仅限管理员", "未知角色，拒绝调用")

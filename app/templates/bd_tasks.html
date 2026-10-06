@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+{% block title %}{{ t('任务') }}{% endblock %}
+{% block content %}
+<style>.htmx-indicator{display:none}.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator{display:inline}</style>
+<div class="page-title">
+  <h1>{{ t('任务') }}</h1>
+  <span class="sub">{{ t('每个车站一个任务：在哪个队、分给谁、进展多少；可按分配日期查询') }}</span>
+  <div class="actions">
+    <a class="btn ghost" download data-testid="tasks-export"
+       href="/tasks/export?team={{ team_id or '' }}&state={{ state }}&line={{ line_id or '' }}&kw={{ kw|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if stale %}&stale=1{% endif %}">{{ t('导出 Excel') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+{# ⚠️ 卡片与下面的 tab **同一口径**（2026-10-06 审计：原来卡片按 task.state 数，
+   "已分配 0" 与同屏 tab 的 "已分配（515）" 打架）。口径：车站池=还没派队的物理车站；
+   已分配=有人管（有队伍/有担当/有进度）；停滞=**已分到人**且 ≥N 天没动。 #}
+<div class="stat-grid grid" style="margin-bottom:.8rem">
+  <div class="stat-card"><div class="k">{{ t('车站池（还没派队）') }}</div>
+    <div class="v" data-testid="card-pool">{{ cards.pool }}</div></div>
+  <div class="stat-card warnk"><div class="k">{{ t('已分配（有队伍') }}</div>
+    <div class="v" data-testid="card-assigned">{{ cards.assigned }}</div></div>
+  <div class="stat-card okk"><div class="k">{{ t('已完成') }}</div>
+    <div class="v" data-testid="card-done">{{ cards.done }}</div></div>
+  <div class="stat-card {% if cards.stale %}warnk{% endif %}">
+    <div class="k">{{ t('停滞（≥') }}{{ stale_days }}{{ t(' 天没动）') }}</div>
+    <div class="v" data-testid="card-stale">{{ cards.stale }}</div></div>
+</div>
+<p class="hint" style="margin:-.3rem 0 .6rem">
+  {{ t('口径：车站池 = 还没派给队伍的车站；已分配 = 已派队（含还没分到人的）；停滞 = 已分到人但 ≥N 天没提交。任务总数 =') }}
+  <b>{{ cards.total }}</b></p>
+{# 三个 tab（用户 2026-10-05："任务分为已完成，已分配，未分配几个tab页"）——
+   计数**只受其它筛选影响**，不受当前 tab 影响；链接保留其余筛选条件。 #}
+{# ===== 按队汇总（**放在任务列表下面**：列表是主体，汇总是抓手） =====
+   用户 2026-10-06："对于团队的任务信息往下放" + "我怎么看每个队的任务信息，包括已完成，未完成"
+   → 每个数字都点得动：已完成/进行中/未分配/停滞 各自链到"该队 + 该状态"的列表。 #}
+{% if by_team %}
+<div class="card" style="margin-top:1rem" data-testid="by-team-card">
+  <h3 style="margin:0 0 .5rem">{{ t('按队汇总') }}</h3>
+  <p class="hint" style="margin:0 0 .6rem">
+    {{ t('点队名看该队全部；点数字看该状态的明细。') }}
+    {{ t('这里的「未分配」= 已派给该队但还没分到人（与上面 tab 的「车站池」不是一回事）。') }}</p>
+  <div class="tbl-wrap">
+    <table class="grid-tbl" data-testid="by-team">
+      <thead>
+        <tr>
+          <th>{{ t('队伍') }}</th>
+          <th>{{ t('任务') }}</th>
+          <th>{{ t('已完成') }}</th>
+          <th>{{ t('进行中') }}</th>
+          <th>{{ t('未分配') }}</th>
+          <th>{{ t('停滞') }}</th>
+          <th>{{ t('完成率') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in by_team %}
+        <tr data-testid="by-team-row">
+          <td><a href="/tasks?team={{ b.team_id }}&tab=all"
+                 data-testid="by-team-name-{{ b.team_id }}"><b>{{ b.team_name }}</b></a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=all"
+                 data-testid="by-team-total-{{ b.team_id }}">{{ b.total }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=done"
+                 data-testid="by-team-done-{{ b.team_id }}">{{ b.done }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=assigned"
+                 data-testid="by-team-doing-{{ b.team_id }}"
+                 title="{{ t('该队未完成的任务（进行中）') }}">{{ b.doing }}</a></td>
+          <td><a href="/tasks?team={{ b.team_id }}&tab=assigned&state=unassigned"
+                 data-testid="by-team-unassigned-{{ b.team_id }}"
+                 title="{{ t('该队已派下去、但还没分到人的任务') }}">{{ b.unassigned }}</a></td>
+          <td>{% if b.stale %}<a class="pill warnk"
+                 href="/tasks?team={{ b.team_id }}&tab=assigned&stale=1"
+                 data-testid="by-team-stale-{{ b.team_id }}">{{ b.stale }}</a>{% else %}0{% endif %}</td>
+          <td data-testid="by-team-rate-{{ b.team_id }}">
+            {{ (100 * b.done // b.total) if b.total else 0 }}%</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">{{ t('还没有派给团队的任务') }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+<div class="tabs" data-testid="task-tabs" style="margin-bottom:.6rem">
+  {% for k in tabs %}
+  <a class="{% if tab == k %}on{% endif %}"
+     href="/tasks?{{ tab_qs }}tab={{ k }}"
+     data-testid="tab-{{ k }}">{{ labels[k] }}（{{ tab_counts[k] }}）</a>
+  {% endfor %}
+</div>
+
+<form method="get" action="/tasks" class="card"
+      style="padding:.7rem 1rem;margin-bottom:.8rem" data-testid="task-filter">
+  {# ⚠️ 必须带 tab（否则点「查询」会跳回默认的「未分配」= 车站池，看着就是"查询没用"）；
+     已分配/已完成才认 团队/日期/停滞（车站池是"还没有队伍的车站"，队伍筛选对它无意义）。 #}
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <input type="hidden" name="state" value="{{ state }}">
+  {% if tab != 'unassigned' %}
+  <label class="f">{{ t('团队') }}
+    <select name="team">
+      <option value="">{{ t('全部') }}</option>
+      {% for t in teams %}
+      <option value="{{ t.id }}" {% if team_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label class="f">{{ t('线路') }}
+    <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-filter">
+      {# 只列**有内容的线路**：未分配 tab = 还有未分配车站的线；其它 tab = 有任务的线 #}
+      <option value="">{{ t('全部线路') }}（{{ line_opts.total }}）</option>
+      {% for ln in line_opts.rows %}
+      <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %} data-zh="{{ line_zh(ln.name) }}">
+        {{ ln.label }}（{{ ln.n }}）</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if tab != 'unassigned' %}
+  <label class="f">{{ t('分配日期从') }}
+    <input type="date" name="date_from" value="{{ date_from }}" data-testid="date-from">
+  </label>
+  <label class="f">{{ t('到') }}
+    <input type="date" name="date_to" value="{{ date_to }}" data-testid="date-to">
+  </label>
+  {% endif %}
+  <label class="f">{{ t('关键词') }}
+    <input type="text" name="kw" value="{{ kw }}" style="width:150px">
+  </label>
+  {% if tab != 'unassigned' %}
+  <label class="f">
+    <input type="checkbox" name="stale" value="1" {% if stale %}checked{% endif %}
+           data-testid="stale-only">
+    {{ t('只看多少天没动的') }}（≥{{ stale_days }} {{ t('天') }}）
+  </label>
+  {% endif %}
+  <button class="btn" type="submit" data-testid="task-search">{{ t('查询') }}</button>
+  {% if tab == 'unassigned' %}
+  <span class="hint" style="align-self:center" data-testid="pool-filter-hint">
+    {{ t('这一栏是车站池（还没派给队伍的车站），可按 线路 / 站名 搜；队伍/日期在这一栏不适用。') }}</span>
+  {% endif %}
+</form>
+
+
+{% if tab == 'all' %}
+<p class="hint" style="margin:0 0 .5rem" data-testid="all-tasks-hint">
+  {{ t('当前看的是「该队全部任务」（含已完成）——点上面的 tab 可只看某一类。') }}</p>
+{% endif %}
+
+{% if tab == 'unassigned' %}
+{# ===== 未分配 = **车站池**（还没有队伍的物理车站）=====
+   用户 2026-10-06："对于未分配，我可以选择一些车站，直接做分配" +
+   "不要单独的'建任务按钮'" → 勾站 + 选队 + 按「分配」= 建任务 + 派队 一步完成。 #}
+<form method="post" action="/tasks/assign" id="pool-form"
+      onsubmit="var n=document.querySelectorAll('#pool-form input[name=&#39;place_id&#39;]:checked').length; return n > 0 ? confirm(&#39;把已选的 &#39;+n+&#39; 个车站派给这个队？&#39;) : true" data-testid="pool-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="line" value="{{ line_id or '' }}">
+  {# 回跳保留当前视图（tab/队伍/线路/关键词/页码），否则派完队被弹回默认视图 #}
+  <input type="hidden" name="back"
+         value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+  <div class="card" style="padding:.7rem 1rem;margin-bottom:.6rem">
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <b>{{ t('分配') }}：</b>
+      <select name="team" data-testid="pool-team" style="max-width:14rem">
+        <option value="">{{ t('选择队伍') }}</option>
+        {% for tm in teams %}
+        <option value="{{ tm.id }}">{{ tm.name }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn" type="submit" data-testid="pool-assign">{{ t('分配给该队') }}</button>
+      {# AI 派工建议：htmx 局部刷新，只给建议（勾选/派队仍走这个表单） #}
+      <button class="btn ghost" type="button" data-testid="ai-suggest"
+              hx-post="/tasks/ai-suggest" hx-target="#ai-suggest-box"
+              hx-swap="innerHTML" hx-indicator="#ai-busy"
+              hx-vals='{{ {"line": (line_id or "")|string, "kw": kw,
+                           "csrf_token": request.state.csrf,
+                           "_ft": form_token()}|tojson }}'>{{ t('AI 建议') }}</button>
+      <span id="ai-busy" class="hint htmx-indicator">{{ t('AI 正在分析…') }}</span>
+      <span class="spacer" style="flex:1"></span>
+      <span class="hint">{{ t('已勾选') }} <b data-testid="pool-count">0</b> {{ t('个车站') }}</span>
+    </div>
+    <div id="ai-suggest-box" data-testid="ai-suggest-box"></div>
+    <p class="hint" style="margin:.4rem 0 0">
+      {{ t('勾法：点一下勾选；Shift + 点 = 勾中间一整段；按住鼠标拖过多行 = 连续勾选。派队后这些车站就变成「进行中」。') }}</p>
+  </div>
+
+  <div class="tbl-wrap">
+  <table class="grid-tbl">
+    <thead>
+      <tr>
+        {# 全选 / 全不选 = **表头一个复选框**（勾=全选、取消=全不选、勾了一部分=半选态） #}
+        <th class="pick-cell"><input type="checkbox" data-testid="pool-all"
+              title="{{ t('全选 / 全不选') }}" aria-label="{{ t('全选 / 全不选') }}"></th>
+        <th>{{ t('车站') }}</th><th>{{ t('经过线路') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in pool_rows %}
+      <tr data-testid="pool-row" data-place-id="{{ r.place.id }}">
+        <td class="pick-cell">
+          <input type="checkbox" name="place_id" value="{{ r.place.id }}"
+                 data-testid="pool-check"></td>
+        <td><b>{{ r.name }}</b>{% if r.n_line > 1 %}
+          <span class="hint">（{{ r.n_line }} {{ t('条线') }}）</span>{% endif %}</td>
+        <td class="hint">{{ r.lines_text }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="empty">{{ t('没有未分配的车站') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+    {% include "_pager.html" %}
+  </div>
+</form>
+
+<script>
+/* 车站池的勾选交互：逐个 / Shift 区间 / 拖拽圈选 / 表头复选框全选 */
+(function () {
+  var form = document.getElementById('pool-form');
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(
+    form.querySelectorAll('input[name="place_id"]:not([disabled])'));
+  var countEl = document.querySelector('[data-testid="pool-count"]');
+  var allEl = document.querySelector('[data-testid="pool-all"]');
+  var lastIdx = null, dragging = false, dragTo = null;
+  function nSel() { return boxes.filter(function (b) { return b.checked; }).length; }
+  function refresh() {
+    var n = nSel();
+    if (countEl) countEl.textContent = n;
+    if (allEl) {                       /* 全选 / 半选 / 全不选 三态 */
+      allEl.checked = n > 0 && n === boxes.length;
+      allEl.indeterminate = n > 0 && n < boxes.length;
+    }
+  }
+  function setRange(a, b, val) {
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    for (var i = lo; i <= hi; i++) boxes[i].checked = val;
+  }
+  boxes.forEach(function (b, i) {
+    b.addEventListener('click', function (ev) {
+      if (ev.shiftKey && lastIdx !== null) setRange(lastIdx, i, true);
+      lastIdx = i; refresh();
+    });
+    b.closest('tr').addEventListener('mousedown', function (ev) {
+      if (ev.target.tagName === 'INPUT' && ev.shiftKey) return;
+      dragging = true; dragTo = !b.checked;
+      document.body.style.userSelect = 'none';
+    });
+    b.closest('tr').addEventListener('mouseenter', function () {
+      if (!dragging) return;
+      b.checked = dragTo; lastIdx = i; refresh();
+    });
+  });
+  document.addEventListener('mouseup', function () {
+    if (dragging) { dragging = false; document.body.style.userSelect = ''; }
+  });
+  if (allEl) allEl.addEventListener('change', function () {
+    boxes.forEach(function (b) { b.checked = allEl.checked; });
+    lastIdx = null; refresh();
+  });
+  form.addEventListener('submit', function () {
+    var btn = form.querySelector('[data-testid="pool-assign"]');
+    if (btn && nSel() > 0) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }
+  });
+  refresh();
+})();
+</script>
+{% else %}
+{# ============ AI 总结（近 7 天 + 环比上一个 7 天）============
+   用户 2026-10-06："任务AI总结…加一个按钮给管理员…生成一次缓存当天，点开即看" #}
+<div class="card" id="ai-summary" data-testid="ai-summary"
+     style="padding:.7rem 1rem;margin-bottom:.7rem">
+  <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
+    <b>{{ t('AI 总结（近 7 天）') }}</b>
+    <span class="hint">{{ t('只统计任务域：完成/派工/上报/确认/驳回/停滞，并环比上一个 7 天') }}</span>
+    <span class="spacer" style="flex:1"></span>
+    <form method="post" action="/tasks/ai-summary" style="display:flex;gap:.4rem">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      {% if ai_summary %}
+      <input type="hidden" name="force" value="1">
+      <button class="btn ghost" type="submit" data-testid="ai-regen">{{ t('重新生成') }}</button>
+      {% else %}
+      <button class="btn" type="submit" data-testid="ai-gen">{{ t('AI 总结') }}</button>
+      {% endif %}
+    </form>
+  </div>
+  {% if ai_summary %}
+  <div style="margin-top:.6rem" data-testid="ai-body">
+    <div style="font-size:1.02rem"><b>{{ ai_summary.summary.headline }}</b></div>
+    <ul style="margin:.35rem 0 .2rem 1.1rem">
+      {% for b in ai_summary.summary.bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+    {% if ai_summary.summary.risks %}
+    <div class="hint">{{ t('需要关注') }}</div>
+    <ul style="margin:.2rem 0 0 1.1rem">
+      {% for r in ai_summary.summary.risks %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {# 让管理员能核对"总结是不是基于这些数" #}
+    <div class="hint" style="margin-top:.4rem">
+      {{ t('近 7 天') }}：{{ t('完成') }} {{ ai_summary.metrics.now.done }}
+      · {{ t('派工') }} {{ ai_summary.metrics.now.dispatched }}
+      · {{ t('上报') }} {{ ai_summary.metrics.now.reported }}
+      · {{ t('确认') }} {{ ai_summary.metrics.now.confirmed }}
+      · {{ t('驳回') }} {{ ai_summary.metrics.now.rejected }}
+      · {{ t('停滞') }} {{ ai_summary.metrics.now.stale }}
+      {% set d = ai_summary.metrics.delta %}
+      （{{ t('环比') }} {{ '+' if d.done >= 0 else '' }}{{ d.done }} / {{ '+' if d.reported >= 0 else '' }}{{ d.reported }}）
+      · {{ t('生成于') }} {{ jst(ai_summary.created_at) }}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# **批量撤回**（用户 2026-10-06：管理员可撤回"已派队但还没分到人"的任务，含已有进展的） #}
+{% if tab == 'assigned' %}
+<form method="post" action="/tasks/return-pool" id="return-pool-form"
+      data-testid="return-pool-form" style="margin-bottom:.6rem"
+      onsubmit="return confirm('{{ t('把选中的任务退回车站池？（进展会保留）') }}')">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="back"
+         value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+  <div class="card" style="padding:.6rem 1rem;display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
+    <button class="btn ghost" type="submit" data-testid="return-pool-bulk">
+      {{ t('撤回选中的任务（回到车站池）') }}</button>
+    <span class="hint">{{ t('只能撤回「还没分到队员」的（有担当的请让队长先回收）') }}</span>
+  </div>
+</form>
+{% endif %}
+<div class="tbl-wrap">
+<table class="grid-tbl">
+  <thead>
+    <tr>
+      {# 用户 2026-10-06：只要这 6 列（队长/状态/开始日/完成日/确认/最后提交/多少天没动 都去掉） #}
+      <th>{{ t('车站') }}</th><th>{{ t('团队') }}</th><th>{{ t('担当') }}</th>
+      <th>{{ t('进度') }}</th><th>{{ t('分配日期') }}</th><th>{{ t('修正进展') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr data-testid="task-row" {% if r.stale %}class="stale-row" data-stale="1"{% endif %}>
+      <td>{% if return_map.get(r.task.id) %}<input type="checkbox" name="task_id"
+            value="{{ r.task.id }}" form="return-pool-form" style="width:auto"
+            data-testid="return-check-{{ r.task.id }}"
+            aria-label="{{ t('选中以撤回') }}"> {% endif %}<a href="/tasks/{{ r.task.id }}" data-testid="task-link-{{ r.task.id }}"><b>{{ r.station_name }}</b></a>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
+      <td>{{ r.team_name or '—' }}</td>
+      <td>{% if r.assignees %}{% for a in r.assignees %}{{ a.name }}{% if leave_map.get(a.code) %}<span class="pill warnk" data-testid="leave-{{ r.task.id }}-{{ a.code }}" title="{{ t('休假中（至') }} {{ leave_map[a.code].end_date.strftime('%Y-%m-%d') if leave_map[a.code].end_date else t('未定') }}）">{{ t('休') }}</span>{% endif %}{{ '、' if not loop.last }}{% endfor %}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
+      <td>{{ r.pct }}%
+        {% if r.stale %}<span class="pill warnk" data-testid="stale-{{ r.task.id }}"
+              title="{{ t('超过') }} {{ stale_days }} {{ t('天没提交进展') }}">{{ r.days_since if r.days_since is not none else '—' }} {{ t('天没动') }}</span>{% endif %}
+        {% if r.pending_review %}<span class="pill warnk"
+              data-testid="review-{{ r.task.id }}">{{ t('待确认') }}</span>
+        {% elif r.review_status == 'rejected' and r.last_reported_pct is not none %}
+        <span class="pill errk" data-testid="review-{{ r.task.id }}">{{ t('被驳回') }}
+          <span class="hint">{{ r.last_reported_pct }}% → {{ r.pct }}%</span></span>
+        {% elif r.last_reported_pct is not none and r.last_reported_pct != r.pct %}
+        <span class="hint" data-testid="review-{{ r.task.id }}">{{ t('队员报') }}
+          {{ r.last_reported_pct }}%</span>{% endif %}</td>
+      <td>{{ r.assign_date.strftime('%Y-%m-%d') if r.assign_date else '—' }}</td>
+      <td>
+        {% if r.state == 'done' %}{# 已完成 → 只能「驳回」（把 100% 退回，用户 2026-10-06） #}
+        <form method="post" action="/my/tasks/reject"
+              style="display:flex;gap:.3rem;align-items:center"
+              data-testid="reject-form-{{ r.task.id }}">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
+          <input type="hidden" name="task_id" value="{{ r.task.id }}">
+          <input type="number" name="pct" min="0" max="99" value="90"
+                 style="width:4.5rem" data-testid="reject-pct-{{ r.task.id }}">
+          <input type="text" name="note" placeholder="{{ t('驳回原因') }}" style="width:7rem">
+          <button class="btn ghost" type="submit"
+                  data-testid="reject-btn-{{ r.task.id }}">{{ t('驳回') }}</button>
+        </form>
+        {% elif not adjust_map.get(r.task.id) %}
+        {# 用户 2026-10-06 口径：管理员只能改**队长已确认/处理过**的 #}
+        <span class="hint" data-testid="need-confirm-{{ r.task.id }}"
+              title="{{ t('管理员只能修改队长确认过的进展') }}">{{ t('等队长确认') }}</span>
+        {% else %}
+        <form method="post" action="/tasks/{{ r.task.id }}/progress"
+              style="display:flex;gap:.3rem;align-items:center">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+          <input type="hidden" name="_ft" value="{{ form_token() }}">
+          <input type="hidden" name="back"
+                 value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+          <input type="number" name="pct" min="0" max="100" value="{{ r.pct }}"
+                 style="width:4.5rem">
+          <input type="text" name="note" placeholder="{{ t('备注') }}" style="width:7rem">
+          <button class="btn ghost" type="submit">{{ t('存') }}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty">{{ t('没有符合条件的任务') }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+  {% include "_pager.html" %}
+</div>
+
+{% endif %}
+
+{# ⚠️ 当前 tab 没结果、但别的 tab 有匹配 → 必须提示（否则用户以为"搜不到"） #}
+{% if empty_current %}
+  {% set others = [] %}
+  {% for k in tabs %}{% if k != tab and tab_counts[k] %}
+    {% set _ = others.append((k, tab_counts[k])) %}
+  {% endif %}{% endfor %}
+  {% if others %}
+  <div class="card" style="padding:.7rem 1rem;margin-bottom:.8rem" data-testid="other-tabs-hint">
+    <b>{{ t('当前这一栏没有匹配') }}</b>
+    <span class="hint">{{ t('但别的栏里有：') }}</span>
+    {% for k, n in others %}
+    <a class="btn ghost" href="/tasks?{{ page_qs }}tab={{ k }}"
+       data-testid="other-tab-{{ k }}">{{ labels[k] }} {{ n }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

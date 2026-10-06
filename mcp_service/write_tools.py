@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P1 写能力层：finalize_file / rebuild_preview / rebuild_month / set_per_point。
 
-设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md §6。
+设计见 docs/specs-mcp-tools-scenario.md。
 场景化重构（49→16）后本文件**不再注册工具**（注册统一在 scenario_ops.py）：
 - rebuild 经 visit_rebuild(action='preview'|'run') 暴露；
 - finalize 的能力（出正式表）已并入 visit_upload 的自动链路；

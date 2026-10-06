@@ -6,7 +6,7 @@
 from datetime import datetime
 
 from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey,
-                        Integer, String, Text, UniqueConstraint, Index)
+                        Integer, String, Text, UniqueConstraint, Index, text)
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -447,7 +447,7 @@ class MonthPerfRecord(Base):
 
 # ---------------------------------------------------------------------------
 # P1（WorkBuddy 接入）：Token / 审计 / 封账 / 重算快照
-# 设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md
+# 设计见 docs/specs-mcp-tools-scenario.md（工具场景化）与 docs/MCP对接手册.md
 # ---------------------------------------------------------------------------
 
 class ApiToken(Base):
@@ -807,6 +807,10 @@ class StaffDatePlan(Base):
     available = Column(Boolean, nullable=False, default=True)   # True=可出勤 / False=不出勤
     reported = Column(Boolean, nullable=False, default=False)   # True=当天已自报出勤（□）
     source = Column(String(16), nullable=False, default="web", server_default="web")
+    #: 该行是**假期模式自动标的"不出勤"**（用户 2026-10-03"可以标"）：
+    #: 指向 `bd_staff_leave.id`；结束/替换休假时按它**精确撤销**，
+    #: 这样"员工自己点的 ×"和"休假带的 ×"分得清，不会互相抹掉。
+    leave_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now)
     updated_at = Column(DateTime, nullable=False, default=_now, onupdate=_now)
 
@@ -823,3 +827,522 @@ class FormToken(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=_now, index=True)
     used_at = Column(DateTime, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# BD 作业域（bd_*）：行政区划基底 / 门店宇宙
+# 设计见 docs/specs-bd-ops-layer.md
+#
+# ⚠️ 硬边界：本域**只新增表**，绝不向结算域表（formal_records /
+#    person_daily_stats / month_perf_records / payroll_*）加列；
+#    结算域永不读取本域数据。
+# ---------------------------------------------------------------------------
+
+class BdArea(Base):
+    """行政区划基底（作業域）：都道府県 / 市区町村 / 町丁目。
+
+    官方编码，**只读同步**（来源：総務省 全国地方公共団体コード；
+    町丁目层将来可用 e-Stat 小地域补全）。不自造坐标系 ——
+    片区（bd_zone，P2 建）由本表的丁目集合构成。
+
+    - `level`：pref / city / town
+    - `code`：pref=2 位、city=6 位（全国地方公共団体コード）、town=11 位
+    - `parent_code`：上级 code（city → pref、town → city）
+    """
+    __tablename__ = "bd_area"
+    __table_args__ = (
+        UniqueConstraint("level", "code", name="uq_bd_area_level_code"),
+        Index("ix_bd_area_parent", "parent_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    level = Column(String(8), nullable=False)                # pref/city/town
+    code = Column(String(16), nullable=False)
+    name = Column(String(128), nullable=False, default="")
+    name_kana = Column(String(128), nullable=False, default="",
+                       server_default="")
+    parent_code = Column(String(16), nullable=True)
+    pref_code = Column(String(4), nullable=False, default="",
+                       server_default="")
+    city_code = Column(String(8), nullable=False, default="",
+                       server_default="")
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStore(Base):
+    """门店宇宙（作業域）：回流累积的门店主档。
+
+    ⭐ `store_key` **优先取既有 `raw_records.store_id_raw`** ——
+    实测它是稳定的门店主键（一个 id → 一个店名，基本 1:1；
+    格式 `010104709` + 注册日 + 序号）。**不必依赖 Google place_id。**
+
+    - `area_code`：所属町丁目 code（靠地址地理编码回填，可空）
+    - `last_visit_date`：**60 天冷却的判定依据**
+    - `zone_id`：所属片区（冗余；片区表 P2 再建，此处不加 FK）
+    """
+    __tablename__ = "bd_store"
+    __table_args__ = (
+        UniqueConstraint("store_key", name="uq_bd_store_key"),
+        Index("ix_bd_store_area", "area_code"),
+        Index("ix_bd_store_zone", "zone_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    store_key = Column(String(64), nullable=False)
+    name_raw = Column(Text, nullable=False, default="")
+    name_norm = Column(Text, nullable=False, default="")
+    address = Column(Text, nullable=False, default="", server_default="")
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    area_code = Column(String(16), nullable=True)
+    zone_id = Column(Integer, nullable=True)
+    place_id = Column(String(64), nullable=True)
+    gyotai = Column(String(64), nullable=False, default="", server_default="")
+    first_seen_person_code = Column(String(32), nullable=True)
+    first_seen_date = Column(Date, nullable=True)
+    last_visit_date = Column(Date, nullable=True)
+    visit_count = Column(Integer, nullable=False, default=0)
+    source = Column(String(16), nullable=False, default="import",
+                    server_default="import")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+# ---------------------------------------------------------------------------
+# 团队 + 车站任务（feat/team-task · 规格 docs/specs-team-management.md /
+# docs/specs-station-tasks.md）
+#
+# ⚠️ 硬边界：本域**只新增 bd_* 表**，绝不向结算域表（formal_records /
+#    person_daily_stats / month_perf_records / payroll_*）加列；
+#    结算域永不读取本域数据。
+# ---------------------------------------------------------------------------
+
+class BdTeam(Base):
+    """团队（一层队；队名由管理员起，如 `小川队`）。"""
+    __tablename__ = "bd_team"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_bd_team_name"),
+        UniqueConstraint("code", name="uq_bd_team_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    code = Column(String(32), nullable=True)
+    note = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")          # active / closed
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTeamMember(Base):
+    """团队成员（含历史：人走了写 end_date，永不删行）。
+
+    - `role`：leader 队长 / member 队员
+    - ⚠️ **死规定（用户 2026-10-03）**：**一个人同时只能在一个队**；跨队没有"借调"，
+      只有**先转出、再转入**（原队 `end_date` 收口 + 新队开一行）。
+      所以 `person_code` 在 `end_date IS NULL` 的行上**唯一** —— 部分唯一索引
+      `uq_bd_team_member_active_person`（SQLite/PG 都支持）。服务层判重只是第一层，
+      这条索引让任何代码路径 / 手工 SQL 都破不了。
+    """
+    __tablename__ = "bd_team_member"
+    __table_args__ = (
+        UniqueConstraint("team_id", "person_code", "start_date",
+                         name="uq_bd_team_member"),
+        Index("ix_bd_team_member_person", "person_code"),
+        Index("uq_bd_team_member_active_person", "person_code", unique=True,
+              sqlite_where=text("end_date IS NULL"),
+              postgresql_where=text("end_date IS NULL")),
+    )
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=False)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    role = Column(String(16), nullable=False, default="member",
+                  server_default="member")           # leader / member
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)           # NULL = 现役
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdLine(Base):
+    """铁道线路主档（车站的上级）。
+
+    数据来源：**国土数値情報 N02（鉄道）** —— `scripts/bd_fetch_rail.py` 抓取并生成
+    `scripts/bd_kanto_rail.json`，`scripts/bd_import_rail.py` 导入。一都三県 ≈ 131 线。
+
+    ⚠️ `name` 是 MLIT 的**官方线路名**，单看会重名（「本線」有京急/京成/西武…，
+    都営是「12号線大江戸線」）→ **界面一律显示 `operator_short + name`**（如「京急 本線」）。
+    `kind` 是粗分类（jr / shinkansen / private / public / third / monorail / agt / tram / cable）。
+    """
+    __tablename__ = "bd_line"
+    __table_args__ = (
+        UniqueConstraint("operator", "name", name="uq_bd_line_op_name"),
+        Index("ix_bd_line_kind", "kind"),
+        Index("ix_bd_line_name_norm", "name_norm"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    name_norm = Column(String(64), nullable=False)          # NFKC + 去空白
+    operator = Column(String(64), nullable=False)           # MLIT 运营公司全名
+    operator_short = Column(String(32), nullable=False, default="", server_default="")
+    kind = Column(String(16), nullable=False, default="", server_default="")
+    prefs = Column(String(32), nullable=False, default="", server_default="")
+    n_station = Column(Integer, nullable=False, default=0, server_default="0")
+    source = Column(String(16), nullable=False, default="mlit", server_default="mlit")
+    note = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStationPlace(Base):
+    """**物理车站（场所）**：车站数据资产的**核心层**（2026-10-05 用户："车站数据可以当成我们的数据资产。
+
+    也是任务的输入源之一"）。
+
+    - 一条 = 一个真实存在的车站（人真正走到的那个地方）
+    - `bd_station` = "**某条线路上的**这个站"（站×线隶属），一个 place 下 1~N 条
+    - 分层键 = **N02_005g 駅グループコード**（MLIT 官方"同一车站"分组；**不用猜**）
+      实测：1,920 条站×线 → **1,568 个物理车站**，237 个跨线站（渋谷/新宿/横浜/大宮/池袋 最多 7 条线），
+      同组站名 100% 一致、坐标 100% 在 1km 内（0 异常）
+    - ⚠️ **任务仍挂在 `bd_station`（站×线）上**，本层**不改任务行为**：将来要"一个物理车站一个任务"
+      时，把任务指到 place 即可（届时定合并规则）；`lines_text`/`n_line` 让界面先能显示"N 条线经过"
+    - 未来**片区（zone）**也从这一层长出来（一片区域 = 若干物理车站）
+    """
+    __tablename__ = "bd_station_place"
+    __table_args__ = (
+        # group_code 是 N02 的分组码；手工建的站没有 → 用部分唯一索引（只约束非空）
+        Index("uq_bd_place_group", "group_code", unique=True,
+              sqlite_where=text("group_code != ''"),
+              postgresql_where=text("group_code != ''")),
+        Index("ix_bd_place_pref", "pref"),
+        Index("ix_bd_place_name_norm", "name_norm"),
+        Index("ix_bd_place_city", "city"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)              # 规范站名（同组取一致写法）
+    name_norm = Column(String(64), nullable=False)         # NFKC + 去空白 + ケ/ヶ 统一
+    pref = Column(String(8), nullable=False, default="", server_default="")
+    city = Column(String(64), nullable=False, default="", server_default="")  # 市区町村（待补）
+    lon = Column(Float, nullable=True)                     # 组内坐标均值
+    lat = Column(Float, nullable=True)
+    group_code = Column(String(16), nullable=False, default="", server_default="")
+    n_line = Column(Integer, nullable=False, default=0, server_default="0")
+    n_operator = Column(Integer, nullable=False, default=0, server_default="0")
+    operators = Column(String(128), nullable=False, default="", server_default="")   # 冗余可读
+    lines_text = Column(Text, nullable=False, default="", server_default="")        # 冗余可读
+    source = Column(String(16), nullable=False, default="mlit", server_default="mlit")
+    note = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStation(Base):
+    """车站主数据（一个站 = 一个站前商圈 = 用户口中的"一边区域"）。
+
+    只存主数据；任务/担当/进展在 `bd_task*` 上。
+    `name_norm` 是站名判重键（NFKC + 去空白 + **ケ/ヶ 统一**）。
+
+    ⚠️ **一线一站**（用户 2026-10-03 口径）：唯一键 = `(line_id, name_norm)`。
+    同一个物理车站跨多条线路时**现在按线路各存一行**（东京站 ×山手線/中央線/…），
+    将来再定合并规则 —— `group_code`（N02_005g，MLIT 的同一车站分组码）已存下来，
+    合并时用它 + 坐标即可（用户："知道有这个坑就行，先不处理"）。
+    `line_id` 为空的历史/手工行，用 `uq_bd_station_noline_name` 保证站名不重复。
+    """
+    __tablename__ = "bd_station"
+    __table_args__ = (
+        Index("uq_bd_station_line_name", "line_id", "name_norm", unique=True,
+              sqlite_where=text("line_id IS NOT NULL"),
+              postgresql_where=text("line_id IS NOT NULL")),
+        Index("uq_bd_station_noline_name", "name_norm", unique=True,
+              sqlite_where=text("line_id IS NULL"),
+              postgresql_where=text("line_id IS NULL")),
+        Index("ix_bd_station_line", "line"),
+        Index("ix_bd_station_line_id", "line_id"),
+        Index("ix_bd_station_pref", "pref"),
+        Index("ix_bd_station_group_code", "group_code"),
+        Index("ix_bd_station_place_id", "place_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    name_norm = Column(String(64), nullable=False)
+    line = Column(String(64), nullable=False, default="", server_default="")
+    #: 线路主档（N02 导入的行都有；手工建且没填线路的行可能为空）
+    line_id = Column(Integer, ForeignKey("bd_line.id"), nullable=True)
+    #: **物理车站**（资产核心层）：同一 place 下的多行 = 多条线路经过同一个车站
+    place_id = Column(Integer, ForeignKey("bd_station_place.id"), nullable=True)
+    #: MLIT 运营公司全名（冗余，列表页不用 join）
+    operator = Column(String(64), nullable=False, default="", server_default="")
+    #: JIS 都道府県码（13=東京都 / 11=埼玉 / 12=千葉 / 14=神奈川）
+    pref = Column(String(8), nullable=False, default="", server_default="")
+    lon = Column(Float, nullable=True)
+    lat = Column(Float, nullable=True)
+    #: N02_005c 駅コード / N02_005g 同一駅グループコード（将来の合并用）
+    ekicode = Column(String(16), nullable=False, default="", server_default="")
+    group_code = Column(String(16), nullable=False, default="", server_default="")
+    #: **沿线顺序**（1 起）——「按线路选站」时用来排序（用户 2026-10-05：
+    #: "直接在现有的车站表里加一列，后面我们查的时候就拿这列做 order 排序"）
+    #: ⚠️ 来源是 **OSM 的"运行系统线路"**（山手線 = 30 站一圈），不是 N02 官方线路口径
+    #:   （N02 把山手环拆成 山手線17 + 東北線 + 東海道線）→ 所以同一 N02 线路内的 seq
+    #:   **可能不连续，但相对顺序是对的**（排序只看相对大小，不看是否 1..N 连号）
+    seq = Column(Integer, nullable=True)
+    #: 沿线里程（km，从该运行系统线路的起点站算）—— 判断"这一站离市中心多远"
+    along_km = Column(Float, nullable=True)
+    #: 顺序来源标记（如 `osm:JR山手線`），空 = 没取到顺序
+    seq_src = Column(String(64), nullable=False, default="", server_default="")
+    source = Column(String(16), nullable=False, default="manual",
+                    server_default="manual")           # manual / mlit
+    note = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")          # active / closed
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTask(Base):
+    """任务 = 一件要做的活；**来源可以是车站，将来也可以是片区**。
+
+    - **任务单位 = 物理车站**（用户 2026-10-05 定稿）：`UNIQUE(place_id)`，
+      「1 个车站 = 1 个任务，各自独立状态」。用户原话："我分给 A 队的 10 个站，
+      **并不是他这 10 个站作为一个整体任务跑完我再分新的**，而是在剩下几个站的时候，
+      我就可以再派发新的一组任务给他" → **派活是滚动的**，所以任务必须细到站、状态独立。
+      （京葉線 10 站给 A 队 + 8 站给 B 队 = **18 个任务**，不是 2 个）
+    - `station_id` 保留（老数据/站×线口径仍可用），**新任务只填 `place_id`**；
+      `UNIQUE(station_id)` 对 NULL 不生效（SQLite/PG 里 NULL 互不相等），所以两者能共存
+    - `source_type`：任务来源判别（今天恒为 `station`）。将来以**片区**当任务时：
+      加 `zone_id`（可空）+ `place_id` 改可空 + `source_type='zone'`，任务表别的都不动
+    - `assign_date`：**分配日期**（管理员把任务派给团队的日期；**默认今天**，
+      用户："一个任务是要好几天才能执行完的"）→ 管理端按区间查询
+    - `state`：unassigned 未分配 / doing 进行中 / done 已完成
+      （由担当 + 进度推导，服务层统一维护）
+    - `pct`：当前进展 0–100（最近一次提交的值，冗余在此便于列表直读）
+    """
+    __tablename__ = "bd_task"
+    __table_args__ = (
+        UniqueConstraint("station_id", name="uq_bd_task_station"),
+        Index("uq_bd_task_place", "place_id", unique=True,
+              sqlite_where=text("place_id IS NOT NULL"),
+              postgresql_where=text("place_id IS NOT NULL")),
+        Index("ix_bd_task_team", "team_id"),
+        Index("ix_bd_task_assign_date", "assign_date"),
+        Index("ix_bd_task_state", "state"),
+    )
+    id = Column(Integer, primary_key=True)
+    #: 任务来源判别：station（现在）/ zone（将来片区）—— 车站与片区都是任务的**输入源**
+    source_type = Column(String(16), nullable=False, default="station",
+                         server_default="station")
+    #: 老口径（站×线）；新任务只填 `place_id`，此列留空
+    station_id = Column(Integer, ForeignKey("bd_station.id"), nullable=True)
+    #: **物理车站**（任务单位）：1 个车站 1 个任务（跨线站也只 1 个）
+    place_id = Column(Integer, ForeignKey("bd_station_place.id"), nullable=True)
+    team_id = Column(Integer, ForeignKey("bd_team.id"), nullable=True)
+    assign_date = Column(Date, nullable=True)        # 分配日期（派给团队那天）
+    state = Column(String(16), nullable=False, default="unassigned",
+                   server_default="unassigned")      # unassigned / doing / done
+    pct = Column(Integer, nullable=False, default=0, server_default="0")
+    # 开始日 / 完成日：对应用户 Excel 的那两列，**自动写**
+    # （首次提交进展 = 开始日；pct 到 100 = 完成日）
+    start_date = Column(Date, nullable=True)
+    done_date = Column(Date, nullable=True)
+    note = Column(Text, nullable=False, default="", server_default="")
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdTaskAssign(Base):
+    """任务担当：一个任务分给 1~2 名队员（上限在服务层强制）。"""
+    __tablename__ = "bd_task_assign"
+    __table_args__ = (
+        UniqueConstraint("task_id", "person_code", name="uq_bd_task_assign"),
+        Index("ix_bd_task_assign_person", "person_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("bd_task.id"), nullable=False)
+    person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
+    assigned_by = Column(String(64), nullable=False, default="", server_default="")
+    assigned_at = Column(DateTime, nullable=False, default=_now)
+    #: **当天派工日期**（JST）。队长"每天派工"用：今天派的 ∪ 未完成的（自动延续）就是队员当天要做的。
+    #: NULL = 早于本字段的历史行（按"未完成即延续"处理）
+    dispatch_date = Column(Date, nullable=True, index=True)
+
+
+class BdTaskProgress(Base):
+    """每日任务进展提交（一天一条，当天可改；历史留痕）。
+
+    - `pct` 0–100（滑动条）= **当前生效值**（队长调整后就是调整后的值）
+    - `progress_date`：业务日（JST），UNIQUE(task_id, progress_date)
+    - **审核（用户 2026-10-03 要求：员工先上报 → 队长确认或调整）**：
+      · `reported_pct`/`reported_by`：**员工上报的原值**（队长调整也不动，用于对比展示）
+      · `review_status`：`pending`（等确认）/ `confirmed`（认可，值与上报一致）
+        / `adjusted`（队长改了值）
+      · `reviewed_by`/`reviewed_at`/`review_note`：谁什么时候处理的
+    """
+    __tablename__ = "bd_task_progress"
+    __table_args__ = (
+        UniqueConstraint("task_id", "progress_date", name="uq_bd_task_progress"),
+        Index("ix_bd_task_progress_date", "progress_date"),
+    )
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("bd_task.id"), nullable=False)
+    progress_date = Column(Date, nullable=False)
+    pct = Column(Integer, nullable=False, default=0, server_default="0")
+    note = Column(Text, nullable=False, default="", server_default="")
+    submitted_by = Column(String(32), nullable=False, default="",
+                          server_default="")
+    # ---- 上报 / 审核（员工先报、队长确认或调整）----
+    reported_pct = Column(Integer, nullable=True)
+    reported_by = Column(String(32), nullable=False, default="",
+                         server_default="")
+    review_status = Column(String(16), nullable=False, default="pending",
+                           server_default="pending")
+    reviewed_by = Column(String(32), nullable=False, default="",
+                         server_default="")
+    reviewed_at = Column(DateTime, nullable=True)
+    review_note = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdLog(Base):
+    """作业域变更日志（**追加型：只写不改不删**）。
+
+    用户 2026-10-03 要求：「每个任务的变化日志；团队变化、团队成员变化、队长变化也要记」。
+    设计取舍：**一张通用表**（`domain` 区分），写入只有一处、时间线一次查询出全。
+
+    - `domain`：task / team / member / station
+    - `ref_id`：对应行 id；`ref_label` 冗余可读（车站名/队名/人名），日志永远看得懂
+    - `action`：create / update / dispatch / assign / unassign / role / state
+      / progress / remove / status
+    - `field` + `old_value` + `new_value`：改了什么（"担当：汤静 → 甘子杰"）
+    - `actor`：操作人（登录名或 person_code）；`actor_name` 冗余显示名
+    """
+    __tablename__ = "bd_log"
+    __table_args__ = (
+        Index("ix_bd_log_ref", "domain", "ref_id"),
+        Index("ix_bd_log_created", "created_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    domain = Column(String(16), nullable=False)
+    ref_id = Column(Integer, nullable=True)
+    ref_label = Column(String(128), nullable=False, default="", server_default="")
+    action = Column(String(24), nullable=False)
+    field = Column(String(32), nullable=False, default="", server_default="")
+    old_value = Column(Text, nullable=False, default="", server_default="")
+    new_value = Column(Text, nullable=False, default="", server_default="")
+    actor = Column(String(64), nullable=False, default="", server_default="")
+    actor_name = Column(String(64), nullable=False, default="", server_default="")
+    note = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdRoleCap(Base):
+    """角色能力表（**权限口径的单一来源**，用户 2026-10-03 选 (a) 方案）。
+
+    `(role, capability) → allowed`；判权（服务层）与页面按钮（模板）共用这一份。
+    能力清单见 `app/services/bd_perm.py::CAPABILITIES`（保持小而实用）。
+    """
+    __tablename__ = "bd_role_cap"
+    __table_args__ = (
+        UniqueConstraint("role", "capability", name="uq_bd_role_cap"),
+    )
+    id = Column(Integer, primary_key=True)
+    role = Column(String(16), nullable=False)
+    capability = Column(String(32), nullable=False)
+    allowed = Column(Boolean, nullable=False, default=False,
+                      server_default="0")
+    note = Column(Text, nullable=False, default="", server_default="")
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdAiSummary(Base):
+    """**任务域 AI 总结的缓存**（一天一条；用户 2026-10-06：生成一次、点开即看）。
+
+    ⚠️ 为什么不复用结算域的 `ai_runs`：铁律「作业域只写 `bd_*` 表」。
+    """
+    __tablename__ = "bd_ai_summary"
+    __table_args__ = (UniqueConstraint("summary_date", name="uq_bd_ai_summary_day"),)
+    id = Column(Integer, primary_key=True)
+    #: 业务日（JST）—— 一天一条，当天再点直接看缓存
+    summary_date = Column(Date, nullable=False)
+    days = Column(Integer, nullable=False, default=7, server_default="7")
+    #: 送进模型的指标（JSON 文本；回头核对"总结是不是基于这些数"就靠它）
+    metrics_json = Column(Text, nullable=False, default="", server_default="")
+    #: 模型产出的总结（JSON 文本：headline / bullets / risks）
+    summary_json = Column(Text, nullable=False, default="", server_default="")
+    model = Column(String(64), nullable=False, default="", server_default="")
+    tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdStaffLeave(Base):
+    """员工自己的**假期模式**（休假期，用户 2026-10-03 要求）。
+
+    - 员工在员工端 `/my/plan` 上自己开启/结束；管理员可代改（服务层支持）
+    - `end_date` 为空 = **未定结束日**（长期休假）
+    - **一人同时只有一条 `status='active'` 的休假期**（新开一条 → 旧的自动结束）
+    - 派工只看"目标日期是否落在休假期内" → **提醒，不强制约束**（用户明确）
+    """
+    __tablename__ = "bd_staff_leave"
+    __table_args__ = (
+        Index("ix_bd_staff_leave_person", "person_code", "start_date"),
+    )
+    id = Column(Integer, primary_key=True)
+    person_code = Column(String(64), nullable=False, index=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)          # 空 = 未定
+    reason = Column(Text, nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active",
+                    server_default="active")        # active / ended
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdMessage(Base):
+    """站内消息（**头信息**，一条消息一行）。
+
+    用户 2026-10-03：「消息模块就是类似其它网站或者系统的消息模块」——
+    所以走标准设计：**一条消息 + N 个收件人**（`BdMessageRecipient`），已读是**按人**的。
+
+    - `sender_kind`：`system`（任务确认/调整等自动通知）/ `admin` / `leader`
+    - `scope`：`manual`（手动发）/ `task_review`（任务进展确认/调整）/ `announce`（公告）
+    - `url`：点开消息跳哪里（如任务详情 `/tasks/12`）
+    - `ref_type`/`ref_id`：关联对象，便于按任务查消息
+    """
+    __tablename__ = "bd_message"
+    __table_args__ = (Index("ix_bd_message_created", "created_at"),)
+    id = Column(Integer, primary_key=True)
+    sender_kind = Column(String(16), nullable=False, default="system",
+                         server_default="system")
+    sender = Column(String(64), nullable=False, default="", server_default="")
+    sender_name = Column(String(64), nullable=False, default="",
+                         server_default="")
+    title = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False, default="", server_default="")
+    url = Column(String(255), nullable=False, default="", server_default="")
+    scope = Column(String(24), nullable=False, default="manual",
+                   server_default="manual")
+    ref_type = Column(String(24), nullable=False, default="", server_default="")
+    ref_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
+class BdMessageRecipient(Base):
+    """消息收件人（**每个收件人一行**，已读各自独立）。"""
+    __tablename__ = "bd_message_recipient"
+    __table_args__ = (
+        UniqueConstraint("message_id", "person_code",
+                         name="uq_bd_message_recipient"),
+        Index("ix_bd_message_recipient_person", "person_code", "read_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("bd_message.id", ondelete="CASCADE"),
+                        nullable=False)
+    person_code = Column(String(64), nullable=False)
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)

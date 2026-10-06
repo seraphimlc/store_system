@@ -1,5 +1,8 @@
 # MCP OAuth（SSO）规格
 
+> **状态**：设计规格（该期定稿）｜**最后更新**：2026-10-06
+> **一句话**：MCP OAuth（SSO）
+
 > 目标：员工在 WorkBuddy 点「连接」→ 浏览器登录**巡店系统账号** → 自动完成授权。
 > **不再需要每人手动配 token**。已确认 WorkBuddy 客户端支持 MCP OAuth（实测其主程序含
 > `/.well-known/oauth-protected-resource`、`pkce`、`registration_endpoint`、`token_endpoint`）。

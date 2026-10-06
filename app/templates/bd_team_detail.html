@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}{{ team.name }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ team.name }} <span class="sub">{{ team.code or '' }}</span></h1>
+  <div class="actions">
+    <a class="btn ghost" href="/teams">{{ t('返回团队列表') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:.9rem;padding:.8rem 1rem">
+  <form method="post" action="/teams/{{ team.id }}/edit">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <div class="form-grid">
+      <label>{{ t('队名') }}<input type="text" name="name" value="{{ team.name }}" required></label>
+      <label>{{ t('队编号') }}<input type="text" name="code" value="{{ team.code or '' }}"></label>
+      <label>{{ t('状态') }}
+        <select name="status">
+          <option value="active" {% if team.status=='active' %}selected{% endif %}>{{ t('在岗') }}</option>
+          <option value="closed" {% if team.status=='closed' %}selected{% endif %}>{{ t('停用') }}</option>
+        </select>
+      </label>
+      <label>{{ t('备注') }}<input type="text" name="note" value="{{ team.note or '' }}" style="width:100%"></label>
+    </div>
+    <div class="form-actions"><button class="btn" type="submit">{{ t('保存队信息') }}</button></div>
+  </form>
+</div>
+
+{# 成员：勾选进队 + radio 指定队长（用户口径：一个队 1 名队长）
+   2026-10-03 用户："圈选队员的表格太丑了。做一个普通的表格不行吗？"
+   → 去掉自创的滚动小窗口/工具条/整行染色，回到**和 /车站、/任务 一样的普通表格**：
+     筛选 → 操作行 → `.tbl-wrap > table.grid-tbl` → 说明 #}
+<form method="post" action="/teams/{{ team.id }}/members" class="card"
+      style="padding:.8rem 1rem" data-testid="members-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <h3 style="margin-top:0">{{ t('圈选队员') }}
+    <span class="hint">{{ t('勾选的人进队，没勾的移出（移出写历史，不删记录）') }}</span>
+  </h3>
+  <label class="f">{{ t('按姓名 / 编号筛选') }}
+    <input type="text" id="pick-filter" placeholder="{{ t('输入姓名或编号后 5 位') }}"
+           style="width:260px" oninput="bdFilter(this.value)"
+           data-testid="pick-filter">
+  </label>
+  <div class="form-actions">
+    <button class="btn" type="submit" data-testid="members-save">{{ t('保存成员') }}</button>
+    <button class="btn ghost" type="button" onclick="bdUncheckAll()"
+            data-testid="pick-clear">{{ t('全不选') }}</button>
+    <span class="hint" data-testid="pick-count">
+      {{ t('已勾选') }} <b id="pick-n">0</b> / {{ people|length }} {{ t('人') }}
+      · {{ t('可见') }} <span id="pick-shown">{{ people|length }}</span> {{ t('人') }}
+    </span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="grid-tbl">
+      <thead>
+        <tr><th class="pick-cell">{{ t('进队') }}</th>
+            <th class="pick-cell"
+                title="{{ t('点这里＝指定他当队长（会自动勾上「进队」）；一个队 1 名') }}">{{ t('队长') }}</th>
+            <th>{{ t('姓名') }}</th>
+            <th title="{{ t('鼠标悬停看完整编号') }}">{{ t('员工编号') }}</th>
+            <th>{{ t('账号') }}</th>
+            <th>{{ t('员工状态') }}</th>
+            <th>{{ t('原角色') }}</th></tr>
+      </thead>
+      <tbody>
+        {% for p in people %}
+        {% set on = p.code in active_codes %}
+        {% set old = (members|selectattr('person_code','equalto',p.code)|list|first) %}
+        <tr data-name="{{ p.display_name }} {{ p.code }}"
+            data-testid="pick-row">
+          <td class="pick-cell"><input type="checkbox" name="person" value="{{ p.code }}"
+                     {% if on %}checked{% endif %} onchange="bdRowPicked(this)"
+                     data-testid="pick-{{ p.code }}"></td>
+          <td class="pick-cell"><input type="radio" name="leader" value="{{ p.code }}"
+                     onchange="bdLeaderPicked(this)"
+                     {% if old and old.role == 'leader' %}checked{% endif %}
+                     data-testid="leader-{{ p.code }}"></td>
+          <td>{{ p.display_name }}</td>
+          <td title="{{ p.code }}">{{ p.code[-5:] }}</td>
+          <td>{% if p.has_account %}{{ t('已开通') }}{% else %}<span class="hint">{{ t('未开通') }}</span>{% endif %}</td>
+          <td data-testid="status-{{ p.code }}">{{ status_labels.get(p.status, p.status) if p.status else t('未开通账号') }}</td>
+          <td>{% if old %}{{ t('队长') if old.role == 'leader' else t('队员') }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {# 两条说明：怎么指定队长 + 候选范围（`一个队员只能在一个队`） #}
+  <p class="hint" style="margin:.6rem 0 .2rem" data-testid="leader-howto">
+    {{ t('指定队长：勾上他这行的「进队」，再点「队长」——点「队长」会自动帮你勾上「进队」。一个队 1 名队长。') }}
+  </p>
+  <p class="hint" style="margin:0" data-testid="pick-scope">
+    {{ t('列表里只有本队队员和还没进队的人；已被其它队圈走的') }}
+    <b data-testid="n-elsewhere">{{ n_elsewhere or 0 }}</b>
+    {{ t('人不显示（一个队员只能在一个队，要调人先在他原来的队移出）。没有账号的人看不到任务页，但仍可被记录为队员。') }}
+  </p>
+</form>
+<script>
+/* 圈选表格（纯前端，不依赖脚本库）：筛选 + 已勾选计数 + 全不选。
+   提交字段仍是 person[]（进队）/ leader（队长）。样式走通用的 `.grid-tbl`，不做任何自创修饰。 */
+function bdPicked() {
+  return document.querySelectorAll('input[name="person"]:checked');
+}
+function bdCount() {
+  var el = document.getElementById('pick-n');
+  if (el) el.textContent = bdPicked().length;
+}
+function bdRowPicked() {
+  bdCount();
+}
+/* 点「队长」= 指定他当队长 → **自动勾上「进队」**（后端只认「进队」勾选的人；
+   用户 2026-10-03："如何指定队长？" 就是漏了这一步）。 */
+function bdLeaderPicked(radio) {
+  var tr = radio.closest ? radio.closest('tr') : null;
+  if (!tr) return;
+  var cb = tr.querySelector('input[name="person"]');
+  if (cb && !cb.checked) {
+    cb.checked = true;
+    bdCount();
+  }
+}
+function bdUncheckAll() {
+  document.querySelectorAll('input[name="person"]').forEach(function (cb) {
+    cb.checked = false;
+  });
+  bdCount();
+}
+function bdFilter(q) {
+  q = (q || '').trim().toLowerCase();
+  var shown = 0;
+  document.querySelectorAll('tr[data-testid="pick-row"]').forEach(function (tr) {
+    var t = (tr.getAttribute('data-name') || '').toLowerCase();
+    var hit = !q || t.indexOf(q) >= 0;
+    tr.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  var el = document.getElementById('pick-shown');
+  if (el) el.textContent = shown;
+}
+bdCount();
+</script>
+{% endblock %}

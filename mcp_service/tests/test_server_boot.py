@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """服务能组装、传输安全未被关闭、进程级启动行为正确（spec §8 T2）。
 
-- test_tools_are_registered：工具清单 = 16 个场景化工具（visit_verify / visit_overview …）
+- test_tools_are_registered：工具清单 = 24 个场景化工具（visit_verify / visit_overview …）
 - test_exit_nonzero_on_bad_config：空配置启动必须非零退出（spec §8 T2）
 - test_boots_and_listens：好配置必须真的监听端口（"能启动"的冒烟证据）
 """
@@ -39,8 +39,8 @@ def test_tools_are_registered(monkeypatch, tmp_path):
     monkeypatch.setenv("VISIT_MCP_LOG", str(tmp_path / "r.jsonl"))
     mcp = build_server()
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    # 场景化重构后 = 16 个（规格：docs/specs-mcp-tools-scenario.md 第三节）
-    assert len(names) == 16
+    # 场景化重构 16 个 + 作业域 8 个 = 24 个（2026-10-06）
+    assert len(names) == 24
     assert {"visit_verify", "visit_overview", "visit_upload", "visit_whoami",
             "visit_my_perf", "visit_my_pay"} <= names
     # 旧工具名已删除（不做兼容期）

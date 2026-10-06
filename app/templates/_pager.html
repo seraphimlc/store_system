@@ -1,0 +1,34 @@
+{# 统一分页条（app/services/paging.py 配套）。
+   用法：{% include "_pager.html" %} —— 上下文需有 `pager`（paginate() 的返回值）
+   与 `page_qs`（paging.qs(request.query_params)，保留筛选条件）。
+   单页时只显示「共 N 条」，不显示翻页按钮（少即是多）。 #}
+{% if pager and pager.total %}
+  {% if pager.pages > 1 %}
+<div class="pager" data-testid="pager">
+  <span class="hint" data-testid="pager-info">
+    {{ t('共') }} {{ pager.total }} {{ t('条') }} ·
+    {{ t('第') }} {{ pager.page }} / {{ pager.pages }} {{ t('页') }}
+    （{{ pager.start }}–{{ pager.end }}）
+  </span>
+  <span style="flex:1"></span>
+  {% if pager.has_prev %}
+  <a class="btn ghost" href="?{{ page_qs }}page=1" data-testid="page-first">{{ t('首页') }}</a>
+  <a class="btn ghost" href="?{{ page_qs }}page={{ pager.page - 1 }}" data-testid="page-prev">{{ t('上一页') }}</a>
+  {% else %}
+  <span class="btn ghost disabled">{{ t('上一页') }}</span>
+  {% endif %}
+  {% if pager.has_next %}
+  <a class="btn ghost" href="?{{ page_qs }}page={{ pager.page + 1 }}" data-testid="page-next">{{ t('下一页') }}</a>
+  <a class="btn ghost" href="?{{ page_qs }}page={{ pager.pages }}" data-testid="page-last">{{ t('末页') }}</a>
+  {% else %}
+  <span class="btn ghost disabled">{{ t('下一页') }}</span>
+  {% endif %}
+</div>
+  {% else %}
+<p class="hint" style="padding:.5rem .8rem" data-testid="pager-total">
+  {{ t('共') }} {{ pager.total }} {{ t('条') }}</p>
+  {% endif %}
+{% elif pager %}
+<p class="hint" style="padding:.5rem .8rem" data-testid="pager-empty">
+  {{ t('没有符合条件的记录') }}</p>
+{% endif %}

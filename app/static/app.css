@@ -425,3 +425,74 @@ table.plan-matrix th .hint { font-weight: 400; }
   font-size: .95rem; color: var(--ink); border: 1px solid var(--line);
   border-radius: 8px; background: #fff; }
 .edit-dlg .form-actions { display: flex; gap: .5rem; margin-top: .7rem; }
+
+/* 车站任务：停滞行（未完成且多少天没动）高亮，管理端一眼可见 */
+.stale-row { background: #fff8e6; }
+.stale-row td:first-child { box-shadow: inset 3px 0 0 var(--warn, #d98a00); }
+
+/* ---------------- 管理端左侧分组菜单（用户 2026-10-03：顶部放不下了） ---------------- */
+.sidenav {
+  position: fixed; top: 54px; bottom: 0; left: 0; width: 210px; z-index: 15;
+  background: #0d1b34; border-right: 1px solid #1d335c;
+  padding: .35rem 0 1.6rem; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.sidenav .side-group { padding: .2rem 0 .35rem; }
+.sidenav .side-title {
+  font-size: .7rem; letter-spacing: .5px; color: #6b86b6;
+  padding: .6rem .95rem .2rem;
+}
+.sidenav .side-item {
+  display: flex; align-items: center; gap: .4rem;
+  color: #cfe0ff; font-size: .93rem; padding: .42rem .95rem;
+  border-left: 3px solid transparent;
+}
+.sidenav .side-item:hover { background: #16294a; color: #fff; text-decoration: none; }
+.sidenav .side-item.on {
+  background: #16294a; color: #fff; font-weight: 600;
+  border-left-color: var(--brand);
+}
+.sidenav .side-item .badge {
+  background: #e0483f; color: #fff; border-radius: 999px;
+  font-size: .7rem; line-height: 1; padding: .18rem .38rem; font-weight: 600;
+}
+/* 有左侧菜单时内容区让位（宽屏才让，窄屏它是抽屉） */
+@media (min-width: 861px) {
+  body.has-sidenav main.wrap { margin-left: 210px; margin-right: auto; }
+  body.has-sidenav .topbar { padding-left: 1.5rem; }
+}
+@media (max-width: 860px) {
+  /* 窄屏：左侧菜单变抽屉，顶部汉堡按钮开关 */
+  .sidenav {
+    top: 0; width: 262px; padding-top: .5rem; z-index: 40;
+    display: none; box-shadow: 6px 0 22px rgba(8,18,44,.4);
+  }
+  .sidenav.open { display: block; }
+  body.has-sidenav main.wrap { margin-left: 0; margin-right: auto; }
+}
+.sidenav .side-foot { border-top: 1px solid #1d335c; margin-top: .5rem; }
+.sidenav .side-lang { color: #8fa6cd; font-size: .85rem; }
+.sidenav .side-lang a { color: #cfe0ff; }
+.sidenav .side-logout { margin: 0; }
+.sidenav .side-logout-btn {
+  background: none; border: 0; width: 100%; text-align: left;
+  cursor: pointer; font: inherit; color: #cfe0ff;
+  border-left: 3px solid transparent;
+}
+.sidenav .side-logout-btn:hover { background: #16294a; color: #fff; }
+/* 窄屏抽屉的遮罩（点空白处关闭） */
+.nav-mask {
+  position: fixed; inset: 0; background: rgba(8,18,44,.42); z-index: 35;
+}
+@media (min-width: 861px) { .nav-mask { display: none !important; } }
+[x-cloak] { display: none !important; }
+
+/* 圈选表格工具条 + 选中行高亮（团队详情） */
+/* 圈选表格：进队/队长两列窄且居中；其余走通用 grid-tbl（用户："做一个普通的表格"） */
+.pick-cell { width: 3.6rem; text-align: center !important; }
+
+/* 统一分页条（_pager.html）：一行，左计数右翻页 */
+.pager { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .55rem .8rem; border-top: 1px solid var(--line); background: #fafbfe; }
+.pager .btn.disabled { opacity: .45; cursor: default; pointer-events: none; }
+.pager .hint { font-size: .86rem; }

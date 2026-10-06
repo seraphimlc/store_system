@@ -403,6 +403,9 @@ def roster_start_map(db, codes: Optional[List[str]] = None) -> Dict[str, date]:
     渲染路径"只读计划表"的约定不受影响；查询全是单表聚合，没有 join。）
     """
     from sqlalchemy import func
+    if codes and len(codes) == 1:
+        d = roster_start_fast(db, list(codes)[0])
+        return {list(codes)[0]: d} if d else {}
     out: Dict[str, date] = {}
     q1 = (db.query(User.person_code, func.min(User.created_at))
           .filter(User.role == "staff", User.person_code.isnot(None)))
@@ -429,10 +432,38 @@ def roster_start_map(db, codes: Optional[List[str]] = None) -> Dict[str, date]:
     return out
 
 
-def roster_start(db, person_code: Optional[str]) -> Optional[date]:
+def _coerce_dt(v):
+    """原生 SQL 在 SQLite 上取回的是字符串 → 解析成 datetime（ORM 会自动转，裸 SQL 不会）。"""
+    from datetime import datetime as _dt
+    if isinstance(v, str):
+        try:
+            return _dt.fromisoformat(v.replace(" ", "T", 1))
+        except ValueError:
+            return None
+    return v
+
+
+def roster_start_fast(db, person_code: Optional[str]) -> Optional[date]:
+    """单人版：**一条 SQL**（三个标量子查询）——中间件每请求都要用，省两次往返。
+
+    结果与 `roster_start()` 完全一致（都是"三者取最早"）。
+    """
     if not person_code:
         return None
-    return roster_start_map(db, [person_code]).get(person_code)
+    from sqlalchemy import text
+    row = db.execute(text(
+        "SELECT (SELECT MIN(created_at) FROM users "
+        "         WHERE role = 'staff' AND person_code = :c), "
+        "       (SELECT created_at FROM persons WHERE code = :c), "
+        "       (SELECT MIN(plan_date) FROM staff_date_plans WHERE person_code = :c)"
+    ), {"c": person_code}).first()
+    days = [d for d in (_jst_date(_coerce_dt(x)) for x in (row or ())) if d]
+    return min(days) if days else None
+
+
+def roster_start(db, person_code: Optional[str]) -> Optional[date]:
+    """单人「名册起点」（≈入职日）：users/persons/plans 三者最早（JST）。"""
+    return roster_start_fast(db, person_code)
 
 
 def personal_window_state(db, person_code: Optional[str], key: str,
@@ -687,10 +718,12 @@ def admin_matrix(db, key: str, today=None) -> dict:
     start, end, deadline = period_bounds(key)
     days = period_days(key)
     plan_rows = (db.query(StaffDatePlan.person_code, StaffDatePlan.plan_date,
-                          StaffDatePlan.available, StaffDatePlan.reported)
+                          StaffDatePlan.available, StaffDatePlan.reported,
+                          StaffDatePlan.leave_id)
                  .filter(StaffDatePlan.plan_date >= start,
                          StaffDatePlan.plan_date <= end).all())
-    plan_map = {(c, d): (bool(a), bool(r)) for c, d, a, r in plan_rows}
+    plan_map = {(c, d): (bool(a), bool(r)) for c, d, a, r, _lv in plan_rows}
+    leave_map = {(c, d) for c, d, _a, _r, lv in plan_rows if lv}
     with_plan = {c for c, _ in plan_map}          # 有行 = 登记过（含只自报的行，下面再判）
 
     cand = _matrix_people(db)
@@ -758,6 +791,8 @@ def admin_matrix(db, key: str, today=None) -> dict:
         rows.append({
             "person_code": code, "name": cand[code]["name"] or code,
             "short_code": short_code(code),      # 页面/导出只显示后 5 位（完整编号在 title 里）
+            # 这些天是「假期模式」自动标的不出勤（页面用它区别于员工自己点的 ×）
+            "leave_days": [d for d in days if (code, d) in leave_map],
             "states": states,
             "marks": {d: MARKS[s] for d, s in states.items()},
             "assumed_days": assumed,       # 逐日：这一格是"没填→默认可出勤"（浅色显示）

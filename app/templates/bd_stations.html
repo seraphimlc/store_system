@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ t('车站') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('车站') }}</h1>
+  <span class="sub">{{ t('车站资产：线路 / 站×线 / 物理车站；派任务请到「任务」页') }}</span>
+  <div class="actions">
+    <a class="btn ghost" download data-testid="stations-export"
+       href="/stations/export?kw={{ kw }}&status={{ status }}&line={{ line_id or '' }}&pref={{ pref }}&operator={{ operator }}&kind={{ kind }}&multi={{ multi }}&sort={{ sort }}">{{ t('导出 CSV') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+{# 车站数据资产（三层：线路 / 站×线 / 物理车站）—— 用户 2026-10-05："车站数据是数据资产" #}
+<div class="stat-grid grid" style="margin-bottom:.8rem" data-testid="station-asset">
+  <div class="stat-card"><div class="k">{{ t('线路') }}</div><div class="v">{{ asset.n_line }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('车站（站×线）') }}</div><div class="v">{{ asset.n_station }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('物理车站') }}</div><div class="v">{{ asset.n_place }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('跨线车站') }}</div><div class="v">{{ asset.n_multi_line }}</div></div>
+</div>
+
+{# 筛选：标准写法（form.form-grid + label.fld + form-actions）
+   关键词 = 一个框搜全部：站名 / 駅コード / 运营商 / 线路名 / 还经过 / 都道府県名 #}
+<div class="card" style="margin-bottom:.8rem;padding:.8rem 1rem">
+  <form method="get" class="form-grid" data-testid="station-filter">
+    <label class="fld">{{ t('关键词') }}
+      <input type="search" name="kw" value="{{ kw }}"
+             placeholder="{{ t('站名 / 駅コード / 线路') }}" data-testid="station-kw">
+    </label>
+    <label class="fld">{{ t('线路') }}
+      <select name="line" data-cb-filter="1" data-emp-filter-hint="{{ t('输入线路名（中文/日文）') }}" data-testid="line-filter">
+        <option value="">{{ t('全部线路') }}</option>
+        {% for ln in lines %}
+        <option value="{{ ln.id }}" {% if line_id == ln.id %}selected{% endif %} data-zh="{{ line_zh(ln.name) }}">{{ ln.operator_short }} {{ ln.name }}（{{ ln.n_station }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="form-actions" style="align-items:flex-end">
+      <button class="btn" type="submit" data-testid="station-search">{{ t('查询') }}</button>
+      {% if has_filter %}<a class="btn ghost" href="/stations">{{ t('清空') }}</a>{% endif %}
+    </div>
+  </form>
+</div>
+
+{% if line_id %}
+<p style="margin:0 0 .6rem">
+  <a class="btn" href="/tasks/new?line={{ line_id }}"
+     data-testid="stations-to-new-task">{{ t('用这条线建任务') }}</a>
+  <span class="hint">{{ t('只建你勾选的那几个站（不必全选）') }}</span>
+</p>
+{% endif %}
+
+<div class="tbl-wrap">
+<table class="grid-tbl">
+  <thead>
+    <tr>
+      <th>{{ t('车站') }}</th>
+      <th>{{ t('线路') }}</th>
+      <th>{{ t('駅コード') }}</th>
+      <th>{{ t('都道府県') }}</th>
+      <th>{{ t('物理车站 / 还经过') }}</th>
+      <th>{{ t('状态') }}</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr data-testid="station-row">
+      <td><b>{{ r.station.name }}</b>
+        {% if r.n_line > 1 %}<span class="pill" data-testid="multi-line-{{ r.station.id }}"
+              title="{{ r.lines_text }}">{{ r.n_line }} {{ t('条线') }}</span>{% endif %}</td>
+      <td>{{ r.line_label or '—' }}
+        {% if r.kind_label %}<span class="hint">{{ t(r.kind_label) }}</span>{% endif %}</td>
+      <td>{% if r.station.ekicode %}<span data-testid="ekicode-{{ r.station.id }}">{{ r.station.ekicode }}</span>{% else %}<span class="hint">—</span>{% endif %}</td>
+      <td>{{ r.pref_label or '—' }}</td>
+      <td>{% if r.n_line > 1 %}<span class="hint">{{ r.n_line }} {{ t('条线') }}：
+        {{ r.lines_text }}</span>{% else %}<span class="hint">—</span>{% endif %}</td>
+      <td>{% if r.station.status == 'active' %}{{ t('启用') }}{% else %}{{ t('停用') }}{% endif %}</td>
+      <td>
+        <button class="btn ghost" type="button"
+                onclick="bdEditStation({{ r.station.id }}, {{ r.station.name|tojson }}, {{ (r.station.line or '')|tojson }}, {{ (r.station.note or '')|tojson }}, {{ r.station.status|tojson }})">
+          {{ t('编辑') }}
+        </button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="empty">{{ t('没有匹配的车站') }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% include "_pager.html" %}
+<p class="hint" style="margin-top:.6rem">
+  {{ t('线路顺序数据') }} © <a href="https://www.openstreetmap.org/copyright" target="_blank"
+  rel="noopener">OpenStreetMap</a> contributors（ODbL）</p>
+</div>
+
+{# 编辑：只改备注/状态/别名，**不新建车站**（车站是官方数据资产，用户 2026-10-06："车站不是我说建就建的"） #}
+<dialog id="st-dlg" class="edit-dlg" data-testid="station-edit-dialog">
+  <form method="post" id="st-form" action="">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <h3>{{ t('编辑车站') }}<span class="hint" id="st-who"></span></h3>
+    <label>{{ t('车站名') }}<input type="text" name="name" id="st-name" required></label>
+    <label>{{ t('线路') }}<input type="text" name="line" id="st-line"></label>
+    <label>{{ t('备注') }}<input type="text" name="note" id="st-note"></label>
+    <label>{{ t('状态') }}
+      <select name="status" id="st-status">
+        <option value="active">{{ t('启用') }}</option>
+        <option value="closed">{{ t('停用') }}</option>
+      </select>
+    </label>
+    <div class="form-actions">
+      <button class="btn" type="submit" data-testid="station-save">{{ t('保存') }}</button>
+      <button class="btn ghost" type="button" onclick="document.getElementById('st-dlg').close()">{{ t('取消') }}</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function bdEditStation(id, name, line, note, status) {
+  var f = document.getElementById('st-form');
+  f.action = '/stations/' + id + '/edit';
+  document.getElementById('st-name').value = name || '';
+  document.getElementById('st-line').value = line || '';
+  document.getElementById('st-note').value = note || '';
+  document.getElementById('st-status').value = status || 'active';
+  document.getElementById('st-who').textContent = '#' + id;
+  document.getElementById('st-dlg').showModal();
+}
+</script>
+{% endblock %}

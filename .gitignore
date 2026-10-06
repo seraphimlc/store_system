@@ -27,6 +27,9 @@ _learn_tmp/
 .vscode/
 
 *.db
+# 本地演示库与它的手工备份（`*.db` 匹配不到 `.db.pre_*` → 显式加）
+store_settle_live*
+*.bak.db
 
 # 8月对账验证缓存（真实数据，不入库）
 data/verify/recon_cache.json

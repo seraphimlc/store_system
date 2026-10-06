@@ -73,12 +73,17 @@ async def main():
             init = await s.initialize()
             tools = sorted(t.name for t in (await s.list_tools()).tools)
             print(f"  ✅ 协议 {init.protocol_version} | 工具 {len(tools)} 个")
-            if len(tools) != 16:
-                print(f"  ❌ 期望 16 个场景化工具，实际 {len(tools)}：{tools}")
+            if len(tools) != 24:
+                print(f"  ❌ 期望 24 个工具（16 场景化 + 8 作业域），实际 {len(tools)}：{tools}")
             else:
-                print("  ✅ 场景化工具数 = 16（规格：docs/specs-mcp-tools-scenario.md 第三节）")
+                print("  ✅ 工具数 = 24（16 场景化 + 8 作业域，2026-10-06）")
             need = {"visit_upload", "visit_overview", "visit_verify",
-                    "visit_payroll", "visit_payroll_export"}
+                    "visit_payroll", "visit_payroll_export",
+                    # 作业域（2026-10-06）
+                    "visit_my_tasks", "visit_team_tasks", "visit_task_board",
+                    "visit_self_report", "visit_task_report",
+                    "visit_task_assign", "visit_task_confirm",
+                    "visit_task_return"}
             missing = need - set(tools)
             print(f"  {'✅' if not missing else '❌'} 关键工具齐全"
                   + (f"（缺 {sorted(missing)}）" if missing else ""))

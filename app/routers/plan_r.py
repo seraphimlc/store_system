@@ -27,9 +27,12 @@ def _denied():
 
 
 def _admin_guard(user):
+    """管理端守卫：非 admin 一律拦（队长 → `/login`，再按角色落到 `/my/tasks`）。"""
     if user is None:
         return RedirectResponse("/login", status_code=302)
     if user.role != "admin":
+        if user.role == "leader":
+            return RedirectResponse("/login", status_code=302)
         return RedirectResponse("/my/perf", status_code=302)
     return None
 
@@ -56,10 +59,15 @@ def my_plan_page(request: Request,
                  user: Optional[User] = Depends(require_login),
                  db: Session = Depends(get_db), period: str = "",
                  saved: str = "", msg: str = "", err: str = ""):
-    """我的出勤计划：半月表格，默认每天都出勤，点选哪天不出勤。"""
-    if user is None or user.role != "staff" or not user.person_code:
+    """我的出勤计划：半月表格，默认每天都出勤，点选哪天不出勤。
+
+    ⚠️ **队长也是员工**（用户 2026-10-03 口径）→ `staff` 与 `leader` 都能用；
+    这里同时是「**假期模式**」的入口（休假期 = 派工提醒的数据源之一）。
+    """
+    if user is None or user.role not in ("staff", "leader") \
+            or not user.person_code:
         return _denied()
-    from app.services import date_plan
+    from app.services import bd_leave, date_plan
     today = date_plan.jst_today()
     options = date_plan.period_options(today)
     key = _resolve_period(period, today, [o["key"] for o in options],
@@ -71,6 +79,8 @@ def my_plan_page(request: Request,
         "wd_labels": date_plan.WD_LABELS, "marks": date_plan.MARKS,
         "next_win": date_plan.next_window(today),
         "jst_delta": timedelta(hours=9),
+        "on_leave": bd_leave.current(db, user.person_code, today),
+        "leave": bd_leave.active_leave(db, user.person_code),
         "saved": saved, "msg": msg, "err": err,
     })
 
@@ -83,7 +93,8 @@ def my_plan_submit(request: Request,
                    user: Optional[User] = Depends(require_login),
                    db: Session = Depends(get_db)):
     """提交/修改某个半月的出勤计划（只提交"不出勤"的日期）。"""
-    if user is None or user.role != "staff" or not user.person_code:
+    if user is None or user.role not in ("staff", "leader") \
+            or not user.person_code:
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
@@ -155,3 +166,77 @@ def staff_plans_export(user: Optional[User] = Depends(require_login),
         media_type=("application/vnd.openxmlformats-officedocument"
                     ".spreadsheetml.sheet"),
         headers={"Content-Disposition": cd})
+
+
+# ---------------- 员工端：假期模式（用户 2026-10-03 要求） ----------------
+
+def _leave_guard(user):
+    """假期模式：`staff` / `leader` 都能自己开（**管理员可代改走服务层**）。"""
+    if user is None or user.role not in ("staff", "leader") \
+            or not user.person_code:
+        return _denied()
+    return None
+
+
+@router.post("/my/leave")
+def my_leave_start(request: Request,
+                   start_date: str = Form(""),
+                   end_date: str = Form(""),
+                   reason: str = Form(""),
+                   csrf_token: str = Form(""),
+                   user: Optional[User] = Depends(require_login),
+                   db: Session = Depends(get_db)):
+    """开启假期模式（休假期）。`end_date` 留空 = 未定结束日。"""
+    g = _leave_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_leave, date_plan
+    today = date_plan.jst_today()
+
+    def _parse(s):
+        return _iso_or_none(s)
+
+    try:
+        start = _parse(start_date) or today
+        end = _parse(end_date)
+        bd_leave.start_leave(db, user.person_code, start, end, reason,
+                             by=user.username, actor_user=user)
+        db.commit()
+        return RedirectResponse("/my/plan?msg=%s" % quote("已开启假期模式"),
+                                status_code=303)
+    except bd_leave.LeaveError as e:
+        db.rollback()
+        return RedirectResponse("/my/plan?err=%s" % quote(str(e)),
+                                status_code=303)
+
+
+@router.post("/my/leave/end")
+def my_leave_end(request: Request, csrf_token: str = Form(""),
+                 user: Optional[User] = Depends(require_login),
+                 db: Session = Depends(get_db)):
+    """结束假期模式（从今天起就不再是休假）。"""
+    g = _leave_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_leave
+    row = bd_leave.end_leave(db, user.person_code, by=user.username,
+                             actor_user=user)
+    db.commit()
+    msg = "已结束假期模式" if row is not None else "当前不在休假状态"
+    return RedirectResponse("/my/plan?msg=%s" % quote(msg), status_code=303)
+
+
+def _iso_or_none(s):
+    from datetime import date as _d
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        y, m, dd = s.split("-")
+        return _d(int(y), int(m), int(dd))
+    except (ValueError, AttributeError):
+        return None

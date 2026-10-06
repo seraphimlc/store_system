@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """闸门模块：写权限 / 封账 / 源守卫 / 确认语 / 参数 / preview / 配置就绪。
 
-设计见 docs/superpowers/specs/2026-09-22-workbuddy-p1-write-tools-design.md §7。
+设计见 docs/specs-mcp-tools-scenario.md。
 所有闸门**与会话无关**（不依赖进程内状态），因此单进程或多副本语义一致。
 """
 import re

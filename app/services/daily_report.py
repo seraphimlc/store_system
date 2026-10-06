@@ -72,6 +72,47 @@ def get_report(db, person_code: str, report_date) -> Optional[StaffDailyReport]:
                     StaffDailyReport.report_date == report_date).first())
 
 
+def upsert_today_core(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
+                      client_ts: str = "") -> StaffDailyReport:
+    """**不提交事务**的当日自报写入（没有就新建、有就更新）。
+
+    给跨域编排层（`app/services/self_report.py`）用：员工一次自报要同时写
+    「点数」和「任务进度」，两者必须**同一个事务** —— 各自 `commit()` 就做不到
+    "要么都成、要么都不成"（2026-10-06 用户口径：点数与进度一起提交自报）。
+    """
+    code = getattr(user, "person_code", None)
+    if not code:
+        raise ValueError("账号未绑定员工编号，无法填报")
+    today = jst_today()
+    if is_locked(db, today):
+        raise Locked(today)                   # 今天的数据已对账 → 不许再写
+    p1 = to_count(p1_cnt, "1点店铺数")
+    p2 = to_count(p2_cnt, "2点店铺数")
+    row = today_report(db, code)
+    if row is None:
+        row = StaffDailyReport(person_code=code, user_id=getattr(user, "id", None),
+                               report_date=today, area=(area or "").strip()[:64],
+                               p1_cnt=p1, p2_cnt=p2, total_cnt=p1 + p2,
+                               client_ts=(client_ts or "")[:40])
+        db.add(row)
+    else:
+        row.area = (area or "").strip()[:64]
+        row.p1_cnt = p1
+        row.p2_cnt = p2
+        row.total_cnt = p1 + p2
+    db.flush()
+    return row
+
+
+def after_today_write(db, person_code: str, ref_date) -> None:
+    """自报写入 **commit 之后**的副作用（计划表写透 + 物化刷新）。
+
+    单独拆出来：编排层要先 `db.commit()` 再跑这些（它们自己会查库/写库）。
+    """
+    _sync_plan_reported(db, person_code, ref_date)
+    _refresh_materialized(db, ref_date)
+
+
 def update_today(db, user, *, area: str = "", p1_cnt=0, p2_cnt=0) -> StaffDailyReport:
     """修改**今天**已提交的填报（跨天不允许：那是补录，本期不做）。"""
     code = getattr(user, "person_code", None)

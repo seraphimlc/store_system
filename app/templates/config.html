@@ -30,7 +30,7 @@
   <form method="post" action="/config/save">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <table style="width:auto">
+    <table class="kv" style="width:auto">
       <tr><th style="text-align:left">{{ t('每点金额(円)') }}</th>
         <td><input type="number" name="per_point" value="{{ per_point }}" style="width:6rem"></td></tr>
       <tr><th style="text-align:left">{{ t('达标点数') }}</th>

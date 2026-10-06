@@ -1,0 +1,464 @@
+{% extends "base.html" %}
+{% block title %}{{ t('我的任务') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{% if is_leader %}{{ t('任务') }}{% else %}{{ t('我的任务') }}{% endif %}</h1>
+  <span class="sub">
+    {% if is_leader %}
+      {{ t('我自己的任务照常上报；本队的任务可以分派和调整（页面与员工一样，只多出任务管理）') }}
+    {% else %}
+      {{ t('每天下班前上报一次进展（0–100%）') }}
+    {% endif %}
+  </span>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+{% if my_leave %}
+<div class="msg" data-testid="my-leave-banner" style="background:#fff8e6">
+  {{ t('你现在处于休假状态（') }}{{ my_leave.start_date.strftime('%m-%d') }} ~
+  {{ my_leave.end_date.strftime('%m-%d') if my_leave.end_date else t('未定') }}）·
+  <a href="/my/plan">{{ t('去出勤计划页结束休假') }}</a>
+</div>
+{% endif %}
+
+{% if is_leader %}
+{% if not teams %}
+<div class="card"><p class="empty" data-testid="no-team">{{ t('你还没被指定为队长') }}</p></div>
+{% else %}
+<p class="hint" data-testid="leader-hint">
+  {{ t('我带的队：') }}{% for tm in teams %}<b>{{ tm.name }}</b>{{ '、' if not loop.last }}{% endfor %}
+  · {{ t('我负责') }} <b data-testid="n-mine">{{ n_mine }}</b> {{ t('个车站') }}
+  · {{ t('本队') }} {{ counts.unassigned + counts.doing + counts.done }} {{ t('个车站') }}
+  {% if counts.unassigned %}· <a href="/my/tasks?tab=unassigned"
+      data-testid="leader-unassigned-link">{{ t('待分派') }} <b>{{ counts.unassigned }}</b> {{ t('个') }}</a>{% endif %}
+  {% if n_pending %}· <span class="pill warnk" data-testid="pending-hint">{{ t('待确认') }} {{ n_pending }}</span>{% endif %}
+</p>
+
+{# 待确认批量确认（用户 2026-10-06 审计：30 条要 30 次往返 + 每处理完被弹走） #}
+{% if is_leader and tab == 'pending' %}
+<form id="bulk-confirm-form" method="post" action="/my/tasks/confirm-bulk"
+      data-testid="bulk-confirm-form" style="margin-bottom:.6rem">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="back" value="/my/tasks?tab=pending">
+  <div class="card" style="padding:.7rem 1rem">
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <label class="f" style="gap:.3rem">
+        <input type="checkbox" data-testid="bc-all" style="width:auto"
+               aria-label="{{ t('全选 / 全不选') }}"> {{ t('全选') }}</label>
+      <button class="btn" type="submit" data-testid="bulk-confirm">{{ t('确认选中的上报') }}</button>
+      <span class="spacer" style="flex:1"></span>
+      <span class="hint">{{ t('已选') }} <b data-testid="bc-count">0</b> {{ t('条') }}</span>
+    </div>
+    <p class="hint" style="margin:.4rem 0 0">{{ t('勾几条 → 一次确认（认可队员上报的原值）；要改数值请单条调整。') }}</p>
+  </div>
+</form>
+{% endif %}
+
+{# 一键全确认（当天全部）—— 用户 2026-10-06 口径 #}
+{% if is_leader and tab == 'pending' %}
+  <form method="post" action="/my/tasks/confirm-day" style="margin:.4rem 0"
+        onsubmit="return confirm('{{ t('确认当天的全部待确认上报？') }}')"
+        data-testid="confirm-day-form">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <button class="btn" type="submit" data-testid="confirm-day">
+      {{ t('一键确认今天全部') }}（{{ n_pending }}{{ t('条') }}）</button>
+    <span class="hint">{{ t('认可每位队员上报的原值；已确认的会通知队员') }}</span>
+  </form>
+{% endif %}
+
+
+{# 队长批量分派：勾任务 → 选队员 → 一次分配（2026-10-06 用户："未分配任务，可以多选，
+   然后点一下分配，可以分配到人。这里不需要进度调整控件"）
+   ⚠️ 复选框用 `form="bulk-assign-form"` 关联到下面那个表单（不在同一个 DOM 父节点里也能提交） #}
+{% if is_leader and tab == 'unassigned' %}
+<form id="bulk-assign-form" method="post" action="/my/tasks/assign-bulk"
+      data-testid="bulk-assign-form" style="margin-bottom:.6rem">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <div class="card" style="padding:.7rem 1rem">
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <label class="f" style="gap:.3rem">
+        <input type="checkbox" data-testid="bulk-all" style="width:auto"
+               aria-label="{{ t('全选 / 全不选') }}"> {{ t('全选') }}</label>
+      <b>{{ t('分派给') }}：</b>
+      <select name="person" data-testid="bulk-person" style="max-width:16rem">
+        <option value="">{{ t('选择队员') }}</option>
+        {% for tm in teams %}{% for m in members.get(tm.id, []) %}
+        {% set a = bulk_avail.get(m.person_code, {}) %}
+        <option value="{{ m.person_code }}">{{ m.display_name }}（{{ tm.name }}）{% if a.tags %} · {% for tg in a.tags %}{{ avail_tags.get(tg, tg) }}{{ '·' if not loop.last }}{% endfor %}{% endif %}</option>
+        {% endfor %}{% endfor %}
+      </select>
+      <button class="btn" type="submit" data-testid="bulk-assign">{{ t('分配给该队员') }}</button>
+      <span class="spacer" style="flex:1"></span>
+      {# **存量补录**：勾多条 → 批量设进展 / 批量标记完成（用户 2026-10-06：
+         "已经完成的队长可以直接标成已经完成；未完成但有进展的可以直接设置进展"） #}
+      <label class="f" style="gap:.3rem">{{ t('进展') }}
+        <input type="number" name="pct_manual" min="0" max="100" value="50"
+               style="width:5rem" data-testid="bulk-pct"></label>
+      <button class="btn ghost" type="submit" value=""
+              formaction="/my/tasks/progress-bulk"
+              data-testid="bulk-progress">{{ t('批量设进展') }}</button>
+      <button class="btn ghost" type="submit" name="pct" value="100"
+              formaction="/my/tasks/progress-bulk"
+              onclick="return confirm('{{ t('把勾选的任务全部标成已完成？') }}')"
+              data-testid="bulk-done">{{ t('批量标记完成') }}</button>
+
+      <span class="spacer" style="flex:1"></span>
+      <span class="hint">{{ t('已选') }} <b data-testid="bulk-count">0</b> {{ t('个任务') }}</span>
+    </div>
+    <p class="hint" style="margin:.4rem 0 0">
+      {{ t('勾几个任务 → 选一个队员 → 按「分配给该队员」。分完他们就去做，进展在「进行中」里看。') }}</p>
+  </div>
+</form>
+<script>
+/* ⚠️ 这段脚本在**行渲染之前**（模板上方）→ 必须等 DOM 就绪，否则
+   `boxes` 抓到 0 个复选框：表头全选 / Shift 区间 / 拖拽 / "已选 N" 全是死的
+   （2026-10-06 浏览器实跑抓到；手动勾选提交仍能work，所以单测没发现） */
+document.addEventListener('DOMContentLoaded', function () {
+  var form = document.getElementById('bulk-assign-form');
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('input[name="task_id"][form="bulk-assign-form"]'));
+  var allEl = document.querySelector('[data-testid="bulk-all"]');
+  var cntEl = document.querySelector('[data-testid="bulk-count"]');
+  function refresh() {
+    var n = boxes.filter(function (b) { return b.checked; }).length;
+    if (cntEl) cntEl.textContent = n;
+    if (allEl) { allEl.checked = n > 0 && n === boxes.length;
+                 allEl.indeterminate = n > 0 && n < boxes.length; }
+  }
+  /* Shift + 点 = 勾中间一整段；按住鼠标拖过多行 = 连续勾选（与管理端车站池一致） */
+  var lastIdx = null, dragging = false, dragTo = null;
+  function setRange(a, b, val) {
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    for (var i = lo; i <= hi; i++) boxes[i].checked = val;
+  }
+  boxes.forEach(function (b, i) {
+    b.addEventListener('click', function (ev) {
+      if (ev.shiftKey && lastIdx !== null) setRange(lastIdx, i, true);
+      lastIdx = i; refresh();
+    });
+    var tr = b.closest('.task-row');
+    if (tr) {
+      tr.addEventListener('mousedown', function (ev) {
+        if (ev.target.tagName === 'INPUT') return;
+        dragging = true; dragTo = !b.checked;
+      });
+      tr.addEventListener('mouseenter', function () {
+        if (dragging) { b.checked = dragTo; lastIdx = i; refresh(); }
+      });
+    }
+  });
+  document.addEventListener('mouseup', function () { dragging = false; });
+  if (allEl) allEl.addEventListener('change', function () {
+    boxes.forEach(function (b) { b.checked = allEl.checked; }); refresh(); });
+  form.addEventListener('submit', function () {
+    var btn = form.querySelector('[data-testid="bulk-assign"]');
+    if (btn) { btn.disabled = true; btn.textContent = '{{ t("提交中…") }}'; }
+  });
+  refresh();
+});
+document.addEventListener('DOMContentLoaded', function () {
+  /* 待确认批量确认：同一套勾选/计数逻辑（同样要等 DOM 就绪） */
+  var form = document.getElementById('bulk-confirm-form');
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(
+    document.querySelectorAll('input[name="task_id"][form="bulk-confirm-form"]'));
+  var allEl = document.querySelector('[data-testid="bc-all"]');
+  var cntEl = document.querySelector('[data-testid="bc-count"]');
+  function refresh2() {
+    var n = boxes.filter(function (b) { return b.checked; }).length;
+    if (cntEl) cntEl.textContent = n;
+    if (allEl) { allEl.checked = n > 0 && n === boxes.length;
+                 allEl.indeterminate = n > 0 && n < boxes.length; }
+  }
+  boxes.forEach(function (b) {
+    b.addEventListener('click', refresh2);
+    b.addEventListener('change', refresh2);      /* 真实点击两个事件都会派发 */
+  });
+  if (allEl) allEl.addEventListener('change', function () {
+    boxes.forEach(function (b) { b.checked = allEl.checked; }); refresh2(); });
+  refresh2();
+});
+</script>
+{% endif %}
+
+{# 队长：我的 / 未分配 / 待确认 / 已分配 / 已完成 #}
+<div class="tabs" data-testid="task-tabs">
+  <a class="{% if tab==tab_mine %}on{% endif %}" href="/my/tasks?tab={{ tab_mine }}"
+     data-testid="tab-mine">{{ t('我的') }}（{{ counts.mine }}）</a>
+  <a class="{% if tab==tab_pending %}on{% endif %}" href="/my/tasks?tab={{ tab_pending }}"
+     data-testid="tab-pending">{{ t('待确认') }}（{{ counts.pending }}）</a>
+  <a class="{% if tab=='unassigned' %}on{% endif %}" href="/my/tasks?tab=unassigned"
+     data-testid="tab-unassigned">{{ labels.unassigned }}（{{ counts.unassigned }}）</a>
+  <a class="{% if tab=='doing' %}on{% endif %}" href="/my/tasks?tab=doing"
+     data-testid="tab-doing">{{ labels.doing }}（{{ counts.doing }}）</a>
+  <a class="{% if tab=='done' %}on{% endif %}" href="/my/tasks?tab=done"
+     data-testid="tab-done">{{ labels.done }}（{{ counts.done }}）</a>
+</div>
+
+<form method="get" action="/my/tasks" style="margin-bottom:.6rem">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  {# ⚠️ 关键词要能搜**线路/运营商**（旧实现只匹配站名 → 队长搜"南武線"全军覆没）；
+      线路下拉只列**本队有内容的线路**（2026-10-06 审计） #}
+  <label class="f">{{ t('搜车站/线路') }}<input type="text" name="kw" value="{{ kw }}"
+      placeholder="{{ t('站名 / 线路') }}" style="width:180px"></label>
+  {% if line_opts %}
+  <label class="f">{{ t('线路') }}
+    <select name="line" style="max-width:15rem">
+      <option value="">{{ t('全部线路') }}（{{ line_opts.total }}）</option>
+      {% for o in line_opts.rows %}
+      <option value="{{ o.id }}" {% if line_id == o.id %}selected{% endif %}>{{ o.label }}（{{ o.n }}）</option>
+      {% endfor %}
+    </select></label>
+  {% endif %}
+  <button class="btn ghost" type="submit">{{ t('查询') }}</button>
+</form>
+{% endif %}
+{% else %}
+{# 员工端**只有两个 tab**（用户 2026-10-06）：我的 / 已完成 #}
+<div class="tabs" data-testid="staff-tabs">
+  <a class="{% if tab=='mine' %}on{% endif %}" href="/my/tasks?tab=mine"
+     data-testid="tab-mine">{{ t('我的') }}（{{ counts.mine }}）</a>
+  <a class="{% if tab=='done' %}on{% endif %}" href="/my/tasks?tab=done"
+     data-testid="tab-done">{{ labels.done }}（{{ counts.done }}）</a>
+</div>
+<p class="hint" data-testid="staff-hint">
+  {{ t('分给我的车站：') }} <b>{{ counts.mine + counts.done }}</b> {{ t('个') }}
+  {%- if tab == 'done' %}（{{ t('正在看：已完成') }}）{% endif %}
+</p>
+{% endif %}
+
+{# ============ 员工每日自报：**一页一表单一次提交**（点数 + 当天任务进度）============
+   用户 2026-10-06："一是报点数，二是报任务完成的进度情况，一起提交自报"
+   → 点数输入框 + 每行进度控件都挂到这一个表单（用 `form=` 属性，不嵌套内层表单） #}
+{% if self_report %}
+<form method="post" action="/my/self-report" id="self-report-form"
+      data-testid="self-report-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <div class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
+    <b>{{ t('今日自报') }}</b>
+    <span class="hint">· {{ t('点数和任务进度一起提交') }}</span>
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
+      <label class="hint">{{ t('区域') }}
+        <input type="text" name="area" maxlength="64" style="width:9rem"
+               value="{{ self_report.report.area if self_report.report else '' }}"
+               data-testid="sr-area"></label>
+      <label class="hint">{{ t('1点店铺数') }}
+        <input type="text" name="p1_cnt" inputmode="numeric" style="width:4.5rem"
+               value="{{ self_report.report.p1_cnt if self_report.report else '' }}"
+               data-testid="sr-p1"></label>
+      <label class="hint">{{ t('2点店铺数') }}
+        <input type="text" name="p2_cnt" inputmode="numeric" style="width:4.5rem"
+               value="{{ self_report.report.p2_cnt if self_report.report else '' }}"
+               data-testid="sr-p2"></label>
+      <span class="hint">{{ t('今天已填') if self_report.report else t('今天还没填') }}</span>
+    </div>
+  </div>
+{% endif %}
+
+{% for r in rows %}
+{# 进度控件：**未分配 tab 不给**（没分人谈不了进展）、已完成不给（没得报）。
+   用户 2026-10-06："未分配…这里不需要进度调整控件" #}
+{# 用户 2026-10-06："队长分配完任务后，可以随时调整任务进度。
+   对于未分配的任务，可以直接标识成完成。" → **未分配 tab 对队长也放开**（队员端没有这个 tab） #}
+{% set can_rep = can_report_map.get(r.task.id, false)
+                 and r.state != 'done'
+                 and (tab != 'unassigned' or is_leader) %}
+{% set can_asg = can_assign_map.get(r.task.id, false) and tab != 'unassigned' %}
+<div class="card task-row" style="margin-bottom:.6rem;padding:.7rem 1rem"
+     data-testid="my-task-row" data-can-report="{{ '1' if can_rep else '0' }}"
+     data-can-assign="{{ '1' if can_asg else '0' }}">
+  <div style="display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap">
+    {% if is_leader and tab == 'unassigned' %}
+    <input type="checkbox" name="task_id" value="{{ r.task.id }}" form="bulk-assign-form"
+           data-testid="bulk-check-{{ r.task.id }}" style="width:auto">
+    {% elif is_leader and tab == 'pending' %}
+    <input type="checkbox" name="task_id" value="{{ r.task.id }}" form="bulk-confirm-form"
+           data-testid="bc-check-{{ r.task.id }}" style="width:auto">
+    {% endif %}
+    <a href="/tasks/{{ r.task.id }}"><b style="font-size:1.02rem">{{ r.station_name }}</b></a>
+    {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
+    {% if r.task.id in my_ids %}<span class="pill okk">{{ t('我的') }}</span>{% endif %}
+    <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}"
+          data-testid="state-{{ r.task.id }}">{{ labels[r.state] }}</span>
+    <span class="hint">{{ t('进度') }} <b data-testid="pct-{{ r.task.id }}">{{ r.pct }}%</b></span>
+    {# 审核：员工上报 → 队长确认 / 调整（用户 2026-10-03） #}
+    {% if r.pending_review %}
+    <span class="pill warnk" data-testid="review-state-{{ r.task.id }}">{{ t('待确认') }}
+      {%- if r.last_reported_pct is not none and r.last_reported_pct != r.pct %}（{{ t('队员报') }} {{ r.last_reported_pct }}%）{% endif %}</span>
+    {% elif r.review_status == 'confirmed' and r.last_reported_pct is not none %}
+    <span class="pill okk" data-testid="review-state-{{ r.task.id }}">{{ t('已确认') }}</span>
+    {% elif r.review_status == 'adjusted' and r.last_reported_pct is not none %}
+    <span class="pill" data-testid="review-state-{{ r.task.id }}">{{ t('已调整') }}
+      {%- if r.last_reported_pct != r.pct %} <span class="hint">{{ t('队员报') }} {{ r.last_reported_pct }}%</span>{% endif %}</span>
+    {% elif r.review_status == 'rejected' and r.last_reported_pct is not none %}
+    <span class="pill errk" data-testid="review-state-{{ r.task.id }}">{{ t('被驳回') }}
+      <span class="hint">{{ t('队员报') }} {{ r.last_reported_pct }}% → {{ r.pct }}%</span></span>
+    {% if r.review_note %}<span class="hint">{{ r.review_note }}</span>{% endif %}
+    {% endif %}
+    {% if r.start_date %}<span class="hint">{{ t('开始日') }} {{ r.start_date.strftime('%m-%d') }}</span>{% endif %}
+    {% if r.done_date %}<span class="hint">{{ t('完成日') }} {{ r.done_date.strftime('%m-%d') }}</span>{% endif %}
+    {% if r.last_date %}<span class="hint">{{ t('最后提交') }} {{ r.last_date.strftime('%m-%d') }}
+      {%- if r.last_note %}· {{ r.last_note }}{% endif %}</span>{% endif %}
+    <span class="spacer" style="flex:1"></span>
+    <span class="hint">{% if r.assignees %}{{ r.assignees|map(attribute='name')|join('、') }}{% else %}{{ t('还没分人') }}{% endif %}</span>
+    {% if r.team_name %}<span class="hint">· {{ r.team_name }}</span>{% endif %}
+    {% if r.team_leaders %}<span class="hint">· {{ t('队长') }} {{ r.team_leaders|join('、') }}</span>{% endif %}
+  </div>
+
+  {% if can_asg and r.assignees %}
+  {# **回收 / 空置**：清担当 → 回本队待派（进展保留）—— 用户 2026-10-06 口径 #}
+  <form method="post" action="/my/tasks/return" style="margin-top:.4rem"
+        onsubmit="return confirm('{{ t('把这条收回本队待派？（已填的进展会保留）') }}')"
+        data-testid="return-form-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back_tab" value="{{ tab }}">
+    <button class="btn ghost" type="submit"
+            data-testid="return-{{ r.task.id }}">{{ t('回收（回到本队待派）') }}</button>
+    <span class="hint">{{ t('进展保留，可再分给别人') }}</span>
+  </form>
+  {% endif %}
+
+  {% if can_asg %}
+  {# 分派：勾选本队队员（最多 2 人） #}
+  <details style="margin-top:.45rem">
+    <summary style="cursor:pointer" class="hint">
+      {{ t('分派给队员（最多') }}{{ max_assign }}{{ t('人）') }}</summary>
+    <form method="post" action="/my/tasks/assign"
+          style="margin-top:.4rem" data-testid="assign-{{ r.task.id }}">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      <input type="hidden" name="task_id" value="{{ r.task.id }}">
+      {% set cur = r.assignees|map(attribute='code')|list %}
+      {% set tdate = ((r.assign_date if r.assign_date and r.assign_date > today else today)).isoformat() %}
+      {% for m in members.get(r.team_id, []) %}
+      {% set a = avail.get(tdate ~ '|' ~ m.person_code, {}) %}
+      <label class="pick" style="margin-right:.8rem"
+             title="{{ a.reasons|join('；') if a.reasons else '' }}">
+        <input type="checkbox" name="person" value="{{ m.person_code }}"
+               {% if m.person_code in cur %}checked{% endif %}>
+        {{ m.display_name }}
+        {% if a.level == 'warn' %}<span class="pill warnk"
+              data-testid="avail-{{ r.task.id }}-{{ m.person_code }}">{% for tg in a.tags %}{{ avail_tags.get(tg, tg) }}{{ '·' if not loop.last }}{% endfor %}</span>{% endif %}
+      </label>
+      {% endfor %}
+      <button class="btn ghost" type="submit">{{ t('保存分派') }}</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if can_rep and self_report %}
+  {# 自报模式：控件属于**外层那一个表单**（form= 属性挂靠，不嵌套） #}
+  <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"
+       data-testid="progress-{{ r.task.id }}">
+    <input type="range" name="pct_{{ r.task.id }}" form="self-report-form"
+           min="0" max="100" step="5" value="{{ r.pct }}"
+           style="flex:1;min-width:150px;min-height:2.6rem"
+           data-testid="slider-{{ r.task.id }}"
+           oninput="var s=document.getElementById('pctv-{{ r.task.id }}');if(s)s.textContent=this.value">
+    <b style="min-width:3.2rem;text-align:right"><span
+        id="pctv-{{ r.task.id }}">{{ r.pct }}</span>%</b>
+    <input type="text" name="note_{{ r.task.id }}" form="self-report-form"
+           placeholder="{{ t('备注（可空）') }}" style="width:11rem"
+           data-testid="note-{{ r.task.id }}">
+  </div>
+  {% elif can_rep %}
+  {# 进展上报 / 队长调整：滑动条 0–100% #}
+  <form method="post" action="/my/tasks/progress" class="prog-form"
+        style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"
+        x-data="{v: {{ r.pct }}}" data-testid="progress-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    {# ⚠️ 必须有 `value`：CDN 拉不到 Alpine 时按 HTML 规范会以 50 提交（数据污染）；
+       数字同时写服务端初值 + oninput 兜底，没 JS 也看得见 #}
+    <input type="range" name="pct" min="0" max="100" step="5" value="{{ r.pct }}"
+           x-model.number="v" style="flex:1;min-width:150px;min-height:2.6rem"
+           data-testid="slider-{{ r.task.id }}"
+           oninput="var s=document.getElementById('pctv-{{ r.task.id }}');if(s)s.textContent=this.value">
+    <b style="min-width:3.2rem;text-align:right"><span
+        id="pctv-{{ r.task.id }}" x-text="v">{{ r.pct }}</span>%</b>
+    <input type="text" name="note" placeholder="{{ t('备注（可空）') }}" style="width:11rem">
+    <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
+
+    {# 队长/管理员：一键**确认**队员的上报（认可原值，会发消息给队员） #}
+    {% if can_asg and r.pending_review %}
+    <button class="btn ghost" type="submit" formaction="/my/tasks/confirm"
+            data-testid="confirm-{{ r.task.id }}">{{ t('确认（认可队员上报）') }}</button>
+    {% endif %}
+  </form>
+
+  {% else %}
+  <p class="hint" style="margin:.45rem 0 0" data-testid="readonly-{{ r.task.id }}">
+    {% if locked_map.get(r.task.id) %}
+      <b>{{ t('队长已确认，今天这条不能再改') }}</b>
+      · {{ t('如需修改请联系队长或管理员') }}
+    {% elif r.state == 'done' %}{{ t('已完成，无需再报') }}
+    {% else %}{{ t('这条不归你上报') }}{% endif %}
+  </p>
+  {% endif %}
+
+  {# **未分配的任务：队长可直接标识成完成**（用户 2026-10-06："对于未分配的任务，
+     可以直接标识成完成"）→ 独立表单（独立提交，不与进度表单抢 pct 值） #}
+  {% if is_leader and not r.assignees and r.state != 'done' and can_rep %}
+  <form method="post" action="/my/tasks/progress" style="margin-top:.4rem"
+        onsubmit="return confirm('{{ t('不派人，直接把这站标成已完成？') }}')"
+        data-testid="mark-done-form-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="pct" value="100">
+    <input type="hidden" name="note" value="{{ t('未派人直接完成') }}">
+    <button class="btn ghost" type="submit"
+            data-testid="mark-done-{{ r.task.id }}">{{ t('标记完成') }}</button>
+    <span class="hint">{{ t('不派人，直接把这站标成已完成') }}</span>
+  </form>
+  {% endif %}
+
+  {# 驳回（用户 2026-10-06："队员报了100%，队长可以驳回…就是改成不到100%"）：
+     队长对**队员报的 100% 且还没处理**的驳回；管理员对已确认的也能驳回。 #}
+  {% if can_reject_map.get(r.task.id) %}
+  <form method="post" action="/my/tasks/reject"
+        style="margin-top:.4rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap"
+        data-testid="reject-form-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back"
+           value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <span class="hint">{{ t('驳回：把 100% 退回成') }}</span>
+    <input type="number" name="pct" min="0" max="99" value="90" style="width:4.5rem"
+           data-testid="reject-pct-{{ r.task.id }}">
+    <span class="hint">%</span>
+    <input type="text" name="note" placeholder="{{ t('驳回原因') }}" style="width:11rem">
+    <button class="btn ghost" type="submit"
+            data-testid="reject-btn-{{ r.task.id }}">{{ t('驳回') }}</button>
+  </form>
+  {% endif %}
+
+</div>
+{% else %}
+<div class="card"><p class="empty" data-testid="no-rows">
+  {% if not is_leader and tab == 'done' %}{{ t('还没有已完成的车站') }}
+  {% elif is_leader %}{{ t('这个分组里没有车站') }}
+  {% else %}{{ t('当前没有分给你的车站') }}{% endif %}
+</p></div>
+{% endfor %}
+
+{% if self_report %}
+  <div class="card" style="position:sticky;bottom:0;padding:.7rem 1rem">
+    <button class="btn" type="submit" data-testid="sr-submit" style="width:100%">
+      {{ t('提交今日自报（点数 + 进度）') }}</button>
+    <p class="hint" style="margin:.35rem 0 0">
+      {{ t('一次提交：上面的点数和所有任务进度一起保存；任一条失败则全部不保存。') }}</p>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

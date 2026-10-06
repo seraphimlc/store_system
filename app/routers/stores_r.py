@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.templating import get_templates
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -153,20 +154,35 @@ def ai_run(request: Request, bt: BackgroundTasks, csrf_token: str = Form(...),
 
 @router.get("/stores/entities", response_class=HTMLResponse)
 def entities_page(request: Request, user: Optional[User] = Depends(require_login),
-                  db: Session = Depends(get_db), q: str = ""):
+                  db: Session = Depends(get_db), q: str = "",
+                  page: int = 1, per: int = 0):
+    """店铺实体列表（**分页**）。
+
+    ⚠️ 2026-10-03 修：原来是 `limit(500)` **硬砍**（后 41,640 家永远看不到），
+    而且 `by_id` 把 42,140 行全查进内存。现在真分页 + 只取**本页**相关的
+    master/child 行（`by_id` 只装本页 id）。
+    """
     if user is None or user.role != "admin":
         return _denied()
+    from app.services import paging
     query = db.query(StoreEntity)
     if q:
         like = f"%{q}%"
         query = query.filter(StoreEntity.store_id_raw.like(like)
                              | StoreEntity.name_local.like(like)
                              | StoreEntity.name_norm.like(like))
-    ents = query.order_by(StoreEntity.id).limit(500).all()
-    by_id = {e.id: e for e in db.query(StoreEntity).all()}
+    pager = paging.paginate(query.order_by(StoreEntity.id.asc()), page,
+                            per or paging.PER_DEFAULT)
+    ids = [e.id for e in pager["rows"]]
+    mids = sorted({e.master_id for e in pager["rows"]})
+    by_id = {}
+    if ids or mids:
+        by_id = {e.id: e for e in db.query(StoreEntity).filter(
+            or_(StoreEntity.id.in_(ids), StoreEntity.id.in_(mids))).all()}
     return templates.TemplateResponse("store_entities.html", {
         "request": request, "current_user": user, "q": q,
-        "counts": _counts(db), "ents": ents, "by_id": by_id})
+        "counts": _counts(db), "ents": pager["rows"], "by_id": by_id,
+        "pager": pager, "page_qs": paging.qs(request.query_params)})
 
 
 @router.post("/stores/pairs/{pid}/merge")

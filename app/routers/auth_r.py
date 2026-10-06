@@ -40,6 +40,13 @@ def _set_session(response, uid: int):
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> Optional[User]:
+    """当前用户。**同一请求只加载一次**（中间件已加载就复用）。
+
+    ⚠️ 2026-10-06 实测：中间件（语言 / 员工隔离）与 `require_login` 各查一次 → 一个页面
+    **同一个 User 被查 3 遍**。这里复用 `request.state.user`，省掉重复查询。
+    """
+    # ⚠️ 别复用中间件缓存的 ORM 对象：它绑在中间件那个**已关闭的 session** 上（detach），
+    #    路由里改 `user.password_hash` 再 commit 会静默不生效（2026-10-06 实测红了 3 个测试）。
     data = read_session_token(request.cookies.get(SESSION_COOKIE))
     if not data:
         return None
@@ -62,9 +69,18 @@ def csrf_ok(request: Request, posted: str) -> bool:
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = Query("")):
-    if read_session_token(request.cookies.get(SESSION_COOKIE)):
-        return RedirectResponse(_safe_next(next), status_code=302)
+def login_page(request: Request, next: str = Query(""),
+               db: Session = Depends(get_db)):
+    data = read_session_token(request.cookies.get(SESSION_COOKIE))
+    if data:
+        # 已登录 → **按角色落点**（唯一来源 home.landing_home）。
+        # 旧写法 `_safe_next(next)` 把 next="" 解析成 "/"，队长会被
+        # "/" → "/dashboard" → _denied() → "/login" 打成重定向死循环。
+        from app.services import home as _home
+        u = db.get(User, data["uid"]) if data.get("uid") else None
+        if u is not None and next.strip():
+            return RedirectResponse(_safe_next(next), status_code=302)
+        return RedirectResponse(_home.landing_home(db, u), status_code=302)
     return templates.TemplateResponse("login.html",
                                       {"request": request, "error": None,
                                        "next": next})
@@ -88,14 +104,13 @@ def login_submit(username: str = Form(...), password: str = Form(...),
                                            "next": next},
                                           status_code=401)
     target = _safe_next(next)
-    if user.role == "staff":
-        if user.must_change_password:
-            # 首登/口令被重置：第一个页面就是改密页（不必先跳一次再被中间件拦住）
-            target = "/my/password?must=1"
-        elif target in ("", "/"):
-            # 员工第一个页面：待填报出勤计划 → /my/plan，否则 → /my/report（每日自报）
-            from app.services import date_plan as _dp
-            target = _dp.staff_home(db, user)
+    if target in ("", "/"):
+        # 落点唯一来源（admin → /dashboard、leader → /my/tasks、staff → staff_home）
+        from app.services import home as _home
+        target = _home.landing_home(db, user)
+    if user.must_change_password and not target.startswith("/my/password"):
+        # 首登/口令被重置：第一个页面就是改密页（不必先跳一次再被中间件拦住）
+        target = "/my/password?must=1"
     resp = RedirectResponse(target, status_code=302)
     _set_session(resp, user.id)
     return resp
@@ -116,14 +131,15 @@ def root_redirect(request: Request):
     if data:
         from app.db import SessionLocal
         from app.models import User
-        from app.services import date_plan as _dp
+        from app.services import home as _home
         s = SessionLocal()
         try:
             u = s.get(User, data.get("uid"))
-            if u is not None and u.role == "staff":
-                # 员工首页 = 待填报出勤计划 / 每日自报（date_plan.staff_home 单一来源）
-                return RedirectResponse(_dp.staff_home(s, u), status_code=302)
+            if u is not None:
+                # 落点唯一来源：admin → /dashboard、leader → /my/tasks、
+                # staff → date_plan.staff_home（员工首页）
+                return RedirectResponse(_home.landing_home(s, u), status_code=302)
         finally:
             s.close()
-    # 首页 = 数据看板（管理员）
-    return RedirectResponse("/dashboard", status_code=302)
+    # 未登录 → 登录页
+    return RedirectResponse("/login", status_code=302)

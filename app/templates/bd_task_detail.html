@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ r.station_name if r else t('任务') }}{% endblock %}
+{% block content %}
+{# 管理员：改派队伍 / 退回车站池（2026-10-06 审计：派队原本单向不可逆，选错只能改库） #}
+{% if current_user and current_user.role == 'admin' and r and r.task.team_id %}
+<div class="card" style="margin-bottom:.6rem;padding:.6rem .9rem" data-testid="task-admin-actions">
+  <form method="post" action="/tasks/reassign" style="display:inline-flex;gap:.4rem;align-items:center">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back"
+           value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <span class="hint">{{ t('改派队伍') }}：</span>
+    <select name="team_id" data-testid="reassign-team" style="max-width:13rem">
+      {% for tm in teams %}<option value="{{ tm.id }}"
+        {% if r.task.team_id == tm.id %}selected{% endif %}>{{ tm.name }}</option>{% endfor %}
+    </select>
+    <button class="btn ghost" type="submit" data-testid="reassign-btn"
+            onclick="return confirm('改派会清空不属于新队的担当，确定？')">{{ t('改派') }}</button>
+  </form>
+  <form method="post" action="/tasks/return-pool" style="display:inline-flex;margin-left:1rem">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back" value="/tasks?tab=unassigned">
+    <button class="btn ghost" type="submit" data-testid="return-pool-btn"
+            onclick="return confirm('退回车站池：解除队伍 + 清空担当，确定？')">{{ t('退回车站池') }}</button>
+  </form>
+</div>
+{% endif %}
+<div class="page-title">
+  <h1>{{ r.station_name if r else '—' }}
+    {% if r and r.line %}<span class="sub">{{ r.line }}</span>{% endif %}</h1>
+  <div class="actions">
+    {% if can_adjust %}<a class="btn ghost" href="/tasks">{{ t('返回任务总表') }}</a>
+    {% else %}<a class="btn ghost" href="/my/tasks">{{ t('返回我的任务') }}</a>{% endif %}
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err">{{ err }}</div>{% endif %}
+
+{% if r %}
+<div class="stat-grid grid" style="margin-bottom:.8rem">
+  <div class="stat-card"><div class="k">{{ t('状态') }}</div>
+    <div class="v">{{ labels[r.state] }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('进度') }}</div>
+    <div class="v">{{ r.pct }}<small>%</small></div></div>
+  <div class="stat-card"><div class="k">{{ t('所属团队') }}</div>
+    <div class="v" style="font-size:1rem">{{ r.team_name or '—' }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('担当') }}</div>
+    <div class="v" style="font-size:1rem">
+      {% if r.assignees %}{{ r.assignees|map(attribute='name')|join('、') }}{% else %}—{% endif %}
+    </div></div>
+  <div class="stat-card"><div class="k">{{ t('分配日期') }}</div>
+    <div class="v" style="font-size:1rem">{{ r.assign_date.strftime('%Y-%m-%d') if r.assign_date else '—' }}</div></div>
+  <div class="stat-card"><div class="k">{{ t('开始日 / 完成日') }}</div>
+    <div class="v" style="font-size:1rem">
+      {{ r.start_date.strftime('%m-%d') if r.start_date else '—' }} /
+      {{ r.done_date.strftime('%m-%d') if r.done_date else '—' }}</div></div>
+</div>
+
+{% if can_adjust %}
+<form method="post" action="/tasks/{{ task.id }}/progress" class="card"
+      style="padding:.7rem 1rem;margin-bottom:.8rem" data-testid="admin-progress">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <b>{{ t('修正进展') }}</b>
+  <label class="f">{{ t('进度') }}
+    <input type="number" name="pct" min="0" max="100" value="{{ r.pct }}" style="width:5rem">
+  </label>
+  <label class="f">{{ t('备注') }}<input type="text" name="note" style="width:14rem"></label>
+  <button class="btn" type="submit">{{ t('保存') }}</button>
+</form>
+{% endif %}
+
+<h2 style="font-size:1rem">{{ t('每日进展历史') }}</h2>
+<div class="tbl-wrap" style="margin-bottom:1rem">
+  <table class="grid-tbl" data-testid="progress-history">
+    <thead><tr><th>{{ t('日期') }}</th><th>{{ t('进度') }}</th>
+      <th>{{ t('备注') }}</th><th>{{ t('上报人') }}</th>
+      <th>{{ t('处理') }}</th></tr></thead>
+    <tbody>
+      {% for p in progress %}
+      <tr><td>{{ p.progress_date.strftime('%Y-%m-%d') }}</td>
+        <td>{{ p.pct }}%</td><td>{{ p.note or '—' }}</td>
+        <td>{{ p.reported_by or p.submitted_by or '—' }}</td>
+        <td>
+          {% if p.review_status == 'confirmed' %}<span class="pill okk">{{ t('已确认') }}</span>
+          {% elif p.review_status == 'adjusted' %}<span class="pill">{{ t('已调整') }}</span>
+          {% elif p.review_status == 'rejected' %}<span class="pill errk">{{ t('被驳回') }}</span>
+          {% else %}<span class="pill warnk">{{ t('待确认') }}</span>{% endif %}
+          {% if p.reviewed_by %}<span class="hint">{{ p.reviewed_by }}</span>{% endif %}
+          {% if p.review_note %}<span class="hint">{{ p.review_note }}</span>{% endif %}
+        </td></tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">{{ t('还没有进展记录') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 style="font-size:1rem">{{ t('变更日志') }}</h2>
+<div class="tbl-wrap">
+  <table class="grid-tbl" data-testid="task-timeline">
+    <thead><tr><th>{{ t('时间') }}</th><th>{{ t('动作') }}</th><th>{{ t('字段') }}</th>
+      <th>{{ t('旧值') }}</th><th>{{ t('新值') }}</th><th>{{ t('操作人') }}</th>
+      <th>{{ t('备注') }}</th></tr></thead>
+    <tbody>
+      {% for g in timeline %}
+      <tr data-testid="log-row">
+        <td>{{ jst(g.created_at) }}</td>
+        <td>{{ action_labels.get(g.action, g.action) }}</td>
+        <td>{{ g.field or '—' }}</td>
+        <td>{{ g.old_value or '—' }}</td>
+        <td>{{ g.new_value or '—' }}</td>
+        <td>{{ g.actor_name or g.actor or '—' }}</td>
+        <td>{{ g.note or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="empty">{{ t('还没有日志') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="empty">{{ t('任务不存在') }}</p></div>
+{% endif %}
+{% endblock %}

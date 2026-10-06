@@ -986,9 +986,18 @@ _DESC = {
 
 # 写工具：readOnlyHint=false（规格 §4.2）
 _WRITE_TOOLS = {"visit_upload", "visit_payroll_export", "visit_rebuild",
-                "visit_staff", "visit_config", "visit_store"}
+                "visit_staff", "visit_config", "visit_store",
+                # 作业域写工具（2026-10-06）
+                "visit_self_report", "visit_task_report", "visit_task_assign",
+                "visit_task_confirm", "visit_task_return"}
 
 _WRITE_TITLES = {
+    # 作业域（团队 / 车站 / 任务）
+    "visit_self_report": "提交今日自报（点数+进度）",
+    "visit_task_report": "上报任务进展",
+    "visit_task_assign": "派工 / 改派 / 回收",
+    "visit_task_confirm": "确认 / 一键全确认 / 驳回",
+    "visit_task_return": "撤回任务到车站池",
     "visit_upload": "上传巡店/对账文件",
     "visit_payroll_export": "导出发薪表",
     "visit_rebuild": "月度重算",
@@ -998,6 +1007,10 @@ _WRITE_TITLES = {
 }
 
 _READ_TITLES = {
+    # 作业域（团队 / 车站 / 任务）
+    "visit_my_tasks": "我的任务（含自动延续）",
+    "visit_team_tasks": "本队任务 / 待确认",
+    "visit_task_board": "任务总表（管理员）",
     "visit_whoami": "我是谁（身份与权限）",
     "visit_my_perf": "我的绩效",
     "visit_my_pay": "我的找平与发放",
@@ -1018,8 +1031,177 @@ def _annotations(name: str):
     return read_ann(_READ_TITLES[name])
 
 
+# ---------------- 作业域（团队 / 车站 / 任务）----------------
+# 口径与 Web 端**同一套服务层**（app/services/bd_tasks.py 等），不另写一套。
+# 详见 docs/任务域-全流程.md；MCP 侧能力层在 mcp_service/task_ops.py。
+
+def _task_write(ctx: Context, tool: str, params: dict, fn):
+    """作业域写工具统一入口（提交/回滚在 fn 里做）。"""
+    def _mapped(db, actor):
+        from mcp_service import task_ops
+        try:
+            data = fn(db, actor, task_ops)
+            db.commit()
+            return {"ok": True, "data": data}
+        except Exception as exc:                       # noqa: BLE001
+            db.rollback()
+            from app.services.bd_tasks import TaskError
+            if isinstance(exc, (TaskError, ValueError)):
+                return _envelope_error("BAD_PARAM", str(exc),
+                                       "请检查参数或权限后重试", retryable=False)
+            raise
+    return _write(ctx, tool, params, _mapped, retryable=False)
+
+
+def visit_my_tasks(ctx: Context) -> dict[str, Any]:
+    """**我的任务**：今天派给我的 ∪ 之前派给我但还没做完的（自动延续）+ 今天已填点数。"""
+    from mcp_service import task_ops
+    actor = actor_from_ctx(ctx)
+    return _read(ctx, "visit_my_tasks", {}, lambda db: _my_tasks_run(db, actor, task_ops))
+
+
+def _my_tasks_run(db, actor, task_ops) -> dict[str, Any]:
+    pc = _person_code_of(actor)
+    if not pc:
+        return _unbound_hint()
+    return {"ok": True, "data": task_ops.my_tasks(db, pc)}
+
+
+def visit_self_report(ctx: Context, area: str = "", p1_cnt: int = 0,
+                      p2_cnt: int = 0,
+                      items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """**提交今日自报**：点数（1点/2点店数）+ 当天若干任务的进度，**一次提交同一事务**。
+
+    items = [{"task_id": 123, "pct": 40, "note": "可空"}, ...]；
+    进度没变又没写备注的会被跳过（不会产生多余待确认）。
+    """
+    params = {"area": area, "p1_cnt": p1_cnt, "p2_cnt": p2_cnt,
+              "items": items or []}
+    return _task_write(ctx, "visit_self_report", params,
+                       lambda db, actor, ops: ops.self_report(
+                           db, actor, area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt,
+                           items=items or []))
+
+
+def visit_task_report(ctx: Context, task_id: int, pct: int,
+                      note: str = "") -> dict[str, Any]:
+    """**上报单条任务进展**（0–100）。队员报自己的、队长调整本队的都走它。
+
+    - 队长**随时**可以调本队任何任务的进度（不受"确认后锁定"限制）
+    - **未分配的任务**：队长直接 `pct=100` 就是"标识完成"（不用先派人）
+    - 队员那边：队长确认过的**当天**那条会被锁住
+    """
+    params = {"task_id": task_id, "pct": pct, "note": note}
+    return _task_write(ctx, "visit_task_report", params,
+                       lambda db, actor, ops: ops.report_one(
+                           db, actor, task_id=task_id, pct=pct, note=note))
+
+
+def visit_team_tasks(ctx: Context, tab: str = "", kw: str = "",
+                     line_id: int | None = None) -> dict[str, Any]:
+    """**本队任务**（队长视角）：tab 计数 + 任务行 + 待确认队列。
+
+    tab：空=全部 / `unassigned`=待派（没分人）/ `doing`=已分人 / `done`=已完成。
+    """
+    from mcp_service import task_ops
+    actor = actor_from_ctx(ctx)
+    params = {"tab": tab, "kw": kw, "line_id": line_id}
+
+    def run(db):
+        ids = _actor_team_ids(actor, db)
+        if not ids:
+            return _envelope_error("FORBIDDEN_TOOL", "只有队长能看本队任务",
+                                   "该账号不是队长，或还没有带队", retryable=False)
+        return {"ok": True, "data": task_ops.team_tasks(db, ids, tab=tab, kw=kw,
+                                                        line_id=line_id)}
+    return _read(ctx, "visit_team_tasks", params, run)
+
+
+def _actor_team_ids(actor, db) -> list:
+    """当前身份带的队（队长=他带的队；管理员=全部队）。"""
+    from app.services import bd_teams
+    if actor is None:
+        return []
+    if getattr(actor, "role", "") == "admin":
+        # 管理员：全部队。⚠️ list_teams 的行是 {"team": <BdTeam>, ...}（不是 {"id":…}）
+        #    —— 2026-10-06 实测踩到 KeyError('id')
+        out = []
+        for row in bd_teams.list_teams(db):
+            t = row.get("team") if isinstance(row, dict) else None
+            tid = getattr(t, "id", None)
+            if tid is None and isinstance(row, dict):
+                tid = row.get("id")
+            if tid is not None:
+                out.append(int(tid))
+        return out
+    return [t.id for t in bd_teams.leader_teams(db, getattr(actor, "person_code", None))]
+
+
+def visit_task_assign(ctx: Context, task_id: int,
+                      person_codes: list[str] | None = None) -> dict[str, Any]:
+    """**派工 / 改派 / 回收（空置）**：`person_codes` 传 `[]` 就是回收（进度保留）。"""
+    params = {"task_id": task_id, "person_codes": person_codes or []}
+    return _task_write(ctx, "visit_task_assign", params,
+                       lambda db, actor, ops: ops.assign(
+                           db, actor, task_id=task_id,
+                           person_codes=person_codes or []))
+
+
+def visit_task_confirm(ctx: Context, task_id: int | None = None,
+                       all_today: bool = False, reject: bool = False,
+                       pct: int | None = None, note: str = "") -> dict[str, Any]:
+    """**确认 / 一键全确认 / 驳回**（队长）：
+
+    - `task_id` + 默认 → 确认这一条（认可队员上报的原值）
+    - `all_today=True` → **一键确认当天全部**待确认
+    - `reject=True` + `pct` → 驳回（把 100% 退回成 pct；队员原值保留）
+    """
+    params = {"task_id": task_id, "all_today": all_today, "reject": reject,
+              "pct": pct, "note": note}
+
+    def run(db, actor, ops):
+        if reject:
+            if not task_id or pct is None:
+                raise ValueError("驳回要同时给 task_id 和 pct")
+            return ops.reject(db, actor, task_id=task_id, pct=pct, note=note)
+        if all_today:
+            return ops.confirm_day(db, actor)
+        if not task_id:
+            raise ValueError("要么给 task_id（确认这一条），要么 all_today=True（全部）")
+        return ops.confirm_day(db, actor, task_id=task_id)
+    return _task_write(ctx, "visit_task_confirm", params, run)
+
+
+def visit_task_return(ctx: Context, task_ids: list[int]) -> dict[str, Any]:
+    """**撤回任务到车站池**（管理员）：只撤"已派队但没分到人"的（有进展也行）。"""
+    params = {"task_ids": task_ids}
+    return _task_write(ctx, "visit_task_return", params,
+                       lambda db, actor, ops: ops.return_pool(
+                           db, actor, task_ids=task_ids))
+
+
+def visit_task_board(ctx: Context, tab: str = "", line_id: int | None = None,
+                     kw: str = "", stale_only: bool = False, page: int = 1,
+                     per: int = 20) -> dict[str, Any]:
+    """**任务总表**（管理员）：tab 计数 + 任务行 + 按队汇总 + 停滞口径。
+
+    tab：空=全部 / `unassigned`=车站池 / `assigned`=已派队未完成 / `done`=已完成。
+    `stale_only=True` → 只看"已分到人但 ≥N 天没提交"的。
+    """
+    from mcp_service import task_ops
+    params = {"tab": tab, "line_id": line_id, "kw": kw,
+              "stale_only": stale_only, "page": page, "per": per}
+    return _read(ctx, "visit_task_board", params,
+                 lambda db: {"ok": True, "data": task_ops.board(
+                     db, tab=tab, line_id=line_id, kw=kw,
+                     stale_only=stale_only, page=page, per=per)})
+
+
 def register(mcp: MCPServer) -> None:
-    """注册 16 个场景化工具（唯一注册入口；server.py 经 tools.register 接线）。"""
+    """注册全部场景化工具（唯一注册入口；server.py 经 tools.register 接线）。
+
+    2026-10-06：16 → **24**（新增作业域 8 个：员工 3 + 队长 4 + 管理员 1）。
+    """
     from typing import Annotated
     from pydantic import Field
 
@@ -1042,6 +1224,69 @@ def register(mcp: MCPServer) -> None:
                   month: Annotated[str | None, Field(pattern=MONTH_PATTERN)] = None
                   ) -> dict[str, Any]:
         return visit_my_pay(ctx, month=month)
+
+    # 作业域 8 个（员工 3 + 队长 4 + 管理员 1；授权矩阵见 mcp_service/authz.py）
+    @mcp.tool(name="visit_my_tasks", title=_READ_TITLES["visit_my_tasks"],
+              annotations=_annotations("visit_my_tasks"),
+              description="我的任务（今天派的 ∪ 没做完自动延续的）+ 今天已填点数")
+    def _t_my_tasks(ctx: Context) -> dict[str, Any]:
+        return visit_my_tasks(ctx)
+
+    @mcp.tool(name="visit_self_report", title=_WRITE_TITLES["visit_self_report"],
+              annotations=_annotations("visit_self_report"),
+              description="提交今日自报：点数（1点/2点店数）+ 当天若干任务的进度，"
+                          "一次提交（同一事务）；进度没变又没备注的会跳过")
+    def _t_self_report(ctx: Context, area: str = "", p1_cnt: int = 0,
+                       p2_cnt: int = 0,
+                       items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return visit_self_report(ctx, area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt,
+                                 items=items)
+
+    @mcp.tool(name="visit_task_report", title=_WRITE_TITLES["visit_task_report"],
+              annotations=_annotations("visit_task_report"),
+              description="上报单条任务进展（0–100）；队长随时可调本队进度，"
+                          "未分配的任务 pct=100 即标识完成；队员当天被确认后锁住")
+    def _t_task_report(ctx: Context, task_id: int, pct: int,
+                       note: str = "") -> dict[str, Any]:
+        return visit_task_report(ctx, task_id=task_id, pct=pct, note=note)
+
+    @mcp.tool(name="visit_team_tasks", title=_READ_TITLES["visit_team_tasks"],
+              annotations=_annotations("visit_team_tasks"),
+              description="本队任务（tab: 空/unassigned 待派/doing 已分人/done）+ 待确认队列")
+    def _t_team_tasks(ctx: Context, tab: str = "", kw: str = "",
+                      line_id: int | None = None) -> dict[str, Any]:
+        return visit_team_tasks(ctx, tab=tab, kw=kw, line_id=line_id)
+
+    @mcp.tool(name="visit_task_assign", title=_WRITE_TITLES["visit_task_assign"],
+              annotations=_annotations("visit_task_assign"),
+              description="派工 / 改派 / 回收：person_codes=[] 即回收（回到本队待派，进展保留）")
+    def _t_task_assign(ctx: Context, task_id: int,
+                       person_codes: list[str] | None = None) -> dict[str, Any]:
+        return visit_task_assign(ctx, task_id=task_id, person_codes=person_codes)
+
+    @mcp.tool(name="visit_task_confirm", title=_WRITE_TITLES["visit_task_confirm"],
+              annotations=_annotations("visit_task_confirm"),
+              description="确认（task_id）/ 一键全确认（all_today=True）/ 驳回（reject=True+pct）")
+    def _t_task_confirm(ctx: Context, task_id: int | None = None,
+                        all_today: bool = False, reject: bool = False,
+                        pct: int | None = None, note: str = "") -> dict[str, Any]:
+        return visit_task_confirm(ctx, task_id=task_id, all_today=all_today,
+                                  reject=reject, pct=pct, note=note)
+
+    @mcp.tool(name="visit_task_return", title=_WRITE_TITLES["visit_task_return"],
+              annotations=_annotations("visit_task_return"),
+              description="撤回任务到车站池（管理员）：只撤已派队但没分到人的（有进展也行）")
+    def _t_task_return(ctx: Context, task_ids: list[int]) -> dict[str, Any]:
+        return visit_task_return(ctx, task_ids=task_ids)
+
+    @mcp.tool(name="visit_task_board", title=_READ_TITLES["visit_task_board"],
+              annotations=_annotations("visit_task_board"),
+              description="任务总表（管理员）：tab 计数 + 任务行 + 按队汇总 + 停滞口径")
+    def _t_task_board(ctx: Context, tab: str = "", line_id: int | None = None,
+                      kw: str = "", stale_only: bool = False, page: int = 1,
+                      per: int = 20) -> dict[str, Any]:
+        return visit_task_board(ctx, tab=tab, line_id=line_id, kw=kw,
+                                stale_only=stale_only, page=page, per=per)
 
     # 管理员侧 13 个
     @mcp.tool(name="visit_upload", title=_WRITE_TITLES["visit_upload"],

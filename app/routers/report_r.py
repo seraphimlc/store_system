@@ -196,9 +196,16 @@ def my_report_feedback(request: Request,
 # ---------------- 管理端：填报列表 + 对比 + 导出（规格 §9） ----------------
 
 def _admin_guard(user):
+    """管理端守卫：非 admin 一律拦。
+
+    队长（`role == "leader"`）先回 `/login` —— `GET /login` 现在按角色落点
+    （`home.landing_home` → `/my/tasks`），**不会再 (/ → /dashboard → /login) 死循环**。
+    """
     if user is None:
         return RedirectResponse("/login", status_code=302)
     if user.role != "admin":
+        if user.role == "leader":
+            return RedirectResponse("/login", status_code=302)
         return RedirectResponse("/my/perf", status_code=302)
     return None
 

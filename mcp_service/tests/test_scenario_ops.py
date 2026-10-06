@@ -5,7 +5,7 @@
 1. 每个新工具至少 1 条"能答对"的断言（临时 SQLite 造数据，断言关键字段）
 2. view/action 非法值 → BAD_PARAM + 可选值提示
 3. 员工越权调管理员工具 → FORBIDDEN_TOOL（无副作用）
-4. tools/list：员工 3 个 / 管理员 16 个
+4. tools/list：员工 6 个 / 队长 9 个 / 管理员 24 个
 5. 旧工具名一律删除（不做兼容期）
 6. 关键数字一致 → 由 scripts/mcp_restart.sh 对真实库跑自洽检查（本文件用临时库验证口径）
 7. 审计：工具名记录正确（不是包装函数名）
@@ -469,7 +469,7 @@ def test_staff_forbidden_no_side_effect(factory, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 验收 4：tools/list 员工 3 个 / 管理员 16 个
+# 验收 4：tools/list 员工 6 个 / 队长 9 个 / 管理员 24 个
 # ---------------------------------------------------------------------------
 
 def _registered_names():
@@ -480,17 +480,45 @@ def _registered_names():
     return {t.name for t in asyncio.run(mcp.list_tools())}
 
 
-def test_tools_list_admin_16():
+def test_tools_list_admin_24():
     names = _registered_names()
-    assert len(names) == 16
+    assert len(names) == 24
 
 
-def test_tools_list_staff_3():
-    """员工 tools/list 裁剪 = STAFF_ALLOWED（3 个）。"""
-    assert set(authz.STAFF_ALLOWED) == {"visit_whoami", "visit_my_perf",
-                                        "visit_my_pay"}
+def test_tools_list_staff_6():
+    """员工 tools/list 裁剪 = STAFF_ALLOWED（6 个：3 结算域 + 3 作业域）。"""
+    assert set(authz.STAFF_ALLOWED) == {
+        "visit_whoami", "visit_my_perf", "visit_my_pay",
+        "visit_my_tasks", "visit_self_report", "visit_task_report"}
     names = _registered_names()
     assert set(authz.STAFF_ALLOWED) <= names
+
+
+def test_leader_tier_allowed():
+    """**队长档**（2026-10-06 新增）：员工能用的 + 本队任务管理（3 个）。"""
+    assert set(authz.LEADER_ALLOWED) == set(authz.STAFF_ALLOWED) | {
+        "visit_team_tasks", "visit_task_assign", "visit_task_confirm"}
+    assert authz.require_role("visit_team_tasks") == "LEADER_ALLOWED"
+    assert authz.require_role("visit_upload") == "ADMIN_ONLY"
+
+
+def test_leader_cannot_call_admin_tools():
+    """队长调管理员工具 / 员工调队长工具 → FORBIDDEN_TOOL（进入业务前拦截）。"""
+    class _A:
+        role = "leader"
+        person_code = "P1"
+        uid = 1
+    class _S:
+        role = "staff"
+        person_code = "P2"
+        uid = 2
+    assert authz.enforce("visit_task_confirm", _A(), {}) is None
+    assert authz.enforce("visit_team_tasks", _A(), {}) is None
+    d = authz.enforce("visit_upload", _A(), {})
+    assert d and d["error"]["code"] == "FORBIDDEN_TOOL"
+    d2 = authz.enforce("visit_team_tasks", _S(), {})
+    assert d2 and d2["error"]["code"] == "FORBIDDEN_TOOL"
+    assert authz.enforce("visit_my_tasks", _S(), {}) is None
 
 
 def test_old_tool_names_deleted_no_compat():
