@@ -233,5 +233,21 @@ function bdMenuClose() {
 </script>
 <script src="/static/emp_select.js?v={{ static_ver('emp_select.js') }}" defer></script>
 <script>window.__PAGE_STATE__ = {{ (page_state or {})|tojson }};</script>
+{# 结果提示的地址栏清理：`?msg=`（成功）/ `?err=`（失败）是**跳转带的提示**，
+   页面已经把它渲染成顶部那条彩色横幅了 → 这里把参数从地址栏去掉：
+   ① 刷新/收藏/转发不再带着上一次的结果；② URL 干净。
+   ⚠️ 必须保留 `#hash`（AI 总结提交后会跳到 `#ai-summary`）。 #}
+<script>
+(function () {
+  try {
+    var u = new URL(location.href);
+    if (!u.searchParams.has('msg') && !u.searchParams.has('err')) return;
+    u.searchParams.delete('msg');
+    u.searchParams.delete('err');
+    var q = u.searchParams.toString();
+    history.replaceState(null, '', u.pathname + (q ? '?' + q : '') + u.hash);
+  } catch (e) { /* 老浏览器：忽略，功能不受影响 */ }
+})();
+</script>
 </body>
 </html>

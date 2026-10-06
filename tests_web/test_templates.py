@@ -225,3 +225,17 @@ def test_every_template_compiles():
         except Exception as e:            # noqa: BLE001 —— 就是要抓所有模板错误
             bad.append("%s → %s" % (p.name, e))
     assert not bad, "模板编译失败：\n  " + "\n  ".join(bad)
+
+
+def test_base_strips_msg_from_url():
+    """⚠️ 用户问"这个 ?msg= 是什么意思"：提示是跳转带的（没有服务端 flash）。
+
+    横幅照常显示，但**地址栏要清干净**（刷新/收藏/转发不再带旧结果），
+    且必须保留 `#hash`（AI 总结会跳 `#ai-summary`）。
+    """
+    html = _env().get_template("base.html").render(
+        current_user=SimpleNamespace(display_name="管理员", role="admin"),
+        request=_req(), current_lang="zh")
+    assert "searchParams.delete('msg')" in html
+    assert "searchParams.delete('err')" in html
+    assert "+ u.hash" in html, "不能把 #hash 弄丢"
