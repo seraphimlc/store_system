@@ -27,8 +27,9 @@
   {% set _x1 = existing.p1_cnt or 0 %}
   {% set _x2 = existing.p2_cnt or 0 %}
   {% set _xt = _x1 + _x2 %}
-  <table class="kv" data-testid="today-summary"
-         {% if not _has_tasks %}x-show="!edit"{% endif %}>
+  {# ⚠️ 摘要与表单**互斥**（`!edit` / `edit`）：用户实测"为什么出现两遍"——
+     我把摘要的 x-show 去掉后，已提交的摘要 + 可编辑表单同时渲染 → 同一组点数显示两遍 ✗ #}
+  <table class="kv" data-testid="today-summary" x-show="!edit">
     {% if existing.area %}<tr><th>{{ t('担当区域') }}</th><td>{{ existing.area }}</td></tr>{% endif %}
     <tr><th>{{ t('1点店铺数') }}</th><td>{{ _x1 }}</td></tr>
     <tr><th>{{ t('2点店铺数') }}</th><td>{{ _x2 }}</td></tr>

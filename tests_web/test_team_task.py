@@ -4742,3 +4742,25 @@ def test_self_report_redirect_url_is_well_formed(client, seeded):
     assert "&msg=" not in loc.split("?")[0]
     # 跟着跳一次，确认不是 404
     assert client.get(loc).status_code == 200
+
+
+def test_daily_report_shows_points_block_once(client, seeded):
+    """⚠️ 用户实测（ogawa）：每日填报里同一组点数**出现两遍** ——
+    已提交的只读摘要 + 可编辑表单同时渲染了。两者必须**互斥**（`!edit` / `edit`）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    # 先提交一次（点数 + 进度）→ 页面进入"已提交"状态
+    _post(client, "/my/self-report",
+          {"area": "新宿", "p1_cnt": "4", "p2_cnt": "1",
+           "pct_%d" % tid: "55", "back": "/my/report"}, from_path="/my/report")
+    h = client.get("/my/report").text
+    # 摘要在"非编辑态"显示，表单在"编辑态"显示 → 两者都带 x-show，靠 Alpine 互斥
+    assert 'data-testid="today-summary" x-show="!edit"' in h, \
+        "只读摘要必须在 !edit 时显示（不能常显，否则和表单重复）"
+    # 有任务 → 初始就是编辑态（表单常显），摘要靠 `!edit` 自动隐藏 → **只会看到一份**
+    assert 'x-data="{ edit: true,' in h, "有任务时初始应为编辑态"
+    # （"总店铺数"在 HTML 里出现 3 次是正常的：摘要 1 + 表单 1 + 月度历史表头 1）
