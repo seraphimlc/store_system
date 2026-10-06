@@ -294,6 +294,21 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if r.team_leaders %}<span class="hint">· {{ t('队长') }} {{ r.team_leaders|join('、') }}</span>{% endif %}
   </div>
 
+  {% if can_asg and r.assignees %}
+  {# **回收 / 空置**：清担当 → 回本队待派（进展保留）—— 用户 2026-10-06 口径 #}
+  <form method="post" action="/my/tasks/return" style="margin-top:.4rem"
+        onsubmit="return confirm('{{ t('把这条收回本队待派？（已填的进展会保留）') }}')"
+        data-testid="return-form-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="back_tab" value="{{ tab }}">
+    <button class="btn ghost" type="submit"
+            data-testid="return-{{ r.task.id }}">{{ t('回收（回到本队待派）') }}</button>
+    <span class="hint">{{ t('进展保留，可再分给别人') }}</span>
+  </form>
+  {% endif %}
+
   {% if can_asg %}
   {# 分派：勾选本队队员（最多 2 人） #}
   <details style="margin-top:.45rem">

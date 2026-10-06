@@ -1478,8 +1478,20 @@ def team_tasks(db: Session, team_ids: Sequence[int], tab: str = "",
         return []
     q = _base_query(db, team_id=None, line_id=line_id, kw=kw).filter(
         BdTask.team_id.in_(list(team_ids)))
-    if tab in TABS:
-        q = q.filter(BdTask.state == tab)
+    # ⚠️ 队长视角的 tab **按"有没有分到人"分**，不按全局 state：
+    #    - 未分配（待派）= 本队未完成 且 **无担当**（含"有进展但没人"→ 回收/空置后落这里）
+    #    - 进行中       = 本队未完成 且 **有担当**
+    #    - 已完成       = pct=100
+    #    用户 2026-10-06："队长可以收回来的、分给别人、或者空置；**已经有进展的也能这样**"
+    #    旧写法用 state → "有进展没人"会被算成进行中，回收后回不到"待派"（实测踩到）
+    if tab == TAB_UNASSIGNED:
+        q = q.filter(BdTask.state != STATE_DONE,
+                     ~BdTask.id.in_(_has_assignee(db)))
+    elif tab == TAB_DOING:
+        q = q.filter(BdTask.state != STATE_DONE,
+                     BdTask.id.in_(_has_assignee(db)))
+    elif tab == TAB_DONE:
+        q = q.filter(BdTask.state == STATE_DONE)
     tasks = q.order_by(BdTask.state.asc(), BdTask.id.asc()).all()
     return _rows(db, tasks)
 

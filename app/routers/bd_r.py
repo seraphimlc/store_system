@@ -714,8 +714,12 @@ def my_tasks_page(request: Request,
     if is_leader:
         all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw,
                                        line_id=line_id)
-        counts = {k: sum(1 for r in all_rows if r["state"] == k)
-                  for k in bd_tasks.STATES}
+        # 队长 tab 口径 = **按有没有分人**（与 team_tasks 一致，见其注释）
+        counts = {
+            "unassigned": sum(1 for r in all_rows if not r["assignees"]),
+            "doing": sum(1 for r in all_rows if r["assignees"]),
+            "done": sum(1 for r in all_rows if r["state"] == "done"),
+        }
         counts[TAB_MINE] = len(my_rows)
         # 「待确认」= 队员报过、队长还没处理的（用户 2026-10-03：确认 / 调整）
         counts[TAB_PENDING] = sum(1 for r in all_rows if r.get("pending_review"))
@@ -728,8 +732,12 @@ def my_tasks_page(request: Request,
             rows = my_rows
         elif tab == TAB_PENDING:
             rows = [r for r in all_rows if r.get("pending_review")]
-        elif tab in bd_tasks.TABS:
-            rows = [r for r in all_rows if r["state"] == tab]
+        elif tab == "unassigned":        # 队内**待派** = 未完成且没分人（含"有进展没人"）
+            rows = [r for r in all_rows if not r["assignees"]]
+        elif tab == "doing":             # 进行中 = 未完成且已分人
+            rows = [r for r in all_rows if r["assignees"]]
+        elif tab == "done":
+            rows = [r for r in all_rows if r["state"] == "done"]
         else:
             rows = all_rows
         for tm in teams:      # ⚠️ 别用 `t` 做循环变量（会覆盖全局 t() 翻译函数）
@@ -1134,6 +1142,42 @@ def my_tasks_confirm_bulk(request: Request,
     if errs:
         msg += "；%d 条跳过（%s）" % (len(errs), errs[0])
     return RedirectResponse(_with_msg(back, "msg" if ok else "err", msg, "/my/tasks"),
+                            status_code=303)
+
+
+@router.post("/my/tasks/return")
+def my_tasks_return(request: Request, task_id: int = Form(0),
+                    back_tab: str = Form(""), csrf_token: str = Form(""),
+                    user: Optional[User] = Depends(require_login),
+                    db: Session = Depends(get_db)):
+    """**队长回收 / 空置**：把任务收回本队待派（清掉担当，**进展保留**）。
+
+    用户 2026-10-06："对于分配出去的任务，队长也可以回收回来，或者分给别人，或者空置。
+    **对于已经有进展的任务，也可以这样做**。"
+    """
+    g = _staff_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    t = db.get(bd_tasks.BdTask, task_id)
+    back = "/my/tasks?tab=%s" % (back_tab or "doing")
+    if t is None:
+        return RedirectResponse(back + "&err=" + _q(_m("任务不存在")),
+                                status_code=303)
+    if not bd_tasks.can_assign(db, user, t):
+        return RedirectResponse(back + "&err=" + _q(_m("只有该队队长或管理员能回收")),
+                                status_code=303)
+    try:
+        bd_tasks.assign_members(db, task_id, [], by=user.username,
+                                actor_user=user)
+        db.commit()
+    except Exception as e:                        # noqa: BLE001
+        db.rollback()
+        return RedirectResponse(back + "&err=" + _q(_m(str(e))), status_code=303)
+    return RedirectResponse(back + "&msg="
+                            + _q(_m("已回收：回到本队待派（进展保留）")),
                             status_code=303)
 
 

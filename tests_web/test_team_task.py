@@ -4256,3 +4256,51 @@ def test_leader_confirm_day_one_click(client, seeded):
     _login(client, "tangjing")
     r3 = _post(client, "/my/tasks/confirm-day", {}, from_path="/my/tasks?tab=mine")
     assert r3.status_code in (302, 303)
+
+
+def test_leader_return_task_with_progress(client, seeded):
+    """**A5 回收/空置**（用户 2026-10-06："回收回来，或者分给别人，或者空置；
+    **已经有进展的也能这样**"）：清担当、进展保留、回到本队「待派」tab。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 40, "干了四成", by="tangjing", actor_user=tj)
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    # 回收前：在"进行中"（有担当）
+    h1 = client.get("/my/tasks?tab=doing").text
+    assert 'data-testid="return-%d"' % tid in h1, "有担当的任务要有回收按钮"
+    r = _post(client, "/my/tasks/return", {"task_id": str(tid), "back_tab": "doing"},
+              from_path="/my/tasks?tab=doing")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    assert "已回收" in _uq(r.headers["location"])
+    db = appdb.SessionLocal()
+    assert db.query(BdTaskAssign).filter(BdTaskAssign.task_id == tid).count() == 0
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row is not None and row.pct == 40, "进展必须保留"
+    t = db.get(BdTask, tid)
+    assert t.team_id == seeded["team"], "还在本队"
+    db.close()
+    # 回收后：进"待派"（按有没有分人分 tab）
+    h2 = client.get("/my/tasks?tab=unassigned").text
+    assert 'data-testid="my-task-row"' in h2 or "共" in h2
+    assert "%d" % tid in h2, "回收后应出现在本队待派列表"
+    h3 = client.get("/my/tasks?tab=doing").text
+    assert 'data-testid="return-%d"' % tid not in h3, "已不在进行中"
+    # 再分给别人 → 又回进行中
+    r2 = _post(client, "/my/tasks/assign", {"task_id": str(tid), "person": "P2"},
+               from_path="/my/tasks?tab=unassigned")
+    assert r2.status_code == 303
+    db = appdb.SessionLocal()
+    assert [a.person_code for a in db.query(BdTaskAssign)
+            .filter(BdTaskAssign.task_id == tid).all()] == ["P2"]
+    assert bd_tasks.day_progress_map(db, [tid]).get(tid).pct == 40
+    db.close()
+    # 队员（非队长）不能回收
+    _login(client, "tangjing")
+    r3 = _post(client, "/my/tasks/return", {"task_id": str(tid)},
+               from_path="/my/tasks?tab=mine")
+    assert r3.status_code == 303 and "err=" in r3.headers["location"]
