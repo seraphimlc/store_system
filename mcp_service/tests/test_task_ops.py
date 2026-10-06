@@ -163,3 +163,53 @@ def test_board_and_return_pool(db):
     db.commit()
     r2 = task_ops.return_pool(db, admin, task_ids=[tid])
     assert r2["returned"] == 0 and r2["skipped"][0]["why"]
+
+
+def test_transfer_to_other_team(db):
+    """**转给别的队**：换队 + 原担当被移出（进度保留）+ 目标队能查到。
+
+    MCP 工具（`visit_task_transfer`）调的就是 `task_ops.transfer`，
+    口径必须与 Web 端同一个服务层一致。
+    """
+    from app.services import bd_teams, bd_tasks
+    from app.models import BdTask, BdTaskAssign
+    t2 = bd_teams.create_team(db, "汤静队", "TW02", by="admin")
+    # ⚠️ 人要先存在，才能进队（set_members 会校验"人员不存在"）
+    db.add(Person(code="P3", display_name="甘子杰"))
+    db.add(User(username="ganzijie", display_name="甘子杰", role="staff",
+                is_active=True, status="active", person_code="P3",
+                password_hash=hash_password("pw123456")))
+    db.flush()
+    bd_teams.set_members(db, t2.id, [("P3", "leader")])
+    tid = _tid(db)
+    actor = _Actor(role="leader", username="ogawa", person_code="P1")
+    task_ops.assign(db, actor, task_id=tid, person_codes=["P2"])
+    db.commit()
+    r = task_ops.transfer(db, actor, task_ids=[tid], to_team_id=t2.id)
+    db.commit()
+    assert r["transferred"] == 1 and r["to_team"] == "汤静队"
+    assert r["cleared"] == 1 and r["removed_people"] == ["P2"]
+    t = db.get(BdTask, tid)
+    assert t.team_id == t2.id
+    assert db.query(BdTaskAssign).filter(BdTaskAssign.task_id == tid).count() == 0
+    # 目标队（汤静队）的池子里能看到它（用服务层查，形状稳定）
+    from app.services import bd_tasks as _bt
+    rows = _bt.team_tasks(db, [t2.id], tab="unassigned")
+    assert tid in [x["task"].id for x in rows]
+
+
+def test_transfer_denied_for_non_leader_of_that_team(db):
+    """不是那个队的队长 → 拒绝（只能转自己队里的任务）。"""
+    from app.services import bd_teams
+    t2 = bd_teams.create_team(db, "汤静队", "TW03", by="admin")
+    # P2 已在小川队（一人一队）→ 另外造个人当二队队长
+    db.add(Person(code="P4", display_name="罗子傑"))
+    db.flush()
+    bd_teams.set_members(db, t2.id, [("P4", "leader")])
+    db.commit()
+    tid = _tid(db)
+    outsider = _Actor(role="leader", username="outsider", person_code="P9")
+    with pytest.raises(Exception) as e:
+        task_ops.transfer(db, outsider, task_ids=[tid], to_team_id=t2.id)
+    db.rollback()
+    assert "队长" in str(e.value)

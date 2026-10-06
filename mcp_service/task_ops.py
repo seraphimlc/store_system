@@ -133,6 +133,22 @@ def assign(db, actor, *, task_id: int, person_codes: list) -> dict:
             "state": r.get("state"), "warnings": r.get("warnings", [])}
 
 
+def transfer(db, actor, *, task_ids: list, to_team_id: int) -> dict:
+    """**转给别的队**（队长之间私下换活，用户 2026-10-06）。
+
+    只能转自己当队长的那个队的任务；未分配/进行中都能转（已完成不转）；
+    转出移出原担当但保留已上报进度；给对方队长和被移出的担当各发一条消息。
+    """
+    from app.services import bd_tasks
+    r = bd_tasks.transfer_team_task(db, actor, list(task_ids or []),
+                                    int(to_team_id),
+                                    by=getattr(actor, "username", "") or "",
+                                    actor_user=actor)
+    return {"transferred": r["transferred"], "to_team": r["to_team"],
+            "from_team": r["from_team"], "cleared": r["cleared"],
+            "removed_people": r["removed_people"], "labels": r["labels"]}
+
+
 def confirm_day(db, actor, *, team_ids: list | None = None,
                 task_id: int | None = None, on_date: str | None = None) -> dict:
     """**确认 / 一键全确认**：给了 `task_id` 就确认那一单条，否则确认当天全部。"""

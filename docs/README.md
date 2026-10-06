@@ -24,7 +24,7 @@
 | 规格 | `docs/specs-messages.md` | 站内消息 + 进展确认/调整 |
 | 规格 | `docs/specs-mcp-identity.md` | MCP 身份认证（每用户一身份） |
 | 规格 | `docs/specs-mcp-oauth.md` | MCP OAuth（SSO） |
-| 规格 | `docs/specs-mcp-tools-scenario.md` | MCP 工具场景化重构（49 → 16；⚠️ 已过期，现为 24 个，见 MCP对接手册） |
+| 规格 | `docs/specs-mcp-tools-scenario.md` | MCP 工具场景化重构（49 → 16；⚠️ 已过期，现为 25 个，见 MCP对接手册） |
 | 手册 | `docs/MCP对接手册.md` | 对接其它系统时读：协议实测/OAuth 坑/工具设计/发布验收 |
 | 方案 | `docs/技术方案.md` | 技术实现与决策：架构/数据模型/流程落地/权衡/部署 |
 | 方案 | `docs/产品设计-系统逻辑全览.md` | 业务逻辑全览（角色权限/主流程/判定规则） |

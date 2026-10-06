@@ -153,7 +153,7 @@ MANUAL = {
     "app/services/report_ai.py": "对比报告 AI 评语（数据指纹复用）",
     "app/services/perf.py": "绩效：点数/工资/看板统计",
     "app/services/flow.py": "文件流水线：入表→判定→正式表→自动后处理",
-    "mcp_service/scenario_ops.py": "MCP 场景化工具注册唯一入口（24 个：结算 16 + 作业域 8）",
+    "mcp_service/scenario_ops.py": "MCP 场景化工具注册唯一入口（25 个：结算 16 + 作业域 9）",
     "docs/文件索引.tsv": "全仓文件索引（本文件生成）",
     "AGENTS.md": "**入口手册（保持短）**：功能→读什么对照表",
 }

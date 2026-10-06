@@ -5,7 +5,7 @@ mcp_service/__init__.py	MCP 服务	WorkBuddy MCP 服务（独立进程）。	247
 mcp_service/annotations.py	MCP 服务	MCP tool annotations 统一工厂（P1-6：title + readOnly/idempotent/destructive hint）。	1575
 mcp_service/audit.py	MCP 服务	两阶段调用审计（规格：docs/specs-mcp-identity.md 第五节/第六节）。	5408
 mcp_service/auth.py	MCP 服务	Bearer 鉴权中间件（纯 ASGI）。	9450
-mcp_service/authz.py	MCP 服务	中央授权矩阵 + 统一调用拦截（规格：docs/specs-mcp-identity.md 第二节/第五节）。	5221
+mcp_service/authz.py	MCP 服务	中央授权矩阵 + 统一调用拦截（规格：docs/specs-mcp-identity.md 第二节/第五节）。	5271
 mcp_service/capability.py	MCP 服务	能力层：一个业务能力一个函数，签名 f(db, ...) -> dict。	4697
 mcp_service/config.py	MCP 服务	MCP 服务的 env 读取与启动期校验。	2042
 mcp_service/envelope.py	MCP 服务	统一返回信封：`{ok:true,data}` / `{ok:false,error:{code,message,retryable,hint}}`。	1663
@@ -20,10 +20,10 @@ mcp_service/recon_ops.py	MCP 服务	对账只读能力层（P1 二期）。	1642
 mcp_service/recon_write_ops.py	MCP 服务	对账写能力层：上传对账文件（支付宝结算数据等）。	3125
 mcp_service/reqlog.py	MCP 服务	请求级证据日志：JSON Lines。	911
 mcp_service/run.sh	MCP 服务		830
-mcp_service/scenario_ops.py	MCP 服务	MCP 场景化工具注册唯一入口（24 个：结算 16 + 作业域 8）	60385
+mcp_service/scenario_ops.py	MCP 服务	MCP 场景化工具注册唯一入口（25 个：结算 16 + 作业域 9）	61441
 mcp_service/server.py	MCP 服务	WorkBuddy MCP 服务入口（独立进程，streamable HTTP）。	4007
 mcp_service/store_write_ops.py	MCP 服务	店铺主档写能力层：合并候选对 / 标记不同店 / 拆分实体 / 整批应用推荐。	6871
-mcp_service/task_ops.py	MCP 服务	MCP 作业域（团队 / 车站 / 任务）能力层。	8218
+mcp_service/task_ops.py	MCP 服务	MCP 作业域（团队 / 车站 / 任务）能力层。	8920
 mcp_service/tokens.py	MCP 服务	MCP Token 解析 → Actor。spec §5。	5589
 mcp_service/tools.py	MCP 服务	MCP 工具注册（适配层）。	3955
 mcp_service/write_ops.py	MCP 服务	写操作能力层：上传 / 出表 / 重算 / 改单价。	9621
@@ -41,24 +41,24 @@ app/services/bd_cjk.py	作业域·服务	中日字形归一（to_jp/to_zh/线路
 app/services/bd_import_rail.py	作业域·服务	N02 一都三県地铁数据导入（幂等，认领 515 历史站）	8487
 app/services/bd_leave.py	作业域·服务	假期模式 + 派工可用性提醒（只读跨域，绝不写）	9118
 app/services/bd_lines.py	作业域·服务	线路主档 + line_label()（运营商简称+线名）/线路下拉	4116
-app/services/bd_log.py	作业域·服务	通用追加日志（任务/团队/成员/车站）	4999
+app/services/bd_log.py	作业域·服务	通用追加日志（任务/团队/成员/车站）	5063
 app/services/bd_msg.py	作业域·服务	站内消息（一条消息+N 收件人行；收件人隔离唯一入口）	12587
 app/services/bd_perm.py	作业域·服务	角色能力表（判权与按钮共用一份）	3550
 app/services/bd_places.py	作业域·服务	物理车站层：rebuild_places（同 group_code+坐标合并）	8036
 app/services/bd_store.py	作业域·服务	BD 作业域 · 门店宇宙（`bd_store`）。	5335
 app/services/bd_summary_ai.py	作业域·服务	**任务域 AI 总结**（近 7 天 + 环比上一个 7 天）。	8055
-app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	77802
-app/services/bd_teams.py	作业域·服务	团队：建队/圈人（一人一队唯一索引）/队长同步/成员状态	16576
+app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	80761
+app/services/bd_teams.py	作业域·服务	团队：建队/圈人（一人一队唯一索引）/队长同步/成员状态	16911
 app/templates/_ai_suggest.html	作业域·模板	AI 派工建议的 htmx 片段	2691
 app/templates/_pager.html	作业域·模板	共	1470
 app/templates/bd_logs.html	作业域·模板	变更日志	3493
 app/templates/bd_stations.html	作业域·模板	车站页（资产维护；筛选只有 关键词+线路）	6122
-app/templates/bd_task_detail.html	作业域·模板	改派队伍	6244
+app/templates/bd_task_detail.html	作业域·模板	退回车站池	6534
 app/templates/bd_task_new.html	作业域·模板	建任务	7774
 app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→筛选→列表；未分配=车站池可批量派队）	20424
 app/templates/bd_team_detail.html	作业域·模板	团队详情：圈选队员（一人一队）	6207
 app/templates/bd_teams.html	作业域·模板	团队列表页	3819
-app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	61959
+app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	64473
 AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	7297
 README.md	入口文档		2768
 conftest.py	其它		75
@@ -85,12 +85,12 @@ app/templates/my_perf.html	员工端·模板	我的绩效	3471
 app/templates/my_plan.html	员工端·模板	出勤计划	7153
 app/templates/my_report.html	员工端·模板	每日填报	11980
 app/templates/my_report_feedback.html	员工端·模板	我的核对结果	2891
-app/templates/my_tasks.html	员工端·模板	员工/队长任务页（队长多 未分配/进行中/待确认/已完成）	24933
+app/templates/my_tasks.html	员工端·模板	员工/队长任务页（队长多 未分配/进行中/待确认/已完成）	25601
 app/auth.py	基座	会话与密码：argon2 哈希、签名 cookie（itsdangerous，含过期）、CSRF token。	1323
 app/config.py	基座	Web 应用配置：从环境变量读取（default_factory 保证每次构造读最新 env），	4701
 app/db.py	基座	SQLAlchemy engine/session；环境变量 DATABASE_URL 控制（测试用 sqlite://）。	1206
 app/forms.py	基座	表单一次性提交令牌的接线层：模板全局函数 + 路由依赖 + 客户端防双击。	2606
-app/i18n.py	基座	多语言（中文/日文）基础设施。	37462
+app/i18n.py	基座	多语言（中文/日文）基础设施。	38057
 app/main.py	基座	FastAPI 应用工厂与入口。	10426
 app/models.py	基座	ORM 模型（spec v0.4 §4.1–4.8）。JSON 一律 sqlalchemy.JSON（SQLite/PG 兼容）。	62536
 app/templating.py	基座	共享 Jinja2Templates 工厂：统一注册多语言全局函数（t / LANG_NAMES / lang_url）。	3211
@@ -166,29 +166,29 @@ migrations/versions/f6a7b8c9d0e1_payroll_adjusts.py	数据库迁移	rev f6a7b8c9
 migrations/versions/f6c7d8e9f0a1_users_lang.py	数据库迁移	rev f6c7d8e9f0a1 ｜ ↓f5c6d7e8f9a0 ｜ users 增加 lang（界面语言 zh/ja/空=自动）。	380
 migrations/versions/f7e8d9c0b1a2_oauth_tables.py	数据库迁移	rev f7e8d9c0b1a2 ｜ ↓a4b5c6d7e8f9 ｜ MCP OAuth（SSO）三表：oauth_clients / oauth_codes / oauth_refresh_tokens。	3789
 migrations/versions/f9a8b7c6d5e4_一都三県线路与车站.py	数据库迁移	rev f9a8b7c6d5e4 ｜ ↓d6e7f8a9b0c1 ｜ 一都三県「线路 + 车站」全量入池（用户 2026-10-03："把一都三县所有的地铁线和车站都收集进来"）。	6664
-docs/MCP对接手册.md	文档	MCP 对接手册（可复用）	14030
+docs/MCP对接手册.md	文档	MCP 对接手册（可复用）	14060
 docs/README.md	文档	文档地图（先看这里）	1938
 docs/TODO-问题与排期.md	文档	问题与需求清单（进度跟踪）	1359
 docs/specs-bd-ops-layer.md	文档	BD 作业管理层 · 设计方案（片区 / 派活 / 待扫清单 / 过程）	28260
 docs/specs-date-plan.md	文档	规格 · 日期计划（半月出勤登记）	13446
 docs/specs-mcp-identity.md	文档	MCP 身份认证规格（每用户一身份）	2767
 docs/specs-mcp-oauth.md	文档	MCP OAuth（SSO）规格	3757
-docs/specs-mcp-tools-scenario.md	文档	MCP 工具场景化重构设计稿（49 → 16）	5601
+docs/specs-mcp-tools-scenario.md	文档	MCP 工具场景化重构设计稿（49 → 16）	5602
 docs/specs-messages.md	文档	站内消息 + 任务进展「确认 / 调整」（2026-10-03 交付）	3238
-docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24646
+docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24647
 docs/specs-team-management.md	文档	规格 · 团队管理（第一期）	13867
-docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	6889
+docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7059
 docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产品设计（系统逻辑全览）	9614
 docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8662
 docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7092
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
 docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32023
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31515
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31516
 docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务）	10101
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141
-docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	72632
+docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	74183
 docs/记录-员工填报.md	文档	记录 · 员工每日填报 + 对比 + AI 报告	6963
 docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	6674
 docs/试跑报告-任务域.md	文档	试跑报告 · 任务域（真库 · 2026-10-06）	3216
@@ -235,7 +235,7 @@ mcp_service/tests/conftest.py	测试·MCP	MCP 测试全局隔离。	916
 mcp_service/tests/data/export_baseline.json	测试·MCP		4827
 mcp_service/tests/test_auth.py	测试·MCP	鉴权中间件（P1：查 api_tokens 表）：HTTP 层 401 + WWW-Authenticate，且 401 也落日志。	10200
 mcp_service/tests/test_authz_audit.py	测试·MCP	身份认证与授权验收（规格 docs/specs-mcp-identity.md 第五节）。	7016
-mcp_service/tests/test_cleanup.py	测试·MCP	工具冗余清理（docs/workbuddy-mcp-tool-cleanup.md）验收测试。	7434
+mcp_service/tests/test_cleanup.py	测试·MCP	工具冗余清理（docs/workbuddy-mcp-tool-cleanup.md）验收测试。	7478
 mcp_service/tests/test_config.py	测试·MCP	启动期配置校验：空 Token 与未指定 DATABASE_URL 都必须拒绝启动（spec §5.2）。	2775
 mcp_service/tests/test_connector_package.py	测试·MCP	连接器包结构与占位符一致性（MCP OAuth 版）。	2568
 mcp_service/tests/test_e2e_sdk.py	测试·MCP	官方 MCP Python client SDK 端到端：证明"服务端是对的"（spec §8 T1/T2）。	4679
@@ -253,10 +253,10 @@ mcp_service/tests/test_readonly.py	测试·MCP	只读守卫（spec §8 T3）：m
 mcp_service/tests/test_recon_ops.py	测试·MCP	对账只读能力测试：visit_recon（status/diff/interpret）与 visit_payroll（adjusts）。	15561
 mcp_service/tests/test_reqlog.py	测试·MCP	日志必须可诊断，且不得泄漏凭据（spec §5.6）。	1651
 mcp_service/tests/test_salary.py	测试·MCP	月薪查询：读已物化的 month_perf_records（绝不重算），含真实库回归。	3426
-mcp_service/tests/test_scenario_ops.py	测试·MCP	场景化重构验收（规格 docs/specs-mcp-tools-scenario.md 第六节）。	25941
+mcp_service/tests/test_scenario_ops.py	测试·MCP	场景化重构验收（规格 docs/specs-mcp-tools-scenario.md 第六节）。	25976
 mcp_service/tests/test_server_boot.py	测试·MCP	服务能组装、传输安全未被关闭、进程级启动行为正确（spec §8 T2）。	3308
 mcp_service/tests/test_store_write_ops.py	测试·MCP	店铺主档写工具测试：visit_store(action=merge|skip|split|apply)。	12864
-mcp_service/tests/test_task_ops.py	测试·MCP	作业域 MCP 工具的能力层测试（2026-10-06 新增）。	6749
+mcp_service/tests/test_task_ops.py	测试·MCP	作业域 MCP 工具的能力层测试（2026-10-06 新增）。	8772
 mcp_service/tests/test_tokens.py	测试·MCP	Token 解析：前缀定位 + 摘要校验 + 撤销 + scope + bootstrap 只读（spec §5）。	4817
 mcp_service/tests/test_write_tools.py	测试·MCP	写工具四道闸门与信封（spec §6/§7）。	8701
 tests_web/conftest.py	测试·Web	Web 测试共用 fixture：内存 sqlite（StaticPool 共享连接）+ TestClient。	986
@@ -288,7 +288,7 @@ tests_web/test_staff_status.py	测试·Web	员工管理（状态：在岗/请假
 tests_web/test_store_auto.py	测试·Web	店铺主档自动化测试：上传后增量建候选对 → exact 自动合并 → 受影响月自动重算	15399
 tests_web/test_store_master.py	测试·Web	主档合并服务测试。	1665
 tests_web/test_store_rules.py	测试·Web		753
-tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	202677
+tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	208995
 tests_web/test_templates.py	测试·Web	模板渲染冒烟：base 可加载；登录态含标题与阶段二灰置导航；未登录仅品牌。	9800
 tests_web/test_token_pages.py	测试·Web	MCP Token 管理员代发/吊销、员工状态联动提示。	7215
 tests/__init__.py	测试·结算		0
@@ -303,6 +303,7 @@ app/services/flow.py	结算域	文件流水线：入表→判定→正式表→�
 app/services/perf.py	结算域	绩效：点数/工资/看板统计	13969
 app/services/period.py	结算域	月度分期对账偏差表（薪资找平）：	30883
 app/services/recon.py	结算域	V3 月度对账：导入对账 Excel，与正式数据(正式表/绩效)比对，生成差异。	47038
+scripts/_tmp_tr2.py	脚本	转队：路由 + 两个界面入口（未分配批量转 / 任务详情页单条转）+ i18n	6791
 scripts/backfill_prod_new_tables.py	脚本	线上新表数据回填（**不重导**：只用线上现有数据重建新表）。	6857
 scripts/bd_backfill_lines.py	脚本	把 `scripts/bd_station_lines.json` 里的「线路 → 站名」补到 `bd_station.line`。	2898
 scripts/bd_extract_lines.py	脚本	从「A3整线放射图及执行说明」PDF 抽「**线路 → 站名**」映射，落成 JSON 数据文件。	4221
@@ -390,7 +391,7 @@ deploy/connector/visit-settle/connector-meta.json	部署		289
 deploy/connector/visit-settle/icon.svg	部署		226
 deploy/connector/visit-settle/mcp.json	部署		148
 deploy/connector/visit-settle/oauth-info.json	部署		480
-deploy/connector/visit-settle/skills/visit-settle/SKILL.md	部署		2230
+deploy/connector/visit-settle/skills/visit-settle/SKILL.md	部署		2265
 deploy/entrypoint-mcp.sh	部署		373
 deploy/entrypoint.sh	部署		164
 deploy/nginx.store-settle.conf	部署		3026

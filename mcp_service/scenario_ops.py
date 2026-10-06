@@ -989,7 +989,7 @@ _WRITE_TOOLS = {"visit_upload", "visit_payroll_export", "visit_rebuild",
                 "visit_staff", "visit_config", "visit_store",
                 # 作业域写工具（2026-10-06）
                 "visit_self_report", "visit_task_report", "visit_task_assign",
-                "visit_task_confirm", "visit_task_return"}
+                "visit_task_confirm", "visit_task_return", "visit_task_transfer"}
 
 _WRITE_TITLES = {
     # 作业域（团队 / 车站 / 任务）
@@ -998,6 +998,7 @@ _WRITE_TITLES = {
     "visit_task_assign": "派工 / 改派 / 回收",
     "visit_task_confirm": "确认 / 一键全确认 / 驳回",
     "visit_task_return": "撤回任务到车站池",
+    "visit_task_transfer": "转给别的队（队长间换活）",
     "visit_upload": "上传巡店/对账文件",
     "visit_payroll_export": "导出发薪表",
     "visit_rebuild": "月度重算",
@@ -1147,6 +1148,20 @@ def visit_task_assign(ctx: Context, task_id: int,
                            person_codes=person_codes or []))
 
 
+def visit_task_transfer(ctx: Context, task_ids: list[int],
+                        to_team_id: int) -> dict[str, Any]:
+    """**转给别的队**（队长之间私下换活）：未分配/进行中都能转，已完成不转。
+
+    只能转**自己当队长**的那个队的任务；转出会移出原担当（**已上报进度保留**），
+    并给对方队长与被移出的担当各发一条站内消息。想"互换"就各自转一条。
+    """
+    params = {"task_ids": task_ids or [], "to_team_id": to_team_id}
+    return _task_write(ctx, "visit_task_transfer", params,
+                       lambda db, actor, ops: ops.transfer(
+                           db, actor, task_ids=task_ids or [],
+                           to_team_id=to_team_id))
+
+
 def visit_task_confirm(ctx: Context, task_id: int | None = None,
                        all_today: bool = False, reject: bool = False,
                        pct: int | None = None, note: str = "") -> dict[str, Any]:
@@ -1256,6 +1271,14 @@ def register(mcp: MCPServer) -> None:
     def _t_team_tasks(ctx: Context, tab: str = "", kw: str = "",
                       line_id: int | None = None) -> dict[str, Any]:
         return visit_team_tasks(ctx, tab=tab, kw=kw, line_id=line_id)
+
+    @mcp.tool(name="visit_task_transfer",
+              title=_WRITE_TITLES["visit_task_transfer"],
+              annotations=_annotations("visit_task_transfer"),
+              description="转给别的队（队长之间换活）：不确认即生效；移出原担当但保留进度")
+    def _t_task_transfer(ctx: Context, task_ids: list[int],
+                         to_team_id: int) -> dict[str, Any]:
+        return visit_task_transfer(ctx, task_ids=task_ids, to_team_id=to_team_id)
 
     @mcp.tool(name="visit_task_assign", title=_WRITE_TITLES["visit_task_assign"],
               annotations=_annotations("visit_task_assign"),

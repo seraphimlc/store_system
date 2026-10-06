@@ -480,9 +480,9 @@ def _registered_names():
     return {t.name for t in asyncio.run(mcp.list_tools())}
 
 
-def test_tools_list_admin_24():
+def test_tools_list_admin_25():
     names = _registered_names()
-    assert len(names) == 24
+    assert len(names) == 25
 
 
 def test_tools_list_staff_6():
@@ -495,9 +495,10 @@ def test_tools_list_staff_6():
 
 
 def test_leader_tier_allowed():
-    """**队长档**（2026-10-06 新增）：员工能用的 + 本队任务管理（3 个）。"""
+    """**队长档**：员工能用的 + 本队任务管理（转队 2026-10-06 追加后共 4 个）。"""
     assert set(authz.LEADER_ALLOWED) == set(authz.STAFF_ALLOWED) | {
-        "visit_team_tasks", "visit_task_assign", "visit_task_confirm"}
+        "visit_team_tasks", "visit_task_assign", "visit_task_confirm",
+        "visit_task_transfer"}
     assert authz.require_role("visit_team_tasks") == "LEADER_ALLOWED"
     assert authz.require_role("visit_upload") == "ADMIN_ONLY"
 

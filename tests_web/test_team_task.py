@@ -696,20 +696,23 @@ def test_start_and_done_date_auto_written(seeded):
     tid = seeded["task"]
     t = db.get(BdTask, tid)
     assert t.start_date is None and t.done_date is None
+    # ⚠️ 业务日 = **JST**（不是宿主机本地日期）：UTC 15:00 后两者差一天，
+    #    用 `date.today()` 会在 JST 凌晨跑红（2026-10-06 深夜实测踩到）
+    jst = bd_tasks._today()
     bd_tasks.save_progress(db, tid, 30, by="ogawa")
     db.commit()
     t = db.get(BdTask, tid)
-    assert t.start_date == date.today(), "首次提交 = 开始日"
+    assert t.start_date == jst, "首次提交 = 开始日"
     assert t.done_date is None
     bd_tasks.save_progress(db, tid, 100, by="ogawa")
     db.commit()
     t = db.get(BdTask, tid)
-    assert t.done_date == date.today(), "到 100% = 完成日"
+    assert t.done_date == jst, "到 100% = 完成日"
     # 进度回退 → 完成日清掉（与 state 自洽）
     bd_tasks.save_progress(db, tid, 80, by="ogawa")
     db.commit()
     t = db.get(BdTask, tid)
-    assert t.done_date is None and t.start_date == date.today()
+    assert t.done_date is None and t.start_date == jst
     assert t.state == "doing"
     db.close()
 
@@ -4895,3 +4898,153 @@ def test_mobile_menu_shows_unread_badge(client, seeded):
     db.close()
     h2 = client.get("/my/tasks").text
     assert 'data-testid="menu-unread"' not in h2, "读完就不该有红点"
+
+
+# ---------------- 队长转队（队长之间私下换活，用户 2026-10-06）----------------
+
+def _second_team(db, seed, members=(("P3", "leader"),)):
+    """造第二个队（默认让甘子杰 P3 当队长）—— 转队的目标。"""
+    t2 = bd_teams.create_team(db, "汤静队", "TJ02", by="admin")
+    bd_teams.set_members(db, t2.id, list(members))
+    db.commit()
+    return t2
+
+
+def test_leader_transfer_unassigned_task_to_other_team(seeded):
+    """队长把**未分配**任务转给别的队 → 换队、对方队长收到消息、日志记 transfer。"""
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    t2 = _second_team(db, seeded)
+    leader = db.query(User).filter(User.username == "ogawa").first()
+    r = bd_tasks.transfer_team_task(db, leader, [seeded["task"]], t2.id,
+                                    actor_user=leader)
+    db.commit()
+    assert r["transferred"] == 1 and r["to_team"] == "汤静队"
+    t = db.get(BdTask, seeded["task"])
+    assert t.team_id == t2.id, "任务已经换到目标队"
+    # 日志：action=transfer（/logs 能按"转给其它队"筛出来）
+    from app.models import BdLog
+    log = (db.query(BdLog).filter(BdLog.ref_id == t.id,
+                                  BdLog.action == "transfer").first())
+    assert log is not None and log.old_value == "小川队" and log.new_value == "汤静队"
+    # 目标队队长（P3）收到通知
+    msg = (db.query(bd_msg.BdMessage)
+           .order_by(bd_msg.BdMessage.id.desc()).first())
+    recips = {x.person_code for x in db.query(bd_msg.BdMessageRecipient)
+              .filter(bd_msg.BdMessageRecipient.message_id == msg.id).all()}
+    assert "P3" in recips and "收到" not in msg.title
+    # 对方队长的「未分配」里能看到它
+    rows = bd_tasks.team_tasks(db, [t2.id], tab="unassigned")
+    assert seeded["task"] in [x["task"].id for x in rows]
+    db.close()
+
+
+def test_leader_transfer_doing_task_clears_assignee_but_keeps_progress(seeded):
+    """**进行中**也能转：移出原担当（并通知他），**已上报进度保留**。"""
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    t2 = _second_team(db, seeded)
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    bd_tasks.save_progress(db, tid, 40, "做了一半", by="tangjing")
+    db.commit()
+    leader = db.query(User).filter(User.username == "ogawa").first()
+    r = bd_tasks.transfer_team_task(db, leader, [tid], t2.id, actor_user=leader)
+    db.commit()
+    assert r["cleared"] == 1 and r["removed_people"] == ["P2"]
+    t = db.get(BdTask, tid)
+    assert t.team_id == t2.id and t.pct == 40, "进度必须保留"
+    assert db.query(bd_tasks.BdTaskAssign).filter(
+        bd_tasks.BdTaskAssign.task_id == tid).count() == 0
+    # 被移出的 P2 收到消息
+    msgs = db.query(bd_msg.BdMessage).order_by(bd_msg.BdMessage.id.desc()).limit(3).all()
+    codes = set()
+    for m in msgs:
+        codes |= {x.person_code for x in db.query(bd_msg.BdMessageRecipient)
+                  .filter(bd_msg.BdMessageRecipient.message_id == m.id).all()}
+    assert "P2" in codes, "被移出的担当要收到消息"
+    db.close()
+
+
+def test_transfer_guards(seeded):
+    """守卫：别人队的任务不能转、已完成不能转、目标队必须存在。"""
+    db = appdb.SessionLocal()
+    t2 = _second_team(db, seeded)
+    tid = seeded["task"]
+    p3 = db.query(User).filter(User.username == "ganzijie").first()
+    with pytest.raises(bd_tasks.TaskError):
+        bd_tasks.transfer_team_task(db, p3, [tid], t2.id, actor_user=p3)
+    db.rollback()
+    leader = db.query(User).filter(User.username == "ogawa").first()
+    with pytest.raises(bd_tasks.TaskError):
+        bd_tasks.transfer_team_task(db, leader, [tid], 999999, actor_user=leader)
+    db.rollback()
+    t = db.get(BdTask, tid)
+    t.state, t.pct = "done", 100
+    db.commit()
+    with pytest.raises(bd_tasks.TaskError) as e:
+        bd_tasks.transfer_team_task(db, leader, [tid], t2.id, actor_user=leader)
+    assert "已完成" in str(e.value)
+    db.rollback()
+    db.close()
+
+
+def test_transfer_route_requires_leader_and_csrf(client, seeded):
+    """路由层：普通队员不能转（回 err），队长能转（303 + msg）。"""
+    db = appdb.SessionLocal()
+    t2 = _second_team(db, seeded)
+    db.close()
+    _login(client, "tangjing")               # 队员
+    r = _post(client, "/my/tasks/transfer",
+              {"task_id": str(seeded["task"]), "to_team": str(t2.id),
+               "back": "/my/tasks?tab=unassigned"}, from_path="/my/tasks")
+    assert r.status_code in (302, 303)
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, seeded["task"]).team_id == seeded["team"], "队员转不动"
+    db.close()
+    _login(client, "ogawa")                  # 队长
+    r2 = _post(client, "/my/tasks/transfer",
+               {"task_id": str(seeded["task"]), "to_team": str(t2.id),
+                "back": "/my/tasks?tab=unassigned"}, from_path="/my/tasks")
+    assert r2.status_code == 303
+    assert "%E5%B7%B2%E8%BD%AC%E7%BB%99" in r2.headers["location"]   # 已转给…
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, seeded["task"]).team_id == t2.id
+    db.close()
+
+
+def test_leader_page_shows_transfer_control(client, seeded):
+    """队长「未分配」页要有转队控件；员工页没有。"""
+    db = appdb.SessionLocal()
+    _second_team(db, seeded)
+    db.close()
+    _login(client, "ogawa")
+    h = client.get("/my/tasks?tab=unassigned").text
+    assert 'data-testid="to-team"' in h and 'data-testid="bulk-transfer"' in h
+    assert 'formaction="/my/tasks/transfer"' in h
+    _login(client, "tangjing")
+    h2 = client.get("/my/tasks?tab=mine").text
+    assert 'bulk-transfer' not in h2, "队员不该看到转队"
+
+
+def test_transfer_from_detail_page_comes_back_with_message(client, seeded):
+    """⚠️ 浏览器实测：从任务详情页转出后**不能回详情页**（转出方队长已看不到那条任务，
+    会被数据隔离挡回首页、提示也丢了）→ 必须回自己的任务页 + 带确认提示。"""
+    db = appdb.SessionLocal()
+    t2 = bd_teams.create_team(db, "甘子杰队", "TJ09", by="admin")
+    bd_teams.set_members(db, t2.id, [("P3", "leader")])   # P2 已在小川队（一人一队）
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/transfer",
+              {"task_id": str(seeded["task"]), "to_team": str(t2.id),
+               "back": "/tasks/%d" % seeded["task"], "tab": "doing"},
+              from_path="/tasks/%d" % seeded["task"])
+    loc = r.headers["location"]
+    assert loc.startswith("/my/tasks?tab=doing"), "要回自己的任务页（拿到 %s）" % loc
+    # ⚠️ Location 里的中文是 URL 编码的 → 先解码再断言
+    from urllib.parse import unquote as _uq
+    assert "msg=" in loc and "已转给" in _uq(loc), _uq(loc)
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, seeded["task"]).team_id == t2.id
+    db.close()

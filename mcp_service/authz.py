@@ -32,6 +32,7 @@ STAFF_ALLOWED = frozenset({
 #: ⚠️ 原来只有"员工 / 管理员"两档 → 队长工具只能给管理员用、队长自己反而用不了。
 LEADER_ALLOWED = frozenset(set(STAFF_ALLOWED) | {
     "visit_team_tasks", "visit_task_assign", "visit_task_confirm",
+    "visit_task_transfer",
 })
 
 # “我的”系列工具：只能看本人（服务端强制过滤，不给越权留入口）
@@ -48,7 +49,7 @@ AUTH_REQUIRED_TOOLS = frozenset({
     "visit_staff", "visit_config", "visit_store",
     # 作业域写（2026-10-06）
     "visit_self_report", "visit_task_report", "visit_task_assign",
-    "visit_task_confirm", "visit_task_return",
+    "visit_task_confirm", "visit_task_return", "visit_task_transfer",
     # 导出（现有行为：无身份 → UNAUTHORIZED）
     "visit_recon_export",
 })

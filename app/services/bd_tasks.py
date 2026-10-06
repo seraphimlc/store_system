@@ -732,7 +732,7 @@ def create_tasks_for_places(db: Session, place_ids: Sequence[int], by: str = "",
 
 def set_task_team(db: Session, task_ids: Sequence[int],
                   team_id: Optional[int], assign_date: Optional[date] = None,
-                  by: str = "", actor_user=None) -> dict:
+                  by: str = "", actor_user=None, action: str = "dispatch") -> dict:
     """**派给团队**（管理员）；顺带写分配日期。
 
     换队 → **清空不属于新队的担当**（原担当不属于新队），并回报清掉的人数。
@@ -752,7 +752,7 @@ def set_task_team(db: Session, task_ids: Sequence[int],
         old_team = db.get(BdTeam, t.team_id) if t.team_id else None
         new_team = db.get(BdTeam, team_id) if team_id else None
         if t.team_id != team_id:
-            bd_log.log_op(db, actor_user, "task", "dispatch", ref_id=t.id,
+            bd_log.log_op(db, actor_user, "task", action, ref_id=t.id,
                           ref_label=label, field="team",
                           old=(old_team.name if old_team else "（未派队）"),
                           new=(new_team.name if new_team else "（未派队）"))
@@ -782,6 +782,78 @@ def set_task_team(db: Session, task_ids: Sequence[int],
         n_team += 1
     db.flush()
     return {"updated": n_team, "cleared": n_cleared}
+
+
+def transfer_team_task(db: Session, user, task_ids: Sequence[int],
+                       to_team_id: int, by: str = "",
+                       actor_user=None) -> dict:
+    """**队长把本队任务转给别的队**（用户 2026-10-06："队长之间可以私下交换任务"）。
+
+    口径（用户当场选定）：
+    - **不用对方确认，直接过去**；转完给对方队长发站内消息
+    - **未分配 + 进行中都能转**；**已完成不能转**（那是该队已经干出来的业绩）
+    - 转出**移出原担当**（沿用 `set_task_team` 的换队口径），**已上报进度保留**
+      → 原担当也发消息（不然他手上的活凭空没了）
+    - 只能转**自己是队长**的那个队的任务；目标队必须存在且不是本队
+
+    想"互换"就各自转一条（单向两次 = 互换）。
+    """
+    from app.services import bd_msg, bd_teams
+    to_team = db.get(BdTeam, int(to_team_id or 0))
+    if to_team is None:
+        raise TaskError("目标队伍不存在")
+    pc = getattr(user, "person_code", None)
+    picked, removed, done_skipped = [], [], 0
+    for raw in task_ids or []:
+        try:
+            t = db.get(BdTask, int(raw))
+        except (TypeError, ValueError):
+            continue
+        if t is None or not t.team_id or t.team_id == to_team.id:
+            continue
+        if t.state == STATE_DONE:
+            done_skipped += 1                 # 已完成不转（用户口径）
+            continue
+        if not bd_teams.is_leader_of(db, pc, t.team_id):
+            raise TaskError("只能转自己担任队长的那个队的任务")
+        picked.append(t)
+        for a in (db.query(BdTaskAssign)
+                  .filter(BdTaskAssign.task_id == t.id).all()):
+            removed.append(a.person_code)
+    if not picked:
+        raise TaskError("已完成的任务不能转" if done_skipped else "请先勾选要转的任务")
+    labels = [_station_name(db, t) for t in picked]
+    old_team = db.get(BdTeam, picked[0].team_id)
+    old_name = (old_team.name if old_team else "（未派队）")
+    r = set_task_team(db, [t.id for t in picked], to_team.id, by=by,
+                      actor_user=actor_user, action="transfer")
+    head = "、".join(labels[:3]) + ("…" if len(labels) > 3 else "")
+
+    def _to_leaders(lg):
+        if lg == "ja":
+            return ("%d件のタスクが%sから回ってきました：%s"
+                    % (len(labels), old_name, head),
+                    "未割当・進行中のタスクです。担当を割り当ててください。")
+        return ("从%s转来 %d 个任务：%s" % (old_name, len(labels), head),
+                "都是未分配/进行中的任务，派工即可。")
+
+    def _to_removed(lg):
+        if lg == "ja":
+            return ("担当していたタスクが他チームへ移りました",
+                    "%s（%sへ）" % (head, to_team.name))
+        return ("你担当的任务被转给别的队了",
+                "%s（转给 %s）" % (head, to_team.name))
+
+    bd_msg.send_localized(db, actor_user, bd_teams.leader_codes(db, to_team.id),
+                          _to_leaders, url="/my/tasks?tab=unassigned",
+                          scope="task_review")
+    if removed:
+        bd_msg.send_localized(db, actor_user, sorted(set(removed)),
+                              _to_removed, url="/my/tasks",
+                              scope="task_review")
+    return {"transferred": len(picked), "cleared": r.get("cleared", 0),
+            "removed_people": sorted(set(removed)), "labels": labels,
+            "to_team": to_team.name, "from_team": old_name}
 
 
 def assign_members(db: Session, task_id: int, person_codes: Sequence[str],

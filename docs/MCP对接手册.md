@@ -164,10 +164,10 @@ location /mcp {
 > 生产审计实测：**只有 13 个被调用过**（27%）。用户原话：「40+ 个工具根本用不上那么多。
 > 而且我们也不应该一个 restful api 就做一个工具。我们要根据实际场景来。」
 > 重构后 **49 → 16**，且列表只暴露新集。
-> ⚠️ **2026-10-06 更新：现在共 24 个** —— 结算域 16 个不变，**新增作业域 8 个**
+> ⚠️ **2026-10-06 更新：现在共 25 个** —— 结算域 16 个不变，**新增作业域 9 个**
 > （`visit_my_tasks` / `visit_self_report` / `visit_team_tasks` / `visit_task_assign` /
-> `visit_task_confirm` / `visit_task_report` / `visit_task_return` / `visit_task_board`），
-> 并新增**队长档**（9 个 = 员工 6 + 本队 3）。
+> `visit_task_confirm` / `visit_task_report` / `visit_task_return` / `visit_task_board` /
+> `visit_task_transfer` 队长间转队），并新增**队长档**（10 个 = 员工 6 + 本队 4）。
 
 #### 4.6.1 核心原则
 
@@ -399,7 +399,7 @@ VISIT_OAUTH_REFRESH_DAYS=90
 | MCP 服务（进程/传输/反代） | `mcp_service/server.py`、`mcp_service/run.sh`、`deploy/compose.yaml`、`deploy/nginx.store-settle.conf` |
 | 鉴权与授权 | `mcp_service/auth.py`、`mcp_service/authz.py`、`mcp_service/tokens.py` |
 | 审计 | `mcp_service/audit.py` |
-| 工具实现 | **`mcp_service/scenario_ops.py`（当前 24 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
+| 工具实现 | **`mcp_service/scenario_ops.py`（当前 25 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
 | OAuth/SSO | `app/routers/oauth_r.py`、`app/services/oauth.py`、`app/templates/oauth_consent.html` |
 | 自助签发 / 审计页 | `app/routers/tokens_r.py`、`app/services/mcp_tokens.py`、`app/templates/my_token.html` |
 | 运维脚本 | `scripts/mcp_restart.sh`、`scripts/verify_payroll_logic.py`、`scripts/compare_with_prod.py`、`scripts/backfill_prod_new_tables.py` |

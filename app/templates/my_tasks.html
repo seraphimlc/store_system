@@ -107,6 +107,18 @@
               formaction="/my/tasks/progress-bulk"
               onclick="return confirm('{{ t('把勾选的任务全部标成已完成？') }}')"
               data-testid="bulk-done">{{ t('批量标记完成') }}</button>
+      {# 队长之间私下换活：勾几条 → 选队伍 → 转过去（用户 2026-10-06） #}
+      {% if transfer_teams %}
+      <label class="f" style="gap:.3rem">{{ t('转给') }}
+        <select name="to_team" data-testid="to-team" style="max-width:9rem">
+          <option value="">{{ t('选队伍') }}</option>
+          {% for tm in transfer_teams %}<option value="{{ tm.id }}">{{ tm.name }}</option>{% endfor %}
+        </select></label>
+      <button class="btn ghost" type="submit" value=""
+              formaction="/my/tasks/transfer"
+              onclick="return confirm('{{ t('转出后这些任务归对方队；已派的担当会被移出（已上报进度保留）。确定？') }}')"
+              data-testid="bulk-transfer">{{ t('转给该队') }}</button>
+      {% endif %}
 
       <span class="spacer" style="flex:1"></span>
       <span class="hint">{{ t('已选') }} <b data-testid="bulk-count">0</b> {{ t('个任务') }}</span>

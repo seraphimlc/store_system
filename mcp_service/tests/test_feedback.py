@@ -151,7 +151,7 @@ def test_tools_have_annotations():
     scenario_ops.register(mcp)
     tools = asyncio.run(mcp.list_tools())
     by = {t.name: t for t in tools}
-    assert len(by) == 24
+    assert len(by) == 25
     # 只读工具：readOnlyHint=True；写工具：readOnlyHint=False
     for name in ("visit_overview", "visit_files", "visit_verify",
                  "visit_my_perf", "visit_whoami", "visit_recon_export"):

@@ -343,6 +343,16 @@ def leader_teams(db: Session, person_code: Optional[str]) -> List[BdTeam]:
             .order_by(BdTeam.id.asc()).all())
 
 
+def leader_codes(db: Session, team_id: int) -> List[str]:
+    """该队**现役队长**的人员编号（发站内消息用）。"""
+    if not team_id:
+        return []
+    return [c for (c,) in db.query(BdTeamMember.person_code).filter(
+        BdTeamMember.team_id == team_id,
+        BdTeamMember.role == "leader",
+        BdTeamMember.end_date.is_(None)).all() if c]
+
+
 def is_leader_of(db: Session, person_code: Optional[str],
                  team_id: Optional[int]) -> bool:
     """越权校验**唯一入口**（车站任务的分派/进展也走这里）。"""

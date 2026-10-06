@@ -99,10 +99,10 @@ def test_sdk_roundtrip(server):
 
                 tools = await session.list_tools()
                 names = {t.name for t in tools.tools}
-                # 24 个（含 6 个员工工具 + 3 个队长工具 + 15 个管理员工具）
+                # 25 个（含 6 个员工工具 + 4 个队长工具 + 15 个管理员工具）
                 assert {"visit_verify", "visit_overview", "visit_upload",
                         "visit_whoami"} <= names
-                assert len(names) == 24
+                assert len(names) == 25
 
                 # 信封（A4 的服务端侧证据）
                 res = await session.call_tool("visit_whoami", {})

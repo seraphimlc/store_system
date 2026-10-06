@@ -73,10 +73,10 @@ async def main():
             init = await s.initialize()
             tools = sorted(t.name for t in (await s.list_tools()).tools)
             print(f"  ✅ 协议 {init.protocol_version} | 工具 {len(tools)} 个")
-            if len(tools) != 24:
-                print(f"  ❌ 期望 24 个工具（16 场景化 + 8 作业域），实际 {len(tools)}：{tools}")
+            if len(tools) != 25:
+                print(f"  ❌ 期望 25 个工具（16 场景化 + 9 作业域），实际 {len(tools)}：{tools}")
             else:
-                print("  ✅ 工具数 = 24（16 场景化 + 8 作业域，2026-10-06）")
+                print("  ✅ 工具数 = 25（16 场景化 + 9 作业域，2026-10-06）")
             need = {"visit_upload", "visit_overview", "visit_verify",
                     "visit_payroll", "visit_payroll_export",
                     # 作业域（2026-10-06）

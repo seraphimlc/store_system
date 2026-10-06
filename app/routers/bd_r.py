@@ -873,6 +873,11 @@ def my_tasks_page(request: Request,
     return templates.TemplateResponse("my_tasks.html", {
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
+        # 队长"转给别的队"的目标队（启用中的队里排除本队；用户 2026-10-06）
+        # ⚠️ 别用上面的 `teams`：队长分支里它是 BdTeam 对象（不是 dict）
+        "transfer_teams": ([t for t in bd_teams.team_options(db)
+                            if t["id"] not in set(team_ids or [])]
+                           if is_leader else []),
         "counts": counts, "tab": tab, "kw": kw, "members": members,
 
         # ⚠️ 用 `my_rows`（两个角色分支都有）：只统计"分给我自己的"任务，
@@ -1156,7 +1161,12 @@ def task_detail(request: Request, task_id: int,
         "labels": bd_tasks.state_labels(CURRENT_LANG.get()),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
         "can_adjust": bd_tasks.can_adjust(db, user, task),
-        "teams": bd_teams.team_options(db),      # 改派下拉（管理员）
+        # 本队队长可以"转给别的队"（已完成的除外；用户 2026-10-06）
+        "can_transfer": bool(
+            task.state != bd_tasks.STATE_DONE
+            and bd_teams.is_leader_of(db, getattr(user, "person_code", None),
+                                      task.team_id)),
+        "teams": bd_teams.team_options(db),      # 改派下拉（管理员/队长转队）
         "msg": msg, "err": err,
     })
 
@@ -1257,6 +1267,48 @@ def my_tasks_confirm_bulk(request: Request,
         msg += "；%d 条跳过（%s）" % (len(errs), errs[0])
     return RedirectResponse(_with_msg(back, "msg" if ok else "err", msg, "/my/tasks"),
                             status_code=303)
+
+
+@router.post("/my/tasks/transfer")
+def my_tasks_transfer(request: Request, task_id: Optional[List[str]] = Form(None),
+                      to_team: str = Form(""), tab: str = Form("unassigned"),
+                      back: str = Form(""), csrf_token: str = Form(""),
+                      user: Optional[User] = Depends(require_login),
+                      db: Session = Depends(get_db)):
+    """**队长把本队任务转给别的队**（用户 2026-10-06："队长之间可以私下交换任务"）。
+
+    口径：不用对方确认、直接过去；未分配 + 进行中都能转（已完成不转）；
+    转出**移出原担当**但**保留已上报进度**；给对方队长和被移出的担当各发一条消息。
+    管理员走已有的 `/tasks/reassign`（同一服务层）。
+    """
+    g = _staff_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_tasks
+    ids = [int(x) for x in (task_id or []) if str(x).strip().isdigit()]
+    # ⚠️ 转出去的任务**转出方队长就看不到了**（数据隔离）→ 别回详情页（会被挡回首页 + 提示丢失）。
+    #    一律回自己的任务页并带上提示（2026-10-06 浏览器实测踩到）。
+    _tab_url = "/my/tasks?tab=%s" % (tab or "unassigned")
+    back = _safe_back(back if str(back).startswith("/my/") else "", _tab_url)
+    if not ids or not str(to_team).strip().isdigit():
+        return RedirectResponse(_with_msg(back, "err", _m("请先勾选任务并选择要转给哪个队")),
+                                status_code=303)
+    try:
+        r = bd_tasks.transfer_team_task(db, user, ids, int(to_team),
+                                        by=user.username, actor_user=user)
+        db.commit()
+    except bd_tasks.TaskError as e:
+        db.rollback()
+        return RedirectResponse(_with_msg(back, "err", _m(str(e))), status_code=303)
+    except Exception as e:                            # noqa: BLE001
+        db.rollback()
+        return RedirectResponse(_with_msg(back, "err", _m(str(e))), status_code=303)
+    txt = _m("已转给 %s：%d 个任务", r["to_team"], r["transferred"])
+    if r["cleared"]:
+        txt += _m("（移出 %d 个担当，进度保留）", r["cleared"])
+    return RedirectResponse(_with_msg(back, "msg", txt), status_code=303)
 
 
 @router.post("/my/tasks/progress-bulk")
