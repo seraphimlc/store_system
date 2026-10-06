@@ -167,7 +167,7 @@ migrations/versions/f6a7b8c9d0e1_payroll_adjusts.py	数据库迁移	rev f6a7b8c9
 migrations/versions/f6c7d8e9f0a1_users_lang.py	数据库迁移	rev f6c7d8e9f0a1 ｜ ↓f5c6d7e8f9a0 ｜ users 增加 lang（界面语言 zh/ja/空=自动）。	380
 migrations/versions/f7e8d9c0b1a2_oauth_tables.py	数据库迁移	rev f7e8d9c0b1a2 ｜ ↓a4b5c6d7e8f9 ｜ MCP OAuth（SSO）三表：oauth_clients / oauth_codes / oauth_refresh_tokens。	3789
 migrations/versions/f9a8b7c6d5e4_一都三県线路与车站.py	数据库迁移	rev f9a8b7c6d5e4 ｜ ↓d6e7f8a9b0c1 ｜ 一都三県「线路 + 车站」全量入池（用户 2026-10-03："把一都三县所有的地铁线和车站都收集进来"）。	6664
-docs/MCP对接手册.md	文档	MCP 对接手册（可复用）	14060
+docs/MCP对接手册.md	文档	MCP 对接手册（可复用）	14171
 docs/README.md	文档	文档地图（先看这里）	1938
 docs/TODO-问题与排期.md	文档	问题与需求清单（进度跟踪）	1359
 docs/specs-bd-ops-layer.md	文档	BD 作业管理层 · 设计方案（片区 / 派活 / 待扫清单 / 过程）	28260
@@ -178,13 +178,13 @@ docs/specs-mcp-tools-scenario.md	文档	MCP 工具场景化重构设计稿（49 
 docs/specs-messages.md	文档	站内消息 + 任务进展「确认 / 调整」（2026-10-03 交付）	3238
 docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24647
 docs/specs-team-management.md	文档	规格 · 团队管理（第一期）	13867
-docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7168
+docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7357
 docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产品设计（系统逻辑全览）	9614
 docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8877
-docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7092
+docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7116
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
-docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32024
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31517
+docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32170
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31665
 docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务）	10101
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887

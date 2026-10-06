@@ -399,6 +399,7 @@ VISIT_OAUTH_REFRESH_DAYS=90
 | MCP 服务（进程/传输/反代） | `mcp_service/server.py`、`mcp_service/run.sh`、`deploy/compose.yaml`、`deploy/nginx.store-settle.conf` |
 | 鉴权与授权 | `mcp_service/auth.py`、`mcp_service/authz.py`、`mcp_service/tokens.py` |
 | 审计 | `mcp_service/audit.py` |
+| 作业域字段 | `bd_task.store_count`（店铺数）：队员报到 **100% 时必填**（允许 0），队长批量补录可留空 —— `visit_task_report(store_count=…)` |
 | 工具实现 | **`mcp_service/scenario_ops.py`（当前 25 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
 | OAuth/SSO | `app/routers/oauth_r.py`、`app/services/oauth.py`、`app/templates/oauth_consent.html` |
 | 自助签发 / 审计页 | `app/routers/tokens_r.py`、`app/services/mcp_tokens.py`、`app/templates/my_token.html` |
