@@ -4632,3 +4632,43 @@ def test_ai_summary_page_and_permission(client, seeded, monkeypatch):
     r3 = _post(client, "/tasks/ai-summary", {"force": "1"},
                from_path="/tasks?tab=assigned")
     assert "AI 总结失败" in _uq(r3.headers["location"])
+
+
+def test_bd_sync_prod_export_resets_progress(seeded, tmp_path):
+    """**发布前的数据同步脚本**：导出要**保留主键**（引用靠 id 对齐）、
+    任务进度**清零**（线上由队长补录），并且 `note` 要清成 `""`（NOT NULL，踩过）。"""
+    import importlib.util
+    import json
+    spec = importlib.util.spec_from_file_location(
+        "bd_sync_prod", str(__import__("pathlib").Path(__file__).parent.parent
+                            / "scripts" / "bd_sync_prod.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    # 造一条"已完成 + 有备注"的任务（试跑痕迹）
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing", actor_user=tj)
+    db.commit()
+    db.close()
+    out = tmp_path / "dump.json"
+    payload = mod.export(str(out), with_progress=False)
+    assert out.exists()
+    tasks = payload["tables"]["bd_task"]
+    assert tasks and all(t["id"] for t in tasks), "必须带主键 id（引用靠它对齐）"
+    row = [t for t in tasks if t["id"] == tid][0]
+    assert row["pct"] == 0 and row["state"] == "unassigned"
+    assert row["start_date"] is None and row["done_date"] is None
+    assert row["note"] == "", "note 是 NOT NULL → 清成空串（不是 None）"
+    assert row["team_id"] == seeded["team"], "派给的队要保留（发布要求 2）"
+    assert "bd_task_progress" not in payload["tables"] and \
+        "bd_task_assign" not in payload["tables"], "试跑痕迹不同步"
+    # 保留模式：进度原样
+    p2 = mod.export(str(tmp_path / "d2.json"), with_progress=True)
+    assert [t for t in p2["tables"]["bd_task"] if t["id"] == tid][0]["pct"] == 100
+    # 引用核对：缺人/队长 role 都能报出来
+    db = appdb.SessionLocal()
+    rep = mod._report_referenced(db, payload)
+    assert isinstance(rep["missing_persons"], list) and "leaders" in rep
+    db.close()
