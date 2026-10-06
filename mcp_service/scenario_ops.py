@@ -1085,17 +1085,21 @@ def visit_self_report(ctx: Context, area: str = "", p1_cnt: int = 0,
 
 
 def visit_task_report(ctx: Context, task_id: int, pct: int,
-                      note: str = "") -> dict[str, Any]:
+                      note: str = "", store_count: int | None = None) -> dict[str, Any]:
     """**上报单条任务进展**（0–100）。队员报自己的、队长调整本队的都走它。
 
     - 队长**随时**可以调本队任何任务的进度（不受"确认后锁定"限制）
     - **未分配的任务**：队长直接 `pct=100` 就是"标识完成"（不用先派人）
     - 队员那边：队长确认过的**当天**那条会被锁住
+    - **`store_count`**（店铺数）：队员报到 **100% 时必填**（允许 0）；
+      队长/管理员调整或批量补录时可省（用户 2026-10-06）
     """
-    params = {"task_id": task_id, "pct": pct, "note": note}
+    params = {"task_id": task_id, "pct": pct, "note": note,
+              "store_count": store_count}
     return _task_write(ctx, "visit_task_report", params,
                        lambda db, actor, ops: ops.report_one(
-                           db, actor, task_id=task_id, pct=pct, note=note))
+                           db, actor, task_id=task_id, pct=pct, note=note,
+                           store_count=store_count))
 
 
 def visit_team_tasks(ctx: Context, tab: str = "", kw: str = "",

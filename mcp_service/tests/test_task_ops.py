@@ -103,7 +103,9 @@ def test_team_tasks_confirm_and_reject(db):
     assert t["counts"]["pending"] == 1 and t["counts"]["doing"] == 1
     assert t["pending"][0]["task_id"] == tid
     # ⚠️ 计数口径：100% 的任务算**已完成**，不再算进行中（2026-10-06 统一）
-    task_ops.report_one(db, staff, task_id=tid, pct=100, note="干完了")
+    # ⚠️ 队员报到 100% 必须给店铺数（2026-10-06；允许 0）
+    task_ops.report_one(db, staff, task_id=tid, pct=100, note="干完了",
+                        store_count=5)
     t1b = task_ops.team_tasks(db, [1])
     assert t1b["counts"]["doing"] == 0 and t1b["counts"]["done"] == 1, t1b["counts"]
     assert t1b["counts"]["pending"] == 1
@@ -213,3 +215,33 @@ def test_transfer_denied_for_non_leader_of_that_team(db):
         task_ops.transfer(db, outsider, task_ids=[tid], to_team_id=t2.id)
     db.rollback()
     assert "队长" in str(e.value)
+
+
+def test_report_requires_store_count_at_100_for_member(db):
+    """**队员**报到 100% 必须给店铺数（允许 0）；队长批量/调整可选（用户 2026-10-06）。"""
+    from app.services import bd_tasks
+    tid = _tid(db)
+    member = _Actor(role="staff", username="wen-yiqi", person_code="P2")
+    actor = _Actor(role="leader", username="ogawa", person_code="P1")
+    task_ops.assign(db, actor, task_id=tid, person_codes=["P2"])
+    db.commit()
+    with pytest.raises(Exception) as e:
+        task_ops.report_one(db, member, task_id=tid, pct=100)
+    db.rollback()
+    assert "店铺数" in str(e.value)
+    # 0 是合法的
+    r = task_ops.report_one(db, member, task_id=tid, pct=100, store_count=0)
+    db.commit()
+    assert r["store_count"] == 0 and r["pct"] == 100
+    # 队长调整到 100%（不是本人担当上报）→ 可以不填
+    db2 = db.get(bd_tasks.BdTask, tid)
+    db2.pct = 50
+    db2.state = "doing"
+    db.commit()
+    r2 = task_ops.report_one(db, actor, task_id=tid, pct=100)
+    db.commit()
+    assert r2["pct"] == 100
+    # 填了也能存
+    r3 = task_ops.report_one(db, actor, task_id=tid, pct=100, store_count=7)
+    db.commit()
+    assert r3["store_count"] == 7

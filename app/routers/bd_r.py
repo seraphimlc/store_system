@@ -554,6 +554,7 @@ def task_new_create(request: Request,
 
 @router.post("/tasks/{task_id}/progress")
 def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
+                        store_count: str = Form(""),
                         note: str = Form(""), csrf_token: str = Form(""),
                         back: str = Form(""),
                         user: Optional[User] = Depends(require_login),
@@ -569,7 +570,7 @@ def task_progress_admin(request: Request, task_id: int, pct: str = Form("0"),
         # ⚠️ 必须传 actor_user：否则 save_progress 两个审核分支都不进
         #    （不写 review_status、不发消息，队长一点确认还会用员工原值覆盖管理员刚改的值）
         r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
-                                   actor_user=user)
+                                   actor_user=user, store_count=store_count)
         db.commit()
         # ⚠️ 回跳**原视图**：原来固定 /tasks（=车站池），管理员在"已分配"里每改一条就被弹走
         return RedirectResponse(
@@ -1065,6 +1066,8 @@ async def my_self_report(request: Request,
         except ValueError:
             continue
         items.append({"task_id": tid, "pct": val,
+                      # 完成（100%）时必须填店铺数（用户 2026-10-06；允许 0）
+                      "store_count": str(form.get("stores_%d" % tid) or ""),
                       "note": str(form.get("note_%d" % tid) or "")})
     # 从「每日填报」提交 → 回每日填报；从任务页提交 → 回任务页（用户 2026-10-06）
     back = str(form.get("back") or "/my/tasks?tab=mine")
@@ -1087,6 +1090,7 @@ async def my_self_report(request: Request,
 @router.post("/my/tasks/progress")
 def my_tasks_progress(request: Request, task_id: int = Form(0),
                       pct: str = Form("0"), note: str = Form(""),
+                      store_count: str = Form(""),
                       csrf_token: str = Form(""),
                       user: Optional[User] = Depends(require_login),
                       db: Session = Depends(get_db)):
@@ -1112,7 +1116,7 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
         return RedirectResponse("/my/tasks?err=" + _q(_msg), status_code=303)
     try:
         r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
-                                   actor_user=user)
+                                   actor_user=user, store_count=store_count)
         db.commit()
         # ⚠️ 回跳 tab 按**有没有分人**算（不是 state）：队员端没有那两个 tab → 回「我的」
         if user.role == "leader":

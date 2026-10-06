@@ -84,14 +84,20 @@ def self_report(db, actor, *, area: str = "", p1_cnt: Any = 0, p2_cnt: Any = 0,
             "tasks_skipped": r.get("skipped", 0)}
 
 
-def report_one(db, actor, *, task_id: int, pct: Any, note: str = "") -> dict:
-    """单条上报/调整进展（走 `save_progress` 的完整校验：锁定、归属、值域）。"""
+def report_one(db, actor, *, task_id: int, pct: Any, note: str = "",
+               store_count: Any = None) -> dict:
+    """单条上报/调整进展（走 `save_progress` 的完整校验：锁定、归属、值域、**店铺数**）。
+
+    ⚠️ 队员把任务报到 100% 时**必须给 `store_count`**（允许 0）——判定在服务层按身份做，
+    所以这里不用额外传开关（2026-10-06）。
+    """
     from app.services import bd_tasks
     r = bd_tasks.save_progress(db, int(task_id), pct, note,
                                by=getattr(actor, "username", "") or "",
-                               actor_user=actor)
+                               actor_user=actor, store_count=store_count)
     return {"task_id": int(task_id), "pct": r.get("pct"), "state": r.get("state"),
-            "review_status": r.get("review_status")}
+            "review_status": r.get("review_status"),
+            "store_count": r.get("store_count")}
 
 
 def team_tasks(db, team_ids: list, *, tab: str = "", kw: str = "",

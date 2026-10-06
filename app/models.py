@@ -1143,6 +1143,10 @@ class BdTask(Base):
     state = Column(String(16), nullable=False, default="unassigned",
                    server_default="unassigned")      # unassigned / doing / done
     pct = Column(Integer, nullable=False, default=0, server_default="0")
+    #: **店铺数**（用户 2026-10-06）：队员把任务做到 100% 时必填（**允许 0**）；
+    #:  队长批量补录可留空（NULL）。⚠️ 系统算不出来 —— `bd_store` 3 万家店的
+    #:  `place_id`/经纬度实测全空（0/30681），只能手填。
+    store_count = Column(Integer, nullable=True)
     # 开始日 / 完成日：对应用户 Excel 的那两列，**自动写**
     # （首次提交进展 = 开始日；pct 到 100 = 完成日）
     start_date = Column(Date, nullable=True)

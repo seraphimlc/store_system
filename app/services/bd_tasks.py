@@ -940,10 +940,14 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
 
 def save_progress(db: Session, task_id: int, pct: int, note: str = "",
                   by: str = "", on_date: Optional[date] = None,
-                  actor_user=None, confirm: bool = False) -> dict:
+                  actor_user=None, confirm: bool = False,
+                  store_count: Optional[int] = None,
+                  require_store_count: bool = False) -> dict:
     """**每日进展上报/调整**：写/改当天一条，并把任务刷新为最新进度。
 
     - `pct` 夹到 0–100
+    - **店铺数**（用户 2026-10-06）：填到 100% 时必填（**允许 0**，空着不行）
+      `require_store_count=True` 时强制；队长批量补录传 False（允许留空）
     - 当天已上报 → 覆盖（`updated_at` 变）——**员工先上报、队长做调整**都走这里
     - 刷新 `bd_task.pct/state`，开始日/完成日自动写
     - **每次上报/调整都写一条日志**（进度表会被覆盖，日志不会：
@@ -982,6 +986,20 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         raise TaskError("这条还没有队长确认，管理员暂不能修改")
     if confirm and row is not None and row.reported_pct is not None:
         p = int(row.reported_pct)             # 「确认」= 认可员工上报的原值
+    # ---- 店铺数（用户 2026-10-06）：报 100% 时必填，**允许 0**，空着不行 ----
+    sc = None
+    if store_count is not None and str(store_count).strip() != "":
+        try:
+            sc = int(store_count)
+        except (TypeError, ValueError):
+            raise TaskError("店铺数要填 0 或正整数")
+        if sc < 0:
+            raise TaskError("店铺数不能是负数")
+    # ⚠️ 判定按**身份**而不是按入口：`staff_report` = 本人是担当且在自报（不是队长/管理员在调整）
+    #    → 队员从任何入口（一页自报 / 单条滑块）报到 100% 都必填；
+    #      队长批量补录、管理员调整仍可选（用户 2026-10-06 口径）
+    if (require_store_count or staff_report) and p >= 100 and sc is None:
+        raise TaskError("任务做到 100% 时要填这家车站的店铺数量（可以填 0）")
     _prev_pct = None                  # 旧值快照（判"同值"用；row 为空时保持 None）
     if row is None:
         row = BdTaskProgress(task_id=task_id, progress_date=d, pct=p,
@@ -1033,6 +1051,12 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         row.reviewed_at = datetime.utcnow()
         row.review_note = (note or "").strip()
         review_action = row.review_status
+    if sc is not None and t.store_count != sc:
+        bd_log.log_op(db, actor_user, "task", "update", ref_id=t.id,
+                      ref_label=_station_name(db, t), field="store_count",
+                      old=("" if t.store_count is None else str(t.store_count)),
+                      new=str(sc))
+        t.store_count = sc
     t.pct = p
     # 开始日 / 完成日**自动写**（用户 2026-10-03 口径）
     if t.start_date is None:
@@ -1069,6 +1093,8 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
             "start_date": t.start_date, "done_date": t.done_date,
             "review_status": row.review_status,
             "reported_pct": row.reported_pct,
+            # 店铺数（完成时填；已在库里就回显，2026-10-06）
+            "store_count": t.store_count,
             "notified": bool(notified)}
 
 
@@ -1573,6 +1599,7 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
                           for c in a_codes],
             "n_assign": len(a_codes),
             "pct": t.pct, "state": t.state,
+            "store_count": t.store_count,      # 店铺数（完成时填，2026-10-06）
             "assign_date": t.assign_date,
             "start_date": t.start_date, "done_date": t.done_date,
             "days_since": days, "stale": stale,
@@ -1906,12 +1933,13 @@ def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
     elif state == STATE_DONE:
         doing = dict(doing, rows=[])
     _sheet("进行中",
-           ["线路", "站点", "团队", "担当", "进展%", "分配日期", "开始日", "最后提交"],
+           ["线路", "站点", "团队", "担当", "进展%", "店铺数", "分配日期", "开始日", "最后提交"],
            [[r["line"], r["station_name"], r["team_name"],
              "、".join(a["name"] for a in r["assignees"]), r["pct"],
+             ("" if r.get("store_count") is None else r["store_count"]),
              _d(r["assign_date"]), _d(r["start_date"]), _d(r["last_date"])]
             for r in doing["rows"]],
-           widths=[26, 18, 12, 14, 8, 12, 12, 12])
+           widths=[26, 18, 12, 14, 8, 8, 12, 12, 12])
 
     # ③ 已完成 = 任务（带**完成日期**与用时）
     done = task_board(db, team_id=team_id, line_id=line_id, tab=TAB_DONE,
@@ -1924,11 +1952,12 @@ def tasks_xlsx(db: Session, team_id: Optional[int] = None, state: str = "",
             days = (r["done_date"] - r["start_date"]).days
         rows.append([r["line"], r["station_name"], r["team_name"],
                      "、".join(a["name"] for a in r["assignees"]),
+                     ("" if r.get("store_count") is None else r["store_count"]),
                      _d(r["done_date"]), _d(r["start_date"]),
                      _d(r["assign_date"]), days])
     _sheet("已完成",
-           ["线路", "站点", "团队", "担当", "完成日期", "开始日", "分配日期", "用时(天)"],
-           rows, widths=[26, 18, 12, 14, 12, 12, 12, 10])
+           ["线路", "站点", "团队", "担当", "店铺数", "完成日期", "开始日", "分配日期", "用时(天)"],
+           rows, widths=[26, 18, 12, 14, 8, 12, 12, 12, 10])
 
     buf = BytesIO()
     wb.save(buf)

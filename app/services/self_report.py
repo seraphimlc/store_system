@@ -54,7 +54,8 @@ def submit(db: Session, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
            on_date: Optional[date] = None) -> dict:
     """**一页一次提交**：点数 + N 个任务的当天进度（同一事务）。
 
-    `items` = `[{"task_id": int, "pct": int, "note": str}, ...]`（只有真填了的才传）
+    `items` = `[{"task_id": int, "pct": int, "note": str, "store_count": int|str}, ...]`
+    （只有真填了的才传；**做到 100% 时必须给 `store_count`**，允许 0）
     任一条失败（没权限 / 被队长锁定 / 值非法）→ 抛异常，**调用方负责 rollback**，
     数据库里不会留半截数据。
     """
@@ -91,7 +92,10 @@ def submit(db: Session, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
             continue
         bd_tasks.save_progress(db, tid, pct, (it.get("note") or "").strip(),
                                by=getattr(user, "username", "") or "",
-                               actor_user=user, on_date=d)
+                               actor_user=user, on_date=d,
+                               # 完成（100%）必填店铺数（用户 2026-10-06；允许 0）
+                               store_count=it.get("store_count"),
+                               require_store_count=True)
         done += 1
     # ③ 一次提交
     db.commit()

@@ -317,6 +317,8 @@ document.addEventListener('DOMContentLoaded', function () {
     <span class="pill {% if r.state=='doing' %}warnk{% elif r.state=='done' %}okk{% endif %}"
           data-testid="state-{{ r.task.id }}">{{ labels[r.state] }}</span>
     <span class="hint">{{ t('进度') }} <b data-testid="pct-{{ r.task.id }}">{{ r.pct }}%</b></span>
+    {% if r.store_count is not none %}<span class="pill"
+        data-testid="stores-pill-{{ r.task.id }}">{{ r.store_count }} {{ t('家店') }}</span>{% endif %}
     {# 审核：员工上报 → 队长确认 / 调整（用户 2026-10-03） #}
     {% if r.pending_review %}
     <span class="pill warnk" data-testid="review-state-{{ r.task.id }}">{{ t('待确认') }}
@@ -396,9 +398,18 @@ document.addEventListener('DOMContentLoaded', function () {
            oninput="var s=document.getElementById('pctv-{{ r.task.id }}');if(s)s.textContent=this.value">
     <b style="min-width:3.2rem;text-align:right"><span
         id="pctv-{{ r.task.id }}">{{ r.pct }}</span>%</b>
+    {% if r.store_count is not none %}<span class="pill"
+        data-testid="stores-pill-{{ r.task.id }}">{{ r.store_count }} {{ t('家店') }}</span>{% endif %}
     <input type="text" name="note_{{ r.task.id }}" form="self-report-form"
            placeholder="{{ t('备注（可空）') }}" style="width:11rem"
            data-testid="note-{{ r.task.id }}">
+      {# 完成（100%）时要填店铺数（用户 2026-10-06；允许 0，空着不行）——和点数一起提交 #}
+      <label class="hint" style="gap:.2rem">{{ t('店铺数') }}
+        <input type="number" name="stores_{{ r.task.id }}" form="self-report-form"
+               min="0" step="1"
+               value="{{ r.store_count if r.store_count is not none else '' }}"
+               placeholder="{{ t('完成时填') }}" style="width:5.4rem"
+               data-testid="sr-stores-{{ r.task.id }}"></label>
   </div>
   {% elif can_rep %}
   {# 进展上报 / 队长调整：滑动条 0–100% #}
@@ -417,6 +428,12 @@ document.addEventListener('DOMContentLoaded', function () {
     <b style="min-width:3.2rem;text-align:right"><span
         id="pctv-{{ r.task.id }}" x-text="v">{{ r.pct }}</span>%</b>
     <input type="text" name="note" placeholder="{{ t('备注（可空）') }}" style="width:11rem">
+    {# 店铺数：队员报到 100% 时**必填**（服务层强校验）；队长/管理员可留空 #}
+    <label class="hint" style="gap:.2rem">{{ t('店铺数') }}
+      <input type="number" name="store_count" min="0" step="1"
+             value="{{ r.store_count if r.store_count is not none else '' }}"
+             placeholder="{{ t('完成时填') }}" style="width:5.8rem"
+             data-testid="stores-{{ r.task.id }}"></label>
     <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
 
     {# 队长/管理员：一键**确认**队员的上报（认可原值，会发消息给队员） #}

@@ -20,10 +20,10 @@ mcp_service/recon_ops.py	MCP 服务	对账只读能力层（P1 二期）。	1642
 mcp_service/recon_write_ops.py	MCP 服务	对账写能力层：上传对账文件（支付宝结算数据等）。	3125
 mcp_service/reqlog.py	MCP 服务	请求级证据日志：JSON Lines。	911
 mcp_service/run.sh	MCP 服务		830
-mcp_service/scenario_ops.py	MCP 服务	MCP 场景化工具注册唯一入口（25 个：结算 16 + 作业域 9）	61441
+mcp_service/scenario_ops.py	MCP 服务	MCP 场景化工具注册唯一入口（25 个：结算 16 + 作业域 9）	61659
 mcp_service/server.py	MCP 服务	WorkBuddy MCP 服务入口（独立进程，streamable HTTP）。	4007
 mcp_service/store_write_ops.py	MCP 服务	店铺主档写能力层：合并候选对 / 标记不同店 / 拆分实体 / 整批应用推荐。	6871
-mcp_service/task_ops.py	MCP 服务	MCP 作业域（团队 / 车站 / 任务）能力层。	8920
+mcp_service/task_ops.py	MCP 服务	MCP 作业域（团队 / 车站 / 任务）能力层。	9139
 mcp_service/tokens.py	MCP 服务	MCP Token 解析 → Actor。spec §5。	5589
 mcp_service/tools.py	MCP 服务	MCP 工具注册（适配层）。	3955
 mcp_service/write_ops.py	MCP 服务	写操作能力层：上传 / 出表 / 重算 / 改单价。	9621
@@ -47,18 +47,18 @@ app/services/bd_perm.py	作业域·服务	角色能力表（判权与按钮共�
 app/services/bd_places.py	作业域·服务	物理车站层：rebuild_places（同 group_code+坐标合并）	8036
 app/services/bd_store.py	作业域·服务	BD 作业域 · 门店宇宙（`bd_store`）。	5335
 app/services/bd_summary_ai.py	作业域·服务	**任务域 AI 总结**（近 7 天 + 环比上一个 7 天）。	8055
-app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	80761
+app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	82259
 app/services/bd_teams.py	作业域·服务	团队：建队/圈人（一人一队唯一索引）/队长同步/成员状态	16911
 app/templates/_ai_suggest.html	作业域·模板	AI 派工建议的 htmx 片段	2691
 app/templates/_pager.html	作业域·模板	共	1470
 app/templates/bd_logs.html	作业域·模板	变更日志	3493
 app/templates/bd_stations.html	作业域·模板	车站页（资产维护；筛选只有 关键词+线路）	6122
-app/templates/bd_task_detail.html	作业域·模板	退回车站池	6534
+app/templates/bd_task_detail.html	作业域·模板	店铺数	7031
 app/templates/bd_task_new.html	作业域·模板	建任务	7774
-app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→筛选→列表；未分配=车站池可批量派队）	20424
+app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→筛选→列表；未分配=车站池可批量派队）	20748
 app/templates/bd_team_detail.html	作业域·模板	团队详情：圈选队员（一人一队）	6207
 app/templates/bd_teams.html	作业域·模板	团队列表页	3819
-app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	64473
+app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	64764
 AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	7297
 README.md	入口文档		2768
 conftest.py	其它		75
@@ -83,16 +83,16 @@ app/services/report_store.py	员工填报	对比结果的物化存储（人×区
 app/templates/my_password.html	员工端·模板	修改密码	1158
 app/templates/my_perf.html	员工端·模板	我的绩效	3471
 app/templates/my_plan.html	员工端·模板	出勤计划	7153
-app/templates/my_report.html	员工端·模板	每日填报	11980
+app/templates/my_report.html	员工端·模板	每日填报	12377
 app/templates/my_report_feedback.html	员工端·模板	我的核对结果	2891
-app/templates/my_tasks.html	员工端·模板	员工/队长任务页（队长多 未分配/进行中/待确认/已完成）	25601
+app/templates/my_tasks.html	员工端·模板	员工/队长任务页（队长多 未分配/进行中/待确认/已完成）	26735
 app/auth.py	基座	会话与密码：argon2 哈希、签名 cookie（itsdangerous，含过期）、CSRF token。	1323
 app/config.py	基座	Web 应用配置：从环境变量读取（default_factory 保证每次构造读最新 env），	4701
 app/db.py	基座	SQLAlchemy engine/session；环境变量 DATABASE_URL 控制（测试用 sqlite://）。	1206
 app/forms.py	基座	表单一次性提交令牌的接线层：模板全局函数 + 路由依赖 + 客户端防双击。	2606
-app/i18n.py	基座	多语言（中文/日文）基础设施。	38057
+app/i18n.py	基座	多语言（中文/日文）基础设施。	38292
 app/main.py	基座	FastAPI 应用工厂与入口。	10426
-app/models.py	基座	ORM 模型（spec v0.4 §4.1–4.8）。JSON 一律 sqlalchemy.JSON（SQLite/PG 兼容）。	62536
+app/models.py	基座	ORM 模型（spec v0.4 §4.1–4.8）。JSON 一律 sqlalchemy.JSON（SQLite/PG 兼容）。	62740
 app/templating.py	基座	共享 Jinja2Templates 工厂：统一注册多语言全局函数（t / LANG_NAMES / lang_url）。	3211
 app/__init__.py	应用其它		0
 app/cli.py	应用其它	命令行工具：create-admin（幂等）。	3484
@@ -118,6 +118,7 @@ migrations/versions/a7b8c9d0e1f2_settlement_links.py	数据库迁移	rev a7b8c9d
 migrations/versions/a9b8c7d6e5f4_formal_确认任务_主从档字段.py	数据库迁移	rev a9b8c7d6e5f4 ｜ ↓f0e1d2c3b4a5 ｜ V3：正式表/确认任务建表；店铺主从/最早锚字段；raw 判定扩展	3218
 migrations/versions/aa11bb22cc33_物理车站层.py	数据库迁移	rev aa11bb22cc33 ｜ ↓f9a8b7c6d5e4 ｜ 车站数据资产化：新增**物理车站层** `bd_station_place` + `bd_station.place_id`。	3758
 migrations/versions/aa62fd4cc540_store_pairs_ai_字段.py	数据库迁移	rev aa62fd4cc540 ｜ ↓2aee8f3dbf85 ｜ store_pairs AI 字段	1102
+migrations/versions/ab12cd34ef56_bd_task_store_count.py	数据库迁移	rev ab12cd34ef56 ｜ ↓ee55ff66aa77 ｜ bd_task.store_count：完成时要填的**店铺数**（用户 2026-10-06）	539
 migrations/versions/ac89f3182e16_initial_tables_spec_v0_4_4.py	数据库迁移	rev ac89f3182e16 ｜ initial tables (spec v0.4 §4)	12910
 migrations/versions/b1c2d3e4f5a6_payroll_payment_adjust_trace.py	数据库迁移	rev b1c2d3e4f5a6 ｜ ↓d4e5f6a7b8c9 ｜ 发放台账找平抵扣溯源列：抵扣必须指向来源记录，否则无法对账排查。	896
 migrations/versions/b2c3d4e5f6a7_bd_team_task_团队与车站任务.py	数据库迁移	rev b2c3d4e5f6a7 ｜ ↓d3e4f5a6b7c8 ｜ 团队 + 车站任务：bd_team / bd_team_member / bd_station / bd_task /	6476
@@ -179,16 +180,16 @@ docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24647
 docs/specs-team-management.md	文档	规格 · 团队管理（第一期）	13867
 docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7168
 docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产品设计（系统逻辑全览）	9614
-docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8662
+docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8877
 docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7092
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
-docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32092
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31585
+docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32024
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31517
 docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务）	10101
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141
-docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	74183
+docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	75556
 docs/记录-员工填报.md	文档	记录 · 员工每日填报 + 对比 + AI 报告	6963
 docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	6674
 docs/试跑报告-任务域.md	文档	试跑报告 · 任务域（真库 · 2026-10-06）	3216
@@ -209,7 +210,7 @@ app/services/login_names.py	服务层	自动生成员工登录名：姓名 → �
 app/services/mcp_tokens.py	服务层	MCP Token 服务适配层：**只调用** `mcp_service/tokens.py` 的	4168
 app/services/paging.py	服务层	列表分页（**全站唯一实现**，别各页面自己写一套）。	2416
 app/services/report.py	服务层	V3 文件判定明细（/files/{id}/report）：基于 raw_records.clean_status + 申诉状态。	13538
-app/services/self_report.py	服务层	**员工每日自报的跨域编排层**（点数 + 当天任务进度，一次提交）。	3535
+app/services/self_report.py	服务层	**员工每日自报的跨域编排层**（点数 + 当天任务进度，一次提交）。	3790
 app/templates/base.html	模板	全站基座（顶栏/底栏/侧栏/未读角标/语言切换）	12079
 app/templates/config.html	模板	系统配置	3149
 app/templates/dashboard.html	模板	数据看板	12317
@@ -256,7 +257,7 @@ mcp_service/tests/test_salary.py	测试·MCP	月薪查询：读已物化的 mont
 mcp_service/tests/test_scenario_ops.py	测试·MCP	场景化重构验收（规格 docs/specs-mcp-tools-scenario.md 第六节）。	25976
 mcp_service/tests/test_server_boot.py	测试·MCP	服务能组装、传输安全未被关闭、进程级启动行为正确（spec §8 T2）。	3308
 mcp_service/tests/test_store_write_ops.py	测试·MCP	店铺主档写工具测试：visit_store(action=merge|skip|split|apply)。	12864
-mcp_service/tests/test_task_ops.py	测试·MCP	作业域 MCP 工具的能力层测试（2026-10-06 新增）。	8772
+mcp_service/tests/test_task_ops.py	测试·MCP	作业域 MCP 工具的能力层测试（2026-10-06 新增）。	9946
 mcp_service/tests/test_tokens.py	测试·MCP	Token 解析：前缀定位 + 摘要校验 + 撤销 + scope + bootstrap 只读（spec §5）。	4817
 mcp_service/tests/test_write_tools.py	测试·MCP	写工具四道闸门与信封（spec §6/§7）。	8701
 tests_web/conftest.py	测试·Web	Web 测试共用 fixture：内存 sqlite（StaticPool 共享连接）+ TestClient。	986
@@ -288,7 +289,7 @@ tests_web/test_staff_status.py	测试·Web	员工管理（状态：在岗/请假
 tests_web/test_store_auto.py	测试·Web	店铺主档自动化测试：上传后增量建候选对 → exact 自动合并 → 受影响月自动重算	15399
 tests_web/test_store_master.py	测试·Web	主档合并服务测试。	1665
 tests_web/test_store_rules.py	测试·Web		753
-tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	208995
+tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	213861
 tests_web/test_templates.py	测试·Web	模板渲染冒烟：base 可加载；登录态含标题与阶段二灰置导航；未登录仅品牌。	9800
 tests_web/test_token_pages.py	测试·Web	MCP Token 管理员代发/吊销、员工状态联动提示。	7215
 tests/__init__.py	测试·结算		0
@@ -323,7 +324,7 @@ scripts/bd_reset_ops.py	脚本	作业域**重置**：清掉旧任务层 / 清掉
 scripts/bd_seed_team_task.py	脚本	种子导入：从 `万总/team_task/` 的 6 份 Excel 建团队 + 队长 + 车站/任务。	6766
 scripts/bd_seq_from_geometry.py	脚本	几何法兜底求沿線顺序：把 N02 的**区间几何**串成一条线，再把车站投影上去。	9266
 scripts/bd_station_lines.json	脚本		23586
-scripts/bd_sync_prod.py	脚本	作业域数据同步：**本地 → 线上**（车站/线路/物理车站/队伍/成员/任务）。	8586
+scripts/bd_sync_prod.py	脚本	作业域数据同步：**本地 → 线上**（车站/线路/物理车站/队伍/成员/任务）。	8661
 scripts/build_file_index.py	脚本	生成**全仓文件索引**：`docs/文件索引.tsv`（机器查）+ `docs/文件索引.md`（人看）。	8430
 scripts/check_admin_nav.py	脚本	快速检查管理端左侧菜单渲染（结构 + 当前页高亮 + 员工端不受影响）。	2088
 scripts/check_ja_quality.py	脚本	抽查 ja 渲染的翻译覆盖率（粗略：统计可见中文标签残留）。	2171

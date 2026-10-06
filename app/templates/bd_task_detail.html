@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ r.station_name if r else t('任务') }}{% endblock %}
 {% block content %}
+{% if r and r.store_count is not none %}
+<p class="hint" data-testid="detail-stores">{{ t('店铺数') }}：<b>{{ r.store_count }}</b>
+  {{ t('家店') }}{% if r.state == 'done' %}（{{ t('完成时填的') }}）{% endif %}</p>
+{% endif %}
 {# 管理员改派 / **本队队长转队**（2026-10-06：队长之间私下换活）+ 退回车站池 #}
 {% if current_user and r and r.task.team_id and (current_user.role == 'admin' or can_transfer) %}
 <div class="card" style="margin-bottom:.6rem;padding:.6rem .9rem" data-testid="task-admin-actions">
@@ -75,6 +79,11 @@
     <input type="number" name="pct" min="0" max="100" value="{{ r.pct }}" style="width:5rem">
   </label>
   <label class="f">{{ t('备注') }}<input type="text" name="note" style="width:14rem"></label>
+  <label class="f">{{ t('店铺数') }}
+    <input type="number" name="store_count" min="0" step="1"
+           value="{{ r.store_count if r.store_count is not none else '' }}"
+           placeholder="{{ t('完成时填') }}" style="width:6rem"
+           data-testid="admin-store-count"></label>
   <button class="btn" type="submit">{{ t('保存') }}</button>
 </form>
 {% endif %}

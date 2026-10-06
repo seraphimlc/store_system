@@ -40,7 +40,7 @@ from sqlalchemy import func, inspect, text  # noqa: E402
 TABLES = ("bd_area", "bd_line", "bd_station_place", "bd_station",
           "bd_team", "bd_team_member", "bd_task")
 #: 任务表里"要清零"的进度字段（线上干净开局，队长补录真实进度）
-TASK_PROGRESS_COLS = ("pct", "start_date", "done_date", "note")
+TASK_PROGRESS_COLS = ("pct", "start_date", "done_date", "note", "store_count")
 #: 显式插 id 后需要修序列的表（PG）
 SEQ_TABLES = TABLES
 
@@ -84,6 +84,7 @@ def export(path: str, with_progress: bool = False) -> dict:
             for c in TASK_PROGRESS_COLS:
                 if c in r:
                     r[c] = 0 if c == "pct" else ("" if c == "note" else None)
+                    # store_count 也清空（线上由队员完成时填，2026-10-06）
             if "state" in r:
                 r["state"] = "unassigned"
     with open(path, "w", encoding="utf-8") as f:

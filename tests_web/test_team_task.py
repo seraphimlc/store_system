@@ -2705,7 +2705,7 @@ def test_reject_flow_leader_then_admin(client, seeded):
     db.commit()
     # ① 队员报 100%
     bd_tasks.save_progress(db, tid, 100, "", by="P2",
-                           actor_user=db.query(User).filter(User.username == "tangjing").one())
+                           store_count=12, actor_user=db.query(User).filter(User.username == "tangjing").one())
     t = db.get(BdTask, tid)
     assert t.pct == 100 and t.done_date is not None and t.state == "done"
     row = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).first()
@@ -2727,8 +2727,8 @@ def test_reject_flow_leader_then_admin(client, seeded):
     assert bd_tasks.can_reject(db, leader, t) is False, "已经不是 100% 了，不能再驳回"
     # ④ 队员再报 100% → 队长确认 → 队长不能再驳回，管理员可以
     bd_tasks.save_progress(db, tid, 100, "", by="P2",
-                           actor_user=db.query(User).filter(User.username == "tangjing").one())
-    bd_tasks.save_progress(db, tid, 100, "ok", by="ogawa", actor_user=leader,
+                           store_count=12, actor_user=db.query(User).filter(User.username == "tangjing").one())
+    bd_tasks.save_progress(db, tid, 100, "ok", by="ogawa", store_count=12, actor_user=leader,
                            confirm=True)
     t = db.get(BdTask, tid)
     row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
@@ -2744,7 +2744,7 @@ def test_reject_flow_leader_then_admin(client, seeded):
     assert t.pct == 50 and t.state == "doing" and t.done_date is None
     # ⑤ 新进度必须 < 100
     bd_tasks.save_progress(db, tid, 100, "", by="P2",
-                           actor_user=db.query(User).filter(User.username == "tangjing").one())
+                           store_count=12, actor_user=db.query(User).filter(User.username == "tangjing").one())
     try:
         bd_tasks.reject_progress(db, tid, 100, "", by="admin", actor_user=admin)
         raise AssertionError("驳回成 100% 应该被拒")
@@ -2769,7 +2769,7 @@ def test_reject_route_permissions(client, seeded):
     tid = r["task_ids"][0]
     bd_tasks.assign_members(db, tid, ["P2"], by="admin")
     bd_tasks.save_progress(db, tid, 100, "", by="P2",
-                           actor_user=db.query(User)
+                           store_count=12, actor_user=db.query(User)
                            .filter(User.username == "tangjing").one())
     db.commit()
     assert db.get(BdTask, tid).pct == 100, "先造一个已完成（100%）的任务"
@@ -3301,7 +3301,7 @@ def test_reject_keeps_reporter_and_note(client, seeded):
     bd_tasks.assign_members(db, tid, ["P2"], by="admin")
     # 员工报 100% 并写备注
     r = bd_tasks.save_progress(db, tid, 100, "全部干完了", by="tangjing",
-                               actor_user=db.query(User).filter(
+                               store_count=12, actor_user=db.query(User).filter(
                                    User.username == "tangjing").first())
     db.commit()
     # 队长驳回成 40% 并写理由
@@ -3487,7 +3487,8 @@ def test_task_full_lifecycle_e2e(client, seeded):
     # ⑥ 员工报 100%（调整未锁定当天 → 允许）→ 队长驳回成 30%（保留原值 100）
     _login(client, "tangjing")
     r6 = _post(client, "/my/tasks/progress",
-               {"task_id": str(tid), "pct": "100", "note": "干完了"},
+               {"task_id": str(tid), "pct": "100", "note": "干完了",
+                "store_count": "9"},
                from_path="/my/tasks?tab=mine")
     assert r6.status_code == 303
     db = appdb.SessionLocal()
@@ -3510,7 +3511,9 @@ def test_task_full_lifecycle_e2e(client, seeded):
     db.close()
     # ⑦ 再报 100% → 队长确认 → 完成；**确认后当天锁住**（新规则）
     _login(client, "tangjing")
-    _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100"},
+    # ⚠️ 队员报到 100% **必须给店铺数**（用户 2026-10-06；允许 0，空着不行）
+    _post(client, "/my/tasks/progress",
+          {"task_id": str(tid), "pct": "100", "store_count": "9"},
           from_path="/my/tasks?tab=mine")
     _login(client, "ogawa")
     _post(client, "/my/tasks/confirm", {"task_id": str(tid), "note": ""},
@@ -3567,9 +3570,9 @@ def test_tasks_export_three_sheets_match_sql(client, seeded):
     wb.close()
     # 表头（列定义）固定
     assert rows["未分配"][0] == ("线路", "站点")
-    assert rows["进行中"][0] == ("线路", "站点", "团队", "担当", "进展%",
+    assert rows["进行中"][0] == ("线路", "站点", "团队", "担当", "进展%", "店铺数",
                                "分配日期", "开始日", "最后提交")
-    assert rows["已完成"][0] == ("线路", "站点", "团队", "担当", "完成日期",
+    assert rows["已完成"][0] == ("线路", "站点", "团队", "担当", "店铺数", "完成日期",
                                "开始日", "分配日期", "用时(天)")
     # 行内容 = 该 fixture 的车站（与 SQL 口径一致）
     pool_names = {r[1] for r in rows["未分配"][1:]}
@@ -4652,7 +4655,7 @@ def test_bd_sync_prod_export_resets_progress(seeded, tmp_path):
     tid = seeded["task"]
     bd_tasks.assign_members(db, tid, ["P2"], by="admin")
     tj = db.query(User).filter(User.username == "tangjing").first()
-    bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing", actor_user=tj, store_count=12)
     db.commit()
     db.close()
     out = tmp_path / "dump.json"
@@ -4786,7 +4789,7 @@ def test_progress_notice_goes_to_reporter_not_current_assignee(seeded):
         db.commit()
     # P2（tangjing 这个账号）上报 100% → 记录 reported_by
     tj = db.query(User).filter(User.username == "tangjing").first()
-    bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing", actor_user=tj, store_count=12)
     # 队长确认 → 再改派给 P3（P2 不再是担当）
     bd_tasks.confirm_day(db, tj)
     bd_tasks.assign_members(db, tid, ["P3"], by="admin")
@@ -5047,4 +5050,128 @@ def test_transfer_from_detail_page_comes_back_with_message(client, seeded):
     assert "msg=" in loc and "已转给" in _uq(loc), _uq(loc)
     db = appdb.SessionLocal()
     assert db.get(BdTask, seeded["task"]).team_id == t2.id
+    db.close()
+
+
+# ---------------- 完成时填店铺数（用户 2026-10-06）----------------
+
+def test_member_100_requires_store_count(seeded):
+    """**队员**报 100% 不给店铺数 → 拒绝；给 0 或正数 → 通过并落库。
+
+    判定在服务层按**身份**（本人担当且在自报）→ 任何入口都拦得住。
+    """
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    with pytest.raises(bd_tasks.TaskError) as e:
+        bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing",
+                               actor_user=tj)
+    assert "店铺数" in str(e.value)
+    db.rollback()
+    # 0 合法
+    r = bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing",
+                               actor_user=tj, store_count=0)
+    db.commit()
+    assert r["store_count"] == 0
+    assert db.get(BdTask, tid).store_count == 0
+    db.close()
+
+
+def test_leader_batch_done_allows_blank_store_count(seeded):
+    """队长**批量标记完成**补录存量 → 允许留空（用户口径：否则 513 条没法一键补）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    leader = db.query(User).filter(User.username == "ogawa").first()
+    r = bd_tasks.save_progress(db, tid, 100, "", by="ogawa", actor_user=leader)
+    db.commit()
+    assert r["pct"] == 100
+    assert db.get(BdTask, tid).store_count is None, "队长补录可留空"
+    # 之后能补填
+    r2 = bd_tasks.save_progress(db, tid, 100, "", by="ogawa", actor_user=leader,
+                                store_count=8)
+    db.commit()
+    assert r2["store_count"] == 8
+    db.close()
+
+
+def test_store_count_negative_rejected(seeded):
+    db = appdb.SessionLocal()
+    db2 = db
+    tid = seeded["task"]
+    leader = db.query(User).filter(User.username == "ogawa").first()
+    with pytest.raises(bd_tasks.TaskError) as e:
+        bd_tasks.save_progress(db, tid, 50, "", by="ogawa", actor_user=leader,
+                               store_count=-1)
+    assert "负数" in str(e.value)
+    db.rollback()
+    db.close()
+
+
+def test_store_count_visible_on_pages_and_export(client, seeded):
+    """列表/详情/导出三处都要能看到店铺数。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    # 60% + 先填店铺数也行（允许提前填）→ 留在「我的」页，输入框与 pill 同页可见
+    bd_tasks.save_progress(db, tid, 60, "做了一半", by="tangjing",
+                           actor_user=tj, store_count=11)
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h = client.get("/my/tasks?tab=mine").text
+    # 员工看到的是**自报块**（和点数一起提交）→ 字段名是 stores_<id>
+    assert 'data-testid="sr-stores-%d"' % tid in h, "队员自报行要有店铺数输入"
+    assert 'data-testid="stores-pill-%d"' % tid in h, "行上要显示已填的店铺数"
+    # 每日填报页（一页自报：点数 + 进度 + 店铺数）
+    h2 = client.get("/my/report").text
+    assert 'data-testid="sr-stores-%d"' % tid in h2, "每日填报里要有店铺数输入"
+    # 队长/管理员看到的是**单条进展表单**（补录用）→ 字段名是 store_count
+    _login(client, "ogawa")
+    h5 = client.get("/my/tasks?tab=doing").text
+    assert 'name="store_count"' in h5, "队长的单条进展表单要有店铺数输入"
+    # 管理端「已分配」列表也能看到（同一套行模板）
+    _login(client, "admin")
+    h4 = client.get("/tasks?tab=assigned").text
+    assert 'data-testid="stores-pill-%d"' % tid in h4
+    # 详情页
+    h3 = client.get("/tasks/%d" % tid).text
+    assert 'data-testid="detail-stores"' in h3
+    # 导出：表头 + 值
+    from openpyxl import load_workbook
+    _login(client, "admin")
+    r = client.get("/tasks/export?tab=assigned")     # 这条任务 60% → 在「进行中」
+    assert r.status_code == 200
+    wb = load_workbook(__import__("io").BytesIO(r.content))
+    rows = list(wb["进行中"].iter_rows(values_only=True))
+    assert "店铺数" in rows[0]
+    assert any(row and 11 in row for row in rows[1:]), "导出的进行中里要带店铺数"
+    # 已完成 sheet 也加了这一列（表头就能看出来）
+    done_head = list(wb["已完成"].iter_rows(values_only=True))[0]
+    assert "店铺数" in done_head
+
+
+def test_self_report_100_without_store_count_shows_error(client, seeded):
+    """一页自报：报 100% 不给店铺数 → 整体失败 + 人话提示（不给队长塞半截数据）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    r = _post(client, "/my/self-report",
+              {"area": "x", "p1_cnt": "1", "p2_cnt": "0",
+               "pct_%d" % tid: "100"},
+              from_path="/my/report")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    loc = _uq(r.headers["location"])
+    assert "err=" in loc and "店铺数" in loc, loc
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).pct != 100, "失败就要整体回滚"
     db.close()

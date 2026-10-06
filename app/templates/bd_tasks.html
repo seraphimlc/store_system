@@ -351,7 +351,8 @@
             aria-label="{{ t('选中以撤回') }}"> {% endif %}<a href="/tasks/{{ r.task.id }}" data-testid="task-link-{{ r.task.id }}"><b>{{ r.station_name }}</b></a>{% if r.line %}<span class="hint"> {{ r.line }}</span>{% endif %}</td>
       <td>{{ r.team_name or '—' }}</td>
       <td>{% if r.assignees %}{% for a in r.assignees %}{{ a.name }}{% if leave_map.get(a.code) %}<span class="pill warnk" data-testid="leave-{{ r.task.id }}-{{ a.code }}" title="{{ t('休假中（至') }} {{ leave_map[a.code].end_date.strftime('%Y-%m-%d') if leave_map[a.code].end_date else t('未定') }}）">{{ t('休') }}</span>{% endif %}{{ '、' if not loop.last }}{% endfor %}{% else %}<span class="pill">{{ t('未分配') }}</span>{% endif %}</td>
-      <td>{{ r.pct }}%
+      <td>{{ r.pct }}%{% if r.store_count is not none %}<br><span class="hint"
+            data-testid="stores-pill-{{ r.task.id }}">{{ r.store_count }} {{ t('家店') }}</span>{% endif %}
         {% if r.stale %}<span class="pill warnk" data-testid="stale-{{ r.task.id }}"
               title="{{ t('超过') }} {{ stale_days }} {{ t('天没提交进展') }}">{{ r.days_since if r.days_since is not none else '—' }} {{ t('天没动') }}</span>{% endif %}
         {% if r.pending_review %}<span class="pill warnk"
@@ -365,6 +366,8 @@
       <td>{{ r.assign_date.strftime('%Y-%m-%d') if r.assign_date else '—' }}</td>
       <td>
         {% if r.state == 'done' %}{# 已完成 → 只能「驳回」（把 100% 退回，用户 2026-10-06） #}
+        {% if r.store_count is not none %}<span class="hint"
+            data-testid="stores-{{ r.task.id }}">{{ r.store_count }} {{ t('家店') }}</span>{% endif %}
         <form method="post" action="/my/tasks/reject"
               onsubmit="return confirm('{{ t('确定驳回这条？进度会从 100% 改成你填的数字') }}')"
               style="display:flex;gap:.3rem;align-items:center"

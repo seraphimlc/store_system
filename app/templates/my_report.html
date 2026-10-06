@@ -101,6 +101,12 @@
           id="srv-{{ r.task.id }}">{{ r.pct }}</span>%</b>
       <input type="text" name="note_{{ r.task.id }}" placeholder="{{ t('备注（可空）') }}"
              style="width:10rem" data-testid="sr-note-{{ r.task.id }}">
+      {# 完成（100%）时要填店铺数（用户 2026-10-06；允许 0，空着不行） #}
+      <label class="hint" style="gap:.2rem">{{ t('店铺数') }}
+        <input type="number" name="stores_{{ r.task.id }}" min="0" step="1"
+               value="{{ r.store_count if r.store_count is not none else '' }}"
+               placeholder="{{ t('完成时填') }}"
+               style="width:5.4rem" data-testid="sr-stores-{{ r.task.id }}"></label>
     </div>
     {% endfor %}
     <div class="form-actions" style="margin-top:.7rem">
