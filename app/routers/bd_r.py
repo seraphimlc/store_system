@@ -943,9 +943,15 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
         return RedirectResponse("/my/tasks?err=" + _q(_m("任务不存在")),
                                 status_code=303)
     if not bd_tasks.can_report(db, user, task):
-        return RedirectResponse("/my/tasks?err="
-                                + _q(_m("只能上报自己担当的任务")),
-                                status_code=303)
+        # ⚠️ 分两种说清楚：不是我的活 vs 我的活但**队长今天已确认**（锁住）
+        #   2026-10-06 浏览器实测：原来一律说"只能上报自己担当的任务"，
+        #   队员明明是担当、只是被锁了，看到这句话会完全摸不着头脑
+        _mine = bd_tasks.is_assignee(db, user, task)
+        _row = bd_tasks.day_progress_map(db, [task.id]).get(task.id)
+        _msg = (_m("队长已确认，今天这条不能再改（如需修改请联系队长或管理员）")
+                if _mine and bd_tasks.is_locked_for_staff(_row)
+                else _m("只能上报自己担当的任务"))
+        return RedirectResponse("/my/tasks?err=" + _q(_msg), status_code=303)
     try:
         r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
                                    actor_user=user)

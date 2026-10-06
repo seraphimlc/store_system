@@ -4052,3 +4052,35 @@ def test_admin_progress_form_gated_by_leader_confirm(client, seeded):
     h2 = client.get("/tasks?tab=assigned&kw=駒場東大前").text
     assert 'action="/tasks/%d/progress"' % tid in h2, "确认后应能修正"
     assert 'data-testid="need-confirm-%d"' % tid not in h2
+
+
+def test_locked_staff_sees_correct_reason(client, seeded):
+    """⚠️ 浏览器实测：队员被锁时，路由不能再说"只能上报自己担当的任务"（误导）。"""
+    from urllib.parse import unquote
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    # 硬发（绕过界面）→ 提示要说清是"被锁"，不是"不是你的活"
+    r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "50"},
+              from_path="/my/tasks?tab=mine")
+    loc = unquote(r.headers["location"])
+    assert "err=" in loc
+    assert "队长已确认" in loc, "应说明是被锁（拿到 %s）" % loc
+    assert "只能上报自己担当" not in loc
+    # 别人的任务 → 仍是"只能上报自己担当的任务"
+    db = appdb.SessionLocal()
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    other = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    db.close()
+    r2 = _post(client, "/my/tasks/progress", {"task_id": str(other), "pct": "10"},
+               from_path="/my/tasks?tab=mine")
+    assert "只能上报自己担当" in unquote(r2.headers["location"])
