@@ -94,6 +94,20 @@
       </select>
       <button class="btn" type="submit" data-testid="bulk-assign">{{ t('分配给该队员') }}</button>
       <span class="spacer" style="flex:1"></span>
+      {# **存量补录**：勾多条 → 批量设进展 / 批量标记完成（用户 2026-10-06：
+         "已经完成的队长可以直接标成已经完成；未完成但有进展的可以直接设置进展"） #}
+      <label class="f" style="gap:.3rem">{{ t('进展') }}
+        <input type="number" name="pct_manual" min="0" max="100" value="50"
+               style="width:5rem" data-testid="bulk-pct"></label>
+      <button class="btn ghost" type="submit" value=""
+              formaction="/my/tasks/progress-bulk"
+              data-testid="bulk-progress">{{ t('批量设进展') }}</button>
+      <button class="btn ghost" type="submit" name="pct" value="100"
+              formaction="/my/tasks/progress-bulk"
+              onclick="return confirm('{{ t('把勾选的任务全部标成已完成？') }}')"
+              data-testid="bulk-done">{{ t('批量标记完成') }}</button>
+
+      <span class="spacer" style="flex:1"></span>
       <span class="hint">{{ t('已选') }} <b data-testid="bulk-count">0</b> {{ t('个任务') }}</span>
     </div>
     <p class="hint" style="margin:.4rem 0 0">

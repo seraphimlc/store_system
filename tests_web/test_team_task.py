@@ -4441,3 +4441,64 @@ def test_leader_redirect_stays_on_unassigned_tab(client, seeded):
     r4 = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "90"},
                from_path="/my/tasks?tab=mine")
     assert "tab=mine" in r4.headers["location"], r4.headers["location"]
+
+
+def test_bulk_mark_done_and_bulk_progress(client, seeded):
+    """**③ 存量补录**（用户 2026-10-06）：队长勾多条 → 批量标记完成 / 批量设进展。
+
+    513 条存量任务一条条点不现实；批量要"一条坏只跳它"，并且如实报被跳过的条数。
+    """
+    db = appdb.SessionLocal()
+    t1 = seeded["task"]                              # 本队、无担当 → 可批量
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    other = bd_teams.create_team(db, "别的队", "TW99", by="admin")
+    st3 = bd_tasks.create_station(db, "代々木上原")
+    bd_tasks.create_tasks(db, [st3.id], by="admin", team_id=other.id)
+    db.commit()
+    t3 = db.query(BdTask).order_by(BdTask.id.desc()).first().id   # 别的队 → 应被跳过
+    db.close()
+    _login(client, "ogawa")
+    h = client.get("/my/tasks?tab=unassigned").text
+    assert 'data-testid="bulk-done"' in h and 'data-testid="bulk-progress"' in h
+    assert 'data-testid="bulk-pct"' in h
+    # 批量设进展 35%
+    r = _post(client, "/my/tasks/progress-bulk",
+              {"task_id": [str(t1), str(t2)], "pct_manual": "35",
+               "back_tab": "unassigned"},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    assert "已更新 2 个" in _uq(r.headers["location"]), _uq(r.headers["location"])
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, t1).pct == 35 and db.get(BdTask, t2).pct == 35
+    db.close()
+    # 批量标记完成（pct=100）→ 含别的队的任务 → 如实报被跳过
+    r2 = _post(client, "/my/tasks/progress-bulk",
+               {"task_id": [str(t1), str(t2), str(t3)], "pct": "100",
+                "back_tab": "unassigned"},
+               from_path="/my/tasks?tab=unassigned")
+    loc2 = _uq(r2.headers["location"])
+    assert "已更新 2 个" in loc2 and "1 个被跳过" in loc2, loc2
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, t1).state == "done" and db.get(BdTask, t2).state == "done"
+    assert db.get(BdTask, t1).done_date is not None
+    assert db.get(BdTask, t3).pct == 0, "别的队的任务不能被动"
+    db.close()
+    # 非法值 / 没勾选 → 明确提示
+    r3 = _post(client, "/my/tasks/progress-bulk", {"task_id": [str(t1)],
+                                                  "pct_manual": "300"},
+               from_path="/my/tasks?tab=unassigned")
+    assert "0–100" in _uq(r3.headers["location"])
+    r4 = _post(client, "/my/tasks/progress-bulk", {}, from_path="/my/tasks?tab=unassigned")
+    assert "请先勾选" in _uq(r4.headers["location"])
+    # 队员不能批量改（不是他的任务 → 全被跳过）
+    _login(client, "tangjing")
+    r5 = _post(client, "/my/tasks/progress-bulk", {"task_id": [str(t3)], "pct": "100"},
+               from_path="/my/tasks?tab=mine")
+    assert r5.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, t3).pct == 0
+    db.close()

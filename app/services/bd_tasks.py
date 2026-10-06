@@ -1331,6 +1331,34 @@ def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
     return out
 
 
+def set_progress_many(db: Session, task_ids: Sequence[int], pct, note: str = "",
+                      by: str = "", actor_user=None) -> dict:
+    """**批量设进展 / 批量标记完成**（用户 2026-10-06：513 条存量任务要队长补录）。
+
+    - 逐条走 `save_progress`（权限、锁定、值域、日志、通知全都一致，不另写一套）
+    - 每条一个 **savepoint**：某条失败只跳过它，不影响已成功的（批量补录不能"一条坏全废"）
+    - 返回 `{"updated": n, "skipped": [{"task_id":…, "why":…}]}`（界面要如实报被跳过的）
+    """
+    updated = 0
+    skipped: List[dict] = []
+    for tid in list(task_ids or []):
+        t = db.get(BdTask, tid)
+        if t is None:
+            skipped.append({"task_id": tid, "why": "任务不存在"})
+            continue
+        if actor_user is not None and not can_report(db, actor_user, t):
+            skipped.append({"task_id": tid, "why": "没有权限（不是你队的任务，或已被锁定）"})
+            continue
+        try:
+            with db.begin_nested():               # savepoint：这条失败只回滚这条
+                save_progress(db, tid, pct, note, by=by, actor_user=actor_user)
+            updated += 1
+        except Exception as e:                    # noqa: BLE001
+            skipped.append({"task_id": tid, "why": str(e)[:80]})
+    db.flush()
+    return {"updated": updated, "skipped": skipped}
+
+
 def pending_review_rows(db: Session, team_ids: Optional[Sequence[int]] = None,
                         on_date: Optional[date] = None) -> List[Tuple[int, date]]:
     """还挂着 `pending` 的进展行 → `[(task_id, progress_date)]`（队长的待确认队列口径）。"""

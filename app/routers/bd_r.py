@@ -1188,6 +1188,50 @@ def my_tasks_confirm_bulk(request: Request,
                             status_code=303)
 
 
+@router.post("/my/tasks/progress-bulk")
+def my_tasks_progress_bulk(request: Request, task_id: List[int] = Form(default=[]),
+                           pct: str = Form(""), pct_manual: str = Form(""),
+                           note: str = Form(""), back_tab: str = Form("unassigned"),
+                           csrf_token: str = Form(""),
+                           user: Optional[User] = Depends(require_login),
+                           db: Session = Depends(get_db)):
+    """**批量设进展 / 批量标记完成**（队长补录存量任务用）。
+
+    ⚠️ 两个按钮共用一个表单：`pct` 有值（"标记完成"=100）就用它，
+    为空（"批量设进展"）就用 `pct_manual` 那个数字框。
+    """
+    g = _staff_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    back = "/my/tasks?tab=%s" % (back_tab or "unassigned")
+    ids = [int(x) for x in (task_id or [])]
+    if not ids:
+        return RedirectResponse(back + "&err=" + _q(_m("请先勾选任务")), status_code=303)
+    raw = (pct or "").strip() or (pct_manual or "").strip()
+    if not raw.isdigit() or not (0 <= int(raw) <= 100):
+        return RedirectResponse(back + "&err=" + _q(_m("进度要是 0–100 的整数")),
+                                status_code=303)
+    from app.services import bd_tasks
+    try:
+        r = bd_tasks.set_progress_many(db, ids, int(raw), note,
+                                       by=user.username, actor_user=user)
+        db.commit()
+    except Exception as e:                        # noqa: BLE001
+        db.rollback()
+        return RedirectResponse(back + "&err=" + _q(_m(str(e))), status_code=303)
+    n_skip = len(r["skipped"])
+    if n_skip:
+        first = r["skipped"][0]["why"]
+        return RedirectResponse(
+            back + "&err=" + _q(_m("已更新 %d 个；%d 个被跳过（%s）",
+                                   r["updated"], n_skip, first)), status_code=303)
+    return RedirectResponse(back + "&msg="
+                            + _q(_m("已更新 %d 个任务的进展", r["updated"])),
+                            status_code=303)
+
+
 @router.post("/my/tasks/return")
 def my_tasks_return(request: Request, task_id: int = Form(0),
                     back_tab: str = Form(""), csrf_token: str = Form(""),
