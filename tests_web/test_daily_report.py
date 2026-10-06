@@ -276,7 +276,42 @@ def test_my_report_requires_csrf_and_staff(client):
     client.post("/login", data={"username": "admin", "password": "pw123456"},
                 follow_redirects=False)
     r2 = client.get("/my/report", follow_redirects=False)
-    assert r2.status_code in (302, 307)
+    # ⚠️ 2026-10-06：已登录但没权限 → 回**自己的首页**并说一句人话（303），
+    #    不再踢回 /login（用户实测："每日填报打不开"就是被弹到登录页）
+    assert r2.status_code in (302, 303, 307)
+    assert "/login" not in (r2.headers.get("location") or "")
+    assert "/dashboard" in (r2.headers.get("location") or "")
+
+
+def test_leader_can_open_daily_report_and_perf(client):
+    """队长在底部导航里看得到「每日填报 / 我的绩效」→ 就必须打得开（同一口径）。"""
+    from app.auth import hash_password
+    from app.models import Person, User
+    _seed_staff(client)
+    db = appdb.SessionLocal()
+    if db.get(Person, "P1") is None:
+        db.add(Person(code="P1", display_name="小川逸"))
+    if db.query(User).filter(User.username == "ogawa").first() is None:
+        db.add(User(username="ogawa", display_name="小川逸", role="leader",
+                    is_active=True, status="active", person_code="P1",
+                    password_hash=hash_password("pw123456")))
+    db.commit()
+    db.close()
+    client.post("/login", data={"username": "ogawa", "password": "pw123456"},
+                follow_redirects=False)
+    r = client.get("/my/report", follow_redirects=False)
+    assert r.status_code == 200, "队长要能打开每日填报（拿到 %s）" % r.status_code
+    assert "每日填报" in r.text
+    r2 = client.get("/my/perf", follow_redirects=False)
+    assert r2.status_code == 200, "队长要能打开我的绩效（拿到 %s）" % r2.status_code
+    # 提交也要能用（队长自己也报点数）
+    import re as _re
+    page = client.get("/my/report").text
+    _csrf = _re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
+    r3 = client.post("/my/report", data={
+        "_ft": form_token(client, "/my/report"), "csrf_token": _csrf,
+        "area": "渋谷", "p1_cnt": "2", "p2_cnt": "1"}, follow_redirects=False)
+    assert r3.status_code in (302, 303)
 
 
 def test_month_days_leaves_gap_rows(client):

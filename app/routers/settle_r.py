@@ -59,7 +59,8 @@ def my_perf(request: Request,
             user: Optional[User] = Depends(require_login),
             db: Session = Depends(get_db), month: str = ""):
     """员工看自己当月的绩效：**当月全部逐日明细**（不再按日期筛选）+ 月汇总。"""
-    if user is None or user.role != "staff" or not user.person_code:
+    # ⚠️ 队长也能看自己的绩效（与 plan_r.py / report_r.py 同一口径）
+    if user is None or user.role not in ("staff", "leader") or not user.person_code:
         return _denied()
     from app.services import perf
     code = user.person_code

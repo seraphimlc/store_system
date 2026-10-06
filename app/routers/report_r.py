@@ -23,8 +23,25 @@ router = APIRouter(dependencies=[Depends(_dep_form_token)])
 templates = get_templates()
 
 
-def _denied():
-    return RedirectResponse("/login", status_code=302)
+def _denied(user=None, db=None):
+    """没权限时去哪。
+
+    ⚠️ 2026-10-06 用户实测："本地每日填报打不开" —— 队长（leader）在底部导航里
+    **看得到**「每日填报」，但这里只放行 staff → 被弹回 `/login`，已登录的人突然看到
+    登录页，像坏了。修法：① 队长也能用（与 `plan_r.py` 的 ("staff","leader") 一致，
+    队长自己也在一线，要报自己的点数）；② 真没权限时回**自己的首页**并说一句人话，
+    不再踢回登录页。
+    """
+    if user is None:
+        return RedirectResponse("/login", status_code=302)
+    try:
+        from app.services import home as _home
+        dest = _home.landing_home(db, user) if db is not None else "/"
+    except Exception:                             # noqa: BLE001
+        dest = "/"
+    sep = "&" if "?" in dest else "?"
+    return RedirectResponse(dest + sep + "err=" + quote("这个页面只有员工/队长能用"),
+                            status_code=303)
 
 
 @router.get("/my/report", response_class=HTMLResponse)
@@ -33,8 +50,8 @@ def my_report_page(request: Request,
                    db: Session = Depends(get_db), month: str = "",
                    msg: str = "", err: str = ""):
     """员工填报页：今天还没填 → 表单；已填 → 只读展示；下方是本月历史。"""
-    if user is None or user.role != "staff" or not user.person_code:
-        return _denied()
+    if user is None or user.role not in ("staff", "leader") or not user.person_code:
+        return _denied(user, db)
     from app.services import daily_report, report_compare, report_chart
     today = daily_report.jst_today()
     existing = daily_report.today_report(db, user.person_code)
@@ -68,8 +85,8 @@ def my_report_submit(request: Request,
                      user: Optional[User] = Depends(require_login),
                      db: Session = Depends(get_db)):
     """提交今天的填报（普通表单 + 303，页面不依赖 JS）。"""
-    if user is None or user.role != "staff" or not user.person_code:
-        return _denied()
+    if user is None or user.role not in ("staff", "leader") or not user.person_code:
+        return _denied(user, db)
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import daily_report, report_compare
@@ -140,8 +157,8 @@ def my_report_update(request: Request,
                      user: Optional[User] = Depends(require_login),
                      db: Session = Depends(get_db)):
     """修改今天已提交的填报（仅当天）。"""
-    if user is None or user.role != "staff" or not user.person_code:
-        return _denied()
+    if user is None or user.role not in ("staff", "leader") or not user.person_code:
+        return _denied(user, db)
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     from app.services import daily_report, report_compare
@@ -168,8 +185,8 @@ def my_report_feedback(request: Request,
     评语只给管理员（2026-09-28 用户要求）；这里也从不把报告 payload 交给模板。
     """
     from app.services import report_store
-    if user is None or user.role != "staff" or not user.person_code:
-        return _denied()
+    if user is None or user.role not in ("staff", "leader") or not user.person_code:
+        return _denied(user, db)
     from app.models import StaffReportAnalysis
     from app.services import report_ai
     from app.services import perf as _perf
