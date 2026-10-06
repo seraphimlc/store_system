@@ -7,9 +7,10 @@
 **只写不改不删**（追加型）：所以"员工先报 40%、队长改成 60%"这种过程永远查得到
 （`bd_task_progress` 是一天一条的快照，会被覆盖，看不到改了几次、谁改的）。
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.models import BdLog, User
@@ -66,13 +67,47 @@ def timeline(db: Session, domain: str, ref_id: int,
 
 
 def recent(db: Session, domain: str = "", limit: int = 200,
-           offset: int = 0) -> List[BdLog]:
-    """全站最近日志（可按 domain 过滤）——管理端"发生了什么"入口。"""
+           offset: int = 0, kw: str = "", action: str = "",
+           date_from: str = "", date_to: str = "") -> List[BdLog]:
+    """全站最近日志——管理端"发生了什么"入口。
+
+    筛选（2026-10-06 复盘：生产已 4300+ 条，没有筛选没法用）：
+    `domain` 域 / `kw` 关键词（操作人·对象·备注）/ `action` 动作 /
+    `date_from`~`date_to` **JST 日期**（页面显示的就是 JST，用户按 JST 想）。
+    """
     q = db.query(BdLog)
     if domain in DOMAINS:
         q = q.filter(BdLog.domain == domain)
+    if kw:
+        like = "%" + kw.strip() + "%"
+        q = q.filter(sa.or_(BdLog.actor.like(like),
+                            BdLog.ref_label.like(like),
+                            BdLog.note.like(like)))
+    if action:
+        q = q.filter(BdLog.action == action)
+    # ⚠️ created_at 存的是 **UTC**，页面显示 JST（+9）→ 用户按 JST 填的日期要换算
+    if date_from:
+        dt = _parse_day(date_from)
+        if dt:
+            q = q.filter(BdLog.created_at >= dt - _JST_OFFSET)
+    if date_to:
+        dt = _parse_day(date_to)
+        if dt:
+            q = q.filter(BdLog.created_at < dt + _DAY - _JST_OFFSET)
     return (q.order_by(BdLog.created_at.desc(), BdLog.id.desc())
             .limit(limit).offset(offset).all())
+
+
+_JST_OFFSET = timedelta(hours=9)
+_DAY = timedelta(days=1)
+
+
+def _parse_day(s: str):
+    """`YYYY-MM-DD` → datetime；非法输入返回 None（不筛，不报错）。"""
+    try:
+        return datetime.strptime((s or "").strip(), "%Y-%m-%d")
+    except Exception:                             # noqa: BLE001
+        return None
 
 
 def ACTION_LABELS(lang: str = "zh") -> Dict[str, str]:

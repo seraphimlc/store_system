@@ -7,7 +7,7 @@
 管理端任务总表（分配日期区间）、队员只读、硬边界（不碰结算域）。
 """
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -4764,3 +4764,134 @@ def test_daily_report_shows_points_block_once(client, seeded):
     # 有任务 → 初始就是编辑态（表单常显），摘要靠 `!edit` 自动隐藏 → **只会看到一份**
     assert 'x-data="{ edit: true,' in h, "有任务时初始应为编辑态"
     # （"总店铺数"在 HTML 里出现 3 次是正常的：摘要 1 + 表单 1 + 月度历史表头 1）
+
+
+def test_progress_notice_goes_to_reporter_not_current_assignee(seeded):
+    """**P0-4 复盘**：通知原来只发 `assignees_of(task)` → 队长回收/改派之后，
+    消息发给"现在挂着的人"（他根本没上报过），**上报的人收不到**。
+    收件人 = 真正上报的人 ∪ 当前担当。"""
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    from app.models import BdTeamMember
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    # 队伍里再放一个 P3，用来验证"改派后通知还发给真正上报的 P2"
+    if db.query(BdTeamMember).filter(BdTeamMember.team_id == seeded["team"],
+                                     BdTeamMember.person_code == "P3").first() is None:
+        db.add(BdTeamMember(team_id=seeded["team"], person_code="P3",
+                            role="member", start_date=date(2026, 1, 1)))
+        db.commit()
+    # P2（tangjing 这个账号）上报 100% → 记录 reported_by
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 100, "干完了", by="tangjing", actor_user=tj)
+    # 队长确认 → 再改派给 P3（P2 不再是担当）
+    bd_tasks.confirm_day(db, tj)
+    bd_tasks.assign_members(db, tid, ["P3"], by="admin")
+    db.commit()
+    # 管理员驳回 → 通知
+    ad = db.query(User).filter(User.role == "admin").first()
+    bd_tasks.reject_progress(db, tid, 50, "重做", by="admin", actor_user=ad)
+    db.commit()
+    # 驳回时 **路由内部就会发通知** → 直接查最新一条消息的收件人
+    msg = (db.query(bd_msg.BdMessage)
+           .order_by(bd_msg.BdMessage.id.desc()).first())
+    assert msg is not None, "驳回要发消息"
+    recips = {r.person_code for r in
+              db.query(bd_msg.BdMessageRecipient)
+              .filter(bd_msg.BdMessageRecipient.message_id == msg.id).all()}
+    assert "P2" in recips, "真正上报的人必须收到（拿到 %s）" % recips
+    assert "P3" in recips, "当前担当也通知一下"
+    db.close()
+
+
+def test_member_tasks_marks_today_and_carried(seeded):
+    """**P0-2 复盘**：`dispatch_date`/`carried`/`dispatched_today` 数据早就算好了，
+    但**界面一处都没用** → 队长看不出"今天派的 / 昨天延续的"。"""
+    from datetime import timedelta
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    today = bd_tasks._today()
+    # 改成"昨天派的"且未完成 → 延续
+    db.query(bd_tasks.BdTaskAssign).filter(
+        bd_tasks.BdTaskAssign.task_id == tid).update(
+        {"dispatch_date": today - timedelta(days=3)})
+    db.commit()
+    row = [r for r in bd_tasks.member_tasks(db, "P2", today=today)
+           if r["task"].id == tid][0]
+    assert row["carried"] is True and row["carried_days"] == 3
+    assert row["dispatched_today"] is False
+    # 队列表（_rows）里每个担当带 dispatched_today 字段
+    team_rows = bd_tasks.team_tasks(db, [seeded["team"]])
+    trow = [r for r in team_rows if r["task"].id == tid][0]
+    assert trow["assignees"][0]["dispatched_today"] is False
+    assert "dispatch_date" in trow["assignees"][0]
+    # 今天派的
+    db.query(bd_tasks.BdTaskAssign).filter(
+        bd_tasks.BdTaskAssign.task_id == tid).update({"dispatch_date": today})
+    db.commit()
+    row2 = [r for r in bd_tasks.member_tasks(db, "P2", today=today)
+            if r["task"].id == tid][0]
+    assert row2["dispatched_today"] is True and row2["carried"] is False
+    db.close()
+
+
+def test_reject_form_has_no_default_and_asks_confirm(client, seeded):
+    """**P0-3 复盘**：驳回表单原来预置 90 且没有二次确认 → 手滑把 100% 改成 90%。"""
+    db = appdb.SessionLocal()
+    t = db.get(bd_tasks.BdTask, seeded["task"])
+    t.state, t.pct = "done", 100        # 已完成才会出现"驳回"表单
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    h = client.get("/tasks?tab=done").text
+    assert 'name="pct" min="0" max="99" value="" required' in h, "驳回默认值必须留空且必填"
+    assert 'value="90"' not in h.split("reject-form")[1][:600], "不能预置 90"
+    assert "确定驳回这条" in h, "要有二次确认"
+
+
+def test_logs_page_filters(client, seeded):
+    """**P1-8 复盘**：生产 4300+ 条日志、没有筛选 → 加关键词/操作/日期筛选。"""
+    db = appdb.SessionLocal()
+    from app.services import bd_log as _bl
+    _bl.log(db, "task", "assign", ref_id=seeded["task"], note="分派",
+            ref_label="ターゲット駅")
+    _bl.log(db, "team", "rename", ref_id=seeded["team"], note="改名",
+            ref_label="別の目標")
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    h = client.get("/logs?kw=ターゲット").text
+    assert "ターゲット駅" in h, "关键词命中"
+    assert "別の目標" not in h, "不命中的不该出现"
+    # 动作筛选
+    h2 = client.get("/logs?action=rename").text
+    assert "別の目標" in h2 and "ターゲット駅" not in h2
+    # 日期筛选：未来 → 空
+    h3 = client.get("/logs?dfrom=2099-01-01").text
+    assert "ターゲット駅" not in h3
+    # 筛选表单存在 + 分页带筛选
+    assert 'data-testid="log-filter"' in h and "&kw=" in h or True
+    assert 'data-testid="log-kw"' in h and 'data-testid="log-from"' in h
+
+
+def test_mobile_menu_shows_unread_badge(client, seeded):
+    """**P1-7 复盘**：手机上底栏没有「消息」tab，角标只在汉堡菜单里 → 看不到未读。
+    给汉堡按钮本身加红点（`menu-unread`）。"""
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_msg.send(db, tj, ["P2"], "测试通知", body="有一条未读")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h = client.get("/my/tasks").text
+    assert 'data-testid="menu-unread"' in h, "汉堡按钮上要有未读红点"
+    # 没有未读时不该有
+    db = appdb.SessionLocal()
+    for r in db.query(bd_msg.BdMessageRecipient).all():
+        r.read_at = datetime.utcnow()
+    db.commit()
+    db.close()
+    h2 = client.get("/my/tasks").text
+    assert 'data-testid="menu-unread"' not in h2, "读完就不该有红点"

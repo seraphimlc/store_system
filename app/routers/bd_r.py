@@ -64,6 +64,15 @@ def _admin_guard(user):
     return None
 
 
+def _dispatch_sum(open_rows, done_rows):
+    """「我的」列表的派工小计：今天派了几个、延续几个（用户 2026-10-06 要求能看出来）。"""
+    rows = list(open_rows or []) + list(done_rows or [])
+    today_cnt = sum(1 for r in rows if r.get("dispatched_today"))
+    carried = [r for r in rows if r.get("carried")]
+    return {"today": today_cnt, "carried": len(carried),
+            "max_days": max([r.get("carried_days") or 0 for r in carried] or [0])}
+
+
 def _my_tab_for(db, task) -> str:
     """员工端「我的任务」页该回哪个 tab —— **按队长的新口径**（不是全局 state）。
 
@@ -865,6 +874,10 @@ def my_tasks_page(request: Request,
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
+
+        # ⚠️ 用 `my_rows`（两个角色分支都有）：只统计"分给我自己的"任务，
+        #    队长的队列表不该算进"我的"小计
+        "dispatch_sum": _dispatch_sum(my_rows, []),
         "can_report_map": can_report_map, "can_assign_map": can_assign_map,
         "can_reject_map": can_reject_map, "locked_map": locked_map,
         "tab_mine": TAB_MINE, "tab_pending": TAB_PENDING,
@@ -1151,7 +1164,10 @@ def task_detail(request: Request, task_id: int,
 @router.get("/logs", response_class=HTMLResponse)
 def logs_page(request: Request, user: Optional[User] = Depends(require_login),
               db: Session = Depends(get_db), domain: str = "",
-              page: int = 1, msg: str = "", err: str = ""):
+              page: int = 1, msg: str = "", err: str = "",
+              # 🔍 筛选（2026-10-06 复盘：4300+ 条没筛选没法用）
+              kw: str = "", action: str = "",
+              dfrom: str = "", dto: str = ""):
     """**变更日志**（管理端）：任务/团队/成员/车站 的变化时间线。
 
     - 管理员：看全部
@@ -1167,7 +1183,8 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
     limit = 200
     page = max(1, int(page or 1))
     rows = bd_log.recent(db, domain=domain, limit=limit,
-                         offset=(page - 1) * limit)
+                         offset=(page - 1) * limit,
+                         kw=kw, action=action, date_from=dfrom, date_to=dto)
     if not is_admin:
         # 队长：只保留自己队相关的（任务按 team 反查；团队/成员按队 id）
         my_teams = {t.id for t in bd_teams.leader_teams(db, user.person_code)}
@@ -1187,6 +1204,9 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
         "domains": bd_log.DOMAINS,
         "domain_labels": bd_log.DOMAIN_LABELS(CURRENT_LANG.get()),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
+        # 🔍 筛选值的回显 + 动作下拉清单（2026-10-06）
+        "kw": kw, "action": action, "dfrom": dfrom, "dto": dto,
+        "actions": sorted(bd_log.ACTION_LABELS(CURRENT_LANG.get()).keys()),
         "msg": msg, "err": err,
     })
 

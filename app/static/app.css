@@ -496,3 +496,10 @@ table.plan-matrix th .hint { font-weight: 400; }
   padding: .55rem .8rem; border-top: 1px solid var(--line); background: #fafbfe; }
 .pager .btn.disabled { opacity: .45; cursor: default; pointer-events: none; }
 .pager .hint { font-size: .86rem; }
+
+/* 手机端：未读消息在汉堡按钮上点一个红点（底栏没有消息 tab，2026-10-06） */
+.menu-btn { position: relative; }
+.menu-btn .menu-badge {
+  position: absolute; top: -2px; right: -4px; min-width: 1rem;
+  padding: 0 .25rem; font-size: .68rem; line-height: 1.15rem;
+}

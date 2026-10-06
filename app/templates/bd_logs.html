@@ -14,6 +14,30 @@
   {% for d in domains %}
   <a class="{% if domain==d %}on{% endif %}" href="/logs?domain={{ d }}"
      data-testid="log-tab-{{ d }}">{{ domain_labels.get(d, d) }}</a>
+
+{# 🔍 筛选（2026-10-06 复盘：生产 4300+ 条、没有筛选没法用）—— 按 JST 日期筛 #}
+<form method="get" action="/logs" class="filters"
+      style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.6rem 0">
+  <input type="hidden" name="domain" value="{{ domain }}">
+  <label class="f" style="gap:.3rem">{{ t('关键词') }}
+    <input type="text" name="kw" value="{{ kw }}" placeholder="{{ t('操作人 / 对象 / 备注') }}"
+           style="width:12rem" data-testid="log-kw"></label>
+  <label class="f" style="gap:.3rem">{{ t('操作') }}
+    <select name="action" data-testid="log-action" style="width:8rem">
+      <option value="">{{ t('全部') }}</option>
+      {% for a in actions %}
+      <option value="{{ a }}" {% if action==a %}selected{% endif %}>{{ action_labels.get(a, a) }}</option>
+      {% endfor %}
+    </select></label>
+  <label class="f" style="gap:.3rem">{{ t('从') }}
+    <input type="date" name="dfrom" value="{{ dfrom }}" data-testid="log-from"></label>
+  <label class="f" style="gap:.3rem">{{ t('到') }}
+    <input type="date" name="dto" value="{{ dto }}" data-testid="log-to"></label>
+  <button class="btn" type="submit" data-testid="log-filter">{{ t('筛选') }}</button>
+  {% if kw or action or dfrom or dto %}
+  <a class="btn ghost" href="/logs?domain={{ domain }}" data-testid="log-reset">{{ t('重置') }}</a>
+  {% endif %}
+</form>
   {% endfor %}
 </div>
 
@@ -44,9 +68,10 @@
 
 {% if page > 1 or rows|length == limit %}
 <div class="form-actions">
-  {% if page > 1 %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page - 1 }}">{{ t('上一页') }}</a>{% endif %}
+  {% set _qs = '&kw=' ~ (kw|urlencode) ~ '&action=' ~ (action|urlencode) ~ '&dfrom=' ~ dfrom ~ '&dto=' ~ dto %}
+  {% if page > 1 %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page - 1 }}{{ _qs }}">{{ t('上一页') }}</a>{% endif %}
   <span class="hint">{{ t('第') }}{{ page }} {{ t('页') }}</span>
-  {% if rows|length == limit %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page + 1 }}">{{ t('下一页') }}</a>{% endif %}
+  {% if rows|length == limit %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page + 1 }}{{ _qs }}">{{ t('下一页') }}</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

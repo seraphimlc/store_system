@@ -990,7 +990,9 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         from app.services import bd_msg
         notified = bd_msg.notify_task_progress(
             db, t, review_action, orig_reported, p, by_user=actor_user,
-            note=(note or ""), station=_station_name(db, t))
+            note=(note or ""), station=_station_name(db, t),
+            # 报给"真正上报的人"（回收/改派后他可能已不是担当）
+            reporter=((row.reported_by or row.submitted_by or "") if row is not None else ""))
     return {"pct": p, "state": t.state, "date": d,
             "start_date": t.start_date, "done_date": t.done_date,
             "review_status": row.review_status,
@@ -1182,7 +1184,8 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
     if orig is not None and orig != pct:
         notified = bd_msg.notify_task_progress(
             db, t, "rejected", orig, pct, by_user=actor_user,
-            note=(note or ""), station=_station_name(db, t))
+            note=(note or ""), station=_station_name(db, t),
+            reporter=(row.reported_by or row.submitted_by or ""))
     db.commit()
     return {"pct": pct, "state": t.state, "done_date": t.done_date,
             "reported_pct": orig, "notified": bool(notified)}
@@ -1443,10 +1446,13 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
     teams = {t.id: t for t in db.query(BdTeam).all()}
     assigns: Dict[int, List[str]] = {}
     names = {}
+    #: (task_id, person_code) → 派工日（JST）。用来在**队长的队列表**上标"今天派的"
+    disp_of: Dict[tuple, object] = {}
     for a in (db.query(BdTaskAssign)
               .filter(BdTaskAssign.task_id.in_(tids))
               .order_by(BdTaskAssign.id.asc()).all()):
         assigns.setdefault(a.task_id, []).append(a.person_code)
+        disp_of[(a.task_id, a.person_code)] = a.dispatch_date
     codes = {c for v in assigns.values() for c in v}
     if codes:
         names = {c: (d or c) for c, d in db.query(Person.code, Person.display_name)
@@ -1489,7 +1495,10 @@ def _rows(db: Session, tasks: Sequence[BdTask]) -> List[dict]:
             "team_id": t.team_id,
             "team_name": (teams[t.team_id].name if t.team_id in teams else ""),
             "team_leaders": team_leaders.get(t.team_id, []),
-            "assignees": [{"code": c, "name": names.get(c, c)} for c in a_codes],
+            "assignees": [{"code": c, "name": names.get(c, c),
+                           "dispatch_date": disp_of.get((t.id, c)),
+                           "dispatched_today": (disp_of.get((t.id, c)) == today)}
+                          for c in a_codes],
             "n_assign": len(a_codes),
             "pct": t.pct, "state": t.state,
             "assign_date": t.assign_date,
@@ -1577,6 +1586,8 @@ def member_tasks(db: Session, person_code: Optional[str],
         r["dispatch_date"] = dd
         r["carried"] = bool(dd and dd < d and r["task"].state != STATE_DONE)
         r["dispatched_today"] = (dd == d)
+        #: 延续了几天（0 = 今天派的）—— 界面显示"延续 3 天"
+        r["carried_days"] = ((d - dd).days if (dd and d > dd) else 0)
     return out
 
 

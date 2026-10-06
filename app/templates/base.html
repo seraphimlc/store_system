@@ -24,13 +24,17 @@
 <header class="topbar">
   <span class="brand">{{ t('巡店结算系统') }}</span>
   {% if _is_admin %}
+  {# 未读消息：手机上底栏看不到角标（它只在菜单里的「消息」项上）→ 汉堡按钮上点一个红点 #}
   <button type="button" class="menu-btn" onclick="bdMenuToggle(this)" aria-label="菜单"
-          aria-expanded="false">☰</button>
+          aria-expanded="false">☰{% if request.state.unread_messages %}<span
+        class="badge menu-badge" data-testid="menu-unread">{{ request.state.unread_messages }}</span>{% endif %}</button>
   <span class="spacer"></span>
   <span class="user">{{ current_user.display_name }}</span>
   {% else %}
+  {# 未读消息：手机上底栏看不到角标（它只在菜单里的「消息」项上）→ 汉堡按钮上点一个红点 #}
   <button type="button" class="menu-btn" onclick="bdMenuToggle(this)" aria-label="菜单"
-          aria-expanded="false">☰</button>
+          aria-expanded="false">☰{% if request.state.unread_messages %}<span
+        class="badge menu-badge" data-testid="menu-unread">{{ request.state.unread_messages }}</span>{% endif %}</button>
   <nav class="topnav" onclick="if(event.target===this)bdMenuClose()">
     <span class="spacer"></span>
     <span class="user">{{ current_user.display_name }}</span>

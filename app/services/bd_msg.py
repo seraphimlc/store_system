@@ -178,14 +178,28 @@ def send_localized(db: Session, user, person_codes: Sequence[str],
 
 def notify_task_progress(db: Session, task, action: str, old_pct,
                          new_pct, by_user=None, note: str = "",
-                         station: str = "") -> Optional[BdMessage]:
+                         station: str = "", reporter: str = "") -> Optional[BdMessage]:
     """任务进展的**确认/调整结果通知员工**（用户明确要求）。
 
     `action`：`confirmed`（认可）/ `adjusted`（改了值）/ `rejected`（**驳回**：把 100% 退回）
+
+    ⚠️ **收件人 = 真正上报的人 ∪ 当前担当**（2026-10-06 复盘）：
+    原来只发 `assignees_of(task)` → 队长**回收/改派之后**，消息发给"现在挂着的人"
+    （他根本没上报过），而**上报的人收不到**。`reporter` 传上报人的**用户名**
+    （`bd_task_progress.reported_by`），这里换算成人员编号。
     """
     from app.services import bd_tasks
-    rows = bd_tasks.assignees_of(db, task.id)
-    codes = [r["code"] for r in rows if r.get("code")]
+    codes = []
+    if reporter:
+        from app.models import User as _U
+        pc = (db.query(_U.person_code)
+              .filter(_U.username == reporter).scalar())
+        if pc:
+            codes.append(pc)
+    for r in bd_tasks.assignees_of(db, task.id):
+        if r.get("code"):
+            codes.append(r["code"])
+    codes = list(dict.fromkeys(codes))            # 去重（上报人可能也是担当）
     if not codes:
         return None
     who = (getattr(by_user, "display_name", "") or
