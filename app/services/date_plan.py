@@ -727,9 +727,17 @@ def admin_matrix(db, key: str, today=None) -> dict:
     with_plan = {c for c, _ in plan_map}          # 有行 = 登记过（含只自报的行，下面再判）
 
     cand = _matrix_people(db)
+    # ⚠️ 2026-10-06 修：这条补行路径原来把 `name` 留空 → 行里 `name or code` 就显示成编号。
+    #    只取 `role == 'staff'` 的 `_matrix_people` 装不下**队长**（他们也有出勤登记/自报），
+    #    于是队长们全从这条路径进来、全显示编号（用户报的"前六条全是数字"就是 6 个队长）。
+    #    这里补上姓名（persons 优先，其次同名账号的 display_name）。
+    _names = dict(db.query(Person.code, Person.display_name).all())
+    _disp = {c: d for c, d in db.query(User.person_code, User.display_name).all()
+             if c and d}
     for code in sorted(with_plan - set(cand)):
-        cand[code] = {"person_code": code, "name": "", "can_login": False,
-                      "user_id": None, "status": ""}
+        cand[code] = {"person_code": code,
+                      "name": _names.get(code) or _disp.get(code) or code,
+                      "can_login": False, "user_id": None, "status": ""}
     codes = sorted((c for c, e in cand.items()
                     if e["can_login"] or c in with_plan),
                    key=lambda c: (cand[c]["name"] or c, c))

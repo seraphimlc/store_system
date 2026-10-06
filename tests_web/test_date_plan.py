@@ -1307,3 +1307,39 @@ def test_single_month_employee_gets_analysis(client, monkeypatch):
     assert row.month == "2026-09"
     assert "不要编造环比" in seen["prompt"]        # 没有上月 → 不要求跟上月比
     db.close()
+
+
+def test_matrix_shows_name_for_leader_with_plan(client):
+    """⚠️ 用户 2026-10-06："出勤计划里，前六条没有姓名，全是数字"。
+
+    根因：`_matrix_people` 只取 `role == 'staff'` → **队长**进不去；
+    有登记记录的队长只能走 `admin_matrix` 里的"补行"路径，而那条路径把 `name` 留空 →
+    行里 `name or code` 就显示成编号（页面「编号（后5位）」、导出同样）。
+    修法：补行时从 `persons`（其次同名账号）解析姓名。
+    """
+    from app.models import Person, User, StaffDatePlan
+    from app.services.date_plan import jst_today
+    db = appdb.SessionLocal()
+    # 一个队长（role=leader）+ 他的出勤登记
+    db.add(Person(code="LEAD1", display_name="小川逸", created_at=ROSTER))
+    db.add(User(username="ogawa", display_name="小川逸", role="leader",
+                person_code="LEAD1", password_hash="x", is_active=True,
+                status="active", created_at=ROSTER))
+    db.add(StaffDatePlan(person_code="LEAD1", plan_date=date(2026, 10, 16),
+                         available=True, source="web"))
+    db.commit()
+    m = date_plan.admin_matrix(db, "2026-10-H2", today=date(2026, 10, 10))
+    rows = {r["person_code"]: r for r in m["rows"]}
+    assert "LEAD1" in rows, "有登记记录的队长要进矩阵"
+    assert rows["LEAD1"]["name"] == "小川逸", \
+        "必须显示姓名（修之前是编号）：%s" % rows["LEAD1"]["name"]
+    assert rows["LEAD1"]["short_code"] == "LEAD1"[-5:]
+    # 导出（同一份行数据）也必须带姓名
+    from openpyxl import load_workbook
+    import io as _io
+    data, _fname = date_plan.plan_xlsx(db, "2026-10-H2", today=date(2026, 10, 10))
+    ws = load_workbook(_io.BytesIO(data)).worksheets[0]
+    vals = [list(r) for r in ws.iter_rows(values_only=True)]
+    hit = [r for r in vals if r and r[0] == "小川逸"]
+    assert hit, "导出里也要是姓名（不是编号）：%s" % [r[:2] for r in vals[:5]]
+    db.close()
