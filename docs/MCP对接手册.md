@@ -62,7 +62,7 @@ location /mcp {
 | Origin | 客户端**不发 Origin** → 服务端的 DNS-rebinding 白名单要放行"缺失 Origin" |
 | Host 校验 | 经反代时 Host 是域名 → **必须把域名加入 allowed_hosts**（否则直接拒） |
 | 凭据存储 | 客户端按账号**加密存储**在本机（`~/.workbuddy/connectors/<id>/`） |
-| 工具清单缓存 | 客户端**缓存 tools/list** → 服务端改了工具要**重连**才生效 |
+| 工具清单缓存 | 客户端**缓存 tools/list** → 服务端改了工具要**重连**才生效（数量与档位：员工 6 / 队长 9 / 管理员 24） |
 | 工具级过滤 | 客户端支持 `disabledTools`（可用于按连接器屏蔽工具） |
 | OAuth | **支持 MCP OAuth**：`/.well-known/oauth-protected-resource`、PKCE、动态注册、`token_endpoint`、device_code |
 
@@ -213,7 +213,13 @@ location /mcp {
 | `visit_config` 配置 | config_get + config_set + set_per_point |
 | `visit_store` 店铺主档 | store_search + merge_pair + skip_pair + apply_all + split_entity + ai_run（6→1） |
 | `visit_verify` 数据体检 | verify_integrity |
-| 员工侧 3 个 | `visit_whoami` / `visit_my_perf`（view=month\|daily）/ `visit_my_pay`（一次给全：进度+台账+轨迹） |
+| 员工侧 6 个 | `visit_whoami` / `visit_my_perf`（view=month\|daily）/ `visit_my_pay`（一次给全：进度+台账+轨迹） / **`visit_my_tasks`**（我的任务：今天派的 ∪ 没做完自动延续 + 今天已填点数） / **`visit_self_report`**（点数+进度**一次提交**） / **`visit_task_report`**（单条报进度，含"队长确认后当天锁住"校验） |
+| **队长侧 3 个**（2026-10-06 新增档位） | **`visit_team_tasks`**（本队任务 + 待确认队列，tab 按"有没有分人"）/ **`visit_task_assign`**（派工 / 改派 / **回收**=person_codes 传 `[]`）/ **`visit_task_confirm`**（确认 / **一键全确认** all_today=True / 驳回 reject=True+pct） |
+| **管理员侧新增 2 个** | **`visit_task_board`**（任务总表：tab 计数 + 任务行 + 按队汇总 + 停滞口径）/ **`visit_task_return`**（按线路**批量撤回**到车站池，只撤没分到人的） |
+
+> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 9** / 管理员 24。
+> 队长档 = 员工档 + 3 个本队任务工具。作业域工具与 Web 端**走同一套服务层**
+> （`app/services/bd_tasks.py` 等），口径不会漂移；能力层在 `mcp_service/task_ops.py`。
 
 #### 4.6.5 实施要点（避免踩坑）
 

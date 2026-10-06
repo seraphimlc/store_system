@@ -129,21 +129,25 @@ def _registered_descriptions() -> dict[str, str]:
     from mcp_service import tools as tools_mod
 
     mcp = MCPServer(name="t", version="0.0.0")
-    tools_mod.register(mcp)                   # 全量注册（唯一入口 = 16 个）
+    tools_mod.register(mcp)                   # 全量注册（唯一入口 = 24 个）
     tools = asyncio.run(mcp.list_tools())
     return {t.name: (t.description or "") for t in tools}
 
 
-def test_registered_tools_are_16_scenario_tools():
-    """场景化重构验收：列表只有 16 个新工具，旧名一律删除（不做兼容期）。"""
+def test_registered_tools_are_24_scenario_tools():
+    """场景化重构验收：列表只有 24 个工具（16 场景化 + 8 作业域），旧名一律删除。"""
     descs = _registered_descriptions()
-    assert len(descs) == 16
+    assert len(descs) == 24
     expect = {
         "visit_whoami", "visit_my_perf", "visit_my_pay",
         "visit_upload", "visit_overview", "visit_person", "visit_payroll",
         "visit_payroll_export", "visit_recon", "visit_recon_export",
         "visit_files", "visit_rebuild", "visit_staff", "visit_config",
         "visit_store", "visit_verify",
+        # 作业域 8 个（2026-10-06）
+        "visit_my_tasks", "visit_self_report", "visit_task_report",
+        "visit_team_tasks", "visit_task_assign", "visit_task_confirm",
+        "visit_task_return", "visit_task_board",
     }
     assert set(descs) == expect
     # 旧名已删（用户明确：不做兼容期）

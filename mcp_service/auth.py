@@ -194,8 +194,20 @@ class BearerAuthMiddleware:
         from mcp_service import authz as _authz
         global _ALLOWED_TOOL_NAMES
         if _ALLOWED_TOOL_NAMES is None:
-            _ALLOWED_TOOL_NAMES = set(_authz.STAFF_ALLOWED)
-        need_filter = (actor is not None and getattr(actor, "role", "") != "admin")
+            _ALLOWED_TOOL_NAMES = {
+                "staff": set(_authz.STAFF_ALLOWED),
+                "leader": set(_authz.LEADER_ALLOWED),
+            }
+        _role = getattr(actor, "role", "") if actor is not None else ""
+        # ⚠️ 管理员**直通**（不裁剪）；员工/队长按各自档裁剪；未知角色 → 员工档（保守）
+        #    2026-10-06 踩到：写成 `_keep = get(role) or staff` 会把管理员的列表也裁成员工档
+        if _role == "admin":
+            _keep = None
+        elif _role:
+            _keep = _ALLOWED_TOOL_NAMES.get(_role) or _ALLOWED_TOOL_NAMES["staff"]
+        else:
+            _keep = None                     # actor=None（stdio 本地）不裁剪
+        need_filter = bool(_keep)
         buffered = {"chunks": [], "head": None}
 
         async def send_wrapper(message):
@@ -215,7 +227,7 @@ class BearerAuthMiddleware:
                 except Exception:  # noqa: BLE001
                     method = None
                 if method == "tools/list":
-                    allowed = {n for n in _ALLOWED_TOOL_NAMES}
+                    allowed = set(_keep or ())
                     raw = filter_tools_list_body(raw, allowed)
                 await send(buffered["head"])
                 await send({"type": "http.response.body", "body": raw})
