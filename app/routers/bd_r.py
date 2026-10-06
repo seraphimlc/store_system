@@ -384,6 +384,14 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     pager["rows"] = d["rows"]
     # 当日休假中的人（担当旁边标出来 —— 管理端一眼看到"活派给休假的人了"）
     leave_map = bd_leave.active_map(db)
+    # 「修正进展」能不能点：管理员**只能改队长确认/处理过的**（用户 2026-10-06）
+    # ⚠️ 一次算完（批量），别在模板里逐条判
+    # ⚠️ 未分配 tab 的行是**车站池**（没有 task 键）→ 不参与
+    adjust_map = ({tid: v.get("adjust", False) for tid, v in
+                   bd_tasks.can_reject_maps(db, user,
+                                            [r["task"] for r in d["rows"]],
+                                            rows=d["rows"]).items()}
+                  if tab != bd_tasks.TAB_UNASSIGNED else {})
     # 三个 tab 的数字（**只受其它筛选影响**）——统计卡与 tab 共用同一份，避免两套口径
     counts = bd_tasks.tab_counts(
         db, team_id=team_id, line_id=line_id,
@@ -409,6 +417,7 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
         "line_opts": bd_tasks.line_options(db, tab),
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
         "stale": stale, "stale_days": d.get("stale_days", 2),
+        "adjust_map": adjust_map,
         "leave_map": leave_map,
         "sum": bd_tasks.board_summary(db),
         # ⚠️ 统计卡与 tab **同一口径**（2026-10-06 审计：卡片按 state 数 → "已分配 0"，
@@ -753,17 +762,19 @@ def my_tasks_page(request: Request,
     # ⚠️ 权限**一次算完**（逐条 can_* 会让 76 行变成 180+ 条 SQL → 页面慢）
     perms = bd_tasks.can_reject_maps(db, user, [r["task"] for r in rows],
                                     lead_team_ids=team_ids, rows=rows)
+    locked_map = {}
     for tid, d in perms.items():
         can_report_map[tid] = d["report"]
         can_assign_map[tid] = d["assign"]
         can_reject_map[tid] = d["reject"]
+        locked_map[tid] = d.get("locked", False)     # 队长已确认 → 队员今天不能再改
     my_leave = bd_leave.current(db, user.person_code, jst_today)
     return templates.TemplateResponse("my_tasks.html", {
         "request": request, "current_user": user,
         "is_leader": is_leader, "teams": teams, "rows": rows,
         "counts": counts, "tab": tab, "kw": kw, "members": members,
         "can_report_map": can_report_map, "can_assign_map": can_assign_map,
-        "can_reject_map": can_reject_map,
+        "can_reject_map": can_reject_map, "locked_map": locked_map,
         "tab_mine": TAB_MINE, "tab_pending": TAB_PENDING,
         # 队长端线路下拉：只列**本队有内容的线路**（与管理端同口径，2026-10-06 审计）
         "line_opts": (bd_tasks.line_options(db, tab or "assigned",

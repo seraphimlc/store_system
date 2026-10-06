@@ -311,6 +311,10 @@
           <button class="btn ghost" type="submit"
                   data-testid="reject-btn-{{ r.task.id }}">{{ t('驳回') }}</button>
         </form>
+        {% elif not adjust_map.get(r.task.id) %}
+        {# 用户 2026-10-06 口径：管理员只能改**队长已确认/处理过**的 #}
+        <span class="hint" data-testid="need-confirm-{{ r.task.id }}"
+              title="{{ t('管理员只能修改队长确认过的进展') }}">{{ t('等队长确认') }}</span>
         {% else %}
         <form method="post" action="/tasks/{{ r.task.id }}/progress"
               style="display:flex;gap:.3rem;align-items:center">

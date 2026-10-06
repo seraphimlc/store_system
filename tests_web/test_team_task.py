@@ -519,14 +519,36 @@ def test_admin_board_assigned_tab_and_date_range(client, seeded):
 
 
 def test_admin_fix_progress_via_page(client, seeded):
+    """⚠️ 用户 2026-10-06 口径：**管理员只能改"队长已确认过"的** → 未确认先拦住。"""
+    tid = seeded["task"]
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 70, "员工报 70", by="tangjing", actor_user=tj)
+    db.commit()
+    db.close()
     _login(client, "admin")
-    r = _post(client, "/tasks/%d/progress" % seeded["task"],
+    # ① 队长还没确认 → 管理员不能改
+    r0 = _post(client, "/tasks/%d/progress" % tid,
+               {"pct": "80", "note": "抢改"}, from_path="/tasks")
+    assert r0.status_code == 303 and "err=" in r0.headers["location"], \
+        "未确认就改要被拦住"
+    assert "队长确认" in __import__("urllib.parse", fromlist=["unquote"]).unquote(
+        r0.headers["location"])
+    # ② 队长确认后 → 管理员可以改
+    db = appdb.SessionLocal()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 70, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    db.close()
+    r = _post(client, "/tasks/%d/progress" % tid,
               {"pct": "80", "note": "管理员修正"}, from_path="/tasks")
     assert r.status_code == 303
     db = appdb.SessionLocal()
     row = db.query(BdTaskProgress).filter(
-        BdTaskProgress.task_id == seeded["task"]).one()
-    assert row.pct == 80 and row.submitted_by == "admin"
+        BdTaskProgress.task_id == tid).one()
+    assert row.pct == 80 and row.reviewed_by == "admin"
+    assert row.reported_by == "tangjing", "员工原值/上报人不能被管理员改掉"
     db.close()
 
 
@@ -3296,6 +3318,10 @@ def test_admin_adjust_marks_review_and_notifies(client, seeded):
     tj = db.query(User).filter(User.username == "tangjing").first()
     bd_tasks.save_progress(db, tid, 80, "报 80", by="tangjing", actor_user=tj)
     db.commit()
+    # ⚠️ 新规则：管理员要等**队长确认过**才能改
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 80, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
     ad = db.query(User).filter(User.username == "admin").first()
     bd_tasks.save_progress(db, tid, 60, "管理员修正", by="admin", actor_user=ad)
     db.commit()
@@ -3343,17 +3369,18 @@ def test_same_value_resubmit_does_not_reopen_review(client, seeded):
     bd_tasks.save_progress(db, tid, 60, "报了 60", by="tangjing", actor_user=tj)
     db.commit()
     og = db.query(User).filter(User.username == "ogawa").first()
-    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    # ⚠️ 用「调整」（不是确认）：确认会把当天锁住，就验不到"同值不重开"了
+    bd_tasks.save_progress(db, tid, 55, "队长改成 55", by="ogawa", actor_user=og)
     db.commit()
     row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
            .order_by(BdTaskProgress.progress_date.desc()).first())
-    assert row.review_status == "confirmed"
-    # 员工同值再点一次
-    bd_tasks.save_progress(db, tid, 60, "", by="tangjing", actor_user=tj)
+    assert row.review_status == "adjusted"
+    # 员工同值（55）再点一次 → 不该把队长的调整打回待确认
+    bd_tasks.save_progress(db, tid, 55, "", by="tangjing", actor_user=tj)
     db.commit()
     db.refresh(row)
-    assert row.review_status == "confirmed", "同值重复提交不该打回待确认"
-    assert row.reported_pct == 60
+    assert row.review_status == "adjusted", "同值重复提交不该打回待确认"
+    assert row.reported_pct == 60, "员工原值仍是第一次的 60"
     db.close()
 
 
@@ -3432,21 +3459,25 @@ def test_task_full_lifecycle_e2e(client, seeded):
     assert (row.pct, row.reported_pct, row.review_status) == (60, 60, "pending")
     assert db.get(BdTask, tid).start_date is not None     # 首次提交=开始日
     db.close()
-    # ⑤ 队长确认（认可原值）
+    # ⑤ 队长**调整**（改成 55）——不锁当天（只有"确认"才锁）
     _login(client, "ogawa")
     r = _post(client, "/my/tasks/confirm", {"task_id": str(tid), "note": ""},
               from_path="/my/tasks?tab=pending")
-    assert r.status_code == 303
+    assert r.status_code == 303, "确认失败 → %s %s" % (
+        r.status_code, r.headers.get("location"))
     db = appdb.SessionLocal()
-    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
-           .order_by(BdTaskProgress.progress_date.desc()).first())
-    assert row.review_status == "confirmed" and row.pct == 60
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 55, "队长改成 55", by="ogawa", actor_user=og)
+    db.commit()
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row.review_status == "adjusted" and row.pct == 55
     db.close()
-    # ⑥ 员工报 100% → 队长驳回成 30%（保留原值 100）
+    # ⑥ 员工报 100%（调整未锁定当天 → 允许）→ 队长驳回成 30%（保留原值 100）
     _login(client, "tangjing")
-    _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100",
-                                        "note": "干完了"},
-          from_path="/my/tasks?tab=mine")
+    r6 = _post(client, "/my/tasks/progress",
+               {"task_id": str(tid), "pct": "100", "note": "干完了"},
+               from_path="/my/tasks?tab=mine")
+    assert r6.status_code == 303
     db = appdb.SessionLocal()
     assert db.get(BdTask, tid).state == "done"
     db.close()
@@ -3457,16 +3488,15 @@ def test_task_full_lifecycle_e2e(client, seeded):
     assert r.status_code == 303
     db = appdb.SessionLocal()
     t = db.get(BdTask, tid)
-    row = (db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid)
-           .order_by(BdTaskProgress.progress_date.desc()).first())
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
     assert t.state == "doing" and t.done_date is None      # 回退清完成日
-    assert row.review_status == "rejected"
+    assert row is not None and row.review_status == "rejected"
     assert row.reported_pct == 100, "员工原值要留着（界面显示 队员报 100% → 30%）"
     assert row.reported_by == "tangjing"
     assert row.review_note == "照片没拍全"
     assert row.note == "干完了", "员工备注不能被驳回理由覆盖"
     db.close()
-    # ⑦ 再报 100% → 确认 → 完成
+    # ⑦ 再报 100% → 队长确认 → 完成；**确认后当天锁住**（新规则）
     _login(client, "tangjing")
     _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100"},
           from_path="/my/tasks?tab=mine")
@@ -3476,6 +3506,16 @@ def test_task_full_lifecycle_e2e(client, seeded):
     db = appdb.SessionLocal()
     t = db.get(BdTask, tid)
     assert t.state == "done" and t.done_date is not None
+    db.close()
+    # 确认后队员再提交 → 被锁（服务层强校验，不是只藏按钮）
+    _login(client, "tangjing")
+    r_lock = _post(client, "/my/tasks/progress",
+                   {"task_id": str(tid), "pct": "50"},
+                   from_path="/my/tasks?tab=mine")
+    assert r_lock.status_code == 303 and "err=" in r_lock.headers["location"], \
+        "队长确认后队员不能改当天这条"
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).pct == 100, "锁定后数值不变"
     db.close()
     # ⑧ 汇总：管理端卡片/tab/按队汇总一致，且能筛到这条
     _login(client, "admin")
@@ -3687,6 +3727,18 @@ def test_reassign_and_return_pool(client, seeded):
 
 def test_admin_adjust_keeps_context(client, seeded):
     """管理端修正进展后**留在原视图**（审计：原来固定跳回车站池）。"""
+    # 新规则：先让队长确认，管理员才能改
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, seeded["task"], 30, "员工报", by="tangjing",
+                           actor_user=tj)
+    db.commit()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, seeded["task"], 30, "", by="ogawa", actor_user=og,
+                           confirm=True)
+    db.commit()
+    db.close()
     _login(client, "admin")
     r = _post(client, "/tasks/%d/progress" % seeded["task"],
               {"pct": "50", "note": "管理员改", "back": "/tasks?tab=assigned&line=3"},
@@ -3896,3 +3948,107 @@ def test_stale_filter_total_matches_rows_and_card(client, seeded):
     assert d["total"] == n_card, "列表口径(%d) 要等于统计卡口径(%d)" % (d["total"], n_card)
     assert all(r["stale"] for r in d["rows"]), "列表里每行都应是真停滞"
     assert all(r["assignees"] for r in d["rows"]), "没分担当的不算停滞"
+
+
+def test_staff_cannot_edit_after_leader_confirm(seeded):
+    """A3 新规则：**队长确认后，队员当天不能再改**（服务层强校验）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "做了一半", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row.review_status == "confirmed"
+    assert not bd_tasks.can_report(db, tj, db.get(BdTask, tid)), "确认后队员不可上报"
+    assert bd_tasks.can_report(db, og, db.get(BdTask, tid)), "队长不受限"
+    try:
+        bd_tasks.save_progress(db, tid, 50, "", by="tangjing", actor_user=tj)
+        raised = None
+    except bd_tasks.TaskError as e:
+        raised = str(e)
+    db.rollback()
+    assert raised and "已确认" in raised, "服务层要挡（拿到 %r）" % raised
+    db.close()
+
+
+def test_admin_cannot_adjust_before_leader_confirm(seeded):
+    """A3 新规则：**管理员只能改队长确认过的**（服务层强校验）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    ad = db.query(User).filter(User.username == "admin").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "员工报", by="tangjing", actor_user=tj)
+    db.commit()
+    assert not bd_tasks.can_adjust(db, ad, db.get(BdTask, tid)), "未确认 → 管理员不能改"
+    try:
+        bd_tasks.save_progress(db, tid, 80, "抢改", by="admin", actor_user=ad)
+        raised = None
+    except bd_tasks.TaskError as e:
+        raised = str(e)
+    db.rollback()
+    assert raised and "队长确认" in raised, "服务层要挡（拿到 %r）" % raised
+    # 队长确认后 → 管理员可以改
+    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    assert bd_tasks.can_adjust(db, ad, db.get(BdTask, tid))
+    bd_tasks.save_progress(db, tid, 80, "管理员修正", by="admin", actor_user=ad)
+    db.commit()
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row.pct == 80 and row.reported_pct == 60 and row.reported_by == "tangjing"
+    db.close()
+
+
+def test_staff_sees_lock_hint_after_leader_confirm(client, seeded):
+    """A3 界面：队长确认后，队员端要**看见**"不能再改"（不是默默没按钮）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "做了一半", by="tangjing", actor_user=tj)
+    # 确认前：有进度控件
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h1 = client.get("/my/tasks?tab=mine").text
+    assert 'data-testid="progress-%d"' % tid in h1, "确认前应有进度控件"
+    assert "队长已确认" not in h1
+    # 队长确认后：控件没了 + 明确提示
+    db = appdb.SessionLocal()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    db.close()
+    h2 = client.get("/my/tasks?tab=mine").text
+    assert 'data-testid="progress-%d"' % tid not in h2, "确认后不该再有进度控件"
+    assert "队长已确认" in h2 and "如需修改请联系队长或管理员" in h2
+    assert 'data-testid="readonly-%d"' % tid in h2
+
+
+def test_admin_progress_form_gated_by_leader_confirm(client, seeded):
+    """A3 界面：管理员在**队长确认前**看不到"修正进展"表单，只看到「等队长确认」。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    bd_tasks.save_progress(db, tid, 60, "员工报", by="tangjing", actor_user=tj)
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    h1 = client.get("/tasks?tab=assigned&kw=駒場東大前").text
+    _i = h1.find("駒場東大前")
+    assert 'data-testid="need-confirm-%d"' % tid in h1, "未确认时应显示「等队长确认」"
+    assert 'action="/tasks/%d/progress"' % tid not in h1, "未确认时不该有修正表单"
+    db = appdb.SessionLocal()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    db.close()
+    h2 = client.get("/tasks?tab=assigned&kw=駒場東大前").text
+    assert 'action="/tasks/%d/progress"' % tid in h2, "确认后应能修正"
+    assert 'data-testid="need-confirm-%d"' % tid not in h2

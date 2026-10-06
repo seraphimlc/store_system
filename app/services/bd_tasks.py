@@ -844,9 +844,13 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
     old_codes = [a.person_code for a in old]
     for a in old:
         db.delete(a)
+    # 当天派工日期（用户 2026-10-06："队长每天给队员派当天的任务"；
+    # 昨天没做完的**自动延续**，不新增行 —— 靠查询口径）
+    from app.services.date_plan import jst_today as _jst
+    _d = on_date or _jst()
     for c in codes:
         db.add(BdTaskAssign(task_id=task_id, person_code=c,
-                            assigned_by=(by or "")))
+                            assigned_by=(by or ""), dispatch_date=_d))
     db.flush()
     refresh_state(db, t)
     db.flush()
@@ -895,8 +899,18 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
                         and not can_adjust(db, actor_user, t))
     leader_review = bool(actor_user is not None
                          and can_adjust(db, actor_user, t))
+    # ---- 两条新规则（用户 2026-10-06）：写入时强校验，别只靠界面藏按钮 ----
+    from app.services import bd_perm as _perm
+    _is_lead = _is_team_leader(db, actor_user, t.team_id) if actor_user else False
+    if actor_user is not None and staff_report and not _is_lead \
+            and is_locked_for_staff(row):
+        raise TaskError("这条今天的进展队长已确认，不能再改（如需修改请联系队长或管理员）")
+    if actor_user is not None and not staff_report and not _is_lead \
+            and is_admin(actor_user) and not admin_may_adjust(row):
+        raise TaskError("这条还没有队长确认，管理员暂不能修改")
     if confirm and row is not None and row.reported_pct is not None:
         p = int(row.reported_pct)             # 「确认」= 认可员工上报的原值
+    _prev_pct = None                  # 旧值快照（判"同值"用；row 为空时保持 None）
     if row is None:
         row = BdTaskProgress(task_id=task_id, progress_date=d, pct=p,
                              note=(note or "").strip(),
@@ -904,6 +918,7 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         db.add(row)
         db.flush()
     else:
+        _prev_pct = row.pct               # ⚠️ 先快照旧值：下面 row.pct 会被覆盖
         row.pct = p
         if (note or "").strip():
             row.note = note.strip()      # 只有真填了才覆盖（别把已有备注清掉）
@@ -919,8 +934,16 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
         # 员工上报 → 记录原值，等队长确认。
         # ⚠️ **同值重复提交不重开审核**：队长确认/调整（或驳回）之后，滑块的预置值就是当前值，
         #    员工手滑再点一次会把队长的处理打回 pending、备注也被清空（2026-10-06 审计）
-        _same = (row.reported_pct is not None and int(row.reported_pct) == p)
-        if not (_same and row.review_status in ("confirmed", "adjusted", "rejected")):
+        # "同值" = 与**员工原值**相同，或与**当前生效值**相同
+        # （队长调整后滑块预置的是当前值，员工手滑再点一次不能把调整打回 pending）
+        # 什么算"同值不用重开审核"（避免手滑把队长的结论打回）：
+        #   队长**已经定了值**（confirmed/adjusted）且员工再报的就是这个值。
+        # ⚠️ 不拿 `reported_pct` 比：驳回后员工重报**原值**时会永远停在 rejected
+        #   → 队长再也确认不了（2026-10-06 端到端实测踩到）。
+        # ⚠️ 必须用**旧值**快照：`row.pct` 上面已被赋成 p，拿它比恒为真。
+        _same = bool(row.review_status in ("confirmed", "adjusted")
+                     and _prev_pct is not None and int(_prev_pct) == p)
+        if not _same:
             row.reported_pct = p
             row.reported_by = (by or "")
             row.review_status = "pending"
@@ -1027,7 +1050,32 @@ def is_assignee(db: Session, user, task: BdTask) -> bool:
         BdTaskAssign.person_code == code).first() is not None
 
 
-def can_report(db: Session, user, task: BdTask) -> bool:
+def day_progress_map(db: Session, task_ids: Sequence[int],
+                     on_date: Optional[date] = None) -> Dict[int, "BdTaskProgress"]:
+    """**那一天**的进展行（task_id → row）。用于"确认后锁定"与管理员前置校验。"""
+    ids = [i for i in (task_ids or [])]
+    if not ids:
+        return {}
+    d = on_date or _today()
+    rows = (db.query(BdTaskProgress)
+            .filter(BdTaskProgress.task_id.in_(ids),
+                    BdTaskProgress.progress_date == d).all())
+    return {r.task_id: r for r in rows}
+
+
+def is_locked_for_staff(row) -> bool:
+    """队员能不能改这一天：**队长已确认** → 锁（用户 2026-10-06 口径）。"""
+    return bool(row is not None and row.review_status == "confirmed")
+
+
+def admin_may_adjust(row) -> bool:
+    """管理员能不能改这一天：**该天已被队长处理过**（确认/调整/驳回）才能改。"""
+    return bool(row is not None
+                and row.review_status in ("confirmed", "adjusted", "rejected"))
+
+
+def can_report(db: Session, user, task: BdTask,
+               on_date: Optional[date] = None) -> bool:
     """**上报进展**：管理员 / 该任务的队长 / **本人是担当**。
 
     ⚠️ 用户 2026-10-03 口径变更：「员工自己先上报，队长做调整」——
@@ -1040,7 +1088,13 @@ def can_report(db: Session, user, task: BdTask) -> bool:
         return True
     if not bd_perm.can(db, user, "task.report"):
         return False
-    return _is_team_leader(db, user, task.team_id) or is_assignee(db, user, task)
+    mine = is_assignee(db, user, task)
+    if mine:
+        # ⚠️ 队长的**确认**只锁那一天（进度+备注）；第二天任务没完可以继续报
+        row = day_progress_map(db, [task.id], on_date).get(task.id)
+        if is_locked_for_staff(row):
+            return False
+    return _is_team_leader(db, user, task.team_id) or mine
 
 
 def can_assign(db: Session, user, task: BdTask) -> bool:
@@ -1206,9 +1260,13 @@ def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
                  "reject": False} for tid in ids}
     if user is None or not ids:
         return out
+    # 当天的进展行（"管理员只能改队长处理过的"要按天判）——必须在管理员提前返回**之前**算好
+    day = day_progress_map(db, ids)
     if is_admin(user):
         for tid in ids:
-            out[tid] = {"report": True, "assign": True, "adjust": True,
+            out[tid] = {"report": True, "assign": True,
+                        # ⚠️ 管理员也要遵守"队长确认后才能改"（2026-10-06 口径）
+                        "adjust": admin_may_adjust(day.get(tid)),
                         "reject": True}
         return out
     cap_report = bd_perm.can(db, user, "task.report")
@@ -1225,12 +1283,14 @@ def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
                   else {t.id for t in bd_teams.leader_teams(db, code)})
     by_row = {r["task"].id: r for r in (rows or [])}
     latest = {} if by_row else latest_progress(db, ids)
+    # （day 已在上面算好）
     for t in tasks:
         is_lead = (t.team_id in lead_teams)
         d = out[t.id]
-        d["report"] = bool(cap_report and (is_lead or t.id in mine))
+        d["locked"] = bool(t.id in mine and is_locked_for_staff(day.get(t.id)))
+        d["report"] = bool(cap_report and (is_lead or (t.id in mine and not d["locked"])))
         d["assign"] = bool(cap_assign and is_lead)
-        d["adjust"] = bool(cap_adjust and is_lead)
+        d["adjust"] = bool(is_lead or (cap_adjust and admin_may_adjust(day.get(t.id))))
         if by_row:                      # 用页面已经装好的字段（last_reported_pct/review_status）
             r0 = by_row.get(t.id) or {}
             d["reject"] = bool(t.pct == 100 and is_lead
@@ -1244,16 +1304,24 @@ def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
     return out
 
 
-def can_adjust(db: Session, user, task: BdTask) -> bool:
-    """调整（修正）进展：管理员 / 该任务的队长。"""
+def can_adjust(db: Session, user, task: BdTask,
+               on_date: Optional[date] = None) -> bool:
+    """调整（修正）进展：管理员 / 该任务的队长。
+
+    ⚠️ 用户 2026-10-06 口径：**管理员只能改"队长已确认过"的**（未处理的不能抢先改）；
+    队长对自己队的任务不受此限。
+    """
     from app.services import bd_perm
     if user is None:
         return False
-    if is_admin(user):
+    if _is_team_leader(db, user, task.team_id):
         return True
+    if is_admin(user):
+        row = day_progress_map(db, [task.id], on_date).get(task.id)
+        return admin_may_adjust(row)
     if not bd_perm.can(db, user, "task.adjust"):
         return False
-    return _is_team_leader(db, user, task.team_id)
+    return False
 
 
 # ---------------- 视图数据 ----------------
@@ -1379,17 +1447,33 @@ def team_tasks(db: Session, team_ids: Sequence[int], tab: str = "",
     return _rows(db, tasks)
 
 
-def member_tasks(db: Session, person_code: Optional[str]) -> List[dict]:
-    """队员视角（只读）：分给我的任务。"""
+def member_tasks(db: Session, person_code: Optional[str],
+                 today: Optional[date] = None) -> List[dict]:
+    """队员视角：**今天要做的活** = 今天派给我的 ∪ 之前派给我但**还没完成**的。
+
+    用户 2026-10-06 口径："队长每天给队员派当天的任务；昨天没做完的**自动延续**"
+    → 不新增派工行，靠这个查询口径实现；每行带 `dispatch_date` / `carried` 供界面区分。
+    """
     if not person_code:
         return []
-    tids = [tid for (tid,) in db.query(BdTaskAssign.task_id)
-            .filter(BdTaskAssign.person_code == person_code).all()]
-    if not tids:
+    d = today or _today()
+    rows = (db.query(BdTaskAssign.task_id, BdTaskAssign.dispatch_date)
+            .filter(BdTaskAssign.person_code == person_code).all())
+    if not rows:
         return []
-    tasks = (db.query(BdTask).filter(BdTask.id.in_(tids))
+    disp = {tid: dd for tid, dd in rows}
+    tasks = (db.query(BdTask).filter(BdTask.id.in_(list(disp)))
              .order_by(BdTask.state.asc(), BdTask.id.asc()).all())
-    return _rows(db, tasks)
+    # 今天派的 ∪ 未完成的（历史 dispatch_date 为 NULL 的老行：未完成即延续）
+    keep = [t for t in tasks
+            if t.state != STATE_DONE or disp.get(t.id) == d]
+    out = _rows(db, keep)
+    for r in out:
+        dd = disp.get(r["task"].id)
+        r["dispatch_date"] = dd
+        r["carried"] = bool(dd and dd < d and r["task"].state != STATE_DONE)
+        r["dispatched_today"] = (dd == d)
+    return out
 
 
 def _has_assignee(db: Session):

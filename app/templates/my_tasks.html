@@ -306,7 +306,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   {% else %}
   <p class="hint" style="margin:.45rem 0 0" data-testid="readonly-{{ r.task.id }}">
-    {% if r.state == 'done' %}{{ t('已完成，无需再报') }}
+    {% if locked_map.get(r.task.id) %}
+      <b>{{ t('队长已确认，今天这条不能再改') }}</b>
+      · {{ t('如需修改请联系队长或管理员') }}
+    {% elif r.state == 'done' %}{{ t('已完成，无需再报') }}
     {% else %}{{ t('这条不归你上报') }}{% endif %}
   </p>
   {% endif %}

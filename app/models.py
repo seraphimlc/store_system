@@ -1165,6 +1165,9 @@ class BdTaskAssign(Base):
     person_code = Column(String(32), ForeignKey("persons.code"), nullable=False)
     assigned_by = Column(String(64), nullable=False, default="", server_default="")
     assigned_at = Column(DateTime, nullable=False, default=_now)
+    #: **当天派工日期**（JST）。队长"每天派工"用：今天派的 ∪ 未完成的（自动延续）就是队员当天要做的。
+    #: NULL = 早于本字段的历史行（按"未完成即延续"处理）
+    dispatch_date = Column(Date, nullable=True, index=True)
 
 
 class BdTaskProgress(Base):
