@@ -30,7 +30,7 @@ mcp_service/write_ops.py	MCP 服务	写操作能力层：上传 / 出表 / 重�
 mcp_service/write_tools.py	MCP 服务	P1 写能力层：finalize_file / rebuild_preview / rebuild_month / set_per_point。	9609
 app/services/staff_accounts.py	主档/员工	手工新建员工：编号即身份键（规格 D19/D20）。	6922
 app/services/store_master.py	主档/员工	店铺主档服务：从 raw 同步实体、构建候选对、合并/拆分与审计。	22707
-.gitignore	仓库配置		870
+.gitignore	仓库配置		883
 alembic.ini	仓库配置		3722
 requirements-mcp.txt	仓库配置		560
 requirements-web.txt	仓库配置		241
@@ -59,7 +59,7 @@ app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→�
 app/templates/bd_team_detail.html	作业域·模板	团队详情：圈选队员（一人一队）	6207
 app/templates/bd_teams.html	作业域·模板	团队列表页	3819
 app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	64764
-AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	7297
+AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	7503
 README.md	入口文档		2768
 conftest.py	其它		75
 store_settle/__init__.py	其它		22
@@ -178,18 +178,18 @@ docs/specs-mcp-tools-scenario.md	文档	MCP 工具场景化重构设计稿（49 
 docs/specs-messages.md	文档	站内消息 + 任务进展「确认 / 调整」（2026-10-03 交付）	3238
 docs/specs-station-tasks.md	文档	规格 · 车站任务（第二期）	24647
 docs/specs-team-management.md	文档	规格 · 团队管理（第一期）	13867
-docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7756
+docs/交接-当前状态.md	文档	交接 · 当前状态（截至 2026-10-06 晚）	7883
 docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产品设计（系统逻辑全览）	9614
 docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8877
 docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7116
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
-docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32170
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31665
+docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32254
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31750
 docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务）	10101
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141
-docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	75608
+docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	77012
 docs/记录-员工填报.md	文档	记录 · 员工每日填报 + 对比 + AI 报告	6963
 docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	8920
 docs/试跑报告-任务域.md	文档	试跑报告 · 任务域（真库 · 2026-10-06）	3216
@@ -320,6 +320,7 @@ scripts/bd_line_seq_manual.json	脚本		4338
 scripts/bd_migrate_rail_local.py	脚本	把「一都三県线路+车站」的表结构变更应用到**本地库**（本地不跑 alembic）。	5696
 scripts/bd_osm_route_ids.json	脚本		5012
 scripts/bd_osm_routes.json	脚本		748438
+scripts/bd_rebuild_tasks.py	脚本	任务重建：**删掉现有全部任务**，按 `万总/team_task/` 最新 6 份分配重建。	12395
 scripts/bd_reset_ops.py	脚本	作业域**重置**：清掉旧任务层 / 清掉指定团队（2026-10-05 用户要求）。	6039
 scripts/bd_seed_team_task.py	脚本	种子导入：从 `万总/team_task/` 的 6 份 Excel 建团队 + 队长 + 车站/任务。	6766
 scripts/bd_seq_from_geometry.py	脚本	几何法兜底求沿線顺序：把 N02 的**区间几何**串成一条线，再把车站投影上去。	9266

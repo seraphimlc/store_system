@@ -62,3 +62,4 @@ mcp_service/logs/
 /pj*.txt
 /curl_*.txt
 /*.cookies
+data/backup/
