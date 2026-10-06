@@ -1087,7 +1087,9 @@ def visit_task_report(ctx: Context, task_id: int, pct: int,
                       note: str = "") -> dict[str, Any]:
     """**上报单条任务进展**（0–100）。队员报自己的、队长调整本队的都走它。
 
-    队长确认过的**当天**那条会被锁住（要改请让队长/管理员处理）。
+    - 队长**随时**可以调本队任何任务的进度（不受"确认后锁定"限制）
+    - **未分配的任务**：队长直接 `pct=100` 就是"标识完成"（不用先派人）
+    - 队员那边：队长确认过的**当天**那条会被锁住
     """
     params = {"task_id": task_id, "pct": pct, "note": note}
     return _task_write(ctx, "visit_task_report", params,
@@ -1242,7 +1244,8 @@ def register(mcp: MCPServer) -> None:
 
     @mcp.tool(name="visit_task_report", title=_WRITE_TITLES["visit_task_report"],
               annotations=_annotations("visit_task_report"),
-              description="上报单条任务进展（0–100）；队长确认过的当天那条会被锁住")
+              description="上报单条任务进展（0–100）；队长随时可调本队进度，"
+                          "未分配的任务 pct=100 即标识完成；队员当天被确认后锁住")
     def _t_task_report(ctx: Context, task_id: int, pct: int,
                        note: str = "") -> dict[str, Any]:
         return visit_task_report(ctx, task_id=task_id, pct=pct, note=note)

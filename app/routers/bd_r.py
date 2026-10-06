@@ -54,6 +54,22 @@ def _admin_guard(user):
     return None
 
 
+def _my_tab_for(db, task) -> str:
+    """员工端「我的任务」页该回哪个 tab —— **按队长的新口径**（不是全局 state）。
+
+    2026-10-06：未分配 tab 的进度控件放开后，调完一个"没分人"的任务，
+    旧写法 `tab=%s % state` 会跳到「进行中」，而它按口径还在「待派」→ 队长失去位置。
+    """
+    if task is None:
+        return "mine"
+    if getattr(task, "state", "") == "done":
+        return "done"
+    from app.services import bd_tasks
+    n = (db.query(bd_tasks.BdTaskAssign)
+         .filter(bd_tasks.BdTaskAssign.task_id == task.id).count() or 0)
+    return "doing" if n else "unassigned"
+
+
 def _staff_guard(user):
     """员工端任务页守卫：队员(staff)与队长(leader)都能进。"""
     if user is None:
@@ -732,9 +748,12 @@ def my_tasks_page(request: Request,
         all_rows = bd_tasks.team_tasks(db, team_ids, tab="", kw=kw,
                                        line_id=line_id)
         # 队长 tab 口径 = **按有没有分人**（与 team_tasks 一致，见其注释）
+        # ⚠️ 三个计数都要**先排除已完成**：否则"已完成但没分人"会同时算进未分配和已完成
         counts = {
-            "unassigned": sum(1 for r in all_rows if not r["assignees"]),
-            "doing": sum(1 for r in all_rows if r["assignees"]),
+            "unassigned": sum(1 for r in all_rows
+                              if not r["assignees"] and r["state"] != "done"),
+            "doing": sum(1 for r in all_rows
+                         if r["assignees"] and r["state"] != "done"),
             "done": sum(1 for r in all_rows if r["state"] == "done"),
         }
         counts[TAB_MINE] = len(my_rows)
@@ -750,9 +769,11 @@ def my_tasks_page(request: Request,
         elif tab == TAB_PENDING:
             rows = [r for r in all_rows if r.get("pending_review")]
         elif tab == "unassigned":        # 队内**待派** = 未完成且没分人（含"有进展没人"）
-            rows = [r for r in all_rows if not r["assignees"]]
+            rows = [r for r in all_rows
+                    if not r["assignees"] and r["state"] != "done"]
         elif tab == "doing":             # 进行中 = 未完成且已分人
-            rows = [r for r in all_rows if r["assignees"]]
+            rows = [r for r in all_rows
+                    if r["assignees"] and r["state"] != "done"]
         elif tab == "done":
             rows = [r for r in all_rows if r["state"] == "done"]
         else:
@@ -1024,8 +1045,13 @@ def my_tasks_progress(request: Request, task_id: int = Form(0),
         r = bd_tasks.save_progress(db, task_id, pct, note, by=user.username,
                                    actor_user=user)
         db.commit()
+        # ⚠️ 回跳 tab 按**有没有分人**算（不是 state）：队员端没有那两个 tab → 回「我的」
+        if user.role == "leader":
+            _tab = _my_tab_for(db, task)
+        else:
+            _tab = "done" if task.state == "done" else "mine"
         return RedirectResponse(
-            "/my/tasks?tab=%s&msg=%s" % (r["state"], _q(_m("已提交 %d%%", r["pct"]))),
+            "/my/tasks?tab=%s&msg=%s" % (_tab, _q(_m("已提交 %d%%", r["pct"]))),
             status_code=303)
     except bd_tasks.TaskError as e:
         db.rollback()

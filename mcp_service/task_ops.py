@@ -107,9 +107,12 @@ def team_tasks(db, team_ids: list, *, tab: str = "", kw: str = "",
     pending = [r for r in all_rows if r.get("pending_review")]
     return {
         # 队长 tab 口径 = 按有没有分人（与 Web 端一致）
+        # ⚠️ 先排除已完成：否则"已完成但没分人"会同时算进未分配和已完成
         "counts": {
-            "unassigned": sum(1 for r in all_rows if not r["assignees"]),
-            "doing": sum(1 for r in all_rows if r["assignees"]),
+            "unassigned": sum(1 for r in all_rows
+                              if not r["assignees"] and r["state"] != "done"),
+            "doing": sum(1 for r in all_rows
+                         if r["assignees"] and r["state"] != "done"),
             "done": sum(1 for r in all_rows if r["state"] == "done"),
             "pending": len(pending),
         },

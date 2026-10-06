@@ -97,10 +97,16 @@ def test_team_tasks_confirm_and_reject(db):
     tid = _tid(db)
     bd_tasks.assign_members(db, tid, ["P2"], by="ogawa", actor_user=leader)
     db.commit()
-    task_ops.report_one(db, staff, task_id=tid, pct=100, note="干完了")
+    # 先报 40%（进行中 + 待确认），再报 100%（已完成 + 待确认）
+    task_ops.report_one(db, staff, task_id=tid, pct=40, note="做一半")
     t = task_ops.team_tasks(db, [1])
     assert t["counts"]["pending"] == 1 and t["counts"]["doing"] == 1
     assert t["pending"][0]["task_id"] == tid
+    # ⚠️ 计数口径：100% 的任务算**已完成**，不再算进行中（2026-10-06 统一）
+    task_ops.report_one(db, staff, task_id=tid, pct=100, note="干完了")
+    t1b = task_ops.team_tasks(db, [1])
+    assert t1b["counts"]["doing"] == 0 and t1b["counts"]["done"] == 1, t1b["counts"]
+    assert t1b["counts"]["pending"] == 1
     # 一键全确认
     assert task_ops.confirm_day(db, leader, team_ids=[1])["confirmed"] == 1
     t2 = task_ops.team_tasks(db, [1])

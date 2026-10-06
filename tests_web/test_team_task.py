@@ -401,12 +401,13 @@ def test_leader_task_page_tabs_and_assign(client, seeded):
     p_mine = client.get("/my/tasks?tab=mine")
     assert p_mine.text.count('data-testid="my-task-row"') == 0, "「我的」仍是空的"
     p2 = client.get("/my/tasks?tab=unassigned")
-    # ⚠️ 2026-10-06 用户："未分配任务，可以多选，然后点一下分配，可以分配到人。
-    #    这里不需要进度调整控件" → 未分配 tab 是**批量分派**（勾任务 + 选队员 + 分配）
+    # 未分配 tab 的主体是**批量分派**（勾任务 + 选队员 + 分配）
     assert 'data-testid="bulk-assign-form"' in p2.text
     assert 'data-testid="bulk-check-%d"' % seeded["task"] in p2.text
-    assert 'data-testid="slider-%d"' % seeded["task"] not in p2.text, \
-        "未分配 tab 不该有进度控件"
+    # ⚠️ 口径变更（用户 2026-10-06 追加需求）：未分配的任务也能**直接调进度/标完成**
+    #    （原来按"这里不需要进度调整控件"藏起来；新需求要求放开）
+    assert 'data-testid="slider-%d"' % seeded["task"] in p2.text
+    assert 'data-testid="mark-done-%d"' % seeded["task"] in p2.text
     r = _post(client, "/my/tasks/assign",
               {"task_id": str(seeded["task"]), "person": "P2"},
               from_path="/my/tasks?tab=unassigned")
@@ -3186,7 +3187,10 @@ def test_bulk_assign_on_unassigned_tab(client, seeded):
     assert 'data-testid="bulk-assign-form"' in h
     for tid in ids:
         assert 'data-testid="bulk-check-%d"' % tid in h, "未分配 tab 每行要有勾选框"
-        assert 'data-testid="slider-%d"' % tid not in h, "未分配 tab 不要进度控件"
+        # ⚠️ 口径变更（用户 2026-10-06 加需求）："队长分配完任务后可以随时调整任务进度；
+        #    对于未分配的任务，可以直接标识成完成" → 未分配 tab **要有**进度控件 + 标记完成
+        assert 'data-testid="slider-%d"' % tid in h, "未分配 tab 也要能调进度"
+        assert 'data-testid="mark-done-%d"' % tid in h, "未分配 tab 要能直接标记完成"
     assert 'data-testid="bulk-person"' in h
     # 一次分派 3 个任务给 P2
     p = _post(client, "/my/tasks/assign-bulk",
@@ -4340,3 +4344,100 @@ def test_admin_bulk_return_pool_only_without_assignees(client, seeded):
     # 进展保留
     assert bd_tasks.day_progress_map(db, [t1]).get(t1).pct == 30
     db.close()
+
+
+def test_leader_can_adjust_progress_any_time(client, seeded):
+    """**新需求**（用户 2026-10-06）："队长分配完任务后，可以随时调整任务进度"。
+
+    包括：任务已分给别人（不是队长自己担当）、当天已被确认过 —— 队长都能改。
+    """
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 40, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 40, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row.review_status == "confirmed"
+    # ⚠️ 队员被锁，但队长不受限（can_report 的 mine 分支才判锁）
+    assert not bd_tasks.can_report(db, tj, db.get(BdTask, tid))
+    assert bd_tasks.can_report(db, og, db.get(BdTask, tid))
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "80",
+                                            "note": "队长调"},
+              from_path="/my/tasks?tab=doing")
+    assert r.status_code == 303 and "err=" not in r.headers["location"]
+    db = appdb.SessionLocal()
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row.pct == 80 and row.review_status == "adjusted"
+    assert row.reported_pct == 40, "队员原值仍保留"
+    db.close()
+
+
+def test_leader_marks_unassigned_done(client, seeded):
+    """**新需求**："对于未分配的任务，可以直接标识成完成"（不用先派人）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]                    # seeded 已派队、无担当
+    assert db.query(BdTaskAssign).filter(BdTaskAssign.task_id == tid).count() == 0
+    db.close()
+    _login(client, "ogawa")
+    h = client.get("/my/tasks?tab=unassigned").text
+    assert 'data-testid="mark-done-%d"' % tid in h, "未分配行要有「标记完成」"
+    assert 'data-testid="slider-%d"' % tid in h, "未分配行也要能调进度（新需求）"
+    r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100",
+                                            "note": "未派人直接完成"},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303 and "err=" not in r.headers["location"]
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, tid)
+    assert t.pct == 100 and t.state == "done", "直接标成完成"
+    assert t.done_date is not None, "完成日要有"
+    assert db.query(BdTaskAssign).filter(BdTaskAssign.task_id == tid).count() == 0, \
+        "不需要分人"
+    db.close()
+    # 口径：完成后**不再算未分配**，tab 数字要自洽
+    _login(client, "ogawa")
+    h2 = client.get("/my/tasks?tab=unassigned").text
+    assert 'data-testid="mark-done-%d"' % tid not in h2, "完成后不该再出现在待派"
+    h3 = client.get("/my/tasks?tab=done").text
+    assert 'data-testid="my-task-row"' in h3
+    db = appdb.SessionLocal()
+    rows = bd_tasks.team_tasks(db, [seeded["team"]], tab="unassigned")
+    assert tid not in [r["task"].id for r in rows], "SQL 口径也要排除已完成"
+    rows2 = bd_tasks.team_tasks(db, [seeded["team"]], tab="done")
+    assert tid in [r["task"].id for r in rows2]
+    db.close()
+
+
+def test_leader_redirect_stays_on_unassigned_tab(client, seeded):
+    """⚠️ 浏览器实测：调完"没分人"的任务后，旧写法按 `state` 跳到「进行中」，
+    而它按口径还在「待派」→ 队长失去位置。回跳 tab 要按**有没有分人**算。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]                    # 已派队、无担当
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "35"},
+              from_path="/my/tasks?tab=unassigned")
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "tab=unassigned" in loc, "没分人的任务 → 回「待派」(拿到 %s)" % loc
+    # 分了人之后 → 回「进行中」
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    r2 = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "50"},
+               from_path="/my/tasks?tab=doing")
+    assert "tab=doing" in r2.headers["location"], r2.headers["location"]
+    # 标成完成 → 回「已完成」
+    r3 = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "100"},
+               from_path="/my/tasks?tab=doing")
+    assert "tab=done" in r3.headers["location"], r3.headers["location"]
+    # 队员（无这两个 tab）→ 回「我的」/「已完成」
+    _login(client, "tangjing")
+    r4 = _post(client, "/my/tasks/progress", {"task_id": str(tid), "pct": "90"},
+               from_path="/my/tasks?tab=mine")
+    assert "tab=mine" in r4.headers["location"], r4.headers["location"]

@@ -250,8 +250,11 @@ document.addEventListener('DOMContentLoaded', function () {
 {% for r in rows %}
 {# 进度控件：**未分配 tab 不给**（没分人谈不了进展）、已完成不给（没得报）。
    用户 2026-10-06："未分配…这里不需要进度调整控件" #}
+{# 用户 2026-10-06："队长分配完任务后，可以随时调整任务进度。
+   对于未分配的任务，可以直接标识成完成。" → **未分配 tab 对队长也放开**（队员端没有这个 tab） #}
 {% set can_rep = can_report_map.get(r.task.id, false)
-                 and r.state != 'done' and tab != 'unassigned' %}
+                 and r.state != 'done'
+                 and (tab != 'unassigned' or is_leader) %}
 {% set can_asg = can_assign_map.get(r.task.id, false) and tab != 'unassigned' %}
 <div class="card task-row" style="margin-bottom:.6rem;padding:.7rem 1rem"
      data-testid="my-task-row" data-can-report="{{ '1' if can_rep else '0' }}"
@@ -370,6 +373,7 @@ document.addEventListener('DOMContentLoaded', function () {
         id="pctv-{{ r.task.id }}" x-text="v">{{ r.pct }}</span>%</b>
     <input type="text" name="note" placeholder="{{ t('备注（可空）') }}" style="width:11rem">
     <button class="btn" type="submit" data-testid="submit-{{ r.task.id }}">{{ t('提交今日进展') }}</button>
+
     {# 队长/管理员：一键**确认**队员的上报（认可原值，会发消息给队员） #}
     {% if can_asg and r.pending_review %}
     <button class="btn ghost" type="submit" formaction="/my/tasks/confirm"
@@ -385,6 +389,23 @@ document.addEventListener('DOMContentLoaded', function () {
     {% elif r.state == 'done' %}{{ t('已完成，无需再报') }}
     {% else %}{{ t('这条不归你上报') }}{% endif %}
   </p>
+  {% endif %}
+
+  {# **未分配的任务：队长可直接标识成完成**（用户 2026-10-06："对于未分配的任务，
+     可以直接标识成完成"）→ 独立表单（独立提交，不与进度表单抢 pct 值） #}
+  {% if is_leader and not r.assignees and r.state != 'done' and can_rep %}
+  <form method="post" action="/my/tasks/progress" style="margin-top:.4rem"
+        onsubmit="return confirm('{{ t('不派人，直接把这站标成已完成？') }}')"
+        data-testid="mark-done-form-{{ r.task.id }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="task_id" value="{{ r.task.id }}">
+    <input type="hidden" name="pct" value="100">
+    <input type="hidden" name="note" value="{{ t('未派人直接完成') }}">
+    <button class="btn ghost" type="submit"
+            data-testid="mark-done-{{ r.task.id }}">{{ t('标记完成') }}</button>
+    <span class="hint">{{ t('不派人，直接把这站标成已完成') }}</span>
+  </form>
   {% endif %}
 
   {# 驳回（用户 2026-10-06："队员报了100%，队长可以驳回…就是改成不到100%"）：
