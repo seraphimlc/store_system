@@ -57,6 +57,20 @@
 </form>
 {% endif %}
 
+{# 一键全确认（当天全部）—— 用户 2026-10-06 口径 #}
+{% if is_leader and tab == 'pending' %}
+  <form method="post" action="/my/tasks/confirm-day" style="margin:.4rem 0"
+        onsubmit="return confirm('{{ t('确认当天的全部待确认上报？') }}')"
+        data-testid="confirm-day-form">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <button class="btn" type="submit" data-testid="confirm-day">
+      {{ t('一键确认今天全部') }}（{{ n_pending }}{{ t('条') }}）</button>
+    <span class="hint">{{ t('认可每位队员上报的原值；已确认的会通知队员') }}</span>
+  </form>
+{% endif %}
+
+
 {# 队长批量分派：勾任务 → 选队员 → 一次分配（2026-10-06 用户："未分配任务，可以多选，
    然后点一下分配，可以分配到人。这里不需要进度调整控件"）
    ⚠️ 复选框用 `form="bulk-assign-form"` 关联到下面那个表单（不在同一个 DOM 父节点里也能提交） #}

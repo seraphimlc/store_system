@@ -1137,6 +1137,36 @@ def my_tasks_confirm_bulk(request: Request,
                             status_code=303)
 
 
+@router.post("/my/tasks/confirm-day")
+def my_tasks_confirm_day(request: Request, csrf_token: str = Form(""),
+                         user: Optional[User] = Depends(require_login),
+                         db: Session = Depends(get_db)):
+    """**队长一键确认当天全部**（用户 2026-10-06："队长确认和自动确认"→ 一键全确认）。"""
+    g = _staff_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_teams, bd_tasks
+    teams = bd_teams.leader_teams(db, user.person_code)
+    if not teams and user.role != "admin":
+        return RedirectResponse("/my/tasks?err=" + _q(_m("只有队长能确认")),
+                                status_code=303)
+    team_ids = None if user.role == "admin" else [t.id for t in teams]
+    try:
+        n = bd_tasks.confirm_day(db, user, team_ids=team_ids)
+        db.commit()
+    except Exception as e:                        # noqa: BLE001
+        db.rollback()
+        return RedirectResponse("/my/tasks?tab=pending&err=" + _q(_m(str(e))),
+                                status_code=303)
+    if n == 0:
+        return RedirectResponse("/my/tasks?tab=pending&msg="
+                                + _q(_m("没有待确认的上报")), status_code=303)
+    return RedirectResponse("/my/tasks?tab=pending&msg="
+                            + _q(_m("已一键确认 %d 条", n)), status_code=303)
+
+
 @router.post("/my/tasks/confirm")
 def my_tasks_confirm(request: Request, task_id: int = Form(0),
                      note: str = Form(""), csrf_token: str = Form(""),

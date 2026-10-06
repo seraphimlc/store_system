@@ -4198,3 +4198,61 @@ def test_self_report_skips_unchanged_tasks(client, seeded):
     assert (db.query(StaffDailyReport)
             .filter(StaffDailyReport.person_code == "P2").first()) is not None
     db.close()
+
+
+def test_leader_confirm_day_one_click(client, seeded):
+    """**A4 一键全确认**（用户 2026-10-06："队长确认和自动确认"→ 一键全确认）：
+    一个按钮把当天**全部**待确认确认掉，并逐条通知队员。"""
+    db = appdb.SessionLocal()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    # 三个任务：两个待确认（本队）+ 一个别的队（不能被误确认）
+    t1 = seeded["task"]
+    bd_tasks.assign_members(db, t1, ["P2"], by="admin")
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    bd_tasks.assign_members(db, t2, ["P2"], by="admin")
+    other = bd_teams.create_team(db, "别的队", "TW99", by="admin")
+    from app.models import Person
+    if db.get(Person, "P4") is None:
+        db.add(Person(code="P4", display_name="王五"))
+    db.add(BdTeamMember(team_id=other.id, person_code="P4", role="member",
+                        start_date=date(2026, 9, 1)))
+    db.flush()
+    st3 = bd_tasks.create_station(db, "代々木上原")
+    bd_tasks.create_tasks(db, [st3.id], by="admin", team_id=other.id)
+    db.commit()
+    t3 = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    bd_tasks.assign_members(db, t3, ["P4"], by="admin")
+    bd_tasks.save_progress(db, t1, 40, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, t2, 70, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, t3, 90, "", by="wangwu", actor_user=None)
+    db.commit()
+    db.close()
+    _login(client, "ogawa")
+    r = _post(client, "/my/tasks/confirm-day", {}, from_path="/my/tasks?tab=pending")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    assert "已一键确认 2 条" in _uq(r.headers["location"]), _uq(r.headers["location"])
+    db = appdb.SessionLocal()
+    byid = {x.task_id: x for x in db.query(BdTaskProgress)
+            .filter(BdTaskProgress.task_id.in_([t1, t2, t3])).all()}
+    assert byid[t1].review_status == "confirmed" and byid[t1].pct == 40
+    assert byid[t2].review_status == "confirmed" and byid[t2].pct == 70
+    assert byid[t3].review_status == "pending", "别的队的不能被本队队长确认"
+    # 队员收到 2 条确认消息
+    from app.models import BdMessage as _BM
+    msgs = (db.query(_BM)
+            .filter(_BM.title.like("%确认%")).all())
+    assert len([m for m in msgs if "駒場東大前" in m.title or "下北沢" in m.title]) == 2
+    db.close()
+    # 再点一次 → 没有待确认了
+    _login(client, "ogawa")
+    r2 = _post(client, "/my/tasks/confirm-day", {}, from_path="/my/tasks?tab=pending")
+    assert "没有待确认" in _uq(r2.headers["location"])
+    # 非队长不能一键确认
+    _login(client, "tangjing")
+    r3 = _post(client, "/my/tasks/confirm-day", {}, from_path="/my/tasks?tab=mine")
+    assert r3.status_code in (302, 303)

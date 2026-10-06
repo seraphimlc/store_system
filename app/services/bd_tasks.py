@@ -1304,6 +1304,43 @@ def can_reject_maps(db: Session, user, tasks: Sequence[BdTask],
     return out
 
 
+def pending_review_rows(db: Session, team_ids: Optional[Sequence[int]] = None,
+                        on_date: Optional[date] = None) -> List[Tuple[int, date]]:
+    """还挂着 `pending` 的进展行 → `[(task_id, progress_date)]`（队长的待确认队列口径）。"""
+    q = (db.query(BdTaskProgress.task_id, BdTaskProgress.progress_date)
+         .join(BdTask, BdTask.id == BdTaskProgress.task_id)
+         .filter(BdTaskProgress.review_status == "pending"))
+    if team_ids is not None:
+        ids = [int(i) for i in team_ids]
+        if not ids:
+            return []
+        q = q.filter(BdTask.team_id.in_(ids))
+    if on_date is not None:
+        q = q.filter(BdTaskProgress.progress_date == on_date)
+    return [(int(t), d) for (t, d) in q.all()]
+
+
+def confirm_day(db: Session, user, team_ids: Optional[Sequence[int]] = None,
+                on_date: Optional[date] = None) -> int:
+    """**一键确认（当天全部）** —— 用户 2026-10-06 口径："队长一键全确认"。
+
+    逐条走 `save_progress(confirm=True)`：审核字段、日志、给队员发消息全都一致，
+    不另写一套（避免两条路径口径漂移）。返回真正确认的条数。
+    """
+    rows = pending_review_rows(db, team_ids, on_date=on_date)
+    by = getattr(user, "username", "") or ""
+    n = 0
+    for tid, d in rows:
+        t = db.get(BdTask, tid)
+        if t is None or not can_adjust(db, user, t, on_date=d):
+            continue                     # 不是他的队 / 没权限 → 跳过，不报错
+        save_progress(db, tid, (t.pct or 0), "", by=by, actor_user=user,
+                      confirm=True, on_date=d)
+        n += 1
+    db.flush()
+    return n
+
+
 def can_adjust(db: Session, user, task: BdTask,
                on_date: Optional[date] = None) -> bool:
     """调整（修正）进展：管理员 / 该任务的队长。
