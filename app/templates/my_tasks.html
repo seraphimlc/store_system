@@ -204,6 +204,35 @@ document.addEventListener('DOMContentLoaded', function () {
 </p>
 {% endif %}
 
+{# ============ 员工每日自报：**一页一表单一次提交**（点数 + 当天任务进度）============
+   用户 2026-10-06："一是报点数，二是报任务完成的进度情况，一起提交自报"
+   → 点数输入框 + 每行进度控件都挂到这一个表单（用 `form=` 属性，不嵌套内层表单） #}
+{% if self_report %}
+<form method="post" action="/my/self-report" id="self-report-form"
+      data-testid="self-report-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <div class="card" style="margin-bottom:.8rem;padding:.7rem 1rem">
+    <b>{{ t('今日自报') }}</b>
+    <span class="hint">· {{ t('点数和任务进度一起提交') }}</span>
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
+      <label class="hint">{{ t('区域') }}
+        <input type="text" name="area" maxlength="64" style="width:9rem"
+               value="{{ self_report.report.area if self_report.report else '' }}"
+               data-testid="sr-area"></label>
+      <label class="hint">{{ t('1点店铺数') }}
+        <input type="text" name="p1_cnt" inputmode="numeric" style="width:4.5rem"
+               value="{{ self_report.report.p1_cnt if self_report.report else '' }}"
+               data-testid="sr-p1"></label>
+      <label class="hint">{{ t('2点店铺数') }}
+        <input type="text" name="p2_cnt" inputmode="numeric" style="width:4.5rem"
+               value="{{ self_report.report.p2_cnt if self_report.report else '' }}"
+               data-testid="sr-p2"></label>
+      <span class="hint">{{ t('今天已填') if self_report.report else t('今天还没填') }}</span>
+    </div>
+  </div>
+{% endif %}
+
 {% for r in rows %}
 {# 进度控件：**未分配 tab 不给**（没分人谈不了进展）、已完成不给（没得报）。
    用户 2026-10-06："未分配…这里不需要进度调整控件" #}
@@ -279,7 +308,22 @@ document.addEventListener('DOMContentLoaded', function () {
   </details>
   {% endif %}
 
-  {% if can_rep %}
+  {% if can_rep and self_report %}
+  {# 自报模式：控件属于**外层那一个表单**（form= 属性挂靠，不嵌套） #}
+  <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"
+       data-testid="progress-{{ r.task.id }}">
+    <input type="range" name="pct_{{ r.task.id }}" form="self-report-form"
+           min="0" max="100" step="5" value="{{ r.pct }}"
+           style="flex:1;min-width:150px;min-height:2.6rem"
+           data-testid="slider-{{ r.task.id }}"
+           oninput="var s=document.getElementById('pctv-{{ r.task.id }}');if(s)s.textContent=this.value">
+    <b style="min-width:3.2rem;text-align:right"><span
+        id="pctv-{{ r.task.id }}">{{ r.pct }}</span>%</b>
+    <input type="text" name="note_{{ r.task.id }}" form="self-report-form"
+           placeholder="{{ t('备注（可空）') }}" style="width:11rem"
+           data-testid="note-{{ r.task.id }}">
+  </div>
+  {% elif can_rep %}
   {# 进展上报 / 队长调整：滑动条 0–100% #}
   <form method="post" action="/my/tasks/progress" class="prog-form"
         style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"
@@ -343,4 +387,14 @@ document.addEventListener('DOMContentLoaded', function () {
   {% else %}{{ t('当前没有分给你的车站') }}{% endif %}
 </p></div>
 {% endfor %}
+
+{% if self_report %}
+  <div class="card" style="position:sticky;bottom:0;padding:.7rem 1rem">
+    <button class="btn" type="submit" data-testid="sr-submit" style="width:100%">
+      {{ t('提交今日自报（点数 + 进度）') }}</button>
+    <p class="hint" style="margin:.35rem 0 0">
+      {{ t('一次提交：上面的点数和所有任务进度一起保存；任一条失败则全部不保存。') }}</p>
+  </div>
+</form>
+{% endif %}
 {% endblock %}

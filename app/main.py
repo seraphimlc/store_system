@@ -62,6 +62,8 @@ def create_app() -> FastAPI:
                      # 车站任务：队员看"分给我的车站"，队长在**同一页**分派 + 提交每日进展
                      # （两处写端点 `/my/tasks/assign`、`/my/tasks/progress` 由路由内做角色校验）
                      "/my/tasks",
+                     # 员工每日自报（点数 + 任务进度**一次提交**）——用户 2026-10-06 口径
+                     "/my/self-report",
                      # 任务详情页（进展历史 + 变更日志）——**驳回原因/谁改的只有这里能看**。
                      # ⚠️ 白名单是**前缀匹配且不看方法**，所以这里只放行 `GET /tasks/<id>`；
                      # 同前缀下的写端点（/tasks/<id>/progress、/tasks/assign、/tasks/new）

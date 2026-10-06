@@ -697,7 +697,7 @@ def my_tasks_page(request: Request,
     g = _staff_guard(user)
     if g:
         return g
-    from app.services import bd_leave, bd_teams, bd_tasks
+    from app.services import bd_leave, bd_teams, bd_tasks, self_report
     TAB_MINE = "mine"
     TAB_PENDING = "pending"      # 待确认（队长专用 tab）
     is_leader = user.role == "leader"
@@ -782,6 +782,9 @@ def my_tasks_page(request: Request,
                       if is_leader else {}),
         "line_id": line_id, "line": line,
         "my_ids": my_ids, "n_mine": len(my_rows),
+        # 员工「一页一次提交」自报（点数 + 当天任务进度）：见 docs/任务域-全流程.md §8-7
+        "self_report": (self_report.view(db, user) if not is_leader
+                        and tab == TAB_MINE else None),
         "n_pending": counts.get(TAB_PENDING, 0),
         "avail": avail, "my_leave": my_leave,
         # 批量分派下拉的休假/请假标签（未分配 tab 用"今天"这一档，算一次就够）
@@ -924,6 +927,46 @@ def task_reject(request: Request, task_id: int = Form(0), pct: str = Form("0"),
     return RedirectResponse(
         "%s?msg=%s" % (back, _q(_m("已驳回：进度改为 %d%%", r["pct"]))),
         status_code=303)
+
+
+@router.post("/my/self-report")
+async def my_self_report(request: Request,
+                         user: Optional[User] = Depends(require_login),
+                         db: Session = Depends(get_db)):
+    """**员工每日自报（一页一次提交）**：点数 + 当天 N 个任务进度，同一事务。
+
+    用户 2026-10-06："一是报点数，二是报任务完成的进度情况，一起提交自报"。
+    ⚠️ 字段名是动态的（`pct_<task_id>` / `note_<task_id>`）→ 必须读原始表单，
+    所以这个端点是 `async def`（同步路由拿不到 `await request.form()`）。
+    """
+    g = _staff_guard(user)
+    if g:
+        return g
+    form = await request.form()
+    if not csrf_ok(request, form.get("csrf_token", "")):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import self_report
+    items = []
+    for key, val in form.items():
+        if not key.startswith("pct_"):
+            continue
+        try:
+            tid = int(key[4:])
+        except ValueError:
+            continue
+        items.append({"task_id": tid, "pct": val,
+                      "note": str(form.get("note_%d" % tid) or "")})
+    back = "/my/tasks?tab=mine"
+    try:
+        r = self_report.submit(db, user, area=str(form.get("area") or ""),
+                               p1_cnt=form.get("p1_cnt", ""),
+                               p2_cnt=form.get("p2_cnt", ""), items=items)
+        return RedirectResponse(
+            back + "&msg=" + _q(_m("已提交自报：1点 %d / 2点 %d，%d 个任务进度",
+                                   r["p1"], r["p2"], r["tasks"])), status_code=303)
+    except Exception as e:                       # noqa: BLE001
+        db.rollback()                            # 一起提交 → 失败就整体回滚
+        return RedirectResponse(back + "&err=" + _q(_m(str(e))), status_code=303)
 
 
 @router.post("/my/tasks/progress")

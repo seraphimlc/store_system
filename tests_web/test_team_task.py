@@ -15,6 +15,7 @@ import app.db as appdb
 from app.auth import hash_password
 from app.db import Base
 from app.models import (User, BdStation, BdTask, BdTaskAssign, BdTaskProgress,
+                        StaffDailyReport,
                         BdTeam, BdTeamMember, Person, User)
 from app.services import bd_teams, bd_tasks
 from tests.helpers import form_token
@@ -903,11 +904,15 @@ def test_settlement_code_never_reads_ops_domain():
                  "bd_store", "bd_area", "BdTask", "BdTaskAssign",
                  "BdTaskProgress", "BdStation", "BdTeam", "BdTeamMember",
                  "BdLog", "BdRoleCap", "bd_r")
+    #: **唯一允许跨域的编排层**：员工"点数 + 任务进度一次提交"必须同事务
+    #: （用户 2026-10-06 口径）→ `self_report.py` 同时 import 两边，
+    #: 它不碰结算域四表，也不被作业域引用。除此之外任何结算文件引用作业域都算违规。
+    allowed = {"self_report.py"}
     offenders = []
     for sub in ("services", "routers"):
         for p in sorted((root / sub).glob("*.py")):
-            if p.name.startswith("bd_"):
-                continue                      # 作业域自己的文件
+            if p.name.startswith("bd_") or p.name in allowed:
+                continue                      # 作业域自己的文件 / 跨域编排层
             txt = p.read_text(encoding="utf-8")
             for kw in ops_names:
                 if kw in txt:
@@ -3818,8 +3823,11 @@ def test_progress_slider_has_server_value(client, seeded):
     db.close()
     _login(client, "tangjing")
     h = client.get("/my/tasks?tab=mine").text
-    m = re.search(r'<input type="range" name="pct"[^>]*value="(\d+)"', h)
+    # ⚠️ 2026-10-06 起员工端是**统一自报表单**：滑块 name 变成 `pct_<task_id>`
+    m = re.search(r'<input type="range" name="pct(?:_%d)?"[^>]*value="(\d+)"'
+                  % seeded["task"], h)
     assert m and m.group(1) == "40", "滑块要有服务端 value=当前进度"
+    assert 'form="self-report-form"' in h, "员工端控件要挂到统一自报表单"
     assert re.search(r'id="pctv-%d"[^>]*>40<' % seeded["task"], h), "数字要有服务端兜底"
     assert "oninput=" in h, "无 Alpine 时也要能更新数字"
 
@@ -4084,3 +4092,109 @@ def test_locked_staff_sees_correct_reason(client, seeded):
     r2 = _post(client, "/my/tasks/progress", {"task_id": str(other), "pct": "10"},
                from_path="/my/tasks?tab=mine")
     assert "只能上报自己担当" in unquote(r2.headers["location"])
+
+
+def test_self_report_one_form_one_submit(client, seeded):
+    """**A2 自报合并**（用户 2026-10-06："一是报点数，二是报进度，一起提交自报"）：
+    员工端「我的」是**一个表单**，点数 + N 个任务进度**一次提交**写两个域、同一事务。
+    """
+    db = appdb.SessionLocal()
+    t1 = seeded["task"]
+    bd_tasks.assign_members(db, t1, ["P2"], by="admin")
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    bd_tasks.assign_members(db, t2, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h = client.get("/my/tasks?tab=mine").text
+    # 一个表单包住：点数 + 两个任务的滑块（用 form= 属性挂靠，不嵌套）
+    assert h.count('data-testid="self-report-form"') == 1
+    assert 'action="/my/self-report"' in h
+    assert 'data-testid="sr-p1"' in h and 'data-testid="sr-p2"' in h
+    assert h.count('form="self-report-form"') >= 4, "两个任务的滑块+备注都要挂进来"
+    assert 'data-testid="sr-submit"' in h
+    # 一次提交 → 点数 + 两条进度都落库
+    r = _post(client, "/my/self-report",
+              {"area": "渋谷", "p1_cnt": "2", "p2_cnt": "1",
+               "pct_%d" % t1: "30", "note_%d" % t1: "先做这个",
+               "pct_%d" % t2: "50", "note_%d" % t2: ""},
+              from_path="/my/tasks?tab=mine")
+    assert r.status_code == 303, r.headers.get("location")
+    from urllib.parse import unquote as _uq
+    assert "已提交自报" in _uq(r.headers["location"])
+    db = appdb.SessionLocal()
+    rep = (db.query(StaffDailyReport)
+           .filter(StaffDailyReport.person_code == "P2").one())
+    assert (rep.p1_cnt, rep.p2_cnt, rep.total_cnt, rep.area) == (2, 1, 3, "渋谷")
+    rows = {x.task_id: x for x in db.query(BdTaskProgress)
+            .filter(BdTaskProgress.task_id.in_([t1, t2])).all()}
+    assert rows[t1].pct == 30 and rows[t1].reported_pct == 30
+    assert rows[t2].pct == 50 and rows[t2].note == ""
+    assert db.get(BdTask, t1).state == "doing"
+    db.close()
+
+
+def test_self_report_all_or_nothing(client, seeded):
+    """一起提交 = **要么都成、要么都不成**：有一条被队长锁定 → 整体回滚（点数也不写）。"""
+    db = appdb.SessionLocal()
+    t1 = seeded["task"]
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    _t1, _t2 = t1, t2
+    bd_tasks.assign_members(db, _t1, ["P2"], by="admin")
+    bd_tasks.assign_members(db, _t2, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    # t2 被队长确认（锁定），t1 正常
+    bd_tasks.save_progress(db, _t2, 60, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, _t2, 60, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    r = _post(client, "/my/self-report",
+              {"area": "渋谷", "p1_cnt": "5", "p2_cnt": "5",
+               "pct_%d" % _t1: "20", "pct_%d" % _t2: "90"},
+              from_path="/my/tasks?tab=mine")
+    assert r.status_code == 303 and "err=" in r.headers["location"]
+    db = appdb.SessionLocal()
+    # 点数没写、t1 的进度也没写（整体回滚）
+    assert (db.query(StaffDailyReport)
+            .filter(StaffDailyReport.person_code == "P2").first()) is None
+    assert (db.query(BdTaskProgress)
+            .filter(BdTaskProgress.task_id == _t1).first()) is None
+    assert db.get(BdTask, _t2).pct == 60, "被锁的那条不能变"
+    db.close()
+
+
+def test_self_report_skips_unchanged_tasks(client, seeded):
+    """统一表单会把所有滑块都提交上来 → **没动过的不能写成新的待确认**（0% 也不能）。"""
+    db = appdb.SessionLocal()
+    t1, t2 = seeded["task"], None
+    st2 = bd_tasks.create_station(db, "下北沢")
+    bd_tasks.create_tasks(db, [st2.id], by="admin", team_id=seeded["team"])
+    db.commit()
+    t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id
+    bd_tasks.assign_members(db, t1, ["P2"], by="admin")
+    bd_tasks.assign_members(db, t2, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    # 两个滑块都是 0（服务端初值），只"动"了点数 → 一条进度都不该写
+    r = _post(client, "/my/self-report",
+              {"area": "渋谷", "p1_cnt": "1", "p2_cnt": "0",
+               "pct_%d" % t1: "0", "pct_%d" % t2: "0"},
+              from_path="/my/tasks?tab=mine")
+    from urllib.parse import unquote as _uq
+    loc = _uq(r.headers["location"])
+    assert "0 个任务进度" in loc, loc
+    db = appdb.SessionLocal()
+    assert (db.query(BdTaskProgress)
+            .filter(BdTaskProgress.task_id.in_([t1, t2])).count()) == 0
+    assert (db.query(StaffDailyReport)
+            .filter(StaffDailyReport.person_code == "P2").first()) is not None
+    db.close()
