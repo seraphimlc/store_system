@@ -1,5 +1,10 @@
 # 规格 · 团队管理（第一期）
 
+> ⚠️ **读法**：开头 §0 是**已实施的权威口径**；**后半部分是设计草案**，其中
+> `not_open` 状态机、`/lead/stations`、`/my/stations`、两表设计、「队员只读」等
+> **已被推翻**（作业域最终实现以 `docs/任务域-全流程.md` + `app/services/bd_*.py` 为准）。
+
+
 > **状态**：设计规格（该期定稿）｜**最后更新**：2026-10-06
 > **一句话**：团队管理（第一期）
 
@@ -25,7 +30,7 @@
 | 账号 | `users.role` 新增 `leader`；`/staff-admin` 建号/编辑弹窗都加了**角色**选项（只允许 队员/队长，**不给 admin**），列表加「角色」列 |
 | **角色自动同步** | `bd_teams.sync_account_roles()`：**在团队里当上队长 → 账号自动升 `leader`；不再当任何队队长 → 自动退回 `staff`**（只动 `staff`/`leader`，**绝不动 admin**）。`set_members` 保存成员后自动调用，种子脚本也会调。否则"指定了队长却进不去队长端"——本地库端到端实测踩到过：队长登录进的是队员视图、`/my/tasks` 显示 0 行 |
 | 种子导入 | **一个脚本**：`scripts/bd_seed_team_task.py`（默认 dry-run，`--apply` 才写；`--teams-only`/`--stations-only`）。已把 6 队 + 5 位队长导入本地库；**陈嘉溢队 2 条同名人员记录 → 只报警不猜** |
-| 测试 | `tests_web/test_team_task.py`（30 项，含队长无重定向环、导航 gate、队员只读等）；**全量 `tests_web` 357 passed** |
+| 测试 | `tests_web/test_team_task.py`（**185 项**，含队长无重定向环、导航 gate 等；全量 **522 passed**）——30/357 是当时快照 |
 | 额外修复 | `tests_web/test_date_plan.py` 有 4 个用例没按仓库约定冻结 `jst_today`（JST 跨过 10-03 截止日后必红，**在干净基线上同样失败**）→ 已补 `frozen` fixture |
 
 > ⚠️ 与下面章节的差异：§6.2「队长端 `/lead/team`」**未采用**（队长端并进员工端 `/my/tasks`）；

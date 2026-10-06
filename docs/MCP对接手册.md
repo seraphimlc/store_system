@@ -399,8 +399,8 @@ VISIT_OAUTH_REFRESH_DAYS=90
 | MCP 服务（进程/传输/反代） | `mcp_service/server.py`、`mcp_service/run.sh`、`deploy/compose.yaml`、`deploy/nginx.store-settle.conf` |
 | 鉴权与授权 | `mcp_service/auth.py`、`mcp_service/authz.py`、`mcp_service/tokens.py` |
 | 审计 | `mcp_service/audit.py` |
-| 工具实现（按域分模块） | `mcp_service/read_ops.py`、`my_ops.py`、`write_ops.py`、`write_tools.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
+| 工具实现 | **`mcp_service/scenario_ops.py`（当前 24 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
 | OAuth/SSO | `app/routers/oauth_r.py`、`app/services/oauth.py`、`app/templates/oauth_consent.html` |
 | 自助签发 / 审计页 | `app/routers/tokens_r.py`、`app/services/mcp_tokens.py`、`app/templates/my_token.html` |
 | 运维脚本 | `scripts/mcp_restart.sh`、`scripts/verify_payroll_logic.py`、`scripts/compare_with_prod.py`、`scripts/backfill_prod_new_tables.py` |
-| 规格与发布 | `docs/specs-mcp-identity.md`、`docs/specs-mcp-oauth.md`、`docs/发布计划-MCP上线.md`、`docs/workbuddy-p0-验证记录.md` |
+| 规格 | `docs/specs-mcp-identity.md`、`docs/specs-mcp-oauth.md`、`docs/specs-mcp-tools-scenario.md`（工具集设计稿）、`docs/记录-作业域.md`（作业域工具实施记录） |

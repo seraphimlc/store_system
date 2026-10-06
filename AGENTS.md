@@ -45,6 +45,9 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
    守门测试：`test_station_tasks_does_not_touch_settlement_tables` /
    `test_settlement_code_never_reads_ops_domain` / `test_progress_submission_only_writes_bd_tables`。
 2. **不读 `raw_records`**（隐私）；`data/uploads/` 与线上数据不进仓库。
+   **唯一例外**：`app/services/bd_store.py`（门店宇宙，作业域地基）**只读**它的
+   `store_id_raw` / `store_name_local_raw` / `modified_raw` / `submitter_code` / `original_row`
+   用来建 `bd_store`，**不写结算域任何表**（模块注释里也写明了）。
 3. **业务逻辑只在服务层**（`app/services/`）；路由只做鉴权+取参+渲染，模板不含口径判断。
 4. **别跨 session 传 ORM 对象**（中间件 session 已关闭 → 对象 detach → 路由改属性再 commit
    **静默不生效**，实测把"改密码"改坏了）；中间件要数据就传列值快照。

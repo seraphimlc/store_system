@@ -1,5 +1,10 @@
 # 规格 · 车站任务（第二期）
 
+> ⚠️ **读法**：开头 §0 是**已实施的权威口径**；**后半部分是设计草案**，其中
+> `not_open` 状态机、`/lead/stations`、`/my/stations`、两表设计、「队员只读」等
+> **已被推翻**（作业域最终实现以 `docs/任务域-全流程.md` + `app/services/bd_*.py` 为准）。
+
+
 > **状态**：设计规格（该期定稿）｜**最后更新**：2026-10-06
 > **一句话**：车站任务（第二期）：1 物理车站 = 1 任务
 
@@ -27,11 +32,11 @@
 | 项 | 实际落地 |
 |---|---|
 | 表（4 张） | `bd_station`（车站主数据）/ `bd_task`（= 任务，UNIQUE(station_id)，带 `assign_date`+`state`+`pct`）/ `bd_task_assign`（担当 ≤2 人）/ `bd_task_progress`（**每日**进展，UNIQUE(task_id, progress_date)） |
-| 状态机 | `unassigned`（没担当）/ `doing`（有担当且 pct<100）/ `done`（pct=100）——服务层 `recompute_state` 唯一口径 |
+| 状态机 | `unassigned`（没担当）/ `doing`（**有担当，或 pct>0**）/ `done`（pct=100）——服务层 `recompute_state` 唯一口径（§0.1 已修正） |
 | 服务层 | `app/services/bd_tasks.py`（create_station/update_station/list_stations/create_tasks/set_task_team/assign_members/save_progress/latest_progress/can_submit/team_tasks/member_tasks/task_board/board_summary/tasks_xlsx） |
 | 权限 | `can_submit(db, user, task)`：**管理员 or 该任务的队长**；队员只读 |
 | 种子导入 | `scripts/bd_seed_team_task.py`（默认 dry-run）：6 队 + 515 站 + 515 任务，`assign_date` = 运行日 |
-| 测试 | `tests_web/test_team_task.py`（30 项）+ 全量 `tests_web` **357 passed** |
+| 测试 | `tests_web/test_team_task.py`（**185 项**、全量 **522 passed**；下表里的 30/357 等是**当时快照**） |
 
 > ⚠️ 下面章节（§2 D10/D11/D12、§4 的两表设计、§5 的开放闸门、§7 的 `not_open` 状态机）是**草案**，
 > 与本节冲突时以本节为准。特别是：**没有** `not_open`/`open` 闸门、**没有**"车站自带全部字段"的单表设计。
@@ -220,8 +225,8 @@
 - ❌ 半月/期次、派活周期（D12）
 - ❌ 坐标、地图、Google API（bd-ops P1 阻塞项照旧搁置）
 - ❌ AI 分析、目标(quota)、KPI、路径优化
-- ❌ 队员填报（D4 只读）
-- ❌ MCP 工具（16 个工具清单**不动**）
+- ~~❌ 队员填报（D4 只读）~~ → **已实现**：本人是担当即可上报（`bd_tasks.can_report`）
+- ~~❌ MCP 工具（16 个工具清单不动）~~ → **已扩到 24 个**（+作业域 8 个、队长档 9 个）
 
 ---
 
