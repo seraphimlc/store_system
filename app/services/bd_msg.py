@@ -147,6 +147,35 @@ def send(db: Session, user, person_codes: Sequence[str],
     return msg
 
 
+def lang_of(db: Session, person_code: str) -> str:
+    """收件人的界面语言（`users.lang`；没设置/查不到 → zh）。"""
+    if not person_code:
+        return "zh"
+    from app.models import User
+    row = (db.query(User.lang).filter(User.person_code == person_code).first())
+    lg = (row[0] if row else "") or ""
+    return lg if lg in ("zh", "ja") else "zh"
+
+
+def send_localized(db: Session, user, person_codes: Sequence[str],
+                   build, **kw) -> list:
+    """**按收件人语言分组发送**（同一批人语言不同就发多条）。
+
+    为什么必须分组：消息标题/正文是**落库**的（收件人共享一条），
+    没法"渲染时按看的人翻译"—— 所以发送时就按 `users.lang` 分好组。
+    `build(lang) -> (title, body)`。
+    """
+    groups: dict = {}
+    for c in dict.fromkeys(person_codes or []):
+        if c:
+            groups.setdefault(lang_of(db, c), []).append(c)
+    out = []
+    for lg, codes in groups.items():
+        title, body = build(lg)
+        out.append(send(db, user, codes, title, body, **kw))
+    return out
+
+
 def notify_task_progress(db: Session, task, action: str, old_pct,
                          new_pct, by_user=None, note: str = "",
                          station: str = "") -> Optional[BdMessage]:
@@ -161,24 +190,28 @@ def notify_task_progress(db: Session, task, action: str, old_pct,
         return None
     who = (getattr(by_user, "display_name", "") or
            getattr(by_user, "username", "") or "")
-    if action == "confirmed":
-        title = "任务进展已确认：%s" % station
-        body = "你上报的 %s%% 已被%s确认。" % (new_pct, who or "队长")
-    elif action == "rejected":
-        title = "任务进展被驳回：%s" % station
-        body = ("你上报的 %s%% 被%s驳回，进度改回 %s%%。%s"
-                % (old_pct if old_pct is not None else "—", who or "队长",
-                   new_pct, note or ""))
-    else:
-        title = "任务进展已调整：%s" % station
-        body = ("你上报的 %s%%，被%s调整为 %s%%。%s"
-                % (old_pct if old_pct is not None else "—", who or "队长",
-                   new_pct, note or ""))
-    return send(db, by_user, codes, title, body,
-                url="/tasks/%d" % task.id, scope="task_review",
-                ref_type="task", ref_id=task.id,
-                sender_kind=KIND_SYSTEM if by_user is None else None,
-                system_title=title)
+    old_s = ("%s" % old_pct) if old_pct is not None else "—"
+    who_s = who or "队长"
+
+    def build(lang: str):
+        """按**收件人语言**渲染标题/正文（消息落库 → 必须在发送时定语言）。"""
+        from app.i18n import render_msg as R
+        if action == "confirmed":
+            return (R("任务进展已确认：%s", station, lang=lang),
+                    R("你上报的 %s%% 已被%s确认。", new_pct, who_s, lang=lang))
+        if action == "rejected":
+            return (R("任务进展被驳回：%s", station, lang=lang),
+                    R("你上报的 %s%% 被%s驳回，进度改回 %s%%。%s",
+                      old_s, who_s, new_pct, note or "", lang=lang))
+        return (R("任务进展已调整：%s", station, lang=lang),
+                R("你上报的 %s%%，被%s调整为 %s%%。%s",
+                  old_s, who_s, new_pct, note or "", lang=lang))
+
+    msgs = send_localized(db, by_user, codes, build,
+                          url="/tasks/%d" % task.id, scope="task_review",
+                          ref_type="task", ref_id=task.id,
+                          sender_kind=KIND_SYSTEM if by_user is None else None)
+    return msgs[0] if msgs else None
 
 
 def inbox(db: Session, person_code: str, unread_only: bool = False,

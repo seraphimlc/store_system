@@ -109,7 +109,7 @@
     <tbody>
       {% for g in timeline %}
       <tr data-testid="log-row">
-        <td>{{ g.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ jst(g.created_at) }}</td>
         <td>{{ action_labels.get(g.action, g.action) }}</td>
         <td>{{ g.field or '—' }}</td>
         <td>{{ g.old_value or '—' }}</td>

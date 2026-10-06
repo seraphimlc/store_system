@@ -4502,3 +4502,57 @@ def test_bulk_mark_done_and_bulk_progress(client, seeded):
     db = appdb.SessionLocal()
     assert db.get(BdTask, t3).pct == 0
     db.close()
+
+
+def test_notification_uses_recipient_language(client, seeded):
+    """**① 日语通知正文**（发布前必须）：消息是**落库**的 → 必须在发送时按
+    **收件人** `users.lang` 渲染，不能等渲染页面时再翻（收件人共享一条）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    # 队员账号设成日语
+    u = db.query(User).filter(User.username == "tangjing").first()
+    u.lang = "ja"
+    tj = u
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 40, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 40, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    from app.models import BdMessage
+    m = db.query(BdMessage).order_by(BdMessage.id.desc()).first()
+    assert m is not None
+    assert "タスク進捗を確認しました" in m.title, "日语收件人要收到日文标题（拿到 %s）" % m.title
+    assert "申告した" in m.body and "確認しました" in m.body, m.body
+    db.close()
+
+
+def test_notification_zh_recipient_still_chinese(client, seeded):
+    """中文收件人（未设 lang）仍是中文，别被日文化带跑。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    og = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, tid, 40, "", by="tangjing", actor_user=tj)
+    bd_tasks.save_progress(db, tid, 40, "", by="ogawa", actor_user=og, confirm=True)
+    db.commit()
+    from app.models import BdMessage
+    m = db.query(BdMessage).order_by(BdMessage.id.desc()).first()
+    assert "任务进展已确认" in m.title and "你上报的" in m.body, (m.title, m.body)
+    db.close()
+
+
+def test_html_lang_follows_language_and_jst_timestamp(client, seeded):
+    """**① `<html lang>` + JST 时间戳**：日语界面 lang=ja；UTC 时间按 JST 显示。"""
+    import datetime as _dt
+    _login(client, "admin")
+    assert '<html lang="zh-CN">' in client.get("/tasks").text
+    h = client.get("/tasks?lang=ja").text
+    assert '<html lang="ja">' in h, "日语界面 <html lang> 要是 ja"
+    # jst()：UTC → JST（少 9 小时的坑）
+    from app.templating import jst_str
+    assert jst_str(_dt.datetime(2026, 10, 6, 17, 0)) == "2026-10-07 02:00"
+    assert jst_str(None) == "—"
+    # 日志页真的用了 jst()
+    lg = client.get("/logs").text
+    assert "jst(" not in lg and lg.count("20") > 0

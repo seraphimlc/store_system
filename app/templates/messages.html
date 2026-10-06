@@ -41,7 +41,7 @@
     {% if it.unread %}<span class="pill warnk" data-testid="msg-unread">{{ t('未读') }}</span>{% endif %}
     <a href="/messages/{{ it.msg.id }}/go" data-testid="msg-link-{{ it.msg.id }}"><b>{{ it.msg.title }}</b></a>
     <span class="hint">{{ it.msg.sender_name or it.msg.sender }}</span>
-    <span class="hint">{{ it.msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+    <span class="hint">{{ jst(it.msg.created_at) }}</span>
     {% if it.msg.scope == 'task_review' %}<span class="pill">{{ t('任务进展') }}</span>{% endif %}
     <span class="spacer" style="flex:1"></span>
     {% if it.unread %}
@@ -67,7 +67,7 @@
     <tbody>
       {% for s in rows %}
       <tr data-testid="msg-sent-row">
-        <td>{{ s.msg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ jst(s.msg.created_at) }}</td>
         <td>{{ s.msg.title }}{% if s.msg.body %}<div class="hint">{{ s.msg.body }}</div>{% endif %}</td>
         <td>{{ s.n }}</td>
         <td>{{ s.read }} / {{ s.n }}</td>

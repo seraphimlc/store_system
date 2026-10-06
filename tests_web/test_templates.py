@@ -6,22 +6,17 @@ from pathlib import Path
 
 
 def _env():
+    """独立模板环境 + **共用**生产那套 globals 注册（`register_globals`）。
+
+    ⚠️ 2026-10-06 踩到两次：① 这里自己复制一份 globals → 生产加 `html_lang()/jst()`
+    后测试红；② 改 `get_templates()` 的共享环境（lru_cache，overlay 也共享 globals）
+    → 存根泄漏给其它测试（令牌页变红）。现在：自己建 env + 共用一个注册函数。
+    """
     env = Environment(loader=FileSystemLoader(
         str(Path(__file__).parent.parent / "app" / "templates")),
         autoescape=select_autoescape(["html"]))
-    from app.i18n import t as _t, LANG_NAMES as _LANG_NAMES
-    env.globals["t"] = _t
-    env.globals["LANG_NAMES"] = _LANG_NAMES
-
-    def _lang_url(request, lang):
-        q = dict(request.query_params)
-        q["lang"] = lang
-        return "?" + "&".join(f"{k}={v}" for k, v in q.items())
-    env.globals["lang_url"] = _lang_url
-    env.globals["form_token"] = lambda: "ft-test"   # 一次性提交令牌存根
-    # 静态资源版本号（与 app/templating.py 的 static_ver 同源，别各写一份）
-    from app.templating import static_ver as _sv
-    env.globals["static_ver"] = _sv
+    from app.templating import register_globals
+    register_globals(env, form_token=lambda: "ft-test")   # 令牌存根（真实实现要 session）
     return env
 
 
