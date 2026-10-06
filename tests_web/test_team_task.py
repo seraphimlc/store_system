@@ -4556,3 +4556,79 @@ def test_html_lang_follows_language_and_jst_timestamp(client, seeded):
     # 日志页真的用了 jst()
     lg = client.get("/logs").text
     assert "jst(" not in lg and lg.count("20") > 0
+
+
+def test_ai_summary_metrics_windows_and_cache(client, seeded, monkeypatch):
+    """**AI 总结**（用户 2026-10-06）：近 7 天 + 环比上一个 7 天；生成一次**缓存当天**。
+
+    ⚠️ 数字全部由代码算（模型只写话）；第二次点不重复调模型。
+    """
+    from app.services import bd_summary_ai as S
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    tj = db.query(User).filter(User.username == "tangjing").first()
+    today = bd_tasks._today()
+    # 近窗口：今天报 40%；上一窗口：8 天前报 20% + 10 天前有一单完成
+    bd_tasks.save_progress(db, tid, 40, "", by="tangjing", actor_user=tj,
+                           on_date=today)
+    bd_tasks.save_progress(db, tid, 20, "", by="tangjing", actor_user=tj,
+                           on_date=today - timedelta(days=8))
+    db.commit()
+    m = S.metrics(db, days=7, today=today)
+    assert m["now"]["reported"] == 1 and m["prev"]["reported"] == 1
+    assert m["prev_window"][1] < m["now_window"][0], "两个窗口不能重叠"
+    assert m["by_team"] and m["totals"]["tasks"] >= 1
+    db.close()
+
+    calls = {"n": 0}
+
+    def fake_chat(prompt, timeout=60, return_usage=False, **kw):
+        calls["n"] += 1
+        assert "只依据这些数字" in prompt and "简体中文" in prompt
+        return ('{"headline":"本周完成 1 个，环比 +1","bullets":["完成 1 个"],'
+                '"risks":["还有停滞任务"]}', {"model": "fake", "total_tokens": 12})
+    from app.services import ai_chat
+    monkeypatch.setattr(ai_chat, "chat", fake_chat)
+    monkeypatch.setattr(ai_chat, "configured", lambda: True)
+    db = appdb.SessionLocal()
+    r1 = S.generate(db, by="admin")
+    assert r1["cached"] is False and r1["summary"]["headline"].startswith("本周完成")
+    assert calls["n"] == 1
+    r2 = S.generate(db, by="admin")                     # 第二次 → 缓存
+    assert r2["cached"] is True and calls["n"] == 1, "当天第二次不该再调模型"
+    r3 = S.generate(db, by="admin", force=True)         # 强制重生成
+    assert r3["cached"] is False and calls["n"] == 2
+    v = S.view(db)
+    assert v and v["summary"]["bullets"] == ["完成 1 个"] and v["metrics"]["now"]["reported"] == 1
+    db.close()
+
+
+def test_ai_summary_page_and_permission(client, seeded, monkeypatch):
+    """管理端页面：按钮 → 生成 → 卡片展示；队员不能调；AI 挂了给人话。"""
+    from app.services import ai_chat, bd_summary_ai as S
+    monkeypatch.setattr(ai_chat, "configured", lambda: True)
+    monkeypatch.setattr(ai_chat, "chat", lambda *a, **k: (
+        '{"headline":"一切正常","bullets":["完成 0 个"],"risks":[]}', {}))
+    _login(client, "admin")
+    h = client.get("/tasks?tab=assigned").text
+    assert 'data-testid="ai-gen"' in h and 'data-testid="ai-body"' not in h
+    r = _post(client, "/tasks/ai-summary", {}, from_path="/tasks?tab=assigned")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    assert "AI 总结已生成" in _uq(r.headers["location"]), _uq(r.headers["location"])
+    h2 = client.get("/tasks?tab=assigned").text
+    assert 'data-testid="ai-body"' in h2 and "一切正常" in h2
+    assert 'data-testid="ai-regen"' in h2, "已有总结 → 显示「重新生成」"
+    assert "近 7 天" in h2 and "环比" in h2, "卡片要能核对数字"
+    # 队员不能调（管理员专用）
+    _login(client, "tangjing")
+    r2 = _post(client, "/tasks/ai-summary", {}, from_path="/my/tasks?tab=mine")
+    assert r2.status_code in (302, 303)
+    # AI 挂了 → 人话提示，不是白屏
+    monkeypatch.setattr(ai_chat, "chat", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("boom")))
+    _login(client, "admin")
+    r3 = _post(client, "/tasks/ai-summary", {"force": "1"},
+               from_path="/tasks?tab=assigned")
+    assert "AI 总结失败" in _uq(r3.headers["location"])

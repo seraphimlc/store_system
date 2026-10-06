@@ -374,7 +374,8 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
     g = _admin_guard(user)
     if g:
         return g
-    from app.services import bd_leave, bd_teams, bd_tasks, bd_lines, paging
+    from app.services import (bd_leave, bd_summary_ai, bd_teams, bd_tasks,
+                              bd_lines, paging)
     try:
         team_id = int(team) if str(team).strip() else None
     except ValueError:
@@ -443,6 +444,9 @@ def tasks_page(request: Request, user: Optional[User] = Depends(require_login),
         "state": state, "date_from": date_from, "date_to": date_to, "kw": kw,
         "stale": stale, "stale_days": d.get("stale_days", 2),
         "adjust_map": adjust_map, "return_map": return_map,
+        # AI 总结（管理员）：只读当天缓存；没生成就只显示按钮
+        "ai_summary": (bd_summary_ai.view(db)
+                       if tab != bd_tasks.TAB_UNASSIGNED else None),
         "leave_map": leave_map,
         "sum": bd_tasks.board_summary(db),
         # ⚠️ 统计卡与 tab **同一口径**（2026-10-06 审计：卡片按 state 数 → "已分配 0"，
@@ -684,6 +688,38 @@ def tasks_reassign(request: Request, task_id: Optional[List[str]] = Form(None),
     except bd_tasks.TaskError as e:
         db.rollback()
         return RedirectResponse(_with_msg(back, "err", str(e)), status_code=303)
+
+
+@router.post("/tasks/ai-summary")
+def tasks_ai_summary(request: Request, csrf_token: str = Form(""),
+                     force: str = Form(""),
+                     user: Optional[User] = Depends(require_login),
+                     db: Session = Depends(get_db)):
+    """**任务 AI 总结**（管理员）：近 7 天 + 环比上一个 7 天。
+
+    用户 2026-10-06："任务AI总结…生成一次缓存当天，点开即看" → 默认取当天缓存，
+    `force=1` 重新生成。
+    """
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_summary_ai
+    back = "/tasks?tab=assigned"
+    try:
+        r = bd_summary_ai.generate(db, by=user.username, force=bool(force))
+    except bd_summary_ai.SummaryError as e:
+        db.rollback()
+        return RedirectResponse(back + "&err=" + _q(_m("AI 总结失败：%s", str(e))),
+                                status_code=303)
+    except Exception as e:                                    # noqa: BLE001
+        db.rollback()
+        return RedirectResponse(back + "&err=" + _q(_m("AI 总结失败：%s", str(e)[:80])),
+                                status_code=303)
+    msg = _m("已读取今天的 AI 总结") if r.get("cached") else _m("AI 总结已生成")
+    return RedirectResponse(back + "&msg=" + _q(msg) + "#ai-summary",
+                            status_code=303)
 
 
 @router.post("/tasks/return-pool")

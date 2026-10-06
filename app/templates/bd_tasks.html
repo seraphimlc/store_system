@@ -270,6 +270,53 @@
 })();
 </script>
 {% else %}
+{# ============ AI 总结（近 7 天 + 环比上一个 7 天）============
+   用户 2026-10-06："任务AI总结…加一个按钮给管理员…生成一次缓存当天，点开即看" #}
+<div class="card" id="ai-summary" data-testid="ai-summary"
+     style="padding:.7rem 1rem;margin-bottom:.7rem">
+  <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
+    <b>{{ t('AI 总结（近 7 天）') }}</b>
+    <span class="hint">{{ t('只统计任务域：完成/派工/上报/确认/驳回/停滞，并环比上一个 7 天') }}</span>
+    <span class="spacer" style="flex:1"></span>
+    <form method="post" action="/tasks/ai-summary" style="display:flex;gap:.4rem">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="_ft" value="{{ form_token() }}">
+      {% if ai_summary %}
+      <input type="hidden" name="force" value="1">
+      <button class="btn ghost" type="submit" data-testid="ai-regen">{{ t('重新生成') }}</button>
+      {% else %}
+      <button class="btn" type="submit" data-testid="ai-gen">{{ t('AI 总结') }}</button>
+      {% endif %}
+    </form>
+  </div>
+  {% if ai_summary %}
+  <div style="margin-top:.6rem" data-testid="ai-body">
+    <div style="font-size:1.02rem"><b>{{ ai_summary.summary.headline }}</b></div>
+    <ul style="margin:.35rem 0 .2rem 1.1rem">
+      {% for b in ai_summary.summary.bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+    {% if ai_summary.summary.risks %}
+    <div class="hint">{{ t('需要关注') }}</div>
+    <ul style="margin:.2rem 0 0 1.1rem">
+      {% for r in ai_summary.summary.risks %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {# 让管理员能核对"总结是不是基于这些数" #}
+    <div class="hint" style="margin-top:.4rem">
+      {{ t('近 7 天') }}：{{ t('完成') }} {{ ai_summary.metrics.now.done }}
+      · {{ t('派工') }} {{ ai_summary.metrics.now.dispatched }}
+      · {{ t('上报') }} {{ ai_summary.metrics.now.reported }}
+      · {{ t('确认') }} {{ ai_summary.metrics.now.confirmed }}
+      · {{ t('驳回') }} {{ ai_summary.metrics.now.rejected }}
+      · {{ t('停滞') }} {{ ai_summary.metrics.now.stale }}
+      {% set d = ai_summary.metrics.delta %}
+      （{{ t('环比') }} {{ '+' if d.done >= 0 else '' }}{{ d.done }} / {{ '+' if d.reported >= 0 else '' }}{{ d.reported }}）
+      · {{ t('生成于') }} {{ jst(ai_summary.created_at) }}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
 {# **批量撤回**（用户 2026-10-06：管理员可撤回"已派队但还没分到人"的任务，含已有进展的） #}
 {% if tab == 'assigned' %}
 <form method="post" action="/tasks/return-pool" id="return-pool-form"

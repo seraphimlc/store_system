@@ -1258,6 +1258,27 @@ class BdRoleCap(Base):
     updated_at = Column(DateTime, nullable=False, default=_now)
 
 
+class BdAiSummary(Base):
+    """**任务域 AI 总结的缓存**（一天一条；用户 2026-10-06：生成一次、点开即看）。
+
+    ⚠️ 为什么不复用结算域的 `ai_runs`：铁律「作业域只写 `bd_*` 表」。
+    """
+    __tablename__ = "bd_ai_summary"
+    __table_args__ = (UniqueConstraint("summary_date", name="uq_bd_ai_summary_day"),)
+    id = Column(Integer, primary_key=True)
+    #: 业务日（JST）—— 一天一条，当天再点直接看缓存
+    summary_date = Column(Date, nullable=False)
+    days = Column(Integer, nullable=False, default=7, server_default="7")
+    #: 送进模型的指标（JSON 文本；回头核对"总结是不是基于这些数"就靠它）
+    metrics_json = Column(Text, nullable=False, default="", server_default="")
+    #: 模型产出的总结（JSON 文本：headline / bullets / risks）
+    summary_json = Column(Text, nullable=False, default="", server_default="")
+    model = Column(String(64), nullable=False, default="", server_default="")
+    tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    created_by = Column(String(64), nullable=False, default="", server_default="")
+    created_at = Column(DateTime, nullable=False, default=_now)
+
+
 class BdStaffLeave(Base):
     """员工自己的**假期模式**（休假期，用户 2026-10-03 要求）。
 
