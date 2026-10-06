@@ -7,8 +7,12 @@
   ekicode/group_code/source`（`group_code` = N02_005g，将来合并同一车站用）
 - **`bd_task` 加 `source_type`**：任务来源判别（现在恒为 `station`，将来片区 = `zone`）
 
-⚠️ SQLite 不能直接 drop 唯一约束 → `batch_alter_table(recreate="always")` 重建表
-（SQLite/PG 都能跑；MySQL 跳过两个部分唯一索引，靠服务层判重）。
+⚠️ SQLite 不能直接 drop 唯一约束 → `batch_alter_table(recreate="always")` 重建表；
+但** PG 上不能强制重建**：`bd_station` 被 `bd_task.station_id` 外键引用 →
+重建时要 `DROP CONSTRAINT bd_station_pkey` → PG 报 DependentObjectsStillExist ✗
+（2026-10-06 **生产备份彩排**实测抓到：SQLite 测试全绿、PG 上直接失败）。
+所以：`_RECREATE = "always" if sqlite else "never"`（PG 走原生 ALTER：
+add_column / DROP CONSTRAINT uq_… 都支持）；MySQL 跳过两个部分唯一索引，靠服务层判重。
 """
 from alembic import op
 import sqlalchemy as sa
@@ -17,6 +21,11 @@ revision = "f9a8b7c6d5e4"
 down_revision = "d6e7f8a9b0c1"
 branch_labels = None
 depends_on = None
+
+
+def _recreate(op_):
+    """SQLite 必须重建表才能 drop 唯一约束；PG **必须走原生 ALTER**（外键依赖，见模块注释）。"""
+    return "always" if op_.get_bind().dialect.name == "sqlite" else "never"
 
 
 def _cols(bind, table):
@@ -60,7 +69,7 @@ def apply(op, bind):
 
     # ② 车站：加列 + 换唯一键（SQLite 需要重建表）
     have = _cols(bind, "bd_station")
-    with op.batch_alter_table("bd_station", recreate="always") as b:
+    with op.batch_alter_table("bd_station", recreate=_recreate(op)) as b:
         if "line_id" not in have:
             b.add_column(sa.Column("line_id", sa.Integer(), nullable=True))
         if "operator" not in have:
@@ -126,7 +135,7 @@ def downgrade():
                  "ix_bd_station_line_id"):
         if name in _idx(bind, "bd_station"):
             op.drop_index(name, table_name="bd_station")
-    with op.batch_alter_table("bd_station", recreate="always") as b:
+    with op.batch_alter_table("bd_station", recreate=_recreate(op)) as b:
         for col in ("source", "group_code", "ekicode", "lat", "lon", "pref",
                     "operator", "line_id"):
             b.drop_column(col)
