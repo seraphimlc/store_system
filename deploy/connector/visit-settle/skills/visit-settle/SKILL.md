@@ -4,8 +4,11 @@
 
 **身份与权限（自动，无需配置 Token）**：连接时客户端自动完成 OAuth 授权（浏览器登录巡店系统账号）。
 - **员工**：只能访问**本人**数据（`visit_my_perf` 我的绩效 / `visit_my_pay` 我的找平与发放 /
-  `visit_whoami` 我是谁）；调用管理员工具会被拒绝（`FORBIDDEN_TOOL`）。
-- **管理员**：可用全部 16 个工具（3 个员工工具 + 13 个管理员工具）。
+  `visit_my_tasks` 我的任务 / `visit_self_report` 每日自报 / `visit_whoami` 我是谁 等 6 个）；
+  调用管理员工具会被拒绝（`FORBIDDEN_TOOL`）。
+- **队长**：员工那 6 个 + 本队作业 3 个（`visit_team_tasks` 本队任务 / `visit_task_assign` 派工 /
+  `visit_task_confirm` 确认进展），共 9 个；只能看/管**本队**。
+- **管理员**：可用**全部 24 个**（员工 6 + 队长 3 + 管理员 15）。
 - 员工状态变更（请假/停用/离职）会**立即使其凭据失效**。
 
 ## 口径

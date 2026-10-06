@@ -164,6 +164,10 @@ location /mcp {
 > 生产审计实测：**只有 13 个被调用过**（27%）。用户原话：「40+ 个工具根本用不上那么多。
 > 而且我们也不应该一个 restful api 就做一个工具。我们要根据实际场景来。」
 > 重构后 **49 → 16**，且列表只暴露新集。
+> ⚠️ **2026-10-06 更新：现在共 24 个** —— 结算域 16 个不变，**新增作业域 8 个**
+> （`visit_my_tasks` / `visit_self_report` / `visit_team_tasks` / `visit_task_assign` /
+> `visit_task_confirm` / `visit_task_report` / `visit_task_return` / `visit_task_board`），
+> 并新增**队长档**（9 个 = 员工 6 + 本队 3）。
 
 #### 4.6.1 核心原则
 

@@ -17,6 +17,7 @@
 | MCP 服务（WorkBuddy 接入） | `docs/MCP对接手册.md`、`docs/specs-mcp-*.md` | `mcp_service/**` | `mcp_service/tests` |
 | 多语言 / 导航 / H5 | `app/i18n.py`、`app/templates/base.html`、`app/static/app.css` | — | `test_templates.py`、`test_i18n.py` |
 | 部署 / 发布 | §发布流程 + `deploy/README.md` | `scripts/deploy*.sh`、`deploy/**` | — |
+| **当前状态 / 交接** | **`docs/交接-当前状态.md`**（先读这个：线上有什么、还欠什么） | — | — |
 
 ## 常用命令（cwd = 项目根）
 
@@ -28,7 +29,7 @@ DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.p
 ./.venv/bin/python scripts/idx.py 车站 任务                 # 按关键词找文件
 ./.venv/bin/python scripts/check_templates.py              # 模板结构自检（改完模板跑）
 ./.venv/bin/python scripts/i18n_audit.py                   # 日文缺失/死键（要 0/0）
-scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 16 工具）
+scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 24 工具）
 ```
 
 - 账号：`admin/demo123`；员工 `demo123`（测试里是 `pw123456`）。线上 `store.visitworld.me`。
@@ -78,9 +79,16 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
    `rsync -a --delete -e ssh --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.db' --exclude 'data/' --exclude '.pytest_cache' --exclude '.DS_Store' ./ store-prod:/opt/store-settle/releases/$TS/`
 3. `ssh store-prod "cp /opt/store-settle/current/deploy/.env /opt/store-settle/releases/$TS/deploy/.env; rm -f /opt/store-settle/current; ln -s /opt/store-settle/releases/$TS /opt/store-settle/current"`
-4. `ssh store-prod "cd /opt/store-settle/current/deploy && docker compose build web && docker compose up -d --no-deps web"`（entrypoint 自动 `alembic upgrade`）。
+4. `ssh store-prod "cd /opt/store-settle/current/deploy && docker compose build web mcp && docker compose up -d --no-deps web mcp"`
+   （entrypoint 自动 `alembic upgrade`）。**⚠️ 必须同时建 `mcp`**：只建 `web` 的话 MCP 容器还是旧代码，
+   新工具不会生效（2026-10-06 实测踩到）。`mcp` 容器**不跑迁移**（迁移统一由 `web` 负责）。
 5. 公网走查（健康/绩效/找平/对账/产品页）。改数据前先 `pg_dump` 备份。
 6. 旧机（`ssh store-old`）只留数据供回滚，不参与发布。
+7. **nginx 改动不走发布**：宿主机 `/etc/nginx/conf.d/store.conf` 手工改（改前 `cp -a` 备份、`nginx -t` 通过再
+   `nginx -s reload`）；仓库里的 `deploy/nginx.store-settle.conf` 是它的镜像，改完要同步回来。
+   现有：全站 gzip + `/static/` 一年长缓存（靠模板 `?v={{ static_ver(...) }}` 自动失效）。
+
+> 首次在新机跑作业域迁移前，**务必先在生产备份上彩排**（见下"已知坑"最后一条）。
 
 ## 已知坑（踩过的，别重踩）
 
@@ -97,6 +105,16 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
 - **i18n 键不能含 `"`**（会破坏 `app/i18n.py` 字典 → 页面 500）；引用词用「」。
 - MySQL TEXT 默认值要 `sa.text("('')")`，唯一键含 TEXT 用 VARCHAR(255)。
 - 线上演示期间别做写操作（删文件/重算/重传对账/重置口令）。
+- **`batch_alter_table(recreate="always")` 在 PG 上也重建表**：`bd_station` 被 `bd_task` 外键引用 →
+  `DROP CONSTRAINT bd_station_pkey` 直接失败（`DependentObjectsStillExist`）。SQLite 没这限制，单测永远绿 ✗
+  → 迁移里按方言决定：`"always" if sqlite else "never"`。**首次上生产的迁移必须先在
+  生产 `pg_dump` 还原出的临时 PG 上彩排**（`docker compose run --rm --entrypoint alembic web upgrade head`，
+  ⚠️ 干跑 `--sql` 离线模式读不到当前版本、且遇到 `sa.inspect()` 会直接报错，只能在线彩排）。
+- **结果提示用 `?msg=` / `?err=` 挂在跳转 URL 上**（没有服务端 flash）：跳完由 `base.html` 里的一小段脚本
+  从地址栏清掉（保留 `#hash`）。新写路由回跳请用 `_with_msg()`（自动判断 `?`/`&`），别硬拼；
+  白名单见 `bd_r.py::_safe_back`（只允许本站 `/tasks`、`/my/*`）。
+- **静态资源改完不用管缓存**：模板写 `?v={{ static_ver('app.css') }}`（文件 mtime+size），
+  文件一改版本号就变 → 生产 nginx 敢给 `immutable` 一年缓存。⚠️ 因此**别删 `app/static/` 里的文件**。
 
 ## 文档地图
 
