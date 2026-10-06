@@ -66,9 +66,14 @@ def my_report_page(request: Request,
     chart = {"series": series,
              "geo": report_chart.chart_geometry(series) if series["show"] else {}}
 
+    # ⚠️ 用户 2026-10-06："对于分给我的任务，我也是可以设置进度的" —— 每日填报
+    #    不只是点数：**分给我的任务进度也在这页**，和点数**一次提交**（同一事务）。
+    #    走作业域的跨域编排层 `self_report`（点数 + 进度），队长同样适用。
+    from app.services import self_report as _sr
+    sr = _sr.view(db, user)
     return templates.TemplateResponse("my_report.html", {
         "request": request, "current_user": user,
-        "today": today, "existing": existing,
+        "today": today, "existing": existing, "self_report": sr,
         "existing_jst": (existing.submitted_at + timedelta(hours=9)
                          ).strftime("%Y-%m-%d %H:%M") if existing else "",
         "view": view, "chart": chart, "month": month, "months": months,

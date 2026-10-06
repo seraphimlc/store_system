@@ -7,8 +7,11 @@
 
 {% set _p1 = existing.p1_cnt if existing else 0 %}
 {% set _p2 = existing.p2_cnt if existing else 0 %}
+{# 有分给我的任务时：表单常显（点数 + 任务进度一起填）——用户 2026-10-06 #}
+{% set _has_tasks = self_report and self_report.reportable %}
+{% set _start_edit = 'true' if (not existing) or _has_tasks else 'false' %}
 <div class="card" data-testid="today-card"
-     x-data="{ edit: {{ 'false' if existing else 'true' }}, p1: '{{ _p1 }}', p2: '{{ _p2 }}',
+     x-data="{ edit: {{ _start_edit }}, p1: '{{ _p1 }}', p2: '{{ _p2 }}',
                get a() { return parseInt(this.p1 || 0, 10) || 0 },
                get b() { return parseInt(this.p2 || 0, 10) || 0 },
                get stores() { return this.a + this.b },
@@ -24,7 +27,8 @@
   {% set _x1 = existing.p1_cnt or 0 %}
   {% set _x2 = existing.p2_cnt or 0 %}
   {% set _xt = _x1 + _x2 %}
-  <table class="kv" data-testid="today-summary" x-show="!edit">
+  <table class="kv" data-testid="today-summary"
+         {% if not _has_tasks %}x-show="!edit"{% endif %}>
     {% if existing.area %}<tr><th>{{ t('担当区域') }}</th><td>{{ existing.area }}</td></tr>{% endif %}
     <tr><th>{{ t('1点店铺数') }}</th><td>{{ _x1 }}</td></tr>
     <tr><th>{{ t('2点店铺数') }}</th><td>{{ _x2 }}</td></tr>
@@ -37,16 +41,22 @@
     <tr><th>{{ t('2点店铺占比') }}</th>
         <td data-testid="today-store-rate">{{ '%.1f%%' % (_x2 * 100 / _xt) if _xt else '—' }}</td></tr>
   </table>
+  {% if not _has_tasks %}
   <div class="form-actions" style="margin-top:.7rem" x-show="!edit">
     <button class="btn" type="button" @click="edit = true"
             data-testid="edit-report">{{ t('修改') }}</button>
   </div>
   {% endif %}
+  {% endif %}
 
-  <form method="post" action="{{ '/my/report/update' if existing else '/my/report' }}"
-        x-show="edit" x-cloak>
+  {# ===== 有任务：点数 + 进度**一个表单、一次提交**（同一事务，用户 2026-10-06）；
+       没任务：还是原来的"点数"表单（新建 / 当天修改） ===== #}
+  <form method="post"
+        action="{{ '/my/self-report' if _has_tasks else ('/my/report/update' if existing else '/my/report') }}"
+        {% if not _has_tasks %}x-show="edit" x-cloak{% endif %}>
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
+    {% if _has_tasks %}<input type="hidden" name="back" value="/my/report">{% endif %}
     <table class="kv">
       <tr><th><label for="area">{{ t('担当区域') }}</label></th>
           <td><input type="text" name="area" id="area" maxlength="64" autocomplete="off"
@@ -72,11 +82,38 @@
       <tr><th>{{ t('2点店铺占比') }}</th>
           <td x-text="storeRate" data-testid="live-store-rate"></td></tr>
     </table>
+    {% if _has_tasks %}
+    {# 分给我的任务：每行一个滑块 + 备注（和上面的点数一起提交） #}
+    <h3 style="font-size:.95rem;margin:.9rem 0 .3rem">
+      {{ t('分给我的任务（今天）') }}
+      <span class="hint">· {{ t('进度和点数一起提交，没动过的不会重复报') }}</span></h3>
+    {% for r in self_report.reportable %}
+    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.35rem 0"
+         data-testid="sr-row-{{ r.task.id }}">
+      <b style="min-width:8rem">{{ r.station_name }}</b>
+      {% if r.line %}<span class="hint">{{ r.line }}</span>{% endif %}
+      <input type="range" name="pct_{{ r.task.id }}" min="0" max="100" step="5"
+             value="{{ r.pct }}" style="flex:1;min-width:150px;min-height:2.6rem"
+             data-testid="sr-slider-{{ r.task.id }}"
+             oninput="var s=document.getElementById('srv-{{ r.task.id }}');if(s)s.textContent=this.value">
+      <b style="min-width:3rem;text-align:right"><span
+          id="srv-{{ r.task.id }}">{{ r.pct }}</span>%</b>
+      <input type="text" name="note_{{ r.task.id }}" placeholder="{{ t('备注（可空）') }}"
+             style="width:10rem" data-testid="sr-note-{{ r.task.id }}">
+    </div>
+    {% endfor %}
+    <div class="form-actions" style="margin-top:.7rem">
+      <button class="btn" type="submit" data-testid="submit-self-report">
+        {{ t('提交填报（点数 + 进度）') }}</button>
+      <span class="hint">{{ t('一次提交：点数和上面的任务进度一起保存') }}</span>
+    </div>
+    {% else %}
     <div class="form-actions" style="margin-top:.7rem">
       <button class="btn" type="submit"
               data-testid="{{ 'save-report' if existing else 'submit-report' }}">{{ t('保存') if existing else t('提交填报') }}</button>
       {% if existing %}<button class="btn ghost" type="button" @click="edit = false">{{ t('取消') }}</button>{% endif %}
     </div>
+    {% endif %}
   </form>
 </div>
 

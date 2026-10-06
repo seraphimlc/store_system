@@ -4672,3 +4672,73 @@ def test_bd_sync_prod_export_resets_progress(seeded, tmp_path):
     rep = mod._report_referenced(db, payload)
     assert isinstance(rep["missing_persons"], list) and "leaders" in rep
     db.close()
+
+
+def test_daily_report_includes_my_tasks_for_leader(client, seeded):
+    """**用户实测**："每日填报出来了，但还是只有点数。对于分给我的任务，我也是可以设置进度的"
+
+    → 「每日填报」= 点数 + **分给我的任务进度**，一个表单一次提交（同一事务）；
+    队长同样适用（他也有自己的任务）。
+    """
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    h = client.get("/my/report").text
+    assert 'action="/my/self-report"' in h, "每日填报要能一次提交（点数+进度）"
+    assert 'data-testid="sr-slider-%d"' % tid in h, "分给我的任务要出现在每日填报里"
+    assert 'data-testid="submit-self-report"' in h
+    assert 'name="back" value="/my/report"' in h, "提交后回每日填报"
+    # 一次提交：点数 + 进度都落库
+    r = _post(client, "/my/self-report",
+              {"area": "渋谷", "p1_cnt": "2", "p2_cnt": "1",
+               "pct_%d" % tid: "45", "note_%d" % tid: "做了四成",
+               "back": "/my/report"},
+              from_path="/my/report")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    assert "已提交自报" in _uq(r.headers["location"])
+    assert _uq(r.headers["location"]).startswith("/my/report"), "回落到每日填报"
+    db = appdb.SessionLocal()
+    assert (db.query(StaffDailyReport)
+            .filter(StaffDailyReport.person_code == "P2").first()).p1_cnt == 2
+    row = bd_tasks.day_progress_map(db, [tid]).get(tid)
+    assert row is not None and row.pct == 45 and row.note == "做了四成"
+    db.close()
+    # 没有任务的人：保持原来的"点数"表单（不出现任务块）
+    _login(client, "admin")            # 管理员不进这页（303），换一个无任务的员工
+    db = appdb.SessionLocal()
+    u = db.query(User).filter(User.username == "zhang-zhikai").first()
+    if u is None:
+        db.add(User(username="zhang-zhikai", display_name="张智凯", role="staff",
+                    is_active=True, status="active", person_code="P9",
+                    password_hash=hash_password("pw123456")))
+        from app.models import Person
+        if db.get(Person, "P9") is None:
+            db.add(Person(code="P9", display_name="张智凯"))
+        db.commit()
+    db.close()
+    _login(client, "zhang-zhikai")
+    h2 = client.get("/my/report").text
+    assert 'data-testid="sr-slider-' not in h2 and 'submit-report' in h2, \
+        "没有任务的人还是原来的点数表单"
+
+
+def test_self_report_redirect_url_is_well_formed(client, seeded):
+    """⚠️ 浏览器实测：`back=/my/report` 没有 `?`，硬拼 `&msg=` 会得到
+    `/my/report&msg=…` —— 那是个**不存在的路径**（404 白页）。"""
+    db = appdb.SessionLocal()
+    bd_tasks.assign_members(db, seeded["task"], ["P2"], by="admin")
+    db.commit()
+    db.close()
+    _login(client, "tangjing")
+    r = _post(client, "/my/self-report",
+              {"area": "x", "p1_cnt": "1", "p2_cnt": "0", "back": "/my/report"},
+              from_path="/my/report")
+    loc = r.headers["location"]
+    assert loc.startswith("/my/report?msg="), "回跳要有 ?（拿到 %s）" % loc
+    assert "&msg=" not in loc.split("?")[0]
+    # 跟着跳一次，确认不是 404
+    assert client.get(loc).status_code == 200

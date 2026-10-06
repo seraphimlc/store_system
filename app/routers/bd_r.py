@@ -21,10 +21,20 @@ from app.models import User
 from app.routers.auth_r import csrf_ok, require_login
 from app.templating import get_templates
 
+#: 允许回跳的本站前缀（防开放重定向：必须是本站路径、不能是 `//host` 或带换行）
+_SAFE_BACK_PREFIXES = ("/tasks", "/my/tasks", "/my/report", "/my/perf", "/my/plan",
+                       "/my/leave", "/messages")
+
+
 def _safe_back(back: str, default: str) -> str:
-    """操作后回跳目标（只允许本站任务页，防开放重定向）。"""
+    """操作后回跳目标（只允许本站路径，防开放重定向）。
+
+    ⚠️ 2026-10-06：`/my/report`（每日填报）原来不在白名单里 → 从每日填报提交自报后
+    被强制跳回 `/tasks`，用户以为"没保存/跳错页"。凡是本站的 `/my/*` 页面都该允许。
+    """
     b = (back or "").strip()
-    if b.startswith(("/tasks", "/my/tasks")) and "//" not in b and "\n" not in b:
+    if (b.startswith(_SAFE_BACK_PREFIXES) and "//" not in b
+            and "\n" not in b and "\r" not in b):
         return b
     return default
 
@@ -1038,17 +1048,22 @@ async def my_self_report(request: Request,
             continue
         items.append({"task_id": tid, "pct": val,
                       "note": str(form.get("note_%d" % tid) or "")})
-    back = "/my/tasks?tab=mine"
+    # 从「每日填报」提交 → 回每日填报；从任务页提交 → 回任务页（用户 2026-10-06）
+    back = str(form.get("back") or "/my/tasks?tab=mine")
+    if not back.startswith("/my/"):
+        back = "/my/tasks?tab=mine"
     try:
         r = self_report.submit(db, user, area=str(form.get("area") or ""),
                                p1_cnt=form.get("p1_cnt", ""),
                                p2_cnt=form.get("p2_cnt", ""), items=items)
+        # ⚠️ 用 `_with_msg` 拼 URL：back 里可能没有 `?`（如 `/my/report`）→
+        #    硬拼 `&msg=` 会变成 `/my/report&msg=…`（一个不存在的路径 → 404 白页）
         return RedirectResponse(
-            back + "&msg=" + _q(_m("已提交自报：1点 %d / 2点 %d，%d 个任务进度",
-                                   r["p1"], r["p2"], r["tasks"])), status_code=303)
+            _with_msg(back, "msg", _m("已提交自报：1点 %d / 2点 %d，%d 个任务进度",
+                                      r["p1"], r["p2"], r["tasks"])), status_code=303)
     except Exception as e:                       # noqa: BLE001
         db.rollback()                            # 一起提交 → 失败就整体回滚
-        return RedirectResponse(back + "&err=" + _q(_m(str(e))), status_code=303)
+        return RedirectResponse(_with_msg(back, "err", _m(str(e))), status_code=303)
 
 
 @router.post("/my/tasks/progress")
