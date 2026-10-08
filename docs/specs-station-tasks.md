@@ -36,7 +36,7 @@
 | 服务层 | `app/services/bd_tasks.py`（create_station/update_station/list_stations/create_tasks/set_task_team/assign_members/save_progress/latest_progress/can_submit/team_tasks/member_tasks/task_board/board_summary/tasks_xlsx） |
 | 权限 | `can_submit(db, user, task)`：**管理员 or 该任务的队长**；队员只读 |
 | 种子导入 | `scripts/bd_seed_team_task.py`（默认 dry-run）：6 队 + 515 站 + 515 任务，`assign_date` = 运行日 |
-| 测试 | `tests_web/test_team_task.py`（**185 项**、全量 **522 passed**；下表里的 30/357 等是**当时快照**） |
+| 测试 | `tests_web/test_team_task.py`（**215 项**、全量 **555 passed**；下表里的 30/357 等是**当时快照**） |
 
 > ⚠️ 下面章节（§2 D10/D11/D12、§4 的两表设计、§5 的开放闸门、§7 的 `not_open` 状态机）是**草案**，
 > 与本节冲突时以本节为准。特别是：**没有** `not_open`/`open` 闸门、**没有**"车站自带全部字段"的单表设计。

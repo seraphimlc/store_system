@@ -116,6 +116,10 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
   → 迁移里按方言决定：`"always" if sqlite else "never"`。**首次上生产的迁移必须先在
   生产 `pg_dump` 还原出的临时 PG 上彩排**（`docker compose run --rm --entrypoint alembic web upgrade head`，
   ⚠️ 干跑 `--sql` 离线模式读不到当前版本、且遇到 `sa.inspect()` 会直接报错，只能在线彩排）。
+- **新页面必须自己渲染结果提示横幅**：`msg`/`err` 是路由塞进上下文的（没有服务端 flash），
+  模板要照抄别的页面那句 `{% if msg %}<div class="msg ok">…` —— 否则**提交成功却页面毫无提示**
+  （2026-10-07 新增「进展复核」页时踩到：单测只断言跳转 URL 里的 `msg=`，查不出"页面没渲染"，
+  是**真浏览器实测**抓到的）。
 - **结果提示用 `?msg=` / `?err=` 挂在跳转 URL 上**（没有服务端 flash）：跳完由 `base.html` 里的一小段脚本
   从地址栏清掉（保留 `#hash`）。新写路由回跳请用 `_with_msg()`（自动判断 `?`/`&`），别硬拼；
   白名单见 `bd_r.py::_safe_back`（只允许本站 `/tasks`、`/my/*`）。
