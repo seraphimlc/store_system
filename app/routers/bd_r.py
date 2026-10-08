@@ -771,6 +771,94 @@ def tasks_return_pool(request: Request, task_id: Optional[List[str]] = Form(None
                             status_code=303)
 
 
+
+def _parse_date(v: str):
+    """`YYYY-MM-DD` → date；空/非法 → None（页面筛选用）。"""
+    from datetime import date as _d
+    try:
+        return _d.fromisoformat((v or "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/tasks/reviews", response_class=HTMLResponse)
+def task_reviews_page(request: Request, user: Optional[User] = Depends(require_login),
+                      db: Session = Depends(get_db), date_from: str = "",
+                      date_to: str = "", team_id: str = "",
+                      msg: str = "", err: str = ""):
+    """**进展复核**（管理员）：队长已确认/调整过的进展 → 可批量驳回。
+
+    用户 2026-10-07："管理员批量驳回队长确认过的任务进展。"
+    驳回 = 退回**员工上报的原值** + 状态回到**待确认**（队长重新看）。
+    """
+    g = _admin_guard(user)
+    if g:
+        return g
+    from datetime import timedelta
+
+    from app.services import bd_tasks, bd_teams
+    today = bd_tasks._today()
+    d_to = _parse_date(date_to) or today
+    d_from = _parse_date(date_from) or (d_to - timedelta(days=2))
+    tid = int(team_id) if str(team_id).strip().isdigit() else None
+    v = bd_tasks.settled_reviews(db, date_from=d_from, date_to=d_to, team_id=tid)
+    return templates.TemplateResponse("bd_reviews.html", {
+        "request": request, "current_user": user, "v": v, "today": today,
+        "date_from": d_from, "date_to": d_to, "team_id": tid,
+        "teams": bd_teams.team_options(db), "msg": msg, "err": err,
+    })
+
+
+@router.post("/tasks/reviews/reject")
+def task_reviews_reject(request: Request,
+                        progress_id: List[int] = Form(default=[]),
+                        force_pct: str = Form(""), note: str = Form(""),
+                        date_from: str = Form(""), date_to: str = Form(""),
+                        team_id: str = Form(""), csrf_token: str = Form(""),
+                        user: Optional[User] = Depends(require_login),
+                        db: Session = Depends(get_db)):
+    """**批量驳回**队长已确认/调整过的进展（管理员）。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    back = "/tasks/reviews"
+    qs = "&".join(x for x in (
+        "date_from=%s" % (_parse_date(date_from) or "") if date_from else "",
+        "date_to=%s" % (_parse_date(date_to) or "") if date_to else "",
+        "team_id=%s" % team_id if team_id else "") if x)
+    if qs:
+        back += "?" + qs
+    ids = [int(x) for x in (progress_id or [])]
+    if not ids:
+        return RedirectResponse(_with_msg(back, "err", _m("请先勾选要驳回的进展")),
+                                status_code=303)
+    from app.services import bd_tasks
+    try:
+        r = bd_tasks.reject_reviews_many(db, ids, by=user.username,
+                                         actor_user=user, force_pct=force_pct,
+                                         note=note)
+        db.commit()
+    except Exception as e:                        # noqa: BLE001
+        db.rollback()
+        return RedirectResponse(_with_msg(back, "err", _m(str(e))), status_code=303)
+    n_skip = len(r["skipped"])
+    extra = (_m("（统一退回到 %s%%）", force_pct)
+             if str(force_pct or "").strip() else "")
+    if not r["updated"]:
+        why = r["skipped"][0]["why"] if r["skipped"] else ""
+        return RedirectResponse(_with_msg(back, "err", _m("一条都没驳回：%s", why)),
+                                status_code=303)
+    if n_skip:
+        url = _with_msg(back, "msg", _m("已驳回 %d 条，退回待确认%s", r["updated"], extra))
+        url = _with_msg(url, "err", _m("另有 %d 条被跳过：%s", n_skip,
+                                       r["skipped"][0]["why"]))
+        return RedirectResponse(url, status_code=303)
+    return RedirectResponse(
+        _with_msg(back, "msg", _m("已驳回 %d 条，退回待确认%s", r["updated"], extra)),
+        status_code=303)
+
 @router.get("/my/tasks", response_class=HTMLResponse)
 def my_tasks_page(request: Request,
                   user: Optional[User] = Depends(require_login),

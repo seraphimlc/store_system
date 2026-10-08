@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{# 管理员「进展复核」：队长已确认/调整过的进展 → 批量驳回（退回员工原值、回到待确认）
+   用户 2026-10-07："管理员批量驳回队长确认过的任务进展。" #}
+{% block content %}
+{% if msg %}<div class="msg ok" data-testid="reviews-msg">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err" data-testid="reviews-err">{{ err }}</div>{% endif %}
+<h2 style="font-size:1.05rem" data-testid="reviews-title">{{ t('队长已确认的进展') }}</h2>
+<p class="hint" style="margin:.2rem 0 .7rem">
+  {{ t('驳回后：进度退回队员上报的原值，状态回到「待确认」，队长会重新看到它并收到汇总通知；队员各收到一条通知。') }}
+</p>
+
+<form method="get" action="/tasks/reviews" class="card"
+      style="padding:.6rem 1rem;display:flex;gap:.8rem;align-items:end;flex-wrap:wrap">
+  <label class="f">{{ t('从') }}
+    <input type="date" name="date_from" value="{{ date_from.isoformat() }}"></label>
+  <label class="f">{{ t('到') }}
+    <input type="date" name="date_to" value="{{ date_to.isoformat() }}"></label>
+  <label class="f">{{ t('团队') }}
+    <select name="team_id">
+      <option value="">{{ t('全部') }}</option>
+      {% for o in teams %}
+      <option value="{{ o.id }}" {% if team_id == o.id %}selected{% endif %}>{{ o.name }}</option>
+      {% endfor %}
+    </select></label>
+  <button class="btn" type="submit" data-testid="reviews-filter">{{ t('筛选') }}</button>
+</form>
+
+<p class="hint" style="margin:.5rem 0">
+  {{ t('共') }} <b data-testid="reviews-count">{{ v.rows|length }}</b> {{ t('条') }}
+  （{{ t('已确认') }} {{ v.n_confirmed }} ｜ {{ t('已调整') }} {{ v.n_adjusted }}
+  {% if v.n_no_origin %}｜ <span class="warnk">{{ t('其中') }} {{ v.n_no_origin }}
+  {{ t('条没有队员原值，需填「统一退回到」才能驳回') }}</span>{% endif %}）
+  {% if v.more %}<span class="warnk">（{{ t('只显示最近') }} {{ v.limit }} {{ t('条') }}{{ t('，请缩小日期范围') }}）</span>{% endif %}
+</p>
+
+{% if v.rows %}
+<form method="post" action="/tasks/reviews/reject" id="bulk-reject-form" data-testid="bulk-reject-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="date_from" value="{{ date_from.isoformat() }}">
+  <input type="hidden" name="date_to" value="{{ date_to.isoformat() }}">
+  <input type="hidden" name="team_id" value="{{ team_id or '' }}">
+
+  <div class="card" style="padding:.6rem 1rem;margin-bottom:.6rem;display:flex;gap:1rem;align-items:end;flex-wrap:wrap">
+    <label class="f" style="max-width:13rem">{{ t('统一退回到') }} %
+      <input type="number" name="force_pct" min="0" max="100" step="1" value=""
+             placeholder="{{ t('留空则退回队员上报的原值') }}"
+             data-testid="force-pct" style="width:100%"></label>
+    <label class="f" style="flex:1;min-width:14rem">{{ t('驳回原因（可空，会发给相关人员）') }}
+      <input type="text" name="note" value="" style="width:100%" data-testid="reject-note"></label>
+    <button class="btn" type="submit" data-testid="bulk-reject"
+            onclick="return confirm('{{ t('确认驳回勾选的进展？进度会退回队员上报的原值，队长需要重新确认。') }}')">
+      {{ t('批量驳回（退回待确认）') }}</button>
+  </div>
+
+  <div class="tbl-wrap">
+    <table class="grid-tbl" data-testid="reviews-table">
+      <thead>
+        <tr>
+          <th style="width:2.4rem"><input type="checkbox" style="width:auto"
+                data-testid="check-all"
+                onclick="var f=document.getElementById('bulk-reject-form');f.querySelectorAll('input[name=progress_id]').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
+          <th>{{ t('进度日期') }}</th><th>{{ t('站点') }}</th><th>{{ t('线路') }}</th>
+          <th>{{ t('团队') }}</th><th>{{ t('队员上报') }}</th><th>{{ t('队长结论') }}</th>
+          <th>{{ t('确认人') }}</th><th>{{ t('任务当前') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in v.rows %}
+        <tr data-testid="review-row-{{ r.progress_id }}">
+          <td><input type="checkbox" name="progress_id" value="{{ r.progress_id }}"
+                     form="bulk-reject-form" style="width:auto"
+                     data-testid="pick-{{ r.progress_id }}"
+                     {% if not r.can_back %}title="{{ t('这条是队长直接填的') }}"{% endif %}></td>
+          <td>{{ r.date.isoformat() }}</td>
+          <td><a href="/tasks/{{ r.task_id }}">{{ r.station }}</a></td>
+          <td class="hint">{{ r.line }}</td>
+          <td>{{ r.team_name }}</td>
+          <td>{% if r.reported_pct is not none %}{{ r.reported_pct }}%
+              {% else %}<span class="hint">—</span>{% endif %}</td>
+          <td><span class="pill {% if r.status == 'confirmed' %}okk{% else %}warnk{% endif %}"
+                data-testid="status-{{ r.progress_id }}">{{ r.status_label }} {{ r.pct }}%</span></td>
+          <td class="hint">{{ r.reviewer }}</td>
+          <td class="hint">{{ r.task_pct }}%（{{ r.task_state }}）</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+{% else %}
+<p class="card" style="padding:1rem" data-testid="reviews-empty">
+  {{ t('这个范围内没有队长确认过的进展。') }}</p>
+{% endif %}
+{% endblock %}

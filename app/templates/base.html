@@ -94,8 +94,10 @@
        href="/teams">{{ t('团队') }}</a>
     <a class="side-item {% if _p.startswith('/stations') %}on{% endif %}"
        href="/stations">{{ t('车站') }}</a>
-    <a class="side-item {% if _p.startswith('/tasks') %}on{% endif %}"
+    <a class="side-item {% if _p.startswith('/tasks') and not _p.startswith('/tasks/reviews') %}on{% endif %}"
        href="/tasks">{{ t('任务') }}</a>
+    <a class="side-item {% if _p.startswith('/tasks/reviews') %}on{% endif %}"
+       href="/tasks/reviews">{{ t('进展复核') }}</a>
     <a class="side-item {% if _p.startswith('/logs') %}on{% endif %}"
        href="/logs">{{ t('日志') }}</a>
   </div>

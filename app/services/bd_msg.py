@@ -217,6 +217,11 @@ def notify_task_progress(db: Session, task, action: str, old_pct,
             return (R("任务进展被驳回：%s", station, lang=lang),
                     R("你上报的 %s%% 被%s驳回，进度改回 %s%%。%s",
                       old_s, who_s, new_pct, note or "", lang=lang))
+        if action == "unconfirmed":
+            # 管理员**批量撤销队长的确认**：回到员工原值、状态回 pending（用户 2026-10-07）
+            return (R("任务进展确认被撤销：%s", station, lang=lang),
+                    R("你上报的 %s%% 经确认后被管理员撤销，进度回到 %s%%，等待重新确认。%s",
+                      old_s, new_pct, note or "", lang=lang))
         return (R("任务进展已调整：%s", station, lang=lang),
                 R("你上报的 %s%%，被%s调整为 %s%%。%s",
                   old_s, who_s, new_pct, note or "", lang=lang))

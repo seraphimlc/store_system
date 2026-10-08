@@ -1289,6 +1289,223 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
             "reported_pct": orig, "notified": bool(notified)}
 
 
+
+#: 「队长已处理过」的两种结论（确认 / 调整）—— 管理员批量驳回针对它们（用户 2026-10-07）
+REVIEW_SETTLED = ("confirmed", "adjusted")
+
+#: 审核状态的中文说法（日志/跳过原因/页面上统一用这一份）
+REVIEW_LABELS = {"pending": "待确认", "confirmed": "已确认",
+                 "adjusted": "已调整", "rejected": "已驳回", "": "未上报"}
+
+
+def review_label(status: Optional[str]) -> str:
+    s = (status or "").strip()
+    return REVIEW_LABELS.get(s, s or "—")
+
+
+def settled_reviews(db: Session, *, date_from: Optional[date] = None,
+                    date_to: Optional[date] = None,
+                    team_id: Optional[int] = None,
+                    limit: int = 500) -> dict:
+    """**队长已确认/调整过的进展**清单（管理员批量驳回用，用户 2026-10-07）。
+
+    行 = 一条 `bd_task_progress`（队长处理过的），**不是任务** —— 管理员要驳回的对象是
+    "这个队长确认了这条进展"，不是"这个任务"。
+
+    列表 SQL **常数条**（铁律 5）：任务/队/站点名/人名各一次批量查询，循环里不查库。
+    """
+    q = (db.query(BdTaskProgress, BdTask)
+         .join(BdTask, BdTask.id == BdTaskProgress.task_id)
+         .filter(BdTaskProgress.review_status.in_(REVIEW_SETTLED)))
+    if date_from is not None:
+        q = q.filter(BdTaskProgress.progress_date >= date_from)
+    if date_to is not None:
+        q = q.filter(BdTaskProgress.progress_date <= date_to)
+    if team_id:
+        q = q.filter(BdTask.team_id == int(team_id))
+    rows = (q.order_by(BdTaskProgress.progress_date.desc(),
+                       BdTaskProgress.id.desc()).limit(limit + 1).all())
+    more = len(rows) > limit
+    rows = rows[:limit]
+    if not rows:
+        return {"rows": [], "more": False, "limit": limit,
+                "n_confirmed": 0, "n_adjusted": 0, "n_no_origin": 0}
+
+    pids = [t.place_id for _pr, t in rows if t.place_id]
+    sids = [t.station_id for _pr, t in rows if t.station_id]
+    from app.models import BdLine, User
+    team_names = {t.id: t.name for t in db.query(BdTeam).all()}
+    place_names = ({p.id: p.name for p in db.query(BdStationPlace)
+                    .filter(BdStationPlace.id.in_(pids)).all()} if pids else {})
+    st_rows = (db.query(BdStation).filter(BdStation.id.in_(sids)).all()
+               if sids else [])
+    st_names = {s.id: s.name for s in st_rows}
+    line_names = {l.id: l.name for l in db.query(BdLine).all()}
+    st_lines = {s.id: line_names.get(s.line_id, "") for s in st_rows}
+    unames = {x for _pr, _t in rows for x in
+              ((_pr.reported_by or "").strip(), (_pr.reviewed_by or "").strip()) if x}
+    disp = ({u.username: (u.display_name or u.username)
+             for u in db.query(User).filter(User.username.in_(unames)).all()}
+            if unames else {})
+
+    out = []
+    n_conf = n_adj = n_no = 0
+    for pr, t in rows:
+        can_back = pr.reported_pct is not None
+        if pr.review_status == "confirmed":
+            n_conf += 1
+        else:
+            n_adj += 1
+        if not can_back:
+            n_no += 1
+        out.append({
+            "progress_id": pr.id, "task_id": t.id, "date": pr.progress_date,
+            "station": place_names.get(t.place_id) or st_names.get(t.station_id, ""),
+            "line": st_lines.get(t.station_id, ""),
+            "team_id": t.team_id, "team_name": team_names.get(t.team_id, ""),
+            "status": pr.review_status, "status_label": review_label(pr.review_status),
+            "reported_pct": pr.reported_pct, "pct": pr.pct, "can_back": can_back,
+            "reported_by": disp.get((pr.reported_by or "").strip(),
+                                    pr.reported_by or ""),
+            "reviewer": disp.get((pr.reviewed_by or "").strip(), pr.reviewed_by or ""),
+            "task_pct": t.pct, "task_state": t.state,
+        })
+    return {"rows": out, "more": more, "limit": limit,
+            "n_confirmed": n_conf, "n_adjusted": n_adj, "n_no_origin": n_no}
+
+
+def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "",
+                        actor_user=None, force_pct=None, note: str = "") -> dict:
+    """**批量驳回队长已确认/调整的进展**（管理员；用户 2026-10-07 口径）。
+
+    - 目标行：`review_status in ('confirmed','adjusted')`，其余**跳过并给原因**
+    - 目标值：**退回员工上报原值 `reported_pct`**；`force_pct` 给了就统一用它
+      （⚠️ 专门用来把"已完成 100%"打回进行中 —— 员工原值也是 100% 时靠它才退得回来）
+    - 目标状态：`pending`（回到"待确认"，队长重新看到它；**不再锁员工**）
+    - 任务侧：**只有当这条是该任务最新一天的那条**时才改 `bd_task.pct/state`
+      （更早那几天不是"当前生效值"，动它会污染今天的实际进度）
+    - 每条一个 savepoint（一条坏不影响其它）+ 每条写日志 + 通知
+    """
+    from app.services import bd_log, bd_msg, bd_teams
+    if actor_user is not None:
+        by = getattr(actor_user, "username", "") or by
+    if force_pct is not None and str(force_pct).strip() != "":
+        try:
+            force_pct = int(force_pct)
+        except (TypeError, ValueError):
+            raise TaskError("统一退回的进度要是 0–100 的整数")
+        if not (0 <= force_pct <= 100):
+            raise TaskError("统一退回的进度要在 0–100 之间")
+    else:
+        force_pct = None
+
+    ids = [int(x) for x in dict.fromkeys(progress_ids or [])]
+    # 「每个任务最新一天」预取（一条 SQL；避免逐行查库 —— 铁律 5）
+    latest_date: Dict[int, date] = {}
+    if ids:
+        tids = [tid for (tid,) in db.query(BdTaskProgress.task_id)
+                .filter(BdTaskProgress.id.in_(ids)).all() if tid]
+        if tids:
+            for tid, d in (db.query(BdTaskProgress.task_id,
+                                    func.max(BdTaskProgress.progress_date))
+                           .filter(BdTaskProgress.task_id.in_(tids))
+                           .group_by(BdTaskProgress.task_id).all()):
+                latest_date[tid] = d
+
+    updated, skipped = 0, []
+    done = []                                     # [(pr, t, old_status, old_pct, target)]
+    by_team: Dict[int, int] = {}
+    for pid in ids:
+        pr = db.get(BdTaskProgress, pid)
+        if pr is None:
+            skipped.append({"id": pid, "why": "进展记录不存在"})
+            continue
+        if pr.review_status not in REVIEW_SETTLED:
+            skipped.append({"id": pid, "why": "还没被队长处理过（当前：%s）"
+                            % review_label(pr.review_status)})
+            continue
+        target = force_pct if force_pct is not None else pr.reported_pct
+        if target is None:
+            skipped.append({"id": pid,
+                            "why": "队长直接填的、没有员工上报原值；"
+                                   "要退请填「统一退回到」的百分比"})
+            continue
+        t = db.get(BdTask, pr.task_id)
+        if t is None:
+            skipped.append({"id": pid, "why": "任务不存在"})
+            continue
+        try:
+            with db.begin_nested():               # savepoint：这条失败只回滚这条
+                old_status, old_pct = pr.review_status, pr.pct
+                pr.pct = int(target)
+                pr.review_status = "pending"      # 回到待确认（队长重新看）
+                pr.reviewed_by = ""
+                pr.reviewed_at = None
+                pr.review_note = ""
+                pr.updated_at = datetime.utcnow()
+                if latest_date.get(t.id) == pr.progress_date:
+                    t.pct = int(target)
+                    if int(target) < 100:
+                        t.done_date = None        # 回退清完成日（与既有口径一致）
+                    refresh_state(db, t)
+                    db.flush()
+                bd_log.log_op(db, actor_user, "task", "reject", ref_id=t.id,
+                              ref_label=_station_name(db, t), field="进展确认",
+                              old="%s %s%%" % (review_label(old_status),
+                                               "—" if old_pct is None else old_pct),
+                              new="退回待确认 %d%%" % int(target),
+                              note=(note or ""))
+            updated += 1
+            done.append((pr, t, old_status, old_pct, int(target)))
+            if t.team_id:
+                by_team[t.team_id] = by_team.get(t.team_id, 0) + 1
+        except Exception as e:                    # noqa: BLE001
+            skipped.append({"id": pid, "why": str(e)[:80]})
+    db.flush()
+
+    # ---- 通知：队员各自一条（参照"驳回"的通知口径：回值 + 说明）----
+    notified = 0
+    for pr, t, _old_status, old_pct, target in done:
+        try:
+            r = bd_msg.notify_task_progress(
+                db, t, "unconfirmed", old_pct, target, by_user=actor_user,
+                note=(note or ""), station=_station_name(db, t),
+                reporter=(pr.reported_by or pr.submitted_by or ""))
+            notified += 1 if r is not None else 0
+        except Exception:                         # noqa: BLE001
+            pass                                  # 通知失败不能把驳回回滚掉
+    # ---- 涉及的队长各一条汇总（不逐条轰炸）----
+    summaries = 0
+    for tid, n in sorted(by_team.items()):
+        try:
+            codes = bd_teams.leader_codes(db, tid)
+            if not codes:
+                continue
+            bd_msg.send(db, actor_user, codes,
+                        _m_summary_title(n),
+                        _m_summary_body(db, tid, n, actor_user, note),
+                        url="/my/tasks?tab=pending", scope="task_review")
+            summaries += 1
+        except Exception:                         # noqa: BLE001
+            pass
+    db.flush()
+    return {"updated": updated, "skipped": skipped, "notified": notified,
+            "summaries": summaries, "force_pct": force_pct}
+
+
+def _m_summary_title(n: int) -> str:
+    from app.i18n import render_msg as R
+    return R("你队的 %d 条进展确认被管理员驳回", n)
+
+
+def _m_summary_body(db: Session, team_id: int, n: int, actor_user, note: str) -> str:
+    from app.i18n import render_msg as R
+    team = db.get(BdTeam, team_id)
+    who = ((getattr(actor_user, "display_name", "") or
+            getattr(actor_user, "username", "")) if actor_user else "") or "管理员"
+    tpl = "%s 把 %s 的 %d 条进展确认退回了「待确认」：进度按队员上报的原值计，请你重新确认。%s"
+    return R(tpl, who, (team.name if team else "你队"), n, note or "")
+
 def stale_count(db: Session, team_id: Optional[int] = None,
                 line_id: Optional[int] = None, date_from=None, date_to=None,
                 kw: str = "", stale_days: int = 2) -> int:

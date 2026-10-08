@@ -42,23 +42,24 @@ app/services/bd_import_rail.py	作业域·服务	N02 一都三県地铁数据导
 app/services/bd_leave.py	作业域·服务	假期模式 + 派工可用性提醒（只读跨域，绝不写）	9118
 app/services/bd_lines.py	作业域·服务	线路主档 + line_label()（运营商简称+线名）/线路下拉	4116
 app/services/bd_log.py	作业域·服务	通用追加日志（任务/团队/成员/车站）	5063
-app/services/bd_msg.py	作业域·服务	站内消息（一条消息+N 收件人行；收件人隔离唯一入口）	12587
+app/services/bd_msg.py	作业域·服务	站内消息（一条消息+N 收件人行；收件人隔离唯一入口）	12875
 app/services/bd_perm.py	作业域·服务	角色能力表（判权与按钮共用一份）	3550
 app/services/bd_places.py	作业域·服务	物理车站层：rebuild_places（同 group_code+坐标合并）	8036
 app/services/bd_store.py	作业域·服务	BD 作业域 · 门店宇宙（`bd_store`）。	5335
 app/services/bd_summary_ai.py	作业域·服务	**任务域 AI 总结**（近 7 天 + 环比上一个 7 天）。	8055
-app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	82259
+app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	91783
 app/services/bd_teams.py	作业域·服务	团队：建队/圈人（一人一队唯一索引）/队长同步/成员状态	16911
 app/templates/_ai_suggest.html	作业域·模板	AI 派工建议的 htmx 片段	2691
 app/templates/_pager.html	作业域·模板	共	1470
 app/templates/bd_logs.html	作业域·模板	变更日志	3493
+app/templates/bd_reviews.html	作业域·模板	队长已确认的进展	4871
 app/templates/bd_stations.html	作业域·模板	车站页（资产维护；筛选只有 关键词+线路）	6122
 app/templates/bd_task_detail.html	作业域·模板	店铺数	7031
 app/templates/bd_task_new.html	作业域·模板	建任务	7774
 app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→筛选→列表；未分配=车站池可批量派队）	20748
 app/templates/bd_team_detail.html	作业域·模板	团队详情：圈选队员（一人一队）	6207
 app/templates/bd_teams.html	作业域·模板	团队列表页	3819
-app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	64764
+app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	68528
 AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	7503
 README.md	入口文档		2768
 conftest.py	其它		75
@@ -90,7 +91,7 @@ app/auth.py	基座	会话与密码：argon2 哈希、签名 cookie（itsdangerou
 app/config.py	基座	Web 应用配置：从环境变量读取（default_factory 保证每次构造读最新 env），	4701
 app/db.py	基座	SQLAlchemy engine/session；环境变量 DATABASE_URL 控制（测试用 sqlite://）。	1206
 app/forms.py	基座	表单一次性提交令牌的接线层：模板全局函数 + 路由依赖 + 客户端防双击。	2606
-app/i18n.py	基座	多语言（中文/日文）基础设施。	38292
+app/i18n.py	基座	多语言（中文/日文）基础设施。	39625
 app/main.py	基座	FastAPI 应用工厂与入口。	10426
 app/models.py	基座	ORM 模型（spec v0.4 §4.1–4.8）。JSON 一律 sqlalchemy.JSON（SQLite/PG 兼容）。	62740
 app/templating.py	基座	共享 Jinja2Templates 工厂：统一注册多语言全局函数（t / LANG_NAMES / lang_url）。	3211
@@ -189,7 +190,7 @@ docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务�
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141
-docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	77012
+docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	78564
 docs/记录-员工填报.md	文档	记录 · 员工每日填报 + 对比 + AI 报告	6963
 docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	8920
 docs/试跑报告-任务域.md	文档	试跑报告 · 任务域（真库 · 2026-10-06）	3216
@@ -211,7 +212,7 @@ app/services/mcp_tokens.py	服务层	MCP Token 服务适配层：**只调用** `
 app/services/paging.py	服务层	列表分页（**全站唯一实现**，别各页面自己写一套）。	2416
 app/services/report.py	服务层	V3 文件判定明细（/files/{id}/report）：基于 raw_records.clean_status + 申诉状态。	13538
 app/services/self_report.py	服务层	**员工每日自报的跨域编排层**（点数 + 当天任务进度，一次提交）。	3790
-app/templates/base.html	模板	全站基座（顶栏/底栏/侧栏/未读角标/语言切换）	12079
+app/templates/base.html	模板	全站基座（顶栏/底栏/侧栏/未读角标/语言切换）	12247
 app/templates/config.html	模板	系统配置	3149
 app/templates/dashboard.html	模板	数据看板	12317
 app/templates/file_layout.html	模板	解析布局（可纠正）	3541
@@ -289,7 +290,7 @@ tests_web/test_staff_status.py	测试·Web	员工管理（状态：在岗/请假
 tests_web/test_store_auto.py	测试·Web	店铺主档自动化测试：上传后增量建候选对 → exact 自动合并 → 受影响月自动重算	15399
 tests_web/test_store_master.py	测试·Web	主档合并服务测试。	1665
 tests_web/test_store_rules.py	测试·Web		753
-tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	213861
+tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	225379
 tests_web/test_templates.py	测试·Web	模板渲染冒烟：base 可加载；登录态含标题与阶段二灰置导航；未登录仅品牌。	9800
 tests_web/test_token_pages.py	测试·Web	MCP Token 管理员代发/吊销、员工状态联动提示。	7215
 tests/__init__.py	测试·结算		0

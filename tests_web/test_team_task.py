@@ -5175,3 +5175,302 @@ def test_self_report_100_without_store_count_shows_error(client, seeded):
     db = appdb.SessionLocal()
     assert db.get(BdTask, tid).pct != 100, "失败就要整体回滚"
     db.close()
+
+
+# ---------------- 管理员批量驳回队长已确认的进展（用户 2026-10-07）----------------
+
+def _mk_review(db, task_id, d, reported, reviewed, status, reporter="wen-yiqi",
+               reviewer="ogawa"):
+    """造一条"队长处理过"的进展行：队员报 reported，队长结论 status → reviewed。"""
+    from app.models import BdTaskProgress
+    row = (db.query(BdTaskProgress)
+           .filter(BdTaskProgress.task_id == task_id,
+                   BdTaskProgress.progress_date == d).first())
+    if row is None:
+        row = BdTaskProgress(task_id=task_id, progress_date=d)
+        db.add(row)
+    row.pct = reviewed
+    row.reported_pct = reported if reported is not None else None
+    row.reported_by = reporter
+    row.submitted_by = reporter
+    row.review_status = status
+    row.reviewed_by = reviewer
+    row.reviewed_at = datetime.utcnow()
+    row.review_note = "队长写的意见"
+    db.commit()
+    return row
+
+
+def test_reject_reviews_returns_to_reported_value(seeded):
+    """驳回后：**值退回员工上报原值** + 状态回到 pending + 队长的意见清掉。"""
+    from app.models import BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    row = _mk_review(db, tid, bd_tasks._today(), 40, 40, "confirmed")
+    db.get(BdTask, tid).pct = 40
+    db.commit()
+    r = bd_tasks.reject_reviews_many(db, [row.id], by="admin",
+                                     actor_user=db.query(User).filter(
+                                         User.username == "admin").first())
+    db.commit()
+    assert r["updated"] == 1 and not r["skipped"], r
+    got = db.get(BdTaskProgress, row.id)
+    assert got.review_status == "pending", "回到待确认（队长重新看）"
+    assert got.pct == 40, "退回员工上报的原值"
+    assert got.reported_pct == 40, "原值字段不能被清掉"
+    assert got.reviewed_by == "" and got.reviewed_at is None
+    assert got.review_note == "", "队长的意见要让位给新的处理"
+    db.close()
+
+
+def test_reject_reviews_adjusted_counts_and_clears_done(seeded):
+    """队长**调整过**的也算；把 100%（已完成）打回 → 任务回到进行中、完成日清掉。"""
+    from app.models import BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    row = _mk_review(db, tid, bd_tasks._today(), 70, 100, "adjusted")
+    t = db.get(BdTask, tid)
+    t.pct = 100
+    db.commit()
+    bd_tasks.refresh_state(db, t)
+    db.commit()
+    assert db.get(BdTask, tid).state == "done"
+    db.get(BdTask, tid).done_date = bd_tasks._today()
+    db.commit()
+    r = bd_tasks.reject_reviews_many(db, [row.id], by="admin",
+                                     actor_user=db.query(User).filter(
+                                         User.username == "admin").first())
+    db.commit()
+    assert r["updated"] == 1, r
+    got = db.get(BdTaskProgress, row.id)
+    assert got.pct == 70 and got.review_status == "pending"
+    t2 = db.get(BdTask, tid)
+    assert t2.pct == 70 and t2.state == "doing", "退回原值后要回到进行中"
+    assert t2.done_date is None, "完成日要清掉"
+    db.close()
+
+
+def test_reject_reviews_skips_unprocessed_and_no_origin(seeded):
+    """跳过并给原因：队长没处理过的、以及"队长直接填、没有员工原值"的。"""
+    from datetime import timedelta
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    pending = _mk_review(db, tid, bd_tasks._today(), 30, 30, "pending")
+    noorigin = _mk_review(db, tid, bd_tasks._today() - timedelta(days=1),
+                          30, 55, "adjusted")
+    noorigin.reported_pct = None          # 队长直接填的（没有员工原值）
+    db.commit()
+    r = bd_tasks.reject_reviews_many(db, [pending.id, noorigin.id], by="admin")
+    db.commit()
+    assert r["updated"] == 0 and len(r["skipped"]) == 2, r
+    whys = " ".join(x["why"] for x in r["skipped"])
+    assert "还没被队长处理过" in whys and "没有员工上报原值" in whys, whys
+    db.close()
+
+
+def test_reject_reviews_force_pct_beats_origin(seeded):
+    """`force_pct`：员工原值也是 100% 时，靠它才能把"已完成"真正打回。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")   # 有担当 → 回退后是 doing
+    row = _mk_review(db, tid, bd_tasks._today(), 100, 100, "confirmed")
+    t = db.get(BdTask, tid)
+    t.pct = 100
+    db.commit()
+    bd_tasks.refresh_state(db, t)
+    db.commit()
+    r = bd_tasks.reject_reviews_many(db, [row.id], by="admin", force_pct=0)
+    db.commit()
+    assert r["updated"] == 1 and r["force_pct"] == 0, r
+    assert db.get(BdTask, tid).pct == 0
+    assert db.get(BdTask, tid).state == "doing", "统一退回 0% → 打回进行中"
+    db.close()
+
+
+def test_reject_reviews_keeps_task_value_when_row_not_latest(seeded):
+    """驳回的**不是最新那天**时，绝不能动任务当前的生效值。"""
+    from datetime import timedelta
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    today = bd_tasks._today()
+    old = _mk_review(db, tid, today - timedelta(days=3), 50, 60, "adjusted")
+    _mk_review(db, tid, today, 80, 80, "confirmed")
+    t = db.get(BdTask, tid)
+    t.pct = 80
+    db.commit()
+    bd_tasks.refresh_state(db, t)
+    db.commit()
+    r = bd_tasks.reject_reviews_many(db, [old.id], by="admin")
+    db.commit()
+    assert r["updated"] == 1, r
+    assert db.get(BdTaskProgress, old.id).review_status == "pending"
+    assert db.get(BdTask, tid).pct == 80, "任务仍按最新那条（80%）"
+    db.close()
+
+
+def test_settled_reviews_lists_only_settled(seeded):
+    """清单只列队长处理过的（confirmed/adjusted），并带出队伍/上报人/结论。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    _mk_review(db, tid, bd_tasks._today(), 40, 45, "adjusted")
+    _mk_review(db, tid, bd_tasks._today() - __import__("datetime").timedelta(days=1),
+               30, 30, "pending")
+    v = bd_tasks.settled_reviews(db)
+    assert len(v["rows"]) == 1, v["rows"]
+    row = v["rows"][0]
+    assert row["status"] == "adjusted" and row["reported_pct"] == 40
+    assert row["pct"] == 45 and row["can_back"] is True
+    assert row["team_name"] and row["station"]
+    assert v["n_adjusted"] == 1 and v["n_no_origin"] == 0
+    db.close()
+
+
+def test_reject_reviews_notifies_member_and_leader_summary(seeded):
+    """队员各自一条（确认被撤销）+ 涉及的队长一条汇总。"""
+    from app.models import BdMessage, BdTeamMember
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    # 上报人必须是**库里真有的账号**（消息按 username→人员编号换算），且任务要有担当
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    row = _mk_review(db, tid, bd_tasks._today(), 40, 40, "confirmed",
+                     reporter="tangjing")
+    admin = db.query(User).filter(User.username == "admin").first()
+    before = db.query(BdMessage).count()
+    r = bd_tasks.reject_reviews_many(db, [row.id], by="admin", actor_user=admin)
+    db.commit()
+    assert r["updated"] == 1 and r["notified"] == 1, r
+    assert r["summaries"] >= 1, "要给涉及的队长发一条汇总"
+    msgs = db.query(BdMessage).order_by(BdMessage.id.desc()).limit(3).all()
+    titles = " ".join(m.title for m in msgs)
+    assert "确认被撤销" in titles or "被管理员驳回" in titles, titles
+    assert db.query(BdMessage).count() >= before + 2
+    # 队长汇总发给该队在册队长
+    leaders = {c for (c,) in db.query(BdTeamMember.person_code).filter(
+        BdTeamMember.team_id == seeded["team"],
+        BdTeamMember.role == "leader", BdTeamMember.end_date.is_(None)).all()}
+    assert leaders, "测试前提：该队有在册队长"
+    db.close()
+
+
+def test_reviews_page_admin_only(client, seeded):
+    """页面只有管理员能进；队长/队员被挡回。"""
+    _login(client, "ogawa")
+    r = client.get("/tasks/reviews", follow_redirects=False)
+    assert r.status_code == 302, "队长不该进得来"
+    r2 = client.get("/tasks/reviews")
+    assert r2.status_code in (200, 403) and "队长已确认的进展" not in r2.text
+    _login(client, "admin")
+    ok = client.get("/tasks/reviews")
+    assert ok.status_code == 200 and "队长已确认的进展" in ok.text
+    assert 'data-testid="reviews-table"' in ok.text or \
+        'data-testid="reviews-empty"' in ok.text
+
+
+def test_reviews_page_lists_and_filters(client, seeded):
+    """页面列出队长处理过的进展，按日期/队伍筛选有效。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    row = _mk_review(db, tid, bd_tasks._today(), 40, 45, "adjusted",
+                     reporter="tangjing")
+    db.close()
+    _login(client, "admin")
+    today = bd_tasks._today().isoformat()
+    h = client.get("/tasks/reviews?date_from=%s&date_to=%s" % (today, today)).text
+    assert "已调整" in h
+    assert 'data-testid="reviews-table"' in h
+    assert 'data-testid="pick-%d"' % row.id in h, "这一行要在表里"
+    assert "45%" in h and "40%" in h              # 队员上报 40% ｜ 队长结论 45%
+    # 日期窗口挪到很久以前 → 空态
+    h2 = client.get("/tasks/reviews?date_from=2020-01-01&date_to=2020-01-02").text
+    assert 'data-testid="reviews-empty"' in h2
+    # 按队筛：换一个别的队 → 空
+    db = appdb.SessionLocal()
+    other = bd_teams.create_team(db, "假队", by="admin")
+    db.commit()
+    db.close()
+    h3 = client.get("/tasks/reviews?date_from=%s&date_to=%s&team_id=%d"
+                    % (today, today, other.id)).text
+    assert 'data-testid="reviews-empty"' in h3
+
+
+def test_reviews_reject_post_requires_admin_and_csrf(client, seeded):
+    """批量驳回是管理员的动作（队长不行），且要 CSRF。"""
+    db = appdb.SessionLocal()
+    row = _mk_review(db, seeded["task"], bd_tasks._today(), 40, 40, "confirmed")
+    db.close()
+    _login(client, "ogawa")
+    r = client.post("/tasks/reviews/reject", data={"progress_id": [row.id]},
+                    follow_redirects=False)
+    assert r.status_code in (302, 403), "队长不该能驳回"
+    db = appdb.SessionLocal()
+    assert db.get(BdTaskProgress, row.id).review_status == "confirmed"
+    db.close()
+    # 管理员但 CSRF 错 → 400
+    _login(client, "admin")
+    bad = client.post("/tasks/reviews/reject",
+                      data={"progress_id": [row.id], "csrf_token": "x"})
+    assert bad.status_code == 400
+
+
+def test_reviews_reject_post_works(client, seeded):
+    """管理员勾选后提交 → 退回待确认 + 人话提示。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    row = _mk_review(db, tid, bd_tasks._today(), 40, 40, "confirmed",
+                     reporter="tangjing")
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/tasks/reviews/reject",
+              {"progress_id": [str(row.id)], "note": "确认错了"},
+              from_path="/tasks/reviews")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    loc = _uq(r.headers["location"])
+    assert "msg=" in loc and "已驳回 1 条" in loc, loc
+    db = appdb.SessionLocal()
+    got = db.get(BdTaskProgress, row.id)
+    assert got.review_status == "pending" and got.pct == 40
+    assert db.get(BdTask, tid).pct == 40
+    db.close()
+
+
+def test_reviews_reject_post_force_pct(client, seeded):
+    """「统一退回到 X%」能覆盖员工原值（专治已完成打回）。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")
+    db.commit()
+    row = _mk_review(db, tid, bd_tasks._today(), 100, 100, "confirmed",
+                     reporter="tangjing")
+    t = db.get(BdTask, tid)
+    t.pct = 100
+    db.commit()
+    bd_tasks.refresh_state(db, t)
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/tasks/reviews/reject",
+              {"progress_id": [str(row.id)], "force_pct": "0"},
+              from_path="/tasks/reviews")
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    assert db.get(BdTaskProgress, row.id).pct == 0
+    assert db.get(BdTask, tid).pct == 0
+    assert db.get(BdTask, tid).state == "doing"
+    db.close()
+
+
+def test_reviews_reject_nothing_selected(client, seeded):
+    """没勾选 → 提示，不要静默成功。"""
+    _login(client, "admin")
+    r = _post(client, "/tasks/reviews/reject", {}, from_path="/tasks/reviews")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    assert "err=" in _uq(r.headers["location"])
