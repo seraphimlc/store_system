@@ -29,7 +29,7 @@
   {{ t('共') }} <b data-testid="reviews-count">{{ v.rows|length }}</b> {{ t('条') }}
   （{{ t('已确认') }} {{ v.n_confirmed }} ｜ {{ t('已调整') }} {{ v.n_adjusted }}
   {% if v.n_no_origin %}｜ <span class="warnk">{{ t('其中') }} {{ v.n_no_origin }}
-  {{ t('条没有队员原值，需填「统一退回到」才能驳回') }}</span>{% endif %}）
+  {{ t('条没有队员原值（队长直接填），请填「没有队员原值的退回 X%」') }}</span>{% endif %}）
   {% if v.more %}<span class="warnk">（{{ t('只显示最近') }} {{ v.limit }} {{ t('条') }}{{ t('，请缩小日期范围') }}）</span>{% endif %}
 </p>
 
@@ -42,12 +42,17 @@
   <input type="hidden" name="team_id" value="{{ team_id or '' }}">
 
   <div class="card" style="padding:.6rem 1rem;margin-bottom:.6rem;display:flex;gap:1rem;align-items:end;flex-wrap:wrap">
-    <label class="f" style="max-width:13rem">{{ t('统一退回到') }} %
+    <label class="f" style="max-width:12rem">{{ t('统一退回到') }} %
       <input type="number" name="force_pct" min="0" max="100" step="1" value=""
              placeholder="{{ t('留空则退回队员上报的原值') }}"
              data-testid="force-pct" style="width:100%"></label>
+    <label class="f" style="max-width:12rem">{{ t('没有队员原值的退回') }} %
+      <input type="number" name="no_origin_pct" min="0" max="100" step="1" value=""
+             placeholder="{{ t('队长直接填的（留空=跳过）') }}"
+             data-testid="no-origin-pct" style="width:100%"></label>
     <label class="f" style="flex:1;min-width:14rem">{{ t('驳回原因（可空，会发给相关人员）') }}
       <input type="text" name="note" value="" style="width:100%" data-testid="reject-note"></label>
+    <span class="hint" style="max-width:16rem;flex:1">{{ t('要把「已完成」打回进行中，请在「统一退回到」里填一个小于 100 的值。') }}</span>
     <button class="btn" type="submit" data-testid="bulk-reject"
             onclick="return confirm('{{ t('确认驳回勾选的进展？进度会退回队员上报的原值，队长需要重新确认。') }}')">
       {{ t('批量驳回（退回待确认）') }}</button>
@@ -77,7 +82,9 @@
           <td class="hint">{{ r.line }}</td>
           <td>{{ r.team_name }}</td>
           <td>{% if r.reported_pct is not none %}{{ r.reported_pct }}%
-              {% else %}<span class="hint">—</span>{% endif %}</td>
+              {% else %}<span class="pill warnk"
+                data-testid="no-origin-{{ r.progress_id }}">{{ t('队长直接填') }}</span>
+              {% endif %}</td>
           <td><span class="pill {% if r.status == 'confirmed' %}okk{% else %}warnk{% endif %}"
                 data-testid="status-{{ r.progress_id }}">{{ r.status_label }} {{ r.pct }}%</span></td>
           <td class="hint">{{ r.reviewer }}</td>

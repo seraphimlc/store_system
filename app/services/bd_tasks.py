@@ -1375,12 +1375,17 @@ def settled_reviews(db: Session, *, date_from: Optional[date] = None,
 
 
 def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "",
-                        actor_user=None, force_pct=None, note: str = "") -> dict:
+                        actor_user=None, force_pct=None, note: str = "",
+                        no_origin_pct=None) -> dict:
     """**批量驳回队长已确认/调整的进展**（管理员；用户 2026-10-07 口径）。
 
     - 目标行：`review_status in ('confirmed','adjusted')`，其余**跳过并给原因**
     - 目标值：**退回员工上报原值 `reported_pct`**；`force_pct` 给了就统一用它
       （⚠️ 专门用来把"已完成 100%"打回进行中 —— 员工原值也是 100% 时靠它才退得回来）
+    - **`no_origin_pct`**：只对"**队长直接填、没有队员原值**"的行生效
+      （用户 2026-10-07："有些任务是队长直接调成100%的，没有分给队员，这种也要能回退"）。
+      不传 → 这些行**跳过并给原因**（不猜、不乱退）；传了 → 它们退回这个值，
+      而**有原值的行照旧退回各自原值**（两种行混一批也能一次处理完，互不覆盖）
     - 目标状态：`pending`（回到"待确认"，队长重新看到它；**不再锁员工**）
     - 任务侧：**只有当这条是该任务最新一天的那条**时才改 `bd_task.pct/state`
       （更早那几天不是"当前生效值"，动它会污染今天的实际进度）
@@ -1389,15 +1394,19 @@ def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "
     from app.services import bd_log, bd_msg, bd_teams
     if actor_user is not None:
         by = getattr(actor_user, "username", "") or by
-    if force_pct is not None and str(force_pct).strip() != "":
+    def _pct_arg(v, name):
+        if v is None or str(v).strip() == "":
+            return None
         try:
-            force_pct = int(force_pct)
+            n = int(v)
         except (TypeError, ValueError):
-            raise TaskError("统一退回的进度要是 0–100 的整数")
-        if not (0 <= force_pct <= 100):
-            raise TaskError("统一退回的进度要在 0–100 之间")
-    else:
-        force_pct = None
+            raise TaskError("%s要是 0–100 的整数" % name)
+        if not (0 <= n <= 100):
+            raise TaskError("%s要在 0–100 之间" % name)
+        return n
+
+    force_pct = _pct_arg(force_pct, "统一退回的进度")
+    no_origin_pct = _pct_arg(no_origin_pct, "「没有队员原值」要退回的进度")
 
     ids = [int(x) for x in dict.fromkeys(progress_ids or [])]
     # 「每个任务最新一天」预取（一条 SQL；避免逐行查库 —— 铁律 5）
@@ -1424,11 +1433,16 @@ def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "
             skipped.append({"id": pid, "why": "还没被队长处理过（当前：%s）"
                             % review_label(pr.review_status)})
             continue
-        target = force_pct if force_pct is not None else pr.reported_pct
+        if force_pct is not None:
+            target = force_pct
+        elif pr.reported_pct is not None:
+            target = pr.reported_pct            # 有队员原值 → 退回原值
+        else:
+            target = no_origin_pct              # 队长直接填的 → 用专门那个值
         if target is None:
             skipped.append({"id": pid,
                             "why": "队长直接填的、没有员工上报原值；"
-                                   "要退请填「统一退回到」的百分比"})
+                                   "请填「没有队员原值的退回 X%」或「统一退回到 X%」"})
             continue
         t = db.get(BdTask, pr.task_id)
         if t is None:
@@ -1467,10 +1481,14 @@ def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "
     notified = 0
     for pr, t, _old_status, old_pct, target in done:
         try:
+            # ⚠️ 只有"真有队员上报过"才把 reporter 传进去：
+            #    队长直接填的行 `submitted_by` 是队长自己 → 传了会让他既收"确认被撤销"
+            #    又收汇总（重复打扰）。没传 → 收件人就是任务当前担当（+ 没有就不发）
+            reporter = (pr.reported_by or "") if pr.reported_pct is not None else ""
             r = bd_msg.notify_task_progress(
                 db, t, "unconfirmed", old_pct, target, by_user=actor_user,
                 note=(note or ""), station=_station_name(db, t),
-                reporter=(pr.reported_by or pr.submitted_by or ""))
+                reporter=reporter)
             notified += 1 if r is not None else 0
         except Exception:                         # noqa: BLE001
             pass                                  # 通知失败不能把驳回回滚掉
@@ -1490,7 +1508,8 @@ def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "
             pass
     db.flush()
     return {"updated": updated, "skipped": skipped, "notified": notified,
-            "summaries": summaries, "force_pct": force_pct}
+            "summaries": summaries, "force_pct": force_pct,
+            "no_origin_pct": no_origin_pct}
 
 
 def _m_summary_title(n: int) -> str:

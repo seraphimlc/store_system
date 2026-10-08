@@ -5474,3 +5474,158 @@ def test_reviews_reject_nothing_selected(client, seeded):
     assert r.status_code == 303
     from urllib.parse import unquote as _uq
     assert "err=" in _uq(r.headers["location"])
+
+
+# ---- 「队长直接调成 100%、没分给队员」也要能回退（用户 2026-10-07）----
+
+def _mk_leader_direct(db, task_id, d, pct, status="adjusted", reviewer="ogawa"):
+    """造一条**队长直接填、没有队员原值**的进展（reported_pct 为空）。"""
+    from app.models import BdTaskProgress
+    row = (db.query(BdTaskProgress)
+           .filter(BdTaskProgress.task_id == task_id,
+                   BdTaskProgress.progress_date == d).first())
+    if row is None:
+        row = BdTaskProgress(task_id=task_id, progress_date=d)
+        db.add(row)
+    row.pct = pct
+    row.reported_pct = None          # ← 关键：没有队员上报原值
+    row.reported_by = ""
+    row.submitted_by = "ogawa"       # 队长自己填的
+    row.review_status = status
+    row.reviewed_by = reviewer
+    db.commit()
+    return row
+
+
+def test_no_origin_row_is_listed_and_revertable(seeded):
+    """队长直接填 100%（没分给队员）的行：**要出现在清单里**、能退回、任务回到进行中。"""
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    row = _mk_leader_direct(db, tid, bd_tasks._today(), 100)
+    t = db.get(BdTask, tid)
+    t.pct = 100
+    db.commit()
+    bd_tasks.refresh_state(db, t)
+    db.commit()
+    assert db.get(BdTask, tid).state == "done"
+    # ① 清单里能看见，并且标出来"没有原值"
+    v = bd_tasks.settled_reviews(db)
+    mine = [x for x in v["rows"] if x["progress_id"] == row.id]
+    assert mine, "队长直接填的行也必须进清单（否则无从回退）"
+    assert mine[0]["can_back"] is False and mine[0]["reported_pct"] is None
+    assert v["n_no_origin"] == 1
+    # ② 不填任何值 → 跳过并给原因（不猜、不乱退）
+    r0 = bd_tasks.reject_reviews_many(db, [row.id], by="admin")
+    db.commit()
+    assert r0["updated"] == 0 and "没有员工上报原值" in r0["skipped"][0]["why"]
+    assert db.get(BdTask, tid).pct == 100, "跳过时**不能**动任务"
+    # ③ 用「没有队员原值的退回 0%」→ 退回成功 + 任务回进行中 + 完成日清掉
+    db.get(BdTask, tid).done_date = bd_tasks._today()
+    db.commit()
+    r = bd_tasks.reject_reviews_many(db, [row.id], by="admin", no_origin_pct=0)
+    db.commit()
+    assert r["updated"] == 1 and r["no_origin_pct"] == 0, r
+    # 队长直接填的行**没有队员要通知**（任务也没担当）→ 不该硬造一条给人
+    assert r["notified"] == 0, "没上报过的人不该收到「你上报的…被撤销」"
+    got = db.get(BdTaskProgress, row.id)
+    assert got.review_status == "pending" and got.pct == 0
+    t2 = db.get(BdTask, tid)
+    assert t2.pct == 0 and t2.state != "done" and t2.done_date is None
+    db.close()
+
+
+def test_no_origin_and_origin_mixed_batch(seeded):
+    """**混批**：有原值的退回原值、队长直接填的退回指定值 —— 互不覆盖（防 bug 的关键）。"""
+    from datetime import timedelta
+    from app.models import BdTask, BdTaskProgress
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    from app.models import BdTask
+    other = _mk_extra_task(db, seeded["team"])   # 第二条任务（另一个站）
+    origin = _mk_review(db, tid, bd_tasks._today(), 40, 40, "confirmed")
+    direct = _mk_leader_direct(db, other, bd_tasks._today(), 100)
+    r = bd_tasks.reject_reviews_many(db, [origin.id, direct.id], by="admin",
+                                     no_origin_pct=0)
+    db.commit()
+    assert r["updated"] == 2 and not r["skipped"], r
+    assert db.get(BdTaskProgress, origin.id).pct == 40, "有原值的要退回**它自己的原值**"
+    assert db.get(BdTaskProgress, direct.id).pct == 0, "没原值的用专门那个值"
+    db.close()
+
+
+def test_no_origin_pct_validation(seeded):
+    """非法值要报错，不能悄悄退成奇怪的数。"""
+    db = appdb.SessionLocal()
+    for bad in ("abc", -1, 101):
+        try:
+            bd_tasks.reject_reviews_many(db, [1], by="admin", no_origin_pct=bad)
+            assert False, "应该报错：%r" % (bad,)
+        except bd_tasks.TaskError as e:
+            assert "0–100" in str(e)
+        db.rollback()
+    db.close()
+
+
+def test_no_origin_row_without_team_does_not_crash(seeded):
+    """没有队伍的任务上、队长直接填的行：能退回、**不发汇总也不炸**。"""
+    from app.models import BdTask
+    db = appdb.SessionLocal()
+    t = db.get(BdTask, seeded["task"])
+    t.team_id = None
+    db.commit()
+    row = _mk_leader_direct(db, t.id, bd_tasks._today(), 100)
+    r = bd_tasks.reject_reviews_many(db, [row.id], by="admin", no_origin_pct=0)
+    db.commit()
+    assert r["updated"] == 1 and r["summaries"] == 0, r
+    assert db.get(BdTask, t.id).pct == 0
+    db.close()
+
+
+def _mk_extra_task(db, team_id):
+    """再造一条任务（另一个车站）→ 返回 task_id。混批测试用。"""
+    st = bd_tasks.create_station(db, "池ノ上", line="井の頭線")
+    bd_tasks.create_tasks(db, [st.id], by="admin")
+    t = (db.query(BdTask).filter(BdTask.station_id == st.id).first())
+    bd_tasks.set_task_team(db, [t.id], team_id, assign_date=date(2026, 10, 3))
+    db.commit()
+    return t.id
+
+
+def test_reviews_page_shows_no_origin_marker_and_input(client, seeded):
+    """页面上：队长直接填的行有「队长直接填」标记 + 有「没有队员原值的退回」输入框。"""
+    db = appdb.SessionLocal()
+    row = _mk_leader_direct(db, seeded["task"], bd_tasks._today(), 100)
+    db.close()
+    _login(client, "admin")
+    h = client.get("/tasks/reviews").text
+    assert 'data-testid="no-origin-%d"' % row.id in h, "要标出队长直接填"
+    assert 'data-testid="no-origin-pct"' in h, "要有专门的退回值输入框"
+    assert "駒場東大前" in h or 'data-testid="pick-%d"' % row.id in h
+
+
+def test_reviews_reject_post_no_origin(client, seeded):
+    """管理员用「没有队员原值的退回 0%」提交 → 队长直接填的 100% 被退回。"""
+    from app.models import BdTask
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    bd_tasks.assign_members(db, tid, ["P2"], by="admin")   # 有担当，回退后是 doing
+    db.commit()
+    row = _mk_leader_direct(db, tid, bd_tasks._today(), 100)
+    t = db.get(BdTask, tid)
+    t.pct = 100
+    db.commit()
+    bd_tasks.refresh_state(db, t)
+    db.commit()
+    db.close()
+    _login(client, "admin")
+    r = _post(client, "/tasks/reviews/reject",
+              {"progress_id": [str(row.id)], "no_origin_pct": "0"},
+              from_path="/tasks/reviews")
+    assert r.status_code == 303
+    from urllib.parse import unquote as _uq
+    loc = _uq(r.headers["location"])
+    assert "已驳回 1 条" in loc and "队长直接填的退回 0%" in loc, loc
+    db = appdb.SessionLocal()
+    assert db.get(BdTask, tid).pct == 0
+    assert db.get(BdTask, tid).state == "doing"
+    db.close()

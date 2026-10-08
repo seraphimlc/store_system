@@ -47,19 +47,19 @@ app/services/bd_perm.py	作业域·服务	角色能力表（判权与按钮共�
 app/services/bd_places.py	作业域·服务	物理车站层：rebuild_places（同 group_code+坐标合并）	8036
 app/services/bd_store.py	作业域·服务	BD 作业域 · 门店宇宙（`bd_store`）。	5335
 app/services/bd_summary_ai.py	作业域·服务	**任务域 AI 总结**（近 7 天 + 环比上一个 7 天）。	8055
-app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	91783
+app/services/bd_tasks.py	作业域·服务	作业域核心：车站池/任务板/状态机/派队/分派/进展/驳回/导出/线路下拉口径	92580
 app/services/bd_teams.py	作业域·服务	团队：建队/圈人（一人一队唯一索引）/队长同步/成员状态	16911
 app/templates/_ai_suggest.html	作业域·模板	AI 派工建议的 htmx 片段	2691
 app/templates/_pager.html	作业域·模板	共	1470
 app/templates/bd_logs.html	作业域·模板	变更日志	3493
-app/templates/bd_reviews.html	作业域·模板	队长已确认的进展	4871
+app/templates/bd_reviews.html	作业域·模板	队长已确认的进展	5359
 app/templates/bd_stations.html	作业域·模板	车站页（资产维护；筛选只有 关键词+线路）	6122
 app/templates/bd_task_detail.html	作业域·模板	店铺数	7031
 app/templates/bd_task_new.html	作业域·模板	建任务	7774
 app/templates/bd_tasks.html	作业域·模板	任务页（队伍汇总→tab→筛选→列表；未分配=车站池可批量派队）	20748
 app/templates/bd_team_detail.html	作业域·模板	团队详情：圈选队员（一人一队）	6207
 app/templates/bd_teams.html	作业域·模板	团队列表页	3819
-app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	68528
+app/routers/bd_r.py	作业域·路由	作业域全部路由：/teams /stations /tasks /my/tasks /messages /logs	68865
 AGENTS.md	入口文档	**入口手册（保持短）**：功能→读什么对照表	7503
 README.md	入口文档		2768
 conftest.py	其它		75
@@ -91,7 +91,7 @@ app/auth.py	基座	会话与密码：argon2 哈希、签名 cookie（itsdangerou
 app/config.py	基座	Web 应用配置：从环境变量读取（default_factory 保证每次构造读最新 env），	4701
 app/db.py	基座	SQLAlchemy engine/session；环境变量 DATABASE_URL 控制（测试用 sqlite://）。	1206
 app/forms.py	基座	表单一次性提交令牌的接线层：模板全局函数 + 路由依赖 + 客户端防双击。	2606
-app/i18n.py	基座	多语言（中文/日文）基础设施。	39625
+app/i18n.py	基座	多语言（中文/日文）基础设施。	40032
 app/main.py	基座	FastAPI 应用工厂与入口。	10426
 app/models.py	基座	ORM 模型（spec v0.4 §4.1–4.8）。JSON 一律 sqlalchemy.JSON（SQLite/PG 兼容）。	62740
 app/templating.py	基座	共享 Jinja2Templates 工厂：统一注册多语言全局函数（t / LANG_NAMES / lang_url）。	3211
@@ -184,13 +184,13 @@ docs/产品设计-系统逻辑全览.md	文档	巡店数据结算系统 · 产�
 docs/任务域-全流程.md	文档	任务域全流程（车站任务 · 定义 → 分配 → 执行 → 汇总）	8877
 docs/发布清单-作业域.md	文档	发布清单 · 作业域（团队 / 车站 / 任务）	7116
 docs/技术方案.md	文档	巡店结算系统 · 技术方案	28223
-docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32254
-docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31750
+docs/文件索引.md	文档	文件索引（自动生成 · 别手改）	32301
+docs/文件索引.tsv	文档	全仓文件索引（本文件生成）	31801
 docs/测试用例-任务域.md	文档	测试用例 · 任务域（车站任务）	10101
 docs/测试用例.md	文档	测试用例 · 巡店数据结算系统	26616
 docs/索引.md	文档		26887
 docs/结算主流程设计-v3.md	文档	结算主流程设计（v3 · 2026-09-08 与万总确认版）	4141
-docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	78564
+docs/记录-作业域.md	文档	记录 · 作业域（团队 / 车站 / 任务）	79816
 docs/记录-员工填报.md	文档	记录 · 员工每日填报 + 对比 + AI 报告	6963
 docs/记录-日期计划.md	文档	记录 · 日期计划（半月出勤登记）	8920
 docs/试跑报告-任务域.md	文档	试跑报告 · 任务域（真库 · 2026-10-06）	3216
@@ -290,7 +290,7 @@ tests_web/test_staff_status.py	测试·Web	员工管理（状态：在岗/请假
 tests_web/test_store_auto.py	测试·Web	店铺主档自动化测试：上传后增量建候选对 → exact 自动合并 → 受影响月自动重算	15399
 tests_web/test_store_master.py	测试·Web	主档合并服务测试。	1665
 tests_web/test_store_rules.py	测试·Web		753
-tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	225379
+tests_web/test_team_task.py	测试·Web	团队 + 车站任务测试（规格 `docs/specs-team-management.md` /	231176
 tests_web/test_templates.py	测试·Web	模板渲染冒烟：base 可加载；登录态含标题与阶段二灰置导航；未登录仅品牌。	9800
 tests_web/test_token_pages.py	测试·Web	MCP Token 管理员代发/吊销、员工状态联动提示。	7215
 tests/__init__.py	测试·结算		0

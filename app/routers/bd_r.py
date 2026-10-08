@@ -812,12 +812,17 @@ def task_reviews_page(request: Request, user: Optional[User] = Depends(require_l
 @router.post("/tasks/reviews/reject")
 def task_reviews_reject(request: Request,
                         progress_id: List[int] = Form(default=[]),
-                        force_pct: str = Form(""), note: str = Form(""),
+                        force_pct: str = Form(""), no_origin_pct: str = Form(""),
+                        note: str = Form(""),
                         date_from: str = Form(""), date_to: str = Form(""),
                         team_id: str = Form(""), csrf_token: str = Form(""),
                         user: Optional[User] = Depends(require_login),
                         db: Session = Depends(get_db)):
-    """**批量驳回**队长已确认/调整过的进展（管理员）。"""
+    """**批量驳回**队长已确认/调整过的进展（管理员）。
+
+    `force_pct` 对所有行生效；`no_origin_pct` **只**对"队长直接填、没有队员原值"的行生效
+    （两种行混一批时互不覆盖 —— 用户 2026-10-07）。
+    """
     g = _admin_guard(user)
     if g:
         return g
@@ -838,14 +843,18 @@ def task_reviews_reject(request: Request,
     try:
         r = bd_tasks.reject_reviews_many(db, ids, by=user.username,
                                          actor_user=user, force_pct=force_pct,
+                                         no_origin_pct=no_origin_pct,
                                          note=note)
         db.commit()
     except Exception as e:                        # noqa: BLE001
         db.rollback()
         return RedirectResponse(_with_msg(back, "err", _m(str(e))), status_code=303)
     n_skip = len(r["skipped"])
-    extra = (_m("（统一退回到 %s%%）", force_pct)
-             if str(force_pct or "").strip() else "")
+    extra = ""
+    if str(force_pct or "").strip():
+        extra += _m("（统一退回到 %s%%）", force_pct)
+    elif str(no_origin_pct or "").strip():
+        extra += _m("（队员原值照旧，队长直接填的退回 %s%%）", no_origin_pct)
     if not r["updated"]:
         why = r["skipped"][0]["why"] if r["skipped"] else ""
         return RedirectResponse(_with_msg(back, "err", _m("一条都没驳回：%s", why)),
