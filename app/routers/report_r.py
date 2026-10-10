@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.i18n import render_msg as _render_msg
 from app.models import User
 from app.routers.auth_r import csrf_ok, require_login
 from app.templating import get_templates
@@ -258,9 +259,10 @@ def _edit_row(db, person_code: str, edit_date: str):
         return None
     r = daily_report.get_report(db, person_code, d)
     if r is None:
-        return {"person_code": person_code, "date": d, "area": "", "p1": 0, "p2": 0}
+        return {"person_code": person_code, "date": d, "area": "", "p1": 0, "p2": 0,
+                "exists": False}
     return {"person_code": person_code, "date": r.report_date,
-            "area": r.area or "", "p1": r.p1_cnt, "p2": r.p2_cnt}
+            "area": r.area or "", "p1": r.p1_cnt, "p2": r.p2_cnt, "exists": True}
 
 
 def _staff_options(db):
@@ -292,6 +294,13 @@ def staff_reports_page(request: Request,
     # MCP/脚本仍可调用。
     rep_sum = report_compare.reports_summary(db, start=s, end=e,
                                              person_code=person_code)
+    # 「改」进来时还要给出**那天的任务进展**（管理员改自报 = 点数 + 当天进展，
+    # 用户 2026-10-10）。跨域取数一律走编排层 `self_report`（铁律 1 的唯一例外）。
+    edit_row = _edit_row(db, person_code, edit_date)
+    day_view = {"rows": [], "is_backfill": False}
+    if edit_row:
+        from app.services import self_report as _sr
+        day_view = _sr.admin_day_view(db, person_code, edit_row["date"])
     return templates.TemplateResponse("staff_reports.html", {
         "request": request, "current_user": user, "data": data,
         "start": s, "end": e, "person_code": person_code,
@@ -299,35 +308,65 @@ def staff_reports_page(request: Request,
         "jst_delta": timedelta(hours=9),
         "cov_end": daily_report.coverage_end(db), "locked_dates": locked,
         "rep_sum": rep_sum,
-        "edit_row": _edit_row(db, person_code, edit_date),
+        "edit_row": edit_row, "day_progress": day_view["rows"],
+        "edit_is_backfill": bool(edit_row and not edit_row.get("exists")),
     })
 
 
 @router.post("/staff-reports/report/save")
-def staff_report_save(request: Request,
-                      person_code: str = Form(""), report_date: str = Form(""),
-                      area: str = Form(""), p1_cnt: str = Form(""),
-                      p2_cnt: str = Form(""), csrf_token: str = Form(""),
-                      start: str = Form(""), end: str = Form(""),
-                      user: Optional[User] = Depends(require_login),
-                      db: Session = Depends(get_db)):
-    """管理员给员工**补录 / 修改**自报（仅未对账的日期）。"""
+async def staff_report_save(request: Request,
+                            person_code: str = Form(""), report_date: str = Form(""),
+                            area: str = Form(""), p1_cnt: str = Form(""),
+                            p2_cnt: str = Form(""), csrf_token: str = Form(""),
+                            start: str = Form(""), end: str = Form(""),
+                            user: Optional[User] = Depends(require_login),
+                            db: Session = Depends(get_db)):
+    """管理员给员工**补录 / 修改**自报（仅未对账的日期）。
+
+    - **改**（这天已有自报）：点数 + **当天任务进展**，一次保存（同一事务）；
+    - **补录**（这天没有自报）：**只补点数**，带进展直接拒绝
+      （用户 2026-10-10 口径："补录不了任务进展"）。
+
+    进展字段名是动态的（`pct_<task_id>` / `note_<task_id>`）→ 必须读原始表单，
+    所以这里是 `async def`（与 `/my/self-report` 同一套约定）。
+    """
     g = _admin_guard(user)
     if g:
         return g
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    from app.services import daily_report
+    from app.services import daily_report, self_report
     back = "/staff-reports?start=%s&end=%s" % (quote(start), quote(end))
     d = _as_date(report_date, None)
     if d is None:
         return RedirectResponse(back + "&err=" + quote("时间格式应为 YYYY-MM-DD"),
                                 status_code=303)
+    form = await request.form()
+    items = []
+    for key, val in form.items():
+        if not key.startswith("pct_"):
+            continue
+        try:
+            tid = int(key[4:])
+        except ValueError:
+            continue
+        items.append({"task_id": tid, "pct": val,
+                      "note": str(form.get("note_%d" % tid) or "")})
     try:
-        row = daily_report.save_by_admin(
-            db, person_code=person_code, report_date=d, area=area,
-            p1_cnt=p1_cnt, p2_cnt=p2_cnt, user_id=getattr(user, "id", None))
-        return RedirectResponse(back + "&msg=" + quote("已保存补录"), status_code=303)
+        r = self_report.admin_day_save(
+            db, user, person_code=person_code, on_date=d, area=area,
+            p1_cnt=p1_cnt, p2_cnt=p2_cnt, items=items)
+        _rm = _render_msg
+        if r["created"]:
+            msg = _rm("已补录 %s 的点数：1点 %d / 2点 %d（补录不含任务进展）",
+                      d.isoformat(), r["p1"], r["p2"])
+        elif r["tasks"]:
+            msg = _rm("已保存 %s：1点 %d / 2点 %d，改了 %d 个任务进展",
+                      d.isoformat(), r["p1"], r["p2"], r["tasks"])
+        else:
+            msg = _rm("已保存 %s：1点 %d / 2点 %d",
+                      d.isoformat(), r["p1"], r["p2"])
+        return RedirectResponse(back + "&msg=" + quote(msg), status_code=303)
     except daily_report.Locked:
         return RedirectResponse(
             back + "&err=" + quote("该日期已有系统数据（已对账），不能再改"),
@@ -336,6 +375,9 @@ def staff_report_save(request: Request,
         return RedirectResponse(back + "&err=" + quote("保存冲突，请刷新重试"),
                                 status_code=303)
     except ValueError as e:  # noqa: BLE001
+        return RedirectResponse(back + "&err=" + quote(str(e)), status_code=303)
+    except Exception as e:  # noqa: BLE001  进展那条失败 → 整体回滚（点数也不留）
+        db.rollback()
         return RedirectResponse(back + "&err=" + quote(str(e)), status_code=303)
 
 

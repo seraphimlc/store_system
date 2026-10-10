@@ -188,9 +188,17 @@ def is_locked(db, ref_date) -> bool:
     return end is not None and ref_date <= end
 
 
-def save_by_admin(db, *, person_code: str, report_date, area: str = "",
-                  p1_cnt=0, p2_cnt=0, user_id=None) -> StaffDailyReport:
-    """管理员补录或修改**未对账**日期的自报（不存在则新建，存在则覆盖）。"""
+def upsert_day_core(db, *, person_code: str, report_date, area: str = "",
+                    p1_cnt=0, p2_cnt=0, user_id=None):
+    """**不提交事务**的管理员补录/修改某天的点数自报（给跨域编排层用）。
+
+    与员工侧的 `upsert_today_core` 对称：管理员一次要改「点数 + 当天任务进展」时，
+    两者必须**同一个事务**（用户 2026-10-10 口径：都在「员工每日填报」的同一个卡片里
+    改、一次保存）。校验（员工存在 / 未对账）与 upsert 都走这里。
+
+    返回 `(row, created)`；调用方负责 `commit()` 之后的写透/物化刷新
+    （`after_today_write`）。
+    """
     from app.models import Person
     code = (person_code or "").strip()
     if not code:
@@ -206,7 +214,8 @@ def save_by_admin(db, *, person_code: str, report_date, area: str = "",
     row = (db.query(StaffDailyReport)
            .filter(StaffDailyReport.person_code == code,
                    StaffDailyReport.report_date == report_date).first())
-    if row is None:
+    created = row is None
+    if created:
         row = StaffDailyReport(person_code=code, user_id=user_id,
                                report_date=report_date,
                                area=(area or "").strip()[:64],
@@ -219,7 +228,18 @@ def save_by_admin(db, *, person_code: str, report_date, area: str = "",
         row.p2_cnt = p2
         row.total_cnt = p1 + p2
         row.source = "admin"
+    db.flush()
+    return row, created
+
+
+def save_by_admin(db, *, person_code: str, report_date, area: str = "",
+                  p1_cnt=0, p2_cnt=0, user_id=None) -> StaffDailyReport:
+    """管理员补录或修改**未对账**日期的自报（不存在则新建，存在则覆盖）。"""
+    code = (person_code or "").strip()
     try:
+        row, _created = upsert_day_core(
+            db, person_code=code, report_date=report_date, area=area,
+            p1_cnt=p1_cnt, p2_cnt=p2_cnt, user_id=user_id)
         db.commit()
     except IntegrityError as e:
         db.rollback()

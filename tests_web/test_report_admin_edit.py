@@ -11,7 +11,7 @@ from app.auth import SESSION_COOKIE, hash_password, read_session_token
 from app.models import (FormalRecord, ImportFile, Person, PersonDailyStat,
                         RawRecord, StaffDailyReport, StaffReportAnalysis,
                         StaffReportComparePerson, User)
-from app.services import daily_report, report_store
+from app.services import bd_teams, daily_report, report_store
 from tests.helpers import form_token
 
 
@@ -255,3 +255,159 @@ def test_list_page_marks_locked_rows(client):
     html = client.get("/staff-reports?start=2026-09-01&end=2026-09-30").text
     assert "已对账" in html and "edit_date=2026-09-20" in html   # 9/10 锁定、9/20 可改
     assert "edit_date=2026-09-10" not in html
+
+# ---------- 2026-10-10 两个功能：改自报（点数 + 当天进展）/ 补录只能点数 ----------
+# 用户口径：
+#   ① 管理员可以改自报数据 —— 改点数、改进展（同一天一个卡片、一次保存）；
+#   ② 管理员可以补录员工的自报数据 —— 只能补录点数，补录不了任务进展。
+
+def _mk_user(db, username, code, name, role="staff"):
+    """连 Person 一起建好（进展/自报都要外键）。"""
+    if code and db.get(Person, code) is None:
+        db.add(Person(code=code, display_name=name))
+        db.flush()
+    u = db.query(User).filter(User.username == username).first()
+    if u is None:
+        u = User(username=username, display_name=name, role=role,
+                 is_active=True, status="active", person_code=code,
+                 password_hash=hash_password("pw123456"), must_change_password=False)
+        db.add(u)
+    db.flush()
+    return u
+
+
+def _seed_task_with_progress(*, on_date, pct=60, status="confirmed"):
+    """造：员工 P1（member1）+ 队长 P9（leader1）+ 一个任务，那天的进展按 status 处理。"""
+    from app.models import BdTask
+    from app.services import bd_tasks
+    db = appdb.SessionLocal()
+    _mk_user(db, "member1", "P1", "甲", role="staff")
+    _mk_user(db, "leader1", "P9", "队長", role="leader")   # ⚠️ 队长先建好再"确认"
+    team = bd_teams.create_team(db, "P1队", by="admin")
+    bd_teams.set_members(db, team.id, [("P9", "leader"), ("P1", "member")])
+    st = bd_tasks.create_station(db, "測試駅", line="測試線")
+    bd_tasks.create_tasks(db, [st.id], by="admin")
+    task = db.query(BdTask).first()
+    bd_tasks.set_task_team(db, [task.id], team.id, assign_date=on_date)
+    bd_tasks.assign_members(db, task.id, ["P1"], by="admin")
+    ms = db.query(User).filter(User.username == "member1").first()
+    bd_tasks.save_progress(db, task.id, pct, "员工报的", by="member1",
+                           actor_user=ms, on_date=on_date)
+    if status in ("confirmed", "adjusted"):
+        lg = db.query(User).filter(User.username == "leader1").first()
+        bd_tasks.save_progress(db, task.id, pct, "", by="leader1", actor_user=lg,
+                               confirm=(status == "confirmed"), on_date=on_date)
+    db.commit()
+    tid = task.id
+    db.close()
+    return tid
+
+
+def test_admin_edit_day_updates_points_and_progress(client):
+    """① 改自报：点数 + 当天进展一次保存都生效（留痕、任务当前进度跟着变）。"""
+    from app.models import BdTask, BdTaskProgress, BdMessage
+    on_date = date(2026, 10, 9)
+    tid = _seed_task_with_progress(on_date=on_date, pct=60, status="confirmed")
+    db = appdb.SessionLocal()
+    db.add(StaffDailyReport(person_code="P1", report_date=on_date, area="旧",
+                            p1_cnt=1, p2_cnt=1, total_cnt=2, source="web"))
+    db.commit()
+    msgs = db.query(BdMessage).count()
+    db.close()
+    _user(client, "admin", None, "管理员", role="admin")
+    csrf = _login(client)
+    r = _admin_save(client, csrf, person_code="P1", report_date=on_date.isoformat(),
+                    area="新", p1_cnt="9", p2_cnt="3",
+                    **{"pct_%d" % tid: "85", "note_%d" % tid: "管理员改的"})
+    assert r.status_code == 303 and "msg=" in r.headers["location"], r.headers
+    from urllib.parse import unquote
+    assert "改了 1 个任务进展" in unquote(r.headers["location"])
+    db = appdb.SessionLocal()
+    rep = db.query(StaffDailyReport).one()
+    assert (rep.p1_cnt, rep.p2_cnt, rep.total_cnt, rep.area) == (9, 3, 12, "新")
+    row = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).one()
+    assert row.pct == 85 and row.review_status == "adjusted"
+    assert row.reviewed_by == "admin"
+    assert row.reported_pct == 60 and row.reported_by == "member1", "员工原值要留住"
+    assert "管理员改的" in (row.note or "")
+    assert db.get(BdTask, tid).pct == 85, "任务当前进度要跟着变"
+    assert db.query(BdMessage).count() > msgs, "改完要通知队员"
+    db.close()
+
+
+def test_admin_edit_day_rejects_progress_on_backfill(client):
+    """② 补录（那天没有自报）→ 只能补点数；带进展被拦且一条都不写。"""
+    from app.models import BdTaskProgress
+    on_date = date(2026, 10, 9)
+    tid = _seed_task_with_progress(on_date=on_date, pct=60, status="confirmed")
+    _user(client, "admin", None, "管理员", role="admin")
+    csrf = _login(client)
+    # ②-a 带进展 → err，点数也不许写（整体回滚）
+    r = _admin_save(client, csrf, person_code="P1", report_date=on_date.isoformat(),
+                    p1_cnt="9", p2_cnt="0", **{"pct_%d" % tid: "85"})
+    assert "err=" in r.headers["location"]
+    from urllib.parse import unquote
+    assert "只能补录点数" in unquote(r.headers["location"])
+    db = appdb.SessionLocal()
+    assert db.query(StaffDailyReport).count() == 0, "拦住了就一条都不许写"
+    assert db.query(BdTaskProgress).one().pct == 60, "进展不许动"
+    db.close()
+    # ②-b 只补点数 → 成功，进展不动
+    r2 = _admin_save(client, csrf, person_code="P1", report_date=on_date.isoformat(),
+                     area="补", p1_cnt="9", p2_cnt="0")
+    assert "msg=" in r2.headers["location"], r2.headers
+    db = appdb.SessionLocal()
+    rep = db.query(StaffDailyReport).one()
+    assert (rep.p1_cnt, rep.p2_cnt, rep.source) == (9, 0, "admin")
+    assert db.query(BdTaskProgress).one().pct == 60, "补录不碰进展"
+    db.close()
+
+
+def test_admin_edit_day_skips_unchanged_progress(client):
+    """同值的进展不动：只改点数时不该把每条进展盖成"已调整"、也不该刷消息。"""
+    from app.models import BdMessage, BdTaskProgress
+    on_date = date(2026, 10, 9)
+    tid = _seed_task_with_progress(on_date=on_date, pct=60, status="confirmed")
+    db = appdb.SessionLocal()
+    db.add(StaffDailyReport(person_code="P1", report_date=on_date, area="旧",
+                            p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    before_msg = db.query(BdMessage).count()
+    reviewed_at = db.query(BdTaskProgress).one().reviewed_at
+    db.close()
+    _user(client, "admin", None, "管理员", role="admin")
+    csrf = _login(client)
+    r = _admin_save(client, csrf, person_code="P1", report_date=on_date.isoformat(),
+                    p1_cnt="5", p2_cnt="0", **{"pct_%d" % tid: "60"})   # 同值
+    assert "msg=" in r.headers["location"]
+    from urllib.parse import unquote
+    assert "改了" not in unquote(r.headers["location"]), "同值不该算改动"
+    db = appdb.SessionLocal()
+    row = db.query(BdTaskProgress).one()
+    assert row.review_status == "confirmed" and row.reviewed_by == "leader1"
+    assert row.reviewed_at == reviewed_at, "同值不该重盖审核时间"
+    assert db.query(BdMessage).count() == before_msg, "同值不该发消息"
+    assert db.query(StaffDailyReport).one().p1_cnt == 5, "点数照改"
+    db.close()
+
+
+def test_admin_edit_card_shows_day_progress_only_for_existing(client):
+    """界面：改已有自报 → 当天进展逐条给输入框；补录（没有自报）→ 只给点数 + 提示。"""
+    on_date = date(2026, 10, 9)
+    tid = _seed_task_with_progress(on_date=on_date, pct=55, status="confirmed")
+    db = appdb.SessionLocal()
+    db.add(StaffDailyReport(person_code="P1", report_date=on_date, area="x",
+                            p1_cnt=2, p2_cnt=0, total_cnt=2))
+    db.commit()
+    db.close()
+    _user(client, "admin", None, "管理员", role="admin")
+    _login(client)
+    html = client.get("/staff-reports?start=2026-10-01&end=2026-10-10"
+                      "&person_code=P1&edit_date=%s" % on_date.isoformat()).text
+    assert 'data-testid="day-progress"' in html
+    assert 'name="pct_%d"' % tid in html and 'name="note_%d"' % tid in html
+    assert 'value="55"' in html
+    html2 = client.get("/staff-reports?start=2026-10-01&end=2026-10-10"
+                       "&person_code=P1&edit_date=2026-10-08").text
+    assert 'data-testid="backfill-hint"' in html2
+    assert 'name="pct_%d"' % tid not in html2

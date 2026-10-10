@@ -102,3 +102,85 @@ def submit(db: Session, user, *, area: str = "", p1_cnt=0, p2_cnt=0,
     daily_report.after_today_write(db, code, report.report_date)
     return {"p1": report.p1_cnt, "p2": report.p2_cnt, "tasks": done,
             "skipped": skipped, "report_date": report.report_date}
+
+
+# ---------------- 管理员按天改自报（点数 + 当天进展）----------------
+# 用户 2026-10-10："① 管理员可以改自报数据，改点数，改进展；
+#                 ② 管理员可以补录员工的自报数据，只能补录点数，补录不了任务进展。"
+# 两条口径的落点：
+#   - **改**（这天已有自报）：点数 + 当天该员工报的进展，一个卡片、一次保存（同一事务）；
+#   - **补录**（这天没有自报）：只写点数；带进展直接拒绝（服务层硬拦，不只靠界面藏）。
+
+def admin_day_view(db: Session, person_code: str,
+                   on_date: Optional[date] = None) -> dict:
+    """管理员「改自报」要渲染的：这天的点数行 + 这天的进展行（带"能不能改"）。
+
+    `is_backfill=True`（这天还没有自报）→ 界面只给点数，不给进展
+    （补录不碰进展 —— 用户 2026-10-10 口径）。
+    """
+    code = (person_code or "").strip()
+    d = on_date or jst_today()
+    report = daily_report.get_report(db, code, d) if code else None
+    return {
+        "date": d,
+        "report": report,
+        "is_backfill": report is None,
+        "rows": (bd_tasks.person_day_progress(db, code, d)
+                 if (code and report is not None) else []),
+    }
+
+
+def admin_day_save(db: Session, actor, *, person_code: str, on_date=None,
+                   area: str = "", p1_cnt=0, p2_cnt=0,
+                   items: Optional[List[dict]] = None) -> dict:
+    """管理员改一条**已存在**的自报：点数 + 当天进展，**同一事务**（一次保存）。
+
+    - 这天**没有**自报 → 只允许补录点数；`items` 非空直接 `ValueError`
+      （用户 2026-10-10："补录不了任务进展"）。
+    - 进展逐条走 `bd_tasks.save_progress`（= 任务页「修正进展」同一条路径：
+      锁定/归属/值域/审核状态/日志/给队员发消息全都一致，不另写一套）。
+      **同值不动**（管理员只想改点数时，不该把每条进展都盖一次"已调整"）。
+    - 任一条失败 → 抛异常，调用方 rollback（点数与进展都不留半截）。
+    """
+    code = (person_code or "").strip()
+    if not code:
+        raise ValueError("请选择员工")
+    d = on_date or jst_today()
+    items = [it for it in (items or []) if it.get("task_id")]
+    existing = daily_report.get_report(db, code, d)
+    if existing is None and items:
+        raise ValueError("这天还没有自报：只能补录点数，不能补录任务进展")
+    # ① 点数（不 commit，等进展也写完一起提交）
+    report, created = daily_report.upsert_day_core(
+        db, person_code=code, report_date=d, area=area,
+        p1_cnt=p1_cnt, p2_cnt=p2_cnt, user_id=getattr(actor, "id", None))
+    # ② 当天进展（只在"改已有自报"时才动）
+    done, skipped = 0, []
+    if existing is not None:
+        from app.models import BdTask as _BdTask
+        by = getattr(actor, "username", "") or ""
+        for it in items:
+            tid = int(it["task_id"])
+            t = db.get(_BdTask, tid)
+            if t is None:
+                skipped.append({"task_id": tid, "why": "任务不存在"})
+                continue
+            pct = it.get("pct")
+            if pct is None or str(pct).strip() == "":
+                continue
+            try:
+                no_change = (t.pct is not None and int(t.pct) == int(pct))
+            except (TypeError, ValueError):
+                no_change = False
+            note = (it.get("note") or "").strip()
+            if no_change and not note:
+                continue                       # 进度没变也没写备注 → 不动它
+            bd_tasks.save_progress(db, tid, pct, note, by=by,
+                                   actor_user=actor, on_date=d)
+            done += 1
+    # ③ 一次提交
+    db.commit()
+    daily_report.after_today_write(db, code, report.report_date)   # □ 写透 + 物化刷新
+    return {"p1": report.p1_cnt, "p2": report.p2_cnt, "tasks": done,
+            "skipped": skipped, "report_date": report.report_date,
+            "created": created}

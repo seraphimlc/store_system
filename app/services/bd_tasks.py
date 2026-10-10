@@ -970,11 +970,15 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
            .filter(BdTaskProgress.task_id == task_id,
                    BdTaskProgress.progress_date == d).first())
     # ---- 谁在写？员工本人上报 vs 队长/管理员确认或调整（用户 2026-10-03 口径）----
+    # ⚠️ 判"谁在写"必须按**正在写的这一天**（`d`）判，不能按"今天"：
+    #    管理员在「员工每日填报」改**过去某天**的自报（用户 2026-10-10 口径①）时，
+    #    旧写法拿"今天"那行去判 → `leader_review=False` → 审核状态/日志/通知全都不写，
+    #    进度却已经改了（静默半截）。
     staff_report = bool(actor_user is not None
                         and is_assignee(db, actor_user, t)
-                        and not can_adjust(db, actor_user, t))
+                        and not can_adjust(db, actor_user, t, on_date=d))
     leader_review = bool(actor_user is not None
-                         and can_adjust(db, actor_user, t))
+                         and can_adjust(db, actor_user, t, on_date=d))
     # ---- 两条新规则（用户 2026-10-06）：写入时强校验，别只靠界面藏按钮 ----
     from app.services import bd_perm as _perm
     _is_lead = _is_team_leader(db, actor_user, t.team_id) if actor_user else False
@@ -1207,6 +1211,60 @@ def can_assign(db: Session, user, task: BdTask) -> bool:
     if not bd_perm.can(db, user, "task.assign"):
         return False
     return _is_team_leader(db, user, task.team_id)
+
+
+def person_day_progress(db: Session, person_code: str,
+                        on_date: Optional[date] = None) -> List[dict]:
+    """**某人某天的进展行**（管理员在「员工每日填报」里改自报用，用户 2026-10-10）。
+
+    口径 = 那天这条进展**算他的**：`reported_by`/`submitted_by` 是他（他报的），
+    或任务现在挂在他名下（`bd_task_assign`）—— 两种取并集，按行去重。
+
+    返回每行：站点/线路/生效值/员工原值/审核状态/**能不能改**（`admin_may_adjust`）。
+    ⚠️ 常数条 SQL（铁律 5）：担当一次、进度一次、任务行一次批量取名。
+    """
+    from app.models import User
+    code = (person_code or "").strip()
+    d = on_date or _today()
+    if not code or d is None:
+        return []
+    tids = {tid for (tid,) in db.query(BdTaskAssign.task_id)
+            .filter(BdTaskAssign.person_code == code).all()}
+    uname = None
+    u = db.query(User.username).filter(User.person_code == code).first()
+    if u is not None:
+        uname = u[0]
+    conds = []
+    if uname:
+        conds.append(BdTaskProgress.reported_by == uname)
+        conds.append(BdTaskProgress.submitted_by == uname)
+    if tids:
+        conds.append(BdTaskProgress.task_id.in_(list(tids)))
+    if not conds:
+        return []
+    rows = (db.query(BdTaskProgress)
+            .filter(BdTaskProgress.progress_date == d, or_(*conds))
+            .order_by(BdTaskProgress.task_id.asc()).all())
+    if not rows:
+        return []
+    tasks = {t.id: t for t in db.query(BdTask).filter(
+        BdTask.id.in_([r.task_id for r in rows])).all()}
+    named = {r["task"].id: r for r in _rows(db, list(tasks.values()))}
+    out = []
+    for r in rows:
+        info = named.get(r.task_id) or {}
+        out.append({
+            "progress_id": r.id, "task_id": r.task_id,
+            "station": info.get("station_name", ""), "line": info.get("line", ""),
+            "pct": r.pct, "reported_pct": r.reported_pct,
+            "review_status": r.review_status,
+            "review_label": review_label(r.review_status),
+            "note": r.note or "", "reported_by": r.reported_by or "",
+            # 「改自报」时能不能动这一条：与任务页「修正进展」同一条口径
+            # （管理员只能改队长处理过的；点数的锁定另算）
+            "editable": admin_may_adjust(r),
+        })
+    return out
 
 
 def can_reject(db: Session, user, task: BdTask) -> bool:

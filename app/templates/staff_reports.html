@@ -54,6 +54,53 @@
           <td><input type="text" name="p2_cnt" id="ed_p2" inputmode="numeric"
                      pattern="[0-9]*" value="{{ edit_row.p2 if edit_row else 0 }}"></td></tr>
     </table>
+
+    {# 管理员「改自报」= 点数 + **当天该员工的任务进展**（用户 2026-10-10 口径①）。
+       补录（那天还没有自报）时**不给进展**（口径②：补录只能补点数）。 #}
+    {% if edit_row %}
+    {% if edit_is_backfill %}
+    <div class="hint" style="margin-top:.5rem" data-testid="backfill-hint">
+      {{ t('这天还没有自报：只能补录点数，不能补录任务进展。') }}</div>
+    {% elif day_progress %}
+    <h3 style="font-size:.95rem;margin:.9rem 0 .3rem">{{ t('当天任务进展') }}</h3>
+    <div class="tbl-wrap">
+      <table class="grid-tbl" data-testid="day-progress">
+        <thead><tr><th>{{ t('站点') }}</th><th>{{ t('线路') }}</th>
+          <th>{{ t('队员报') }}</th><th>{{ t('当前进度') }}</th>
+          <th>{{ t('处理') }}</th><th>{{ t('改成') }}</th>
+          <th>{{ t('备注') }}</th></tr></thead>
+        <tbody>
+          {% for p in day_progress %}
+          <tr data-testid="day-progress-{{ p.task_id }}">
+            <td><a href="/tasks/{{ p.task_id }}">{{ p.station or p.task_id }}</a></td>
+            <td class="hint">{{ p.line or '—' }}</td>
+            <td>{% if p.reported_pct is not none %}{{ p.reported_pct }}%{% else %}—{% endif %}</td>
+            <td><b>{{ p.pct }}%</b></td>
+            <td>{% if p.editable %}<span class="pill okk">{{ t('可改') }}</span>
+                {% else %}<span class="pill warnk" title="{{ t('管理员只能修改队长确认过的进展') }}">{{ t('等队长确认') }}</span>{% endif %}</td>
+            <td>{% if p.editable %}
+              <input type="number" name="pct_{{ p.task_id }}" min="0" max="100"
+                     value="{{ p.pct }}" style="width:4.5rem"
+                     data-testid="day-pct-{{ p.task_id }}"
+                     aria-label="{{ t('改成') }}">
+              {% else %}<span class="hint">—</span>{% endif %}</td>
+            <td>{% if p.editable %}
+              <input type="text" name="note_{{ p.task_id }}" value="{{ p.note }}"
+                     style="width:9rem" data-testid="day-note-{{ p.task_id }}">
+              {% else %}<span class="hint">{{ p.note or '—' }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="hint" style="margin-top:.3rem">
+      {{ t('进度没变的那条不用动（只改真改了的）；改完的会留痕并通知队员。') }}</div>
+    {% else %}
+    <div class="hint" style="margin-top:.5rem" data-testid="no-progress">
+      {{ t('这天该员工没有任务进展记录。') }}</div>
+    {% endif %}
+    {% endif %}
+
     <div class="form-actions" style="margin-top:.7rem">
       <button class="btn" type="submit" data-testid="admin-save-report">{{ t('保存') }}</button>
     </div>
