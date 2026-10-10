@@ -469,7 +469,7 @@ def test_staff_forbidden_no_side_effect(factory, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 验收 4：tools/list 员工 6 个 / 队长 9 个 / 管理员 24 个
+# 验收 4：tools/list 员工 6 个 / 队长 10 个 / 管理员 26 个
 # ---------------------------------------------------------------------------
 
 def _registered_names():
@@ -480,9 +480,9 @@ def _registered_names():
     return {t.name for t in asyncio.run(mcp.list_tools())}
 
 
-def test_tools_list_admin_25():
+def test_tools_list_admin_26():
     names = _registered_names()
-    assert len(names) == 25
+    assert len(names) == 26
 
 
 def test_tools_list_staff_6():

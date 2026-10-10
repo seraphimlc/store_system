@@ -50,6 +50,8 @@ AUTH_REQUIRED_TOOLS = frozenset({
     # 作业域写（2026-10-06）
     "visit_self_report", "visit_task_report", "visit_task_assign",
     "visit_task_confirm", "visit_task_return", "visit_task_transfer",
+    # 管理员改某员工某天的自报（点数 + 当天进展，2026-10-10）——管理员专属
+    "visit_day_report",
     # 导出（现有行为：无身份 → UNAUTHORIZED）
     "visit_recon_export",
 })

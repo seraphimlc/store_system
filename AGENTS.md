@@ -32,7 +32,7 @@ DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.p
 #       --src "/Users/liuchang/Desktop/万总/team_task" [--apply]
 ./.venv/bin/python scripts/check_templates.py              # 模板结构自检（改完模板跑）
 ./.venv/bin/python scripts/i18n_audit.py                   # 日文缺失/死键（要 0/0）
-scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 25 工具）
+scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 26 工具）
 ```
 
 - 账号：`admin/demo123`；员工 `demo123`（测试里是 `pw123456`）。线上 `store.visitworld.me`。

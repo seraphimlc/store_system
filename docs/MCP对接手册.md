@@ -164,10 +164,13 @@ location /mcp {
 > 生产审计实测：**只有 13 个被调用过**（27%）。用户原话：「40+ 个工具根本用不上那么多。
 > 而且我们也不应该一个 restful api 就做一个工具。我们要根据实际场景来。」
 > 重构后 **49 → 16**，且列表只暴露新集。
-> ⚠️ **2026-10-06 更新：现在共 25 个** —— 结算域 16 个不变，**新增作业域 9 个**
+> ⚠️ **2026-10-06 更新：25 个** —— 结算域 16 个不变，**新增作业域 9 个**
 > （`visit_my_tasks` / `visit_self_report` / `visit_team_tasks` / `visit_task_assign` /
 > `visit_task_confirm` / `visit_task_report` / `visit_task_return` / `visit_task_board` /
 > `visit_task_transfer` 队长间转队），并新增**队长档**（10 个 = 员工 6 + 本队 4）。
+> ⚠️ **2026-10-10 更新：现在共 26 个** —— 作业域再加 1 个
+> **`visit_day_report`**（管理员改/查某员工某天的自报 = 点数 + 当天任务进展；
+> 那天没有自报时**只能补录点数**），仅管理员档。
 
 #### 4.6.1 核心原则
 
@@ -219,9 +222,10 @@ location /mcp {
 | `visit_verify` 数据体检 | verify_integrity |
 | 员工侧 6 个 | `visit_whoami` / `visit_my_perf`（view=month\|daily）/ `visit_my_pay`（一次给全：进度+台账+轨迹） / **`visit_my_tasks`**（我的任务：今天派的 ∪ 没做完自动延续 + 今天已填点数） / **`visit_self_report`**（点数+进度**一次提交**） / **`visit_task_report`**（单条报进度，含"队长确认后当天锁住"校验） |
 | **队长侧 3 个**（2026-10-06 新增档位） | **`visit_team_tasks`**（本队任务 + 待确认队列，tab 按"有没有分人"）/ **`visit_task_assign`**（派工 / 改派 / **回收**=person_codes 传 `[]`）/ **`visit_task_confirm`**（确认 / **一键全确认** all_today=True / 驳回 reject=True+pct） |
-| **管理员侧新增 2 个** | **`visit_task_board`**（任务总表：tab 计数 + 任务行 + 按队汇总 + 停滞口径）/ **`visit_task_return`**（按线路**批量撤回**到车站池，只撤没分到人的） |
+| **管理员侧新增 3 个** | **`visit_task_board`**（任务总表：tab 计数 + 任务行 + 按队汇总 + 停滞口径）/ **`visit_task_return`**（按线路**批量撤回**到车站池，只撤没分到人的）/ **`visit_day_report`**（2026-10-10：改/查某员工某天的自报 —— 点数 + 当天任务进展，一次保存；补录只能点数） |
 
-> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 9** / 管理员 24。
+> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 9** / 管理员 26。
+> （2026-10-10 加 `visit_day_report` → 管理员档 25 → 26。）
 > 队长档 = 员工档 + 3 个本队任务工具。作业域工具与 Web 端**走同一套服务层**
 > （`app/services/bd_tasks.py` 等），口径不会漂移；能力层在 `mcp_service/task_ops.py`。
 
@@ -400,7 +404,7 @@ VISIT_OAUTH_REFRESH_DAYS=90
 | 鉴权与授权 | `mcp_service/auth.py`、`mcp_service/authz.py`、`mcp_service/tokens.py` |
 | 审计 | `mcp_service/audit.py` |
 | 作业域字段 | `bd_task.store_count`（店铺数）：队员报到 **100% 时必填**（允许 0），队长批量补录可留空 —— `visit_task_report(store_count=…)` |
-| 工具实现 | **`mcp_service/scenario_ops.py`（当前 25 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
+| 工具实现 | **`mcp_service/scenario_ops.py`（当前 26 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
 | OAuth/SSO | `app/routers/oauth_r.py`、`app/services/oauth.py`、`app/templates/oauth_consent.html` |
 | 自助签发 / 审计页 | `app/routers/tokens_r.py`、`app/services/mcp_tokens.py`、`app/templates/my_token.html` |
 | 运维脚本 | `scripts/mcp_restart.sh`、`scripts/verify_payroll_logic.py`、`scripts/compare_with_prod.py`、`scripts/backfill_prod_new_tables.py` |

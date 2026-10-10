@@ -245,3 +245,61 @@ def test_report_requires_store_count_at_100_for_member(db):
     r3 = task_ops.report_one(db, actor, task_id=tid, pct=100, store_count=7)
     db.commit()
     assert r3["store_count"] == 7
+
+
+def test_day_report_admin_edit_and_backfill_rules(db):
+    """管理员改自报（点数 + 当天进展）：view 看得到；save 一次改；补录只能点数。
+
+    口径来自用户 2026-10-10：① 管理员可以改自报数据 —— 改点数、改进展；
+    ② 管理员可以补录员工的自报数据 —— 只能补录点数，补录不了任务进展。
+    """
+    from datetime import date
+    from app.models import BdTaskProgress, StaffDailyReport
+    from app.services import bd_tasks
+    leader = _Actor(role="leader", username="ogawa", person_code="P1")
+    staff = _Actor(role="staff", username="文伊琪", person_code="P2", uid=2)
+    admin = _Actor(role="admin", username="admin", person_code=None, uid=9)
+    tid = _tid(db)
+    d = date(2026, 10, 9)
+    bd_tasks.assign_members(db, tid, ["P2"], by="ogawa", actor_user=leader)
+    # 员工那天报了 40%（队长确认过 → 管理员可改）
+    bd_tasks.save_progress(db, tid, 40, "员工报的", by="文伊琪",
+                           actor_user=staff, on_date=d)
+    bd_tasks.save_progress(db, tid, 40, "", by="ogawa", actor_user=leader,
+                           confirm=True, on_date=d)
+    db.add(StaffDailyReport(person_code="P2", report_date=d, area="渋谷",
+                            p1_cnt=1, p2_cnt=0, total_cnt=1))
+    db.commit()
+    # --- view：拿得到点数 + 那天的进展（可改） ---
+    v = task_ops.day_report(db, None, person="P2", on_date=d, action="view")
+    assert v["person_code"] == "P2" and v["date"] == "2026-10-09"
+    assert v["is_backfill"] is False and v["report"]["p1_cnt"] == 1
+    assert [r["task_id"] for r in v["progress"]] == [tid]
+    assert v["progress"][0]["editable"] is True
+    assert v["progress"][0]["reported_pct"] == 40
+    # --- save：点数 + 进展一次改（同事务） ---
+    r = task_ops.day_report(db, admin, person="P2", on_date=d, action="save",
+                            area="新", p1_cnt=7, p2_cnt=2,
+                            items=[{"task_id": tid, "pct": 85, "note": "管理员改"}])
+    assert r["1点"] == 7 and r["2点"] == 2 and r["tasks_changed"] == 1
+    rep = db.query(StaffDailyReport).filter(
+        StaffDailyReport.report_date == d).one()
+    assert (rep.p1_cnt, rep.p2_cnt, rep.total_cnt, rep.area) == (7, 2, 9, "新")
+    row = db.query(BdTaskProgress).filter(BdTaskProgress.task_id == tid).one()
+    assert row.pct == 85 and row.review_status == "adjusted"
+    assert row.reported_pct == 40, "员工原值要留住"
+    # 再看一眼 view：点数与进展都变了，且仍标"可改"
+    v2 = task_ops.day_report(db, None, person="P2", on_date=d, action="view")
+    assert v2["report"]["total_cnt"] == 9
+    assert v2["progress"][0]["pct"] == 85
+    # --- 补录（那天没有自报）带进展 → 拒绝；只补点数 → 可以 ---
+    d2 = date(2026, 10, 8)
+    with pytest.raises(ValueError):
+        task_ops.day_report(db, admin, person="P2", on_date=d2, action="save",
+                            p1_cnt=3, p2_cnt=0,
+                            items=[{"task_id": tid, "pct": 90}])
+    db.rollback()
+    r2 = task_ops.day_report(db, admin, person="P2", on_date=d2, action="save",
+                             p1_cnt=3, p2_cnt=0)
+    assert r2["created"] is True and r2["tasks_changed"] == 0
+    assert db.query(StaffDailyReport).count() == 2

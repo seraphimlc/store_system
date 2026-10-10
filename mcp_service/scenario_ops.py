@@ -989,12 +989,15 @@ _WRITE_TOOLS = {"visit_upload", "visit_payroll_export", "visit_rebuild",
                 "visit_staff", "visit_config", "visit_store",
                 # 作业域写工具（2026-10-06）
                 "visit_self_report", "visit_task_report", "visit_task_assign",
-                "visit_task_confirm", "visit_task_return", "visit_task_transfer"}
+                "visit_task_confirm", "visit_task_return", "visit_task_transfer",
+                # 管理员改某员工某天的自报（点数 + 当天进展，2026-10-10）
+                "visit_day_report"}
 
 _WRITE_TITLES = {
     # 作业域（团队 / 车站 / 任务）
     "visit_self_report": "提交今日自报（点数+进度）",
     "visit_task_report": "上报任务进展",
+    "visit_day_report": "改/查某天自报（点数+进展）",
     "visit_task_assign": "派工 / 改派 / 回收",
     "visit_task_confirm": "确认 / 一键全确认 / 驳回",
     "visit_task_return": "撤回任务到车站池",
@@ -1100,6 +1103,33 @@ def visit_task_report(ctx: Context, task_id: int, pct: int,
                        lambda db, actor, ops: ops.report_one(
                            db, actor, task_id=task_id, pct=pct, note=note,
                            store_count=store_count))
+
+
+def visit_day_report(ctx: Context, person: str, date: str | None = None,
+                     action: str = "view", area: str | None = None,
+                     p1_cnt: int | None = None, p2_cnt: int | None = None,
+                     items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """**管理员改 / 查某员工某天的自报**（点数 + 当天该员工的任务进展）。
+
+    - `action="view"`（默认）：那天已有自报 → 点数 + 那天的进展行（含"能不能改"）；
+    - `action="save"`：**那天已有自报** → 点数 + `items`（`[{task_id,pct,note}]`，只写真改了的）
+      一次保存（同一事务）；**那天没有自报** → 只能补录点数，带 items 会被拒
+      （用户 2026-10-10 口径：管理员可以改自报，但补录只能补点数）。
+    """
+    if action not in ("view", "save"):
+        return _bad_action(action, ["view", "save"])
+    from mcp_service import task_ops
+    params = {"person": person, "date": date, "action": action, "area": area,
+              "p1_cnt": p1_cnt, "p2_cnt": p2_cnt, "items": items}
+    if action == "view":
+        def run(db):
+            return task_ops.day_report(db, None, person=person, on_date=date,
+                                       action="view")
+        return _read(ctx, "visit_day_report", params, run)
+    return _task_write(ctx, "visit_day_report", params,
+                       lambda db, actor, ops: ops.day_report(
+                           db, actor, person=person, on_date=date, action="save",
+                           area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt, items=items))
 
 
 def visit_team_tasks(ctx: Context, tab: str = "", kw: str = "",
@@ -1268,6 +1298,19 @@ def register(mcp: MCPServer) -> None:
     def _t_task_report(ctx: Context, task_id: int, pct: int,
                        note: str = "") -> dict[str, Any]:
         return visit_task_report(ctx, task_id=task_id, pct=pct, note=note)
+
+    @mcp.tool(name="visit_day_report", title=_WRITE_TITLES["visit_day_report"],
+              annotations=_annotations("visit_day_report"),
+              description="管理员改/查某员工某天的自报（点数 + 当天任务进展）："
+                          "action=view 看（默认）；action=save 保存 —— 那天已有自报时"
+                          "点数+items 一次改，没有自报时只能补录点数")
+    def _t_day_report(ctx: Context, person: str, date: str | None = None,
+                      action: str = "view", area: str | None = None,
+                      p1_cnt: int | None = None, p2_cnt: int | None = None,
+                      items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return visit_day_report(ctx, person=person, date=date, action=action,
+                                area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt,
+                                items=items)
 
     @mcp.tool(name="visit_team_tasks", title=_READ_TITLES["visit_team_tasks"],
               annotations=_annotations("visit_team_tasks"),

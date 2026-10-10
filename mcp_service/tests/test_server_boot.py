@@ -39,8 +39,8 @@ def test_tools_are_registered(monkeypatch, tmp_path):
     monkeypatch.setenv("VISIT_MCP_LOG", str(tmp_path / "r.jsonl"))
     mcp = build_server()
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    # 场景化重构 16 个 + 作业域 9 个 = 25 个（2026-10-06）
-    assert len(names) == 25
+    # 场景化重构 16 个 + 作业域 10 个 = 26 个（2026-10-10 加 visit_day_report）
+    assert len(names) == 26
     assert {"visit_verify", "visit_overview", "visit_upload", "visit_whoami",
             "visit_my_perf", "visit_my_pay"} <= names
     # 旧工具名已删除（不做兼容期）

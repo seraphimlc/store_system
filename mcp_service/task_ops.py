@@ -84,6 +84,77 @@ def self_report(db, actor, *, area: str = "", p1_cnt: Any = 0, p2_cnt: Any = 0,
             "tasks_skipped": r.get("skipped", 0)}
 
 
+def _resolve_person(db, person: str):
+    """工号（精确）或姓名（包含）→ Person 行；找不到抛 ValueError（→ BAD_PARAM）。"""
+    from app.models import Person
+    key = (person or "").strip()
+    if not key:
+        raise ValueError("person 不能为空：传工号（精确）或姓名（包含）")
+    rows = db.query(Person).all()
+    hit = next((p for p in rows if p.code == key), None)
+    if hit is None:
+        cands = [p for p in rows if key in (p.display_name or "")]
+        if len(cands) > 1:
+            raise ValueError("姓名 %r 匹配到多人（%s），请传工号"
+                             % (key, "、".join(p.code for p in cands[:5])))
+        hit = cands[0] if cands else None
+    if hit is None:
+        raise ValueError("未找到人员：%r（可先用 visit_staff(view='list') 查编号）" % key)
+    return hit
+
+
+def day_report(db, actor, *, person: str, on_date=None, action: str = "view",
+               area: Any = None, p1_cnt: Any = None, p2_cnt: Any = None,
+               items: list | None = None) -> dict:
+    """**管理员改 / 查某员工某天的自报**（点数 + 当天该员工的任务进展）。
+
+    口径与 Web 端 `/staff-reports` 的「补录 / 修改自报」**完全同一套**（走跨域编排层
+    `self_report.admin_day_*`）：
+    - `action="view"`：那天已有自报 → 把点数 + 那天的进展行（含"能不能改"）列出来；
+    - `action="save"`：那天已有自报 → 点数 + `items` 里**真改了**的进展一次保存（同一事务）；
+      那天**没有**自报 → 只能补录点数，带 `items` 直接报错（用户 2026-10-10 口径②）。
+    """
+    from app.services import self_report as sr
+    from app.services.date_plan import jst_today
+    d = on_date or jst_today()
+    if hasattr(d, "strip"):                      # 允许传 "YYYY-MM-DD" 字符串
+        from datetime import date as _date
+        d = _date.fromisoformat(str(d).strip())
+    p = _resolve_person(db, person)
+    if action == "view":
+        v = sr.admin_day_view(db, p.code, d)
+        rep = v["report"]
+        return {
+            "person_code": p.code, "name": p.display_name or p.code,
+            "date": d.isoformat(), "is_backfill": bool(v["is_backfill"]),
+            "report": ({"area": rep.area or "", "p1_cnt": rep.p1_cnt,
+                        "p2_cnt": rep.p2_cnt, "total_cnt": rep.total_cnt,
+                        "source": rep.source} if rep is not None else None),
+            "progress": [{"task_id": r["task_id"], "station": r["station"],
+                          "line": r["line"], "pct": r["pct"],
+                          "reported_pct": r["reported_pct"],
+                          "review_status": r["review_status"],
+                          "review_label": r["review_label"],
+                          "editable": r["editable"], "note": r["note"]}
+                         for r in v["rows"]],
+            "hint": ("is_backfill=true = 那天还没有自报：只能补录点数，不能补录任务进展"
+                     if v["is_backfill"] else
+                     "editable=false 的进展 = 队长还没处理过，管理员暂不能改"),
+        }
+    if action != "save":
+        raise ValueError("未知 action：%r（可选：view / save）" % action)
+    if p1_cnt is None or p2_cnt is None:
+        raise ValueError("save 必须给 p1_cnt 与 p2_cnt（那天没有自报时就是补录点数）")
+    r = sr.admin_day_save(db, actor, person_code=p.code, on_date=d,
+                          area=("" if area is None else area),
+                          p1_cnt=p1_cnt, p2_cnt=p2_cnt, items=items or [])
+    return {"person_code": p.code, "name": p.display_name or p.code,
+            "date": r["report_date"].isoformat(), "1点": r["p1"], "2点": r["p2"],
+            "tasks_changed": r["tasks"], "created": r["created"],
+            "skipped": r["skipped"],
+            "hint": "created=true = 那天原来没有自报（补录，只写了点数）"}
+
+
 def report_one(db, actor, *, task_id: int, pct: Any, note: str = "",
                store_count: Any = None) -> dict:
     """单条上报/调整进展（走 `save_progress` 的完整校验：锁定、归属、值域、**店铺数**）。
