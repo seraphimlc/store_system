@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """V3 页面路由：员工对账（我的判定确认）+ 管理员确认总览 + 入正式表。"""
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -606,6 +607,8 @@ async def recon_upload2(request: Request, month: str = Form(""),
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
+    if not re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise HTTPException(400, "月份格式非法，应为 YYYY-MM（如 2026-09）")
     content = await file.read()
     import os as _os
     try:

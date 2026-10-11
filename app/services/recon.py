@@ -53,10 +53,24 @@ def _match_daily_hdr(hdr):
     return has_store and has_person and has_date
 
 
+def _match_store_list_hdr(hdr):
+    """识别阿里结算/月度账单表头（store_list）：店 + 员工 + 点数直给，无逐日日期。
+
+    例：Settle Month / ISO PID / … / Store ID / Store Name / … / Employee Name /
+    Action Type / Store Total Amount（点数列值 1/2 直给，见规则 sheet）。
+    """
+    j = "|".join(str(c or "").lower() for c in hdr)
+    has_store = any(k in j for k in ("store id", "店舗id", "店铺id"))
+    has_person = any(k in j for k in ("employee name", "姓名", "提交人"))
+    has_pts = any(k in j for k in ("store total amount", "点数", "总点数"))
+    has_month = any(k in j for k in ("settle month", "结算月", "月份"))
+    return has_store and has_person and has_pts and has_month
+
+
 def guess_kind(path):
     """猜对账文件格式（全 sheet 扫描表头，避免标题行/多表干扰）：
     daily_records(逐条巡店明细→可日级) / person_points(姓名+点数) /
-    store_list / unknown。"""
+    store_list(阿里结算月度账单，店+员工+点数直给) / unknown。"""
     wb = load_workbook(path, read_only=True, data_only=True)
     person = daily = store = False
     for sn in wb.sheetnames:
@@ -68,7 +82,7 @@ def guess_kind(path):
                 person = True
             if _match_daily_hdr(hdr):
                 daily = True
-            if "Store ID" in j or "店舗ID" in j:
+            if _match_store_list_hdr(hdr):
                 store = True
     wb.close()
     if daily:
@@ -318,6 +332,84 @@ def parse_daily_records(path, month: str = "", db=None, ai_cols=None,
     return out or None
 
 
+def parse_store_list(path, month: str = "", db=None, unmatched=None):
+    """解析阿里结算/月度账单（store_list）→ {code: {name, pts, cnt}}。
+
+    格式：Settle Month / ISO PID / … / Store ID / Store Name / … / Employee Name /
+    Action Type / Store Total Amount（点数列 1/2 直给，无逐日日期）。
+    只计 Settle Month 等于 month 的行；按 员工姓名 → Person 编号 汇总人月点数。
+    未匹配员工记入 unmatched（页面/分析提示）。
+    """
+    wb = load_workbook(path, read_only=True, data_only=True)
+    hi = hdr = None
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        for i, r in enumerate(ws.iter_rows(min_row=1, max_row=12,
+                                           values_only=True)):
+            h = [str(c or "") for c in r]
+            if _match_store_list_hdr(h):
+                hi, hdr = i, h
+                break
+        if hi is not None:
+            break
+    if hi is None:
+        wb.close()
+        return None
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    i_month = _hdr_col(hdr, ("settle month", "结算月", "月份"))
+    i_name = _hdr_col(hdr, ("employee name", "姓名", "提交人"))
+    i_pts = _hdr_col(hdr, ("store total amount", "点数", "总点数"))
+    if i_name is None or i_pts is None:
+        return None
+    # 员工姓名 → 编号（与 parse_daily_records 同口径：重名优先当月有正式记录）
+    name2code = {}
+    if db is not None:
+        mc = set()
+        if len(month) == 7:
+            try:
+                y, mo = int(month[:4]), int(month[5:7])
+                from datetime import date as _d2
+                st = _d2(y, mo, 1)
+                en = _d2(y + 1, 1, 1) if mo == 12 else _d2(y, mo + 1, 1)
+                mc = {c for (c,) in db.query(FormalRecord.person_code).filter(
+                    FormalRecord.japan_date >= st,
+                    FormalRecord.japan_date < en).all()}
+            except ValueError:
+                mc = set()
+        by_name = {}
+        for p in db.query(Person).all():
+            by_name.setdefault(p.display_name, []).append(p.code)
+        name2code = {n: (cs[0] if len(cs) == 1
+                         else next((c for c in cs if c in mc), cs[0]))
+                     for n, cs in by_name.items()}
+    out = {}
+    for row in rows[hi + 1:]:
+        if i_month is not None and month:
+            mval = str(_cell(row, i_month) or "").strip()
+            if mval and mval != month and not mval.startswith(month):
+                continue
+        name = str(_cell(row, i_name) or "").strip()
+        if not name:
+            continue
+        pts_cell = _cell(row, i_pts)
+        if pts_cell is None:
+            continue
+        try:
+            pts = int(float(str(pts_cell)))
+        except (TypeError, ValueError):
+            continue
+        code = name2code.get(name, "")
+        if not code:
+            if unmatched is not None:
+                unmatched.append((name, "", month))
+            continue
+        rec = out.setdefault(code, {"name": name, "pts": 0, "cnt": 0})
+        rec["pts"] += pts
+        rec["cnt"] += 1
+    return out or None
+
+
 def compare_daily(db, parsed: dict, month: str):
     """本地正式表(按 员工×日 点数) vs 对账明细 → 问题行列表。
 
@@ -456,6 +548,26 @@ def run_task(db, task_id: int):
                             ref_date=_dt.date.fromisoformat(ds),
                             person_code=c, person_name=v["name"],
                             points=dd["pts"], cnt=dd["cnt"]))
+        elif kind == "store_list":
+            # 阿里结算月度账单：点数列直给、无逐日日期 → 按人月汇总
+            unmatched = []
+            parsed = parse_store_list(path, month, db=db,
+                                      unmatched=unmatched)
+            if unmatched:
+                params["unmatched"] = unmatched[:30]
+            if parsed:
+                params["single_date"] = True
+                params["single_date_val"] = month + "-01"
+                report = {c: v["pts"] for c, v in parsed.items()}
+                # 对账数据表：人×月 落库（_current_recon 依据）
+                if month:
+                    from datetime import date as _d9
+                    for c, v in parsed.items():
+                        db.add(ReconDataRow(
+                            task_id=task_id,
+                            ref_date=_d9.fromisoformat(month + "-01"),
+                            person_code=c, person_name=v["name"],
+                            points=v["pts"], cnt=v["cnt"]))
         saved = 0
         sys_only = []
         if report:

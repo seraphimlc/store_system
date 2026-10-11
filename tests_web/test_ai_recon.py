@@ -196,3 +196,87 @@ def test_report_ai_notes_unconfigured(client, monkeypatch):
     db.delete(t)
     db.commit()
     db.close()
+
+
+# ---------------- store_list（阿里结算月度账单）解析 ----------------
+STORE_LIST_HDR = ["Settle Month", "ISO PID", "ISO Name", "ISO Email",
+                  "ISO Country", "Store ID", "Store Name", "Store Country",
+                  "Store Address", "CD Name", "Employee Name", "Action Type",
+                  "Store Total Amount"]
+
+
+def test_guess_kind_store_list(tmp_path):
+    """阿里结算账单表头 → store_list（店+员工+点数直给+结算月）。"""
+    from app.services import recon
+    from tests.helpers import write_workbook
+    p = str(tmp_path / "alipay.xlsx")
+    write_workbook(p, [("MarsNavi", [STORE_LIST_HDR], [
+        ["2026-09", "1", "n", "e", "JP", "S1", "店1", "JP", "addr", "CD",
+         "甲", "POSM", "1"],
+    ]), ("规则", [["计算规则", "M列，1为1点店铺，2为2点店铺"]], [])])
+    assert recon.guess_kind(p) == "store_list"
+
+
+def test_parse_store_list(client, tmp_path):
+    """store_list 解析：按 员工姓名 汇总人月点数（点数列 1/2 直给）。"""
+    import app.db as appdb
+    from app.models import Person
+    from app.services import recon
+    from tests.helpers import write_workbook
+    db = appdb.SessionLocal()
+    db.add(Person(code="111", display_name="甲"))
+    db.add(Person(code="222", display_name="乙"))
+    db.commit()
+    p = str(tmp_path / "sl.xlsx")
+    write_workbook(p, [("MarsNavi", [STORE_LIST_HDR], [
+        ["2026-09", "1", "n", "e", "JP", "S1", "店1", "JP", "a", "CD", "甲", "POSM", "1"],
+        ["2026-09", "1", "n", "e", "JP", "S2", "店2", "JP", "a", "CD", "甲", "POSM", "2"],
+        ["2026-09", "1", "n", "e", "JP", "S3", "店3", "JP", "a", "CD", "乙", "POSM", "2"],
+        ["2026-08", "1", "n", "e", "JP", "S4", "店4", "JP", "a", "CD", "乙", "POSM", "1"],
+    ])])
+    unmatched = []
+    out = recon.parse_store_list(p, "2026-09", db=db, unmatched=unmatched)
+    assert out == {"111": {"name": "甲", "pts": 3, "cnt": 2},
+                   "222": {"name": "乙", "pts": 2, "cnt": 1}}
+    # 不在结算月的行被过滤；未匹配员工收集
+    p2 = str(tmp_path / "sl2.xlsx")
+    write_workbook(p2, [("MarsNavi", [STORE_LIST_HDR], [
+        ["2026-09", "1", "n", "e", "JP", "S9", "店9", "JP", "a", "CD", "陌生人", "POSM", "1"],
+    ])])
+    unmatched2 = []
+    out2 = recon.parse_store_list(p2, "2026-09", db=db, unmatched=unmatched2)
+    assert out2 is None and unmatched2 == [("陌生人", "", "2026-09")]
+    db.close()
+
+
+def test_run_task_store_list_full(client, tmp_path, monkeypatch):
+    """完整链路：store_list 上传 → 解析 → recon_data_rows 落库 → 人月差异。"""
+    import app.db as appdb
+    from app.models import MonthPerfRecord, Person, ReconDataRow, ReconTask
+    from app.services import recon
+    from tests.helpers import write_workbook
+    db = appdb.SessionLocal()
+    db.add(Person(code="111", display_name="甲"))
+    db.add(Person(code="222", display_name="乙"))
+    db.add(MonthPerfRecord(month="2026-09", person_code="111", points=10))
+    db.commit()
+    p = str(tmp_path / "sl3.xlsx")
+    write_workbook(p, [("MarsNavi", [STORE_LIST_HDR], [
+        ["2026-09", "1", "n", "e", "JP", "S1", "店1", "JP", "a", "CD", "甲", "POSM", "1"],
+        ["2026-09", "1", "n", "e", "JP", "S2", "店2", "JP", "a", "CD", "甲", "POSM", "2"],
+        ["2026-09", "1", "n", "e", "JP", "S3", "店3", "JP", "a", "CD", "乙", "POSM", "1"],
+    ])])
+    monkeypatch.setattr(recon, "ai_configured", lambda: False)
+    t, older = recon.submit_task(db, "2026-09", "sl3.xlsx",
+                                 open(p, "rb").read(), 1, sync=True)
+    rows = db.query(ReconDataRow).filter(ReconDataRow.task_id == t.id).all()
+    assert len(rows) == 2
+    by = {r.person_code: r for r in rows}
+    assert by["111"].points == 3 and by["222"].points == 1
+    res = db.query(recon.ReconResult).filter(
+        recon.ReconResult.task_id == t.id).all()
+    # 甲：系统 10 点 vs 对账 3 点 → 差 +7；乙：系统 0 点 vs 对账 1 点 → 差 -1
+    m = {r.submitter_code: r.diff for r in res}
+    assert m.get("111") == 7 and m.get("222") == -1
+    assert (t.summary or {}).get("kind") == "store_list"
+    db.close()
