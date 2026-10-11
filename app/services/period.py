@@ -90,7 +90,7 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
                 PayrollPayment.month == month,
                 PayrollPayment.person_code == person_code).all():
             absorbed += q.adjust_applied or 0                    # 已扣的（负）
-        remaining = carry + absorbed                             # 还要扣的（负）
+        remaining = carry - absorbed                             # 还要扣的（负）
         if remaining < 0:
             paid_amt = amount or 0
             take = max(remaining, -paid_amt)                     # 本笔最多扣 paid_amt

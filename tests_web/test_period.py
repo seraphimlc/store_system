@@ -3,8 +3,8 @@
 from datetime import date, datetime
 
 import app.db as appdb
-from app.models import (PayrollPeriodRow, Person, PersonDailyStat,
-                        ReconDataRow, ReconTask)
+from app.models import (PayrollPayment, PayrollPeriodRow, Person,
+                        PersonDailyStat, ReconDataRow, ReconTask)
 from app.services import period
 
 
@@ -228,4 +228,72 @@ def test_sys_config_chain(client):
     assert perf.bonus_params("2026-09") == (80, 2000)
     assert perf.month_per_point(db, "2026-09") == 300
     perf.clear_config_cache()
+    db.close()
+
+
+def test_record_payment_no_double_deduct_after_seq1(client):
+    """8月结转 -500：9月 seq1 扣完 → seq2 不得再扣（防重复扣款）。
+
+    回归：absorbed 是负的已扣额，remaining 应为 carry - absorbed（=0），
+    而非 carry + absorbed（=-1000 重复扣）。"""
+    db = appdb.SessionLocal()
+    db.add(Person(code="111", display_name="甲"))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="111",
+                            half1_points=0, half2_points=0,
+                            settle_points=0, prev_adjust_points=0,
+                            diff_points=2, adjust_points=2,
+                            diff_amount=500, adjust_amount=500,
+                            prev_adjust_amount=-500,
+                            updated_at=datetime.utcnow()))
+    db.add(PayrollPeriodRow(month="2026-09", person_code="111",
+                            half1_points=10, half2_points=10,
+                            settle_points=0, prev_adjust_points=0,
+                            diff_points=0, adjust_points=0,
+                            half1_amount=2500, half2_amount=2500,
+                            diff_amount=0, adjust_amount=0,
+                            prev_adjust_amount=0,
+                            updated_at=datetime.utcnow()))
+    db.commit()
+    # seq1 发薪：8月结转 -500 → 应扣 -500（工资 2500 足够）
+    assert period.record_payment(db, "2026-09", "111", 1) is True
+    p1 = (db.query(PayrollPayment)
+          .filter_by(month="2026-09", person_code="111", seq=1).one())
+    assert p1.adjust_applied == -500
+    # seq2 发薪：结转已在 seq1 扣完 → 不得再扣（旧 bug 会扣 -1000）
+    assert period.record_payment(db, "2026-09", "111", 2) is True
+    p2 = (db.query(PayrollPayment)
+          .filter_by(month="2026-09", person_code="111", seq=2).one())
+    assert p2.adjust_applied == 0          # 不再重复扣
+    assert p2.adjust_leftover is None
+    db.close()
+
+
+def test_record_payment_deduces_remaining_after_partial_seq1(client):
+    """8月结转 -3000、seq1 工资 1000 只能扣 1000 → seq2 应扣剩余 -2000。"""
+    db = appdb.SessionLocal()
+    db.add(Person(code="111", display_name="甲"))
+    db.add(PayrollPeriodRow(month="2026-08", person_code="111",
+                            half1_points=0, half2_points=0,
+                            settle_points=0, prev_adjust_points=0,
+                            diff_points=12, adjust_points=12,
+                            diff_amount=3000, adjust_amount=3000,
+                            prev_adjust_amount=-3000,
+                            updated_at=datetime.utcnow()))
+    db.add(PayrollPeriodRow(month="2026-09", person_code="111",
+                            half1_points=4, half2_points=20,
+                            settle_points=0, prev_adjust_points=0,
+                            diff_points=0, adjust_points=0,
+                            half1_amount=1000, half2_amount=5000,
+                            diff_amount=0, adjust_amount=0,
+                            prev_adjust_amount=0,
+                            updated_at=datetime.utcnow()))
+    db.commit()
+    period.record_payment(db, "2026-09", "111", 1)
+    p1 = (db.query(PayrollPayment)
+          .filter_by(month="2026-09", person_code="111", seq=1).one())
+    assert p1.adjust_applied == -1000          # 工资只够扣 1000
+    period.record_payment(db, "2026-09", "111", 2)
+    p2 = (db.query(PayrollPayment)
+          .filter_by(month="2026-09", person_code="111", seq=2).one())
+    assert p2.adjust_applied == -2000          # 剩余 -2000 在 seq2 扣
     db.close()
