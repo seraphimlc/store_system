@@ -607,7 +607,7 @@ async def recon_upload2(request: Request, month: str = Form(""),
         return _denied()
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
-    if not re.fullmatch(r"\d{4}-\d{2}", month or ""):
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month or ""):
         raise HTTPException(400, "月份格式非法，应为 YYYY-MM（如 2026-09）")
     content = await file.read()
     import os as _os
