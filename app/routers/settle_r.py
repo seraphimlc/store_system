@@ -577,6 +577,18 @@ def recon_page(request: Request,
             sys_rows = [{"code": c, "name": persons.get(c, c)}
                         for c in (cur.summary or {}).get("sys_only", [])]
     kind = (cur.summary or {}).get("kind") if cur else ""
+    # 对账可选月份：有对账任务的月份 ∪ 有正式数据的月份（倒序；默认当前任务月/最新）
+    from app.models import FormalRecord as _FR, MonthPerfRecord as _MPR
+    months = {((t.params or {}).get("month", ""))[:7] for t in tasks}
+    for (_m,) in db.query(_MPR.month).all():
+        months.add(str(_m)[:7])
+    for (_d,) in db.query(_FR.japan_date).filter(
+            _FR.japan_date.isnot(None)).all():
+        months.add(str(_d)[:7])
+    months = sorted(months, reverse=True)
+    cur_month = (cur.params or {}).get("month", "") if cur else ""
+    if cur_month not in months and months:
+        cur_month = months[0]
     page_state = {
         "page": "recon", "cur_task": cur.id if cur else None,
         "cur_status": cur.status if cur else None,
@@ -593,6 +605,7 @@ def recon_page(request: Request,
         "request": request, "current_user": user, "msg": msg,
         "tasks": tasks, "cur": cur, "diffs": diff_rows,
         "sys_rows": sys_rows, "next_month": next_month,
+        "months": months, "cur_month": cur_month,
         "day_rows": day_rows, "kind": kind, "page_state": page_state})
 
 

@@ -12,8 +12,10 @@
         data-testid="recon-upload-form">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
-    <label class="f">{{ t('月份') }}<input type="month" name="month" value="2026-08"
-        data-testid="recon-month"></label>
+    <label class="f">{{ t('月份') }}
+      <select name="month" data-testid="recon-month">
+        {% for m in months %}<option value="{{ m }}" {% if m == cur_month %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select></label>
     <input type="file" name="file" accept=".xlsx" required data-testid="recon-file">
     <button class="btn" type="submit" data-testid="recon-upload-btn">{{ t('导入并对比') }}</button>
   </form>
