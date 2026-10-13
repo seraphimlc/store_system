@@ -789,8 +789,9 @@ class StaffDatePlan(Base):
       每日填报提交/修改/删除时**写透**到本表（`date_plan.mark_reported`），
       所以管理端矩阵**只读这一张表即可渲染三态，不需要关联 `staff_daily_reports`**
       （= 不做 join、不做第二条查询）；
-    - 单元格状态 = `cell_state(available, reported)`（同一行内计算）：
-      `reported` → □ 已出勤 / `available` → ○ 可出勤 / 否则 × 不出勤；没有行 = 未登记；
+    - 单元格状态 = `cell_state(available, reported, ...)`（同一行内计算）：
+      `reported` → □ 已出勤 / 过去且亲手登记可出勤却没自报 → △ /
+      `available` → ○ 可出勤 / 否则 × 不出勤；没有行 = 未登记；
     - 计划只是**预报**，`reported` 才是事实（实际出勤以自报为准）；
     - **`source`**：`web` = 员工登记的整期计划行；`report` = 由每日填报写入的行（不算"已登记"）；
       `admin` = 管理员写入。**"该半月是否已登记" = 该期存在 `source != 'report'` 的行**

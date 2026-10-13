@@ -127,7 +127,7 @@ def staff_plans_page(request: Request,
                      user: Optional[User] = Depends(require_login),
                      db: Session = Depends(get_db), period: str = "",
                      msg: str = "", err: str = ""):
-    """全员出勤计划矩阵：行=员工，列=日期（○/×/□/–）。"""
+    """全员出勤计划矩阵：行=员工，列=日期（○/×/△/□/–）。"""
     g = _admin_guard(user)
     if g:
         return g

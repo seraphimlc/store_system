@@ -389,6 +389,8 @@ table.plan-matrix tr.row-inactive td:first-child { color: var(--muted); font-wei
 table.plan-matrix td.c { font-size: 1.02rem; font-weight: 700; min-width: 2.1em; }
 table.plan-matrix td.c.on { color: var(--ok); }
 table.plan-matrix td.c.off { color: var(--err); background: #fff7f7; }
+/* △ = 计划可出勤但没来：和普通 × 同色，但格子里多一个三角，扫一眼能分开 */
+table.plan-matrix td.c.miss { color: var(--err); background: #fff4e8; }
 table.plan-matrix td.c.done { color: var(--brand); background: #f2f6ff; }
 table.plan-matrix td.c.none { color: #c3cad8; }
 /* 入职前（不在职）：留空 + 淡底，不参与任何统计 */

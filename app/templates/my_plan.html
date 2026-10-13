@@ -133,6 +133,7 @@
       <span class="st">
         <span class="pm {{ d.state }}">{{ d.mark }}</span>
         <span class="hint">{% if d.reported %}{{ t('已出勤（已自报）') }}
+          {% elif d.state == 'miss' %}{{ t('计划可出勤但未自报') }}
           {% elif d.past %}{{ t('未自报（按不出勤）') }}
           {% else %}{{ t('填报期已结束') }}{% endif %}</span>
       </span>

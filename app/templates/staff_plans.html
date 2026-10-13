@@ -32,6 +32,7 @@
   <span class="plan-legend">
     <span><span class="pm on">○</span>{{ t('可出勤') }}</span>
     <span><span class="pm off">×</span>{{ t('不出勤') }}</span>
+    <span><span class="pm miss">△</span>{{ t('计划可出勤但未自报') }}</span>
     <span><span class="pm done">□</span>{{ t('已出勤（已自报）') }}</span>
     <span><span class="pm none">–</span>{{ t('未登记') }}</span>
     <span><span class="pm on dim">○</span>{{ t('未填·按可出勤（新入职）') }}</span>
@@ -54,7 +55,7 @@
     {% for d in m.days %}
     <td class="c {{ r.states[d] }}{% if r.assumed_days[d] or r.assumed_off_days[d] %} assumed{% endif %}{% if m.past[d] %} past{% endif %}"
         data-testid="cell-{{ r.person_code }}-{{ d }}"
-        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% else %}{{ r.marks[d] }}{% if d in r.leave_days %}{{ t('（假期模式）') }}{% elif r.assumed_days[d] %}（没填计划→按可出勤）{% elif r.assumed_off_days[d] %}（没填计划→按不出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
+        title="{{ r.name }} {{ d }} {% if r.states[d] == 'na' %}不在职（{{ r.roster_start }} 起）{% elif r.states[d] == 'miss' %}{{ t('计划可出勤但未自报') }}{% else %}{{ r.marks[d] }}{% if d in r.leave_days %}{{ t('（假期模式）') }}{% elif r.assumed_days[d] %}（没填计划→按可出勤）{% elif r.assumed_off_days[d] %}（没填计划→按不出勤）{% endif %}{% endif %}">{{ r.marks[d] }}</td>
     {% endfor %}
   </tr>
   {% else %}

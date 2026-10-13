@@ -5,7 +5,8 @@
 
 - **自然半月**：上半月 `1–15`（H1，截止 3 号）/ 下半月 `16–月末`（H2，截止 18 号）；
 - **默认每天都出勤**：只把"不出勤"的日期落库（`available=False`）；
-- **三态**：`○` 计划可出勤 / `×` 计划不出勤 / `□` 已出勤（已自报）；未登记 = `–`；
+- **格标记**：`○` 计划可出勤 / `×` 计划不出勤 / `□` 已出勤（已自报）；未登记 = `–`；
+  过去「亲手登记可出勤、却没自报」= `△`（没来，和本来就计划不出勤的 × 分开）；
 - **实际出勤以自报为准**：当天有每日填报（`staff_daily_reports`）→ 一律显示 `□`（覆盖计划值）；
 - **锁定**：已过去的日期、已有自报的日期不可再改（逾期只提示，不拦）；
 - 业务日 = **JST**（`daily_report.jst_today()`）。
@@ -26,12 +27,13 @@ SPLIT_DAY = 15      # ≤15 归上半月
 DEADLINE_DAY = {H1: 3, H2: 18}   # 登记截止日（用户口径：3 号 / 18 号前）
 
 STATE_ON = "on"      # ○ 计划可出勤（默认）
-STATE_OFF = "off"    # × 计划不出勤
+STATE_OFF = "off"    # × 计划不出勤 / 过去没来（没登记、或计划就是不出勤）
+STATE_MISS = "miss"  # △ 计划可出勤，但那天已过、没有自报（说了要来、实际没来）
 STATE_DONE = "done"  # □ 已出勤（已自报）
 STATE_NONE = "none"  # – 未登记
 STATE_NA = "na"      # 空白：入职（名册起点）之前，不属于他的日子，不计任何统计
-MARKS = {STATE_ON: "○", STATE_OFF: "×", STATE_DONE: "□", STATE_NONE: "–",
-         STATE_NA: ""}
+MARKS = {STATE_ON: "○", STATE_OFF: "×", STATE_MISS: "△", STATE_DONE: "□",
+         STATE_NONE: "–", STATE_NA: ""}
 
 LOCK_NONE = ""
 LOCK_PAST = "past"           # 日期已过去
@@ -220,12 +222,13 @@ def next_window(today=None) -> Optional[dict]:
 def cell_state(plan_available: Optional[bool], reported: bool,
                assumed: bool = False, past: bool = False,
                before_start: bool = False, inactive: bool = False,
-               assumed_off: bool = False) -> str:
+               assumed_off: bool = False, planned_on: bool = False) -> str:
     """格状态口径（**唯一来源**）：**已自报 > 已过去 > 计划值 > 默认出勤 > 未登记**。
 
     - `reported=True` → **□** 已出勤（已自报；事实，覆盖一切）；
-    - `past=True`（日期 < 今天）→ **×** 没自报就是**没出勤**（用户 2026-10-01 明确：
-      "过去的日期里，有自报显示方框，没自报显示叉"，计划值不参与 —— 预报不改变既成事实）；
+    - `past=True`（日期 < 今天）且没自报：
+      **△** = 员工亲手登记了可出勤、却没来（`planned_on`；2026-10 用户要求与普通 × 分开）；
+      **×** = 其余没来（没登记 / 计划不出勤 / 假期模式）。今天仍显示计划值，次日才判。
     - 今天及以后：有计划行 → ○ / ×；没计划行 → **默认出勤 ○**（`assumed`，窗口关闭后）
       或 **–** 未登记（窗口未关）。
     """
@@ -234,7 +237,7 @@ def cell_state(plan_available: Optional[bool], reported: bool,
     if reported:
         return STATE_DONE
     if past:
-        return STATE_OFF
+        return STATE_MISS if planned_on else STATE_OFF
     if inactive:
         return STATE_OFF             # 停用/离职：今天及以后一律 ×（不可能来上班）
     if plan_available is None:
@@ -277,18 +280,35 @@ def lock_of(d: date, today: date, reported: bool) -> str:
 
 
 def _plan_map(db, person_code: str, start: date, end: date) -> Dict[date, tuple]:
-    """该人某区间的计划行 → `{日期: (available, reported)}`。
+    """该人某区间的计划行 → `{日期: (available, reported, planned_on)}`。
 
     **只读 `staff_date_plans` 这一张表**（用户 2026-10-01 口径："避免关联查询"）：
     "已自报"由每日填报**写透**到本表 `reported` 列（见 `mark_reported`），
-    渲染时不再查 `staff_daily_reports`。
+    渲染时不再查 `staff_daily_reports`。`planned_on` 见 `is_planned_on`。
     """
     rows = (db.query(StaffDatePlan.plan_date, StaffDatePlan.available,
-                     StaffDatePlan.reported)
+                     StaffDatePlan.reported, StaffDatePlan.source,
+                     StaffDatePlan.leave_id)
             .filter(StaffDatePlan.person_code == person_code,
                     StaffDatePlan.plan_date >= start,
                     StaffDatePlan.plan_date <= end).all())
-    return {d: (bool(a), bool(r)) for d, a, r in rows}
+    return {d: (bool(a), bool(r), is_planned_on(a, src, lv))
+            for d, a, r, src, lv in rows}
+
+
+def is_planned_on(available, source, leave_id) -> bool:
+    """这一天是不是员工**亲手登记的可出勤**。
+
+    过去没自报时，只有这种日子画 △（说了要来、没来）。不算的：
+    没登记（没有行）、计划不出勤、假期模式（`leave_id` 有值，或 `source='leave'`
+    ——开假会把原来的可出勤改写成不出勤）、只自报写透进来的行（`source='report'`，
+    那不是登记）。
+    """
+    if available is None or not bool(available):
+        return False
+    if leave_id is not None or source in ("leave", SOURCE_REPORT):
+        return False
+    return True
 
 
 def _row_of(db, person_code: str, d: date):
@@ -564,14 +584,14 @@ def plan_days(db, person_code: str, key: str, today=None) -> dict:
     days = []
     d = start
     while d <= end:
-        avail, rep = plans.get(d, (None, False))
+        avail, rep, planned = plans.get(d, (None, False, False))
         dmode = unfilled_default(key, today, my_start)
         asm = bool(dmode == "on" and d >= today)
         asm_off = bool(dmode == "off" and d >= today)
         past = d < today
         before = my_start is not None and d < my_start
         state = cell_state(avail, rep, assumed=asm, past=past, before_start=before,
-                           assumed_off=asm_off)
+                           assumed_off=asm_off, planned_on=planned)
         lock = lock_of(d, today, rep)
         editable = window_open and not before and lock == LOCK_NONE
         off = (avail is False)
@@ -727,11 +747,12 @@ def admin_matrix(db, key: str, today=None) -> dict:
     days = period_days(key)
     plan_rows = (db.query(StaffDatePlan.person_code, StaffDatePlan.plan_date,
                           StaffDatePlan.available, StaffDatePlan.reported,
-                          StaffDatePlan.leave_id)
+                          StaffDatePlan.source, StaffDatePlan.leave_id)
                  .filter(StaffDatePlan.plan_date >= start,
                          StaffDatePlan.plan_date <= end).all())
-    plan_map = {(c, d): (bool(a), bool(r)) for c, d, a, r, _lv in plan_rows}
-    leave_map = {(c, d) for c, d, _a, _r, lv in plan_rows if lv}
+    plan_map = {(c, d): (bool(a), bool(r), is_planned_on(a, src, lv))
+                for c, d, a, r, src, lv in plan_rows}
+    leave_map = {(c, d) for c, d, _a, _r, _src, lv in plan_rows if lv}
     with_plan = {c for c, _ in plan_map}          # 有行 = 登记过（含只自报的行，下面再判）
 
     cand = _matrix_people(db)
@@ -771,13 +792,13 @@ def admin_matrix(db, key: str, today=None) -> dict:
         gone = {}                       # 逐日：这一格是"不在职"导致的 ×（统计要排除）
         dmode = unfilled_default(key, today, my_start)            # 没填：新入职按出勤 / 老员工按不出勤
         for d in days:
-            av, rep = plan_map.get((code, d), (None, False))
+            av, rep, planned = plan_map.get((code, d), (None, False, False))
             asm = bool(dmode == "on" and d >= today)
             asm_off = bool(dmode == "off" and d >= today)
             before = my_start is not None and d < my_start
             states[d] = cell_state(av, rep, assumed=asm, past=d < today,
                                    before_start=before, inactive=inactive,
-                                   assumed_off=asm_off)
+                                   assumed_off=asm_off, planned_on=planned)
             assumed[d] = bool(asm and av is None and not before
                               and not inactive)                  # 这一格是"默认出勤"
             assumed_off[d] = bool(asm_off and av is None and not before
@@ -785,7 +806,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
             gone[d] = bool(inactive and not before and d >= today)   # 今天及以后的不在职格子
         for d in days:
             # 注意：这里必须重新取本格的 (av, rep)，不能沿用上一个循环的残留值
-            av, rep = plan_map.get((code, d), (None, False))
+            av, rep, _planned = plan_map.get((code, d), (None, False, False))
             if states[d] == STATE_NA:                    # 入职前：不计任何统计
                 continue
             if states[d] in (STATE_ON, STATE_DONE):
@@ -820,7 +841,7 @@ def admin_matrix(db, key: str, today=None) -> dict:
             "assumed_off": a_off_cnt > 0,  # 真有"没填→默认不出勤"的格子
             "assumed_off_cnt": a_off_cnt,
             "on_cnt": sum(1 for d in days if states[d] == STATE_ON),
-            "off_cnt": sum(1 for d in days if states[d] == STATE_OFF),
+            "off_cnt": sum(1 for d in days if states[d] in (STATE_OFF, STATE_MISS)),
             "done_cnt": sum(1 for d in days if states[d] == STATE_DONE),
             "assumed_cnt": a_cnt,
         })
@@ -894,7 +915,8 @@ def plan_xlsx(db, key: str, today=None):
             cells.append(c)
         ws.append(cells)
 
-    note = ("说明：○=可出勤；×=不出勤；□=已出勤（已自报）；空=未登记/未提供。"
+    note = ("说明：○=可出勤；×=不出勤；△=计划可出勤但未自报（没来）；"
+            "□=已出勤（已自报）；空=未登记/未提供。"
             "超期没填计划：老员工按不出勤、本期新入职按可出勤。"
             "可出动天数=今天起可出勤（○/□）的天数。")
     if m["default_all"]:
