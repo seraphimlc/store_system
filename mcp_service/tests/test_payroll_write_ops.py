@@ -248,9 +248,9 @@ def test_unmark_removes_ledger_rows(db):
 def test_payment_adjust_trace_points_to_source(db):
     """抵扣金额带来源：type=carry + 上月找平行 id + 对账任务 id，且剩余递延自洽。"""
     from datetime import date
-    from app.models import (FormalRecord, ImportFile, PayrollPayment,
-                            PayrollPeriodRow, Person, PersonDailyStat,
-                            ReconTask)
+    from app.models import (FormalRecord, ImportFile, PayrollAdjust,
+                            PayrollPayment, PayrollPeriodRow, Person,
+                            PersonDailyStat, ReconTask)
     from app.services import period
 
     db.add(Person(code="P001", display_name="甲"))
@@ -268,6 +268,11 @@ def test_payment_adjust_trace_points_to_source(db):
     db.add(PayrollPeriodRow(month="2026-08", person_code="P001",
                             diff_amount=-10000, diff_points=-40,
                             prev_adjust_amount=-10000))
+    # 结转**读账表**（record_payment 不再读链子）：8 月这笔 -10000 尚未结清
+    db.add(PayrollAdjust(source_month="2026-08", person_code="P001",
+                         source_task_id=88, adjust_amount=-10000,
+                         settled_amount=0, remaining=-10000,
+                         status="in_progress", updated_at=datetime.utcnow()))
     db.commit()
     period.sync_period_table(db, "2026-09")
     db.commit()

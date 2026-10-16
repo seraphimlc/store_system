@@ -21,6 +21,33 @@ def _prev_month(month: str) -> str:
     return f"{y}-{m - 1:02d}"
 
 
+def prior_debt_map(db: Session, month: str) -> dict:
+    """`month` **之前各月仍未结清**的找平余额 → {person_code: 金额(负=欠/正=补)}。
+
+    **"该扣多少"的唯一权威来源**：找平表 `payroll_adjusts.remaining`，由
+    `allocate_settlement` 按 FIFO 逐笔冲销维护（`sync_adjusts` 只重写
+    adjust_amount/settled/remaining，不会被结转链污染）。
+
+    ⚠️ **别拿 `payroll_period_rows.prev_adjust_amount`（下称"链子"）当权威**：
+    链子是**生成那一刻的快照**，只算"当月 diff + 未发薪期的可吸收额度"，
+    **不反映此后实际发生的回收**。
+    实测（2026-10-17 生产）：8 月那两笔在 9 月发薪时已经扣掉了（账表里 8 月
+    `remaining=0 / status=settled`），可 9 月的链子仍写着 `−1,889,000`
+    （= 9 月自己的 −1,296,500 + 8 月**已经扣过的** −592,500），账表是 −1,296,500。
+    10 月一发薪就按链子扣 → **全公司多扣 ¥592,500**（小川逸一人多扣 ¥58,250，
+    他那上半月 88,000 工资会被整笔划走）。
+    """
+    from app.models import PayrollAdjust
+    out: dict = {}
+    if not month:
+        return out
+    for a in db.query(PayrollAdjust).filter(
+            PayrollAdjust.source_month < month,
+            PayrollAdjust.status == "in_progress").all():
+        out[a.person_code] = out.get(a.person_code, 0) + (a.remaining or 0)
+    return out
+
+
 def _month_bounds(month: str):
     y, m = int(month[:4]), int(month[5:7])
     st = _date(y, m, 1)
@@ -83,14 +110,15 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
     prev_row = db.query(PayrollPeriodRow).filter(
         PayrollPeriodRow.month == pm,
         PayrollPeriodRow.person_code == person_code).first()
-    carry = prev_row.prev_adjust_amount or 0 if prev_row else 0   # 负=要扣
+    # ⚠️ **结转额读账表 `payroll_adjusts.remaining`，不读链子 `prev_adjust_amount`。**
+    #    链子是"生成那一刻的快照"，不反映此后已发生的回收：8 月那两笔在 9 月发薪时
+    #    已经扣掉了（账表里 8 月 remaining=0/settled），可 9 月的链子还写着 −1,889,000
+    #    （含 8 月**已经扣过的** −592,500）→ 10 月按链子扣就**全公司多扣 ¥592,500**。
+    #    账表由 `allocate_settlement` 在每次登记发放时逐笔冲销，**本身就是本笔之前
+    #    的真实欠款**，所以这里直接用，**不再另减"本月已扣额"**（再减就重复了）。
+    carry = prior_debt_map(db, month).get(person_code, 0)        # 负=要扣
     if carry < 0:
-        absorbed = 0
-        for q in db.query(PayrollPayment).filter(
-                PayrollPayment.month == month,
-                PayrollPayment.person_code == person_code).all():
-            absorbed += q.adjust_applied or 0                    # 已扣的（负）
-        remaining = carry - absorbed                             # 还要扣的（负）
+        remaining = carry                                         # 还要扣的（负）
         if remaining < 0:
             paid_amt = amount or 0
             take = max(remaining, -paid_amt)                     # 本笔最多扣 paid_amt
@@ -98,16 +126,27 @@ def record_payment(db: Session, month: str, person_code: str, seq: int,
             leftover = remaining - take                          # 扣完仍需递延（负）
             src_type = "carry"
             src_month = pm
-            src_row = prev_row.id
-            from app.models import ReconTask
+            src_row = prev_row.id if prev_row else None
+            # 溯源指向**最老的那笔未结清找平**所在月的对账任务（FIFO，与冲销口径一致）
+            from app.models import PayrollAdjust, ReconTask
+            oldest = (db.query(PayrollAdjust)
+                      .filter(PayrollAdjust.person_code == person_code,
+                              PayrollAdjust.status == "in_progress",
+                              PayrollAdjust.source_month < month)
+                      .order_by(PayrollAdjust.source_month,
+                                PayrollAdjust.id).first())
+            src_task = oldest.source_task_id if oldest else None
+            if oldest is not None:
+                src_month = oldest.source_month
             cur = None
-            for t in db.query(ReconTask).filter(
-                    ReconTask.kind == "monthly_v3").all():
-                pp = t.params or {}
-                if pp.get("month") == pm and not pp.get("replaced_by"):
-                    if cur is None or t.id > cur.id:
-                        cur = t
-            src_task = cur.id if cur else None
+            if oldest is None or src_task is None:
+                for t in db.query(ReconTask).filter(
+                        ReconTask.kind == "monthly_v3").all():
+                    pp = t.params or {}
+                    if pp.get("month") == src_month and not pp.get("replaced_by"):
+                        if cur is None or t.id > cur.id:
+                            cur = t
+                src_task = cur.id if cur else src_task
 
     pay = PayrollPayment(month=month, person_code=person_code, seq=seq,
                          points=points or 0, amount=amount or 0,
@@ -696,11 +735,11 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
 def period_rows(db: Session, month: str):
     """该月偏差表行（含姓名），按人排序。"""
     names = {p.code: p.display_name for p in db.query(Person).all()}
-    # 「上月修正」= 本月要扣/补的上月结转（上月行 prev_adjust_amount）
+    # 「上月修正」= 本月要扣/补的结转金额。**读账表**（payroll_adjusts）而不是上月行
+    # 的 `prev_adjust_amount`：后者是生成时的快照，会把已经扣过的再显示一次
+    # （实测 2026-09 合计 −1,889,000 vs 账表 −1,296,500，差的就是 8 月已收的 −592,500）。
     pm = _prev_month(month)
-    carry = {r.person_code: r.prev_adjust_amount for r in
-             db.query(PayrollPeriodRow).filter(
-                 PayrollPeriodRow.month == pm).all()}
+    carry = prior_debt_map(db, month)
     carry_pt = {r.person_code: r.prev_adjust_points for r in
                 db.query(PayrollPeriodRow).filter(
                     PayrollPeriodRow.month == pm).all()}
@@ -759,18 +798,20 @@ def set_period_values(db: Session, month: str, person_code: str,
 def carry_map(db: Session, month: str) -> dict:
     """该月应结转的「上月未扣完余额」→ {code: [余量点(参考), 余额金额]}。
 
-    余额金额(链式) = 上月(carry + half1_amt + half2_amt)，两期工资扣不完的负余额
-    才递延到本月（发薪表"找平金额"列与两期扣减取自本函数）。
-    找平金额(金额差)自动写表、页面只读；本函数返回上月结转余额(正补/负扣)。
+    **金额一律取账表** `payroll_adjusts.remaining`（正补/负扣），不取上月行的
+    `prev_adjust_amount` —— 那是生成时的快照，会把已经冲销掉的债务再结转一次
+    （实测 2026-09：链子 −1,889,000 vs 账表 −1,296,500）。
+    点数只作**参考**（账表是金额口径，没有点数），仍取上月行的
+    `diff_points − adjust_points`。
     """
-    pm = _prev_month(month)
     if not month:
         return {}
+    pm = _prev_month(month)
+    pts = {r.person_code: (r.diff_points or 0) - (r.adjust_points or 0)
+           for r in db.query(PayrollPeriodRow).filter(
+               PayrollPeriodRow.month == pm).all()}
     out = {}
-    for r in db.query(PayrollPeriodRow).filter(
-            PayrollPeriodRow.month == pm).all():
-        remain_pt = (r.diff_points or 0) - (r.adjust_points or 0)
-        carry_amt = r.prev_adjust_amount or 0
-        if carry_amt:
-            out[r.person_code] = [remain_pt, carry_amt]
+    for code_, amt in prior_debt_map(db, month).items():
+        if amt:
+            out[code_] = [pts.get(code_, 0), amt]
     return out

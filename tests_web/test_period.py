@@ -3,8 +3,8 @@
 from datetime import date, datetime
 
 import app.db as appdb
-from app.models import (PayrollPayment, PayrollPeriodRow, Person,
-                        PersonDailyStat, ReconDataRow, ReconTask)
+from app.models import (PayrollAdjust, PayrollPayment, PayrollPeriodRow,
+                        Person, PersonDailyStat, ReconDataRow, ReconTask)
 from app.services import period
 
 
@@ -20,6 +20,10 @@ def test_sync_formula_and_prev_adjust(client):
                             diff_amount=500, adjust_amount=500,
                             prev_adjust_amount=-500,
                             updated_at=datetime.utcnow()))
+    # 结转的权威来源=账表（period_rows 的「上月修正」读它，不再读链子）
+    db.add(PayrollAdjust(source_month="2026-07", person_code="111",
+                         adjust_amount=-500, settled_amount=0, remaining=-500,
+                         status="in_progress", updated_at=datetime.utcnow()))
     # 8月统计表：8/1=1点(上半月)，8/16=2点+8/20=1点(下半月3点)
     for d, pts in ((date(2026, 8, 1), 1), (date(2026, 8, 16), 2),
                    (date(2026, 8, 20), 1)):
@@ -58,6 +62,10 @@ def test_prev_adjust_chain_carry(client):
                             half1_amount=10000, half2_amount=0,
                             prev_adjust_amount=-25000,
                             updated_at=datetime.utcnow()))
+    db.add(PayrollAdjust(source_month="2026-07", person_code="A",
+                         adjust_amount=-25000, settled_amount=0,
+                         remaining=-25000, status="in_progress",
+                         updated_at=datetime.utcnow()))
     db.add(PayrollPeriodRow(month="2026-07", person_code="B",
                             diff_points=100, adjust_points=100,
                             diff_amount=100 * 250, adjust_amount=100 * 250,
@@ -245,6 +253,10 @@ def test_record_payment_no_double_deduct_after_seq1(client):
                             diff_amount=500, adjust_amount=500,
                             prev_adjust_amount=-500,
                             updated_at=datetime.utcnow()))
+    # 结转的**权威来源是账表**（record_payment 读它，不再读链子）
+    db.add(PayrollAdjust(source_month="2026-08", person_code="111",
+                         adjust_amount=-500, settled_amount=0, remaining=-500,
+                         status="in_progress", updated_at=datetime.utcnow()))
     db.add(PayrollPeriodRow(month="2026-09", person_code="111",
                             half1_points=10, half2_points=10,
                             settle_points=0, prev_adjust_points=0,
@@ -279,6 +291,9 @@ def test_record_payment_deduces_remaining_after_partial_seq1(client):
                             diff_amount=3000, adjust_amount=3000,
                             prev_adjust_amount=-3000,
                             updated_at=datetime.utcnow()))
+    db.add(PayrollAdjust(source_month="2026-08", person_code="111",
+                         adjust_amount=-3000, settled_amount=0, remaining=-3000,
+                         status="in_progress", updated_at=datetime.utcnow()))
     db.add(PayrollPeriodRow(month="2026-09", person_code="111",
                             half1_points=4, half2_points=20,
                             settle_points=0, prev_adjust_points=0,
@@ -296,4 +311,57 @@ def test_record_payment_deduces_remaining_after_partial_seq1(client):
     p2 = (db.query(PayrollPayment)
           .filter_by(month="2026-09", person_code="111", seq=2).one())
     assert p2.adjust_applied == -2000          # 剩余 -2000 在 seq2 扣
+    db.close()
+
+
+def test_carry_comes_from_ledger_not_stale_chain(client):
+    """**回归（2026-10-17 生产）**：8 月那笔已在 9 月发薪时扣掉，10 月不得再扣一次。
+
+    线上实况：账表里 8 月 `remaining=0 / status=settled`（已扣 ¥58,250），
+    可 9 月行的链子 `prev_adjust_amount` 还是生成时的旧快照 **−102,500**
+    （= 9 月自己 −44,250 + 8 月**已经扣过的** −58,250，全公司合计虚高 ¥592,500）。
+    旧实现 `record_payment` 读链子 → 小川逸 10 月上半月 **88,000 工资会被整笔划走**。
+    修后读账表 → 只扣 9 月真正还剩的 −44,250。
+    """
+    db = appdb.SessionLocal()
+    db.add(Person(code="222", display_name="小川逸"))
+    # 8 月：已结清
+    db.add(PayrollAdjust(source_month="2026-08", person_code="222",
+                         adjust_amount=-58250, settled_amount=-58250,
+                         remaining=0, status="settled",
+                         updated_at=datetime.utcnow()))
+    # 9 月：还没扣
+    db.add(PayrollAdjust(source_month="2026-09", person_code="222",
+                         adjust_amount=-44250, settled_amount=0,
+                         remaining=-44250, status="in_progress",
+                         updated_at=datetime.utcnow()))
+    # 9 月行的链子是**旧快照**（含已扣的 8 月）
+    db.add(PayrollPeriodRow(month="2026-09", person_code="222",
+                            half1_points=1407, half2_points=1370,
+                            settle_points=2615, prev_adjust_points=-197,
+                            diff_points=-359, adjust_points=0,
+                            half1_amount=374250, half2_amount=366250,
+                            settle_amount=696250,
+                            diff_amount=-44250, adjust_amount=-44250,
+                            prev_adjust_amount=-102500,
+                            updated_at=datetime.utcnow()))
+    db.add(PayrollPeriodRow(month="2026-10", person_code="222",
+                            half1_points=332, half2_points=0,
+                            settle_points=0, prev_adjust_points=-359,
+                            diff_points=-691, adjust_points=0,
+                            half1_amount=88000, half2_amount=0,
+                            settle_amount=0, diff_amount=0, adjust_amount=0,
+                            prev_adjust_amount=0,
+                            updated_at=datetime.utcnow()))
+    db.commit()
+
+    assert period.record_payment(db, "2026-10", "222", 1) is True
+    p1 = (db.query(PayrollPayment)
+          .filter_by(month="2026-10", person_code="222", seq=1).one())
+    assert p1.adjust_applied == -44250, "只扣 9 月真实剩余的 44,250"
+    assert p1.adjust_applied != -88000, "绝不能按旧链子把整月工资扣光"
+    # 账表被冲销：9 月结清
+    a9 = (db.query(PayrollAdjust)
+          .filter_by(source_month="2026-09", person_code="222").one())
+    assert a9.remaining == 0 and a9.status == "settled"
     db.close()
