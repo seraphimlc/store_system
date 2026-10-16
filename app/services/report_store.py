@@ -79,7 +79,7 @@ def _person_row(p) -> dict:
 def employee_snapshot(db, analysis, person_code: str) -> dict:
     """员工端**只读**物化结果：{person, days}。
 
-    物化行在报告生成时写入（`run_analysis`）或由 `scripts/backfill_compare.py` 补写；
+    物化行在报告生成时写入（`run_analysis`），数据变化后由 `refresh_for_date()` 重算刷新；
     这里**绝不写库**（读接口不能有副作用，并发下会撞唯一键）。
     """
     from app.models import StaffReportCompareDay as _D
@@ -131,7 +131,7 @@ def available_periods(db, person_code: str = "", *, limit: int = 12) -> list:
     """员工端可看的核对区间：同区间取最新一份，且**整段落在已导入文件的覆盖范围内**。
 
     数据源 = 物化表（`staff_report_compare_person`，报告生成时写入）。
-    **只读**：老报告若没有物化行，用 `scripts/backfill_compare.py` 补（不在读路径里写库）。
+    **只读**：老报告若没有物化行，调 `refresh_for_date()` 补（**不在读路径里写库**）。
     """
     from app.models import StaffReportAnalysis as _A
     from app.models import StaffReportComparePerson as _P

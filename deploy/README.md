@@ -1,48 +1,30 @@
 # 部署手册（store.visitworld.me）
 
-部署要点见 `docs/索引.md` §部署。
-服务器：8.216.43.224（root 经 `~/.ssh/default.pem`，Ubuntu 24.04，Docker+Compose 已装）。
-
-## 上线步骤
-
-1. DNS：把 `store.visitworld.me` A 记录指向 `8.216.43.224`（阿里云控制台）。
-2. 上传发布：
-   ```bash
-   ssh -i ~/.ssh/default.pem root@8.216.43.224
-   mkdir -p /opt/store-settle/releases
-   # 本地：rsync 仓库（排除 .venv/.git/tests_*/data）到 /opt/store-settle/releases/<ts>
-   ```
-3. 配置：`cd /opt/store-settle/releases/<ts>/deploy && cp .env.example .env`，填 SECRET_KEY/DB_PASSWORD/ADMIN_PASSWORD，`chmod 600 .env`。
-4. 构建启动（entrypoint 自动 alembic upgrade）：
-   ```bash
-   ln -sfn /opt/store-settle/releases/<ts> /opt/store-settle/current
-   docker compose -f current/deploy/compose.yaml up -d --build
-   curl -fsS http://127.0.0.1:3660/healthz
-   ```
-5. 建管理员：`docker compose -f current/deploy/compose.yaml exec web python -m app.cli create-admin`
-6. Nginx + 证书：
-   ```bash
-   cp /opt/store-settle/current/deploy/nginx.store-settle.conf /etc/nginx/conf.d/
-   nginx -t && systemctl reload nginx
-   certbot --nginx -d store.visitworld.me   # 自动补 ssl 与 80→443
-   curl -fsS https://store.visitworld.me/healthz
-   ```
-7. 备份 cron：`crontab -e` → `15 2 * * * /opt/store-settle/current/deploy/backup.sh >> /var/log/store-settle-backup.log 2>&1`（保持脚本路径固定到 /opt/store-settle/backup.sh 更稳）。
-
-## 回滚
+部署要点见 `AGENTS.md` §发布流程。
+生产机：**`ssh store-prod`**（旧机 `ssh store-old` **只留数据供回滚，不参与发布**）。
+**上线 / 回滚 / 恢复一律照 `AGENTS.md` §发布流程**（那是唯一权威，含 `.env` 正确放法、
+必须同时 build `web`+`mcp`、别用 `| tail` 吃掉退出码等踩过的坑）。速查：
 
 ```bash
-ln -sfn /opt/store-settle/releases/<上一个ts> /opt/store-settle/current
-docker compose -f current/deploy/compose.yaml up -d
-```
+# 上线（第 3、4 步）
+ssh store-prod "install -m600 /opt/store-settle/deploy.env /opt/store-settle/releases/$TS/deploy/.env"
+ssh store-prod "cd /opt/store-settle/current/deploy && docker compose build web mcp && docker compose up -d --no-deps web mcp"
+# 健康
+curl -fsS http://127.0.0.1:3660/healthz
+# 建管理员（首次）
+docker compose -f current/deploy/compose.yaml exec web python -m app.cli create-admin
+# 备份 cron（首次）
+#   15 2 * * * /opt/store-settle/current/deploy/backup.sh >> /var/log/store-settle-backup.log 2>&1
 
-## 恢复演练
+# 回滚：current 指回上一个 release，再 up -d
+ssh store-prod "ln -sfn /opt/store-settle/releases/<上一个TS> /opt/store-settle/current && cd /opt/store-settle/current/deploy && docker compose up -d"
 
-```bash
-gunzip -c backups/store_<ts>.sql.gz | docker compose -f current/deploy/compose.yaml \
-  exec -T db psql -U store_settle store_settle
+# 恢复演练
+gunzip -c backups/store_<ts>.sql.gz | docker compose -f current/deploy/compose.yaml exec -T db psql -U store_settle store_settle
 tar xzf backups/uploads_<ts>.tar.gz -C /opt/store-settle/
 ```
+
+## 端口 / 数据卷
 
 ## 说明
 
@@ -74,14 +56,6 @@ scp deploy/nginx.store-settle.conf store-prod:/etc/nginx/conf.d/store.conf
 ssh store-prod "nginx -t && nginx -s reload"     # 失败就把 .bak 拷回来再 reload
 ```
 
-**实测效果**（2026-10-06，公网真 Chrome 打开 `/tasks`）：
-| 文件 | 压缩前 | 压缩后 | 倍数 |
-|---|---|---|---|
-| htmx.min.js | 48,101 | 15,843 | 3.0× |
-| app.css | 27,080 | 7,793 | 3.5× |
-| alpine.min.js | 44,659 | 16,223 | 2.8× |
-| emp_select.js | 6,705 | 2,669 | 2.5× |
-| chart.umd.min.js | 205,399 | 70,309 | 2.9× |
-| **每页合计** | **126,545** | **42,528** | **省 66%** |
+**实测效果**（2026-10-06 公网真 Chrome）：每页 JS/CSS **126,545 → 42,528 字节，省 66%**（htmx 3.0× / app.css 3.5× / alpine 2.8× / emp_select 2.5× / chart 2.9×）。
 
 内容正确性：解压后的 `app.css` 与生产 release 里的文件 **md5 完全一致** ✓。

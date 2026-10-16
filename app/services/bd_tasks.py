@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""车站任务（规格 `docs/specs-station-tasks.md`）。
+"""车站任务（见 `docs/记录-作业域.md`）。
 
 口径唯一来源。核心口径（写死在测试里）：
 

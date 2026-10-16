@@ -5,7 +5,7 @@
     DATABASE_URL="sqlite:///./store_settle_live.db" \
       mcp_service/.venv/bin/python scripts/verify_tools_refactor.py
 
-覆盖 8 项（见 docs/specs-mcp-tools-scenario.md §6）：
+覆盖 8 项（见 docs/MCP对接手册.md §4.6）：
   1 工具数 = 16（管理员）        2 员工 = 3
   3 旧工具名确实消失              4 员工越权仍被拦（FORBIDDEN_TOOL）
   5 写闸门仍有效（无确认语被拒）   6 关键业务数字与重构前一致

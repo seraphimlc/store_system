@@ -151,7 +151,7 @@ def update_staff(db, user, *, name: str = None, username: str = None,
     只传需要改的字段（None = 不改）。返回改动说明，用于页面提示。
 
     `role` 只允许 `staff`（队员）/ `leader`（队长）——**不允许改成 admin**，
-    避免误把普通员工提成管理员（规格 `docs/specs-team-management.md` Q4）。
+    避免误把普通员工提成管理员（见 `docs/记录-作业域.md`：队长角色）。
 
     ⚠️ **人员编号不支持在这里改**（2026-10-01 用户决定）：编号是身份键，改它要级联改
     `persons` + 近 20 张引用表（计划/自报/绩效/工资/分析/对账），风险远大于收益，先不做。

@@ -4,7 +4,7 @@
 - 管理端：`/teams`（团队定义）、`/stations`（车站→任务）、`/tasks`（任务总表）
 - 员工端：`/my/tasks`（**队长：任务分派 + 每日进展提交；队员：只读我的任务**）
 
-规格：`docs/specs-team-management.md`、`docs/specs-station-tasks.md`。
+规格：`docs/记录-作业域.md`。
 """
 import os
 from datetime import date, datetime

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""团队定义（规格 `docs/specs-team-management.md`）。
+"""团队定义（见 `docs/记录-作业域.md`）。
 
 口径唯一来源：路由只做校验与跳转，**渲染路径不写库**。
 

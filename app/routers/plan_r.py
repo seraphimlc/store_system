@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""日期计划（半月出勤登记）路由：规格 `docs/specs-date-plan.md`。
+"""日期计划（半月出勤登记）路由：规格 `docs/记录-日期计划.md`。
 
 - 员工端：`/my/plan`（半月表格，点选不出勤；提交/修改）
 - 管理端：`/staff-plans`（员工 × 日期大表格）+ `/staff-plans/export`（xlsx）

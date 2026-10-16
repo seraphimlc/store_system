@@ -447,7 +447,7 @@ class MonthPerfRecord(Base):
 
 # ---------------------------------------------------------------------------
 # P1（WorkBuddy 接入）：Token / 审计 / 封账 / 重算快照
-# 设计见 docs/specs-mcp-tools-scenario.md（工具场景化）与 docs/MCP对接手册.md
+# 设计见 docs/MCP对接手册.md §4.6（工具场景化）与 §5（身份/授权）
 # ---------------------------------------------------------------------------
 
 class ApiToken(Base):
@@ -485,7 +485,7 @@ class McpAuditLog(Base):
 
 
 class OAuthClient(Base):
-    """MCP OAuth 动态注册客户端（specs-mcp-oauth.md §三）。
+    """MCP OAuth 动态注册客户端（见 docs/MCP对接手册.md §3）。
 
     `client_secret_hash` 为 NULL = 公共客户端（PKCE 强制，WorkBuddy 即此类）；
     库内只存哈希，明文只在注册响应中出现一次。
@@ -505,7 +505,7 @@ class OAuthCode(Base):
     """授权码（5 分钟有效，一次性）。
 
     `access_token_id`：该 code 换出的 access token 行 id —— code 被重放时据此
-    吊销已换出的 token（specs-mcp-oauth.md §五.2 / 验收 4）。
+    吊销已换出的 token（见 docs/MCP对接手册.md §3）。
     """
     __tablename__ = "oauth_codes"
 
@@ -780,7 +780,7 @@ class StaffReportCompareDay(Base):
 class StaffDatePlan(Base):
     """**日期计划（半月出勤登记）**：一行 = 一个人一天，**整格状态都在这一行里**。
 
-    规格 `docs/specs-date-plan.md`：
+    规格 `docs/记录-日期计划.md`：
 
     - 自然半月：上半月 1–15（H1，截止 3 号）/ 下半月 16–月末（H2，截止 18 号）；
     - **一天一条**（`(person_code, plan_date)` 唯一），默认 `available=True`（默认每天都出勤），
@@ -832,7 +832,7 @@ class FormToken(Base):
 
 # ---------------------------------------------------------------------------
 # BD 作业域（bd_*）：行政区划基底 / 门店宇宙
-# 设计见 docs/specs-bd-ops-layer.md
+# 设计见 docs/记录-作业域.md（车站三层资产）
 #
 # ⚠️ 硬边界：本域**只新增表**，绝不向结算域表（formal_records /
 #    person_daily_stats / month_perf_records / payroll_*）加列；
@@ -912,8 +912,7 @@ class BdStore(Base):
 
 
 # ---------------------------------------------------------------------------
-# 团队 + 车站任务（feat/team-task · 规格 docs/specs-team-management.md /
-# docs/specs-station-tasks.md）
+# 团队 + 车站任务（feat/team-task · 见 docs/记录-作业域.md）
 #
 # ⚠️ 硬边界：本域**只新增 bd_* 表**，绝不向结算域表（formal_records /
 #    person_daily_stats / month_perf_records / payroll_*）加列；

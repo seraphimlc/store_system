@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MCP 工具场景化层（49 → 16，规格：docs/specs-mcp-tools-scenario.md）。
+"""MCP 工具场景化层（49 → 16，规格：docs/MCP对接手册.md §4.6）。
 
 设计铁律：
 - **一个工具 = 一个用户会问的问题 / 会派的一件事**；工具名用用户语言（visit_upload）。
@@ -1126,8 +1126,8 @@ _DESC = {
     ),
     "visit_verify": (
         "数据自洽检查（只读，无参数）：找平表/台账/关联表/找平行四类数字互相印证"
-        "（8 项：找平金额=该月差异 / 已找平+剩余=原始 / 状态一致 / 关联=台账抵扣 / 关联=已找平 / "
-        "台账快照vs应发（提示非错误）/ 抵扣来源可反查 / 递延链符号一致）。"
+        "（9 项 A1–A9：找平金额=该月差异 / 已找平+剩余=原始 / 状态一致 / 关联=台账抵扣 / 关联=已找平 / "
+        "台账快照vs应发（提示非错误）/ 抵扣来源可反查 / 递延链符号一致 / 应发表调整列=差异列（防双源））。"
         "什么时候用我：怀疑数据不一致、上线/重算后核对系统算得对不对时用我。"
         "返回 checks[]（pass/fail/info + 反例明细）与 summary（通过数/失败数/规模）。"
     ),
@@ -1401,7 +1401,8 @@ def visit_task_board(ctx: Context, tab: str = "", line_id: int | None = None,
 def register(mcp: MCPServer) -> None:
     """注册全部场景化工具（唯一注册入口；server.py 经 tools.register 接线）。
 
-    2026-10-06：16 → **24**（新增作业域 8 个：员工 3 + 队长 4 + 管理员 1）。
+    **共 27 个**（2026-10-17 核对）：员工侧 3 + 作业域 10 + 管理员侧 14。
+    （`scripts/mcp_restart.sh` 按"域"报作「16 场景化 + 11 作业域」，同一个 27。）
     """
     from typing import Annotated
     from pydantic import Field
@@ -1426,7 +1427,7 @@ def register(mcp: MCPServer) -> None:
                   ) -> dict[str, Any]:
         return visit_my_pay(ctx, month=month)
 
-    # 作业域 8 个（员工 3 + 队长 4 + 管理员 1；授权矩阵见 mcp_service/authz.py）
+    # 作业域 10 个（员工 3 + 队长 4 + 管理员 1 + 后加 2；授权矩阵见 mcp_service/authz.py）
     @mcp.tool(name="visit_my_tasks", title=_READ_TITLES["visit_my_tasks"],
               annotations=_annotations("visit_my_tasks"),
               description="我的任务（今天派的 ∪ 没做完自动延续的）+ 今天已填点数")
@@ -1510,7 +1511,7 @@ def register(mcp: MCPServer) -> None:
         return visit_task_board(ctx, tab=tab, line_id=line_id, kw=kw,
                                 stale_only=stale_only, page=page, per=per)
 
-    # 管理员侧 13 个
+    # 管理员侧 14 个
     @mcp.tool(name="visit_upload", title=_WRITE_TITLES["visit_upload"],
               annotations=_annotations("visit_upload"), description=_DESC["visit_upload"])
     def _t_upload(ctx: Context, filename: str | None = None,

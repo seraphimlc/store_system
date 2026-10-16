@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """全站落点唯一来源（`landing_home`）。
 
-背景（规格 `docs/specs-team-management.md` §3.3）：加 `leader` 之前只有
+背景（见 `docs/记录-作业域.md`）：加 `leader` 之前只有
 `admin`/`staff` 两个角色，落点散落在各处且写死，是自洽的；**加第三个角色会死循环**：
 
     ／            → 不是 staff → /dashboard

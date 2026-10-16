@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MCP OAuth（SSO）验收测试（规格 docs/specs-mcp-oauth.md §六）。
+"""MCP OAuth（SSO）验收测试（规格 docs/MCP对接手册.md §3）。
 
 覆盖 9 项验收：
 1  完整授权码 + PKCE 流程 → 换出的 token 能调 MCP 工具成功

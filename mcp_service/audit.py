@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""两阶段调用审计（规格：docs/specs-mcp-identity.md 第五节/第六节）。
+"""两阶段调用审计（规格：docs/MCP对接手册.md §5）。
 
 - 每次工具调用：先插一行 `mcp_audit_log`（ok=NULL，含 token_id/user_id/tool/
   params_json 脱敏摘要/client_info），执行后回填 ok/error_code/detail（含耗时 ms）。

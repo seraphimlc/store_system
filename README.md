@@ -1,6 +1,6 @@
 # 巡店数据结算系统（store_system）
 
-> **状态**：活文档（现状）｜**最后更新**：2026-10-06
+> **状态**：活文档（现状）｜**最后更新**：2026-10-17
 > **一句话**：项目说明与快速上手（给人和 AI 的总入口是 `AGENTS.md`）
 
 面向巡店业务的**数据结算 Web 系统**：从原始巡店 Excel 到员工薪资结算的完整闭环——文件导入 → 自动判定 → 申诉/绩效确认 → 正式表 → 绩效工资（月内两期发薪）→ 月度对账（归因 + AI 分析）→ 薪资找平（找平执行 / 上月余量递延）。
@@ -53,9 +53,9 @@ cp .env.example .env
 
 ```
 app/
-  routers/     # 路由（auth/files/v3/perf/stores/accounts/info）
-  services/    # 业务逻辑（v3_flow 判定入表 / v3_perf 绩效工资 / v3_period 薪资找平 / v3_recon 对账 / importer 导入 / ai_chat AI）
-  templates/   # Jinja2 页面（v3_perf 发薪表 / payroll_settle 找平 / v3_recon 对账等）
+  routers/     # 路由（auth_r/files_r/flow_r/perf_r/settle_r/recon_r/plan_r/report_r/msg_r/bd_r/oauth_r/tokens_r）
+  services/    # 业务逻辑（flow 判定入表 / perf 绩效工资 / period 薪资找平 / recon 对账 / importer 导入 / ai_chat AI；bd_* 作业域）
+  templates/   # Jinja2 页面（perf 发薪表 / payroll_settle 找平 / recon 对账 / bd_* 团队车站任务等）
   models.py    # SQLAlchemy 模型
   config.py    # 环境变量配置（含奖金规则配置项）
 store_settle/  # 核心引擎：Excel 解析 / 判重 / 点数规则（纯 Python 可复用）
@@ -76,10 +76,10 @@ docs/          # 产品说明 / 使用手册 / 技术方案 / 测试用例 / 索
 - `docs/结算主流程设计-v3.md`：结算主流程（与万总确认版）
 - `docs/specs-*.md`：各期设计规格（团队/车站任务/日期计划/作业域/消息/MCP）
 - `docs/记录-*.md`：按功能拆的实施记录（口径/踩坑/实测）
-- `docs/索引.md`：跨模块速查 · `docs/文件索引.tsv`：全仓文件索引
-- `docs/测试用例.md`：手工测试用例清单
-- `docs/archive/`：历史过程稿（别当现状读）
+- `docs/文件索引.tsv`：全仓文件索引（`./.venv/bin/python scripts/idx.py <关键词>` 查）
 
 ## 部署
 
-Docker Compose（web + PostgreSQL）+ Nginx。发布：rsync 新 release → 复制 `.env` → 切换 symlink → `docker compose build/up`（entrypoint 自动 `alembic upgrade head`）。数据变更前先 `pg_dump` 备份。
+Docker Compose（web + PostgreSQL）+ Nginx。发布：rsync 新 release → 放生产配置 → 切换 symlink → `docker compose build web mcp && up -d`（entrypoint 自动 `alembic upgrade head`）。数据变更前先 `pg_dump` 备份。
+
+> ⚠️ **发布步骤以 [`AGENTS.md`](AGENTS.md) §发布流程 为准**（含 `.env` 的正确放法 `install -m600 /opt/store-settle/deploy.env …`、必须同时 build `web` 和 `mcp` 等踩过的坑）。本地开发的 `.env` 与生产配置**不是同一份**，别互相覆盖。

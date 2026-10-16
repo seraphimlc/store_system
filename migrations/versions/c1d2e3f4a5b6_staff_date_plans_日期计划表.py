@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """staff_date_plans：日期计划（半月出勤登记）。
 
-规格 `docs/specs-date-plan.md`：一天一条 `(person_code, plan_date)`，
+规格 `docs/记录-日期计划.md`：一天一条 `(person_code, plan_date)`，
 `available=True` 默认可出勤；**只加表，不改任何现有业务表**。
 """
 from alembic import op

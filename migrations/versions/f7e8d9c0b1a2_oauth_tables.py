@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """MCP OAuth（SSO）三表：oauth_clients / oauth_codes / oauth_refresh_tokens。
 
-规格：docs/specs-mcp-oauth.md §三。库内只存 token 摘要（sha256），明文不落库；
+规格：docs/MCP对接手册.md §3。库内只存 token 摘要（sha256），明文不落库；
 `oauth_codes.access_token_id` 用于 code 重放时吊销已换出的 access token（§五.2）。
 """
 from alembic import op

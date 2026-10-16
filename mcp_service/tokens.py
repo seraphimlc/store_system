@@ -4,7 +4,7 @@
 用 SHA-256 摘要 + 明文前缀索引：token 是 256 位高熵随机串（`secrets.token_urlsafe(32)`），
 无字典攻击风险；逐行 argon2 校验是廉价 DoS 向量（v3 §6.1）。
 
-身份认证（specs-mcp-identity.md）：
+身份认证（见 docs/MCP对接手册.md §5）：
 - 校验链：存在 ∧ `revoked_at IS NULL` ∧ (`expires_at` 为空或未过期) ∧
   绑定用户 `is_active` ∧ 用户 `status == "active"`。
 - 失效原因可区分（revoked / expired / user_inactive / user_status:<leave|disabled|resigned>），

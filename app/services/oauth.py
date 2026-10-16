@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MCP OAuth（SSO）服务层（规格：docs/specs-mcp-oauth.md）。
+"""MCP OAuth（SSO）服务层（规格：docs/MCP对接手册.md §3）。
 
 设计要点：换出来的 access token **就是 `api_tokens` 里的一行** →
 Actor/授权矩阵/两阶段审计/员工状态联动全部自动继承，授权模型零改动。

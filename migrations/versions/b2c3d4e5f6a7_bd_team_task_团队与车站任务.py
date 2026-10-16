@@ -2,7 +2,7 @@
 """团队 + 车站任务：bd_team / bd_team_member / bd_station / bd_task /
 bd_task_assign / bd_task_progress。
 
-设计 `docs/specs-team-management.md`（团队）与 `docs/specs-station-tasks.md`
+设计见 `docs/记录-作业域.md`（团队 + 车站任务）
 （车站任务）。**只加表，不改任何现有业务表**（尤其不碰结算域四张表）。
 
 - `bd_team` / `bd_team_member`：团队与成员（含历史：end_date）

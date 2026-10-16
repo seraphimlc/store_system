@@ -5,7 +5,7 @@
 - 员工只读（不能发）；队长只能发给**本队队员**；管理员可发给任意人 / 全体
 - 未读红点在底栏（中间件注入 `request.state.unread_messages`）
 
-规格：`docs/specs-messages.md`。
+规格：`docs/记录-作业域.md`（消息）。
 """
 from typing import List, Optional
 from urllib.parse import quote

@@ -1,11 +1,11 @@
 # MCP 对接手册（可复用）
 
-> **状态**：活文档（可复用）｜**最后更新**：2026-10-06
+> **状态**：活文档（可复用）｜**最后更新**：2026-10-17
 > **一句话**：对接其它系统时读：协议实测/OAuth 坑/工具设计/发布验收
 
 > 来源：巡店结算系统接入 WorkBuddy 的完整实践（P0 连通性 → P1 写工具 → 身份认证/SSO → 上线）。
 > **用途**：其它业务系统接入 MCP 客户端（WorkBuddy 等）时，直接照本手册执行，避免重踩。
-> 本手册只写**通用做法与实测事实**；本系统的具体实现见 `docs/索引.md §1.5` 与各 spec。
+> 本手册只写**通用做法与实测事实**；本系统的具体实现见 `mcp_service/**` 与 `docs/记录-作业域.md`「作业域 MCP 工具」节。
 
 ---
 
@@ -62,7 +62,7 @@ location /mcp {
 | Origin | 客户端**不发 Origin** → 服务端的 DNS-rebinding 白名单要放行"缺失 Origin" |
 | Host 校验 | 经反代时 Host 是域名 → **必须把域名加入 allowed_hosts**（否则直接拒） |
 | 凭据存储 | 客户端按账号**加密存储**在本机（`~/.workbuddy/connectors/<id>/`） |
-| 工具清单缓存 | 客户端**缓存 tools/list** → 服务端改了工具要**重连**才生效（数量与档位：员工 6 / 队长 9 / 管理员 27） |
+| 工具清单缓存 | 客户端**缓存 tools/list** → 服务端改了工具要**重连**才生效（数量与档位：员工 6 / 队长 10 / 管理员 27） |
 | 工具级过滤 | 客户端支持 `disabledTools`（可用于按连接器屏蔽工具） |
 | OAuth | **支持 MCP OAuth**：`/.well-known/oauth-protected-resource`、PKCE、动态注册、`token_endpoint`、device_code |
 
@@ -226,14 +226,14 @@ location /mcp {
 | `visit_store` 店铺主档 | store_search + merge_pair + skip_pair + apply_all + split_entity + ai_run（6→1） |
 | `visit_verify` 数据体检 | verify_integrity |
 | 员工侧 6 个 | `visit_whoami` / `visit_my_perf`（view=month\|daily）/ `visit_my_pay`（一次给全：进度+台账+轨迹） / **`visit_my_tasks`**（我的任务：今天派的 ∪ 没做完自动延续 + 今天已填点数） / **`visit_self_report`**（点数+进度**一次提交**） / **`visit_task_report`**（单条报进度，含"队长确认后当天锁住"校验） |
-| **队长侧 3 个**（2026-10-06 新增档位） | **`visit_team_tasks`**（本队任务 + 待确认队列，tab 按"有没有分人"）/ **`visit_task_assign`**（派工 / 改派 / **回收**=person_codes 传 `[]`）/ **`visit_task_confirm`**（确认 / **一键全确认** all_today=True / 驳回 reject=True+pct） |
+| **队长侧 4 个**（2026-10-06 新增档位） | **`visit_team_tasks`**（本队任务 + 待确认队列，tab 按"有没有分人"）/ **`visit_task_assign`**（派工 / 改派 / **回收**=person_codes 传 `[]`）/ **`visit_task_confirm`**（确认 / **一键全确认** all_today=True / 驳回 reject=True+pct）/ **`visit_task_transfer`**（本队任务**转给别的队**，保留进度） |
 | **管理员侧新增 3 个** | **`visit_task_board`**（任务总表：tab 计数 + 任务行 + 按队汇总 + 停滞口径）/ **`visit_task_return`**（按线路**批量撤回**到车站池，只撤没分到人的）/ **`visit_day_report`**（2026-10-10：改/查某员工某天的自报 —— 点数 + 当天任务进展，一次保存；补录只能点数） |
 | **`visit_task_import`**（2026-10-16） | 线路执行计划表 Excel → 一批车站任务。`action='preview'` 先看（返回 `blob_sha`/`layout`/`summary`/`rows`），再 `action='apply'` + 同一个 `blob_sha` 真建。**已有任务不动、不新建车站、认不出负责队整份拒收**；对不上的行放进 `skip_rows` 才放行。与 Web 端 `/tasks/import` **同一套服务层**（`app/services/bd_task_import.py`） |
 
-> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 9** / 管理员 27。
+> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 10** / 管理员 27。
 > （2026-10-10 加 `visit_day_report` → 管理员档 25 → 26；
 > 2026-10-16 加 `visit_task_import` → 26 → 27。）
-> 队长档 = 员工档 + 3 个本队任务工具。作业域工具与 Web 端**走同一套服务层**
+> 队长档 = 员工档 + 4 个本队任务工具。作业域工具与 Web 端**走同一套服务层**
 > （`app/services/bd_tasks.py` 等），口径不会漂移；能力层在 `mcp_service/task_ops.py`。
 
 #### 4.6.5 实施要点（避免踩坑）
@@ -411,8 +411,8 @@ VISIT_OAUTH_REFRESH_DAYS=90
 | 鉴权与授权 | `mcp_service/auth.py`、`mcp_service/authz.py`、`mcp_service/tokens.py` |
 | 审计 | `mcp_service/audit.py` |
 | 作业域字段 | `bd_task.store_count`（店铺数）：队员报到 **100% 时必填**（允许 0），队长批量补录可留空 —— `visit_task_report(store_count=…)` |
-| 工具实现 | **`mcp_service/scenario_ops.py`（当前 26 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
+| 工具实现 | **`mcp_service/scenario_ops.py`（当前 27 个工具的注册唯一入口）**、`mcp_service/task_ops.py`（作业域能力层）；历史模块 `read_ops.py`、`my_ops.py`、`write_ops.py`、`recon_ops.py`、`recon_write_ops.py`、`payroll_write_ops.py`、`store_write_ops.py`、`export_ops.py`、`misc_ops.py` |
 | OAuth/SSO | `app/routers/oauth_r.py`、`app/services/oauth.py`、`app/templates/oauth_consent.html` |
 | 自助签发 / 审计页 | `app/routers/tokens_r.py`、`app/services/mcp_tokens.py`、`app/templates/my_token.html` |
 | 运维脚本 | `scripts/mcp_restart.sh`、`scripts/verify_payroll_logic.py`、`scripts/compare_with_prod.py`、`scripts/backfill_prod_new_tables.py` |
-| 规格 | `docs/specs-mcp-identity.md`、`docs/specs-mcp-oauth.md`、`docs/specs-mcp-tools-scenario.md`（工具集设计稿）、`docs/记录-作业域.md`（作业域工具实施记录） |
+| 规格 | `docs/MCP对接手册.md` 本文（§3 OAuth / §4.6 工具集 / §5 身份授权）、`docs/记录-作业域.md`（作业域工具实施记录） |

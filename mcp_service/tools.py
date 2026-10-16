@@ -4,7 +4,7 @@
 职责边界：工具函数只做「取 Context → 调能力层 → 包错误信封」。
 P1 起：payload 构建函数从本文件拆出，本文件只保留注册接线。
 场景化重构（49 → 16）：全部工具注册迁移到 scenario_ops.py（本文件只接线），
-旧工具名已按用户要求**直接删除、不做兼容期**（规格：docs/specs-mcp-tools-scenario.md）。
+旧工具名已按用户要求**直接删除、不做兼容期**（规格：docs/MCP对接手册.md §4.6）。
 """
 import os
 from typing import Annotated, Any

@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""中央授权矩阵 + 统一调用拦截（规格：docs/specs-mcp-identity.md 第二节/第五节）。
+"""中央授权矩阵 + 统一调用拦截（规格：docs/MCP对接手册.md §5）。
 
 规则：
 - **默认拒绝**：未登记的工具一律 `ADMIN_ONLY`（admin 全开；staff 一律 FORBIDDEN_TOOL）。
-- `STAFF_ALLOWED`：员工可用的 3 个工具（visit_whoami / visit_my_perf / visit_my_pay）。
+- `STAFF_ALLOWED`：员工可用的 **6** 个工具（visit_whoami / visit_my_perf / visit_my_pay +
+  作业域 3 个：visit_my_tasks / visit_self_report / visit_task_report）。
 - staff 调 admin 工具 → `FORBIDDEN_TOOL`（retryable=false，hint 说明「该操作仅管理员」），
   在进入业务前拦截 → **不产生任何副作用**。
 - “我的”工具（visit_my_*）：无 person 参数入口；若客户端显式传入 person /
@@ -20,7 +21,7 @@ import time
 
 from mcp_service import envelope
 
-# 员工可用的 3 个工具（规格第三节）。未登记的工具默认 admin-only。
+# 员工可用的 6 个工具（见 docs/MCP对接手册.md §5）。未登记的工具默认 admin-only。
 # tools/list 按身份裁剪（mcp_service/auth.py）直接读本集合 → 自动跟随。
 STAFF_ALLOWED = frozenset({
     "visit_whoami", "visit_my_perf", "visit_my_pay",

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """闸门模块：写权限 / 封账 / 源守卫 / 确认语 / 参数 / preview / 配置就绪。
 
-设计见 docs/specs-mcp-tools-scenario.md。
+设计见 docs/MCP对接手册.md §4.6。
 所有闸门**与会话无关**（不依赖进程内状态），因此单进程或多副本语义一致。
 """
 import re

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""“我的”能力层（规格：docs/specs-mcp-identity.md 第二节）。
+"""“我的”能力层（规格：docs/MCP对接手册.md §5）。
 
 能力函数（供 scenario_ops 的 visit_whoami / visit_my_perf / visit_my_pay 调用）：
 - whoami(db, actor)                  我是谁：账号/角色/绑定人员/权限/可用能力

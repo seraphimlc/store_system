@@ -13,8 +13,8 @@
 | 员工每日填报 + 对比 + AI 报告 | **`docs/记录-员工填报.md`** | `app/services/{daily_report,report_compare,report_ai,report_export}.py` | `test_daily_report.py`、`test_report_robustness.py` |
 | 日期计划（半月出勤登记） | **`docs/记录-日期计划.md`** | `app/services/{date_plan,plan_leave}.py` | `test_date_plan.py` |
 | **团队 / 车站 / 任务（作业域）** | **`docs/记录-作业域.md`**（只改这块才读） | `app/services/bd_*.py` | `test_team_task.py` |
-| 站内消息 | `docs/记录-作业域.md` §消息、`docs/specs-messages.md` | `app/services/bd_msg.py` | 同上 |
-| MCP 服务（WorkBuddy 接入） | `docs/MCP对接手册.md`、`docs/specs-mcp-*.md` | `mcp_service/**` | `mcp_service/tests` |
+| 站内消息 | `docs/记录-作业域.md` §消息 | `app/services/bd_msg.py` | 同上 |
+| MCP 服务（WorkBuddy 接入） | `docs/MCP对接手册.md` | `mcp_service/**` | `mcp_service/tests` |
 | 多语言 / 导航 / H5 | `app/i18n.py`、`app/templates/base.html`、`app/static/app.css` | — | `test_templates.py`、`test_i18n.py` |
 | 部署 / 发布 | §发布流程 + `deploy/README.md` | `scripts/deploy*.sh`、`deploy/**` | — |
 | **当前状态 / 交接** | **`docs/交接-当前状态.md`**（先读这个：线上有什么、还欠什么） | — | — |
@@ -32,7 +32,7 @@ DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.p
 #       --src "/Users/liuchang/Desktop/万总/team_task" [--apply]
 ./.venv/bin/python scripts/check_templates.py              # 模板结构自检（改完模板跑）
 ./.venv/bin/python scripts/i18n_audit.py                   # 日文缺失/死键（要 0/0）
-scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 26 工具）
+scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 27 工具）
 ```
 
 - 账号：`admin/demo123`；员工 `demo123`（测试里是 `pw123456`）。线上 `store.visitworld.me`。
@@ -62,15 +62,30 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
 ## 关键基准（系统实测，非手工文件）
 
 > 2026-09-25 用户明确：手工基准文件已作废删除。验收 = **与同一份库的 SQL 直查一致**，不钉死数字。
+> 下表只是**某次快照**（2026-10-17 实测），**会随导入而变** —— 别拿它当断言，要核对就跑 SQL。
 
-| 项 | 2026-08 | 2026-09 |
-|---|---|---|
-| 正式表店数 | 12507 | 15070 |
-| 1点 / 2点 | 8199 / 4308 | 10663 / 4407 |
-| 总点数 | 16787 | 19477 |
-| 工资（円） | 4,895,750 | 5,173,000 |
+| 项（`month_perf_records`） | 2026-07 | 2026-08 | 2026-09 | 2026-10 |
+|---|---|---|---|---|
+| 人数 | 15 | 34 | 35 | 56 |
+| 1点 / 2点 | 1413 / 763 | 8226 / 4280 | 10640 / 4403 | 22124 / 592 |
+| 总点数 | 2939 | 16786 | 19446 | 23308 |
+| 工资（円） | 845,750 | 4,895,500 | 5,165,250 | 6,184,500 |
 
-- **判重口径**：窗口=结算月，键=(店名 trim,月)；组内取 ① deploy=YES（→2点）② 非 AUDIT_FAILED（→1点）
+（`formal_records` 按 `japan_date` 的年月：07 **2176** / 08 **12506** / 09 **15043** / 10 **22716**，全库 52441。）
+
+```bash
+# 现成核对（只读）：
+DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python -c "
+from sqlalchemy import create_engine, text
+with create_engine('sqlite:///./store_settle_live.db').connect() as c:
+    for r in c.execute(text('SELECT month, COUNT(*), SUM(p1), SUM(p2), SUM(points), SUM(salary) FROM month_perf_records GROUP BY month ORDER BY month')): print(r)"
+```
+
+- **判重口径**：窗口=结算月，键=(店名, 月)。**归一化分两档**：结算月 **≥ 2026-09** 用 `flow._norm_name()`
+  （NFKC 全角→半角 + 去半/全角空格 + lower，`WineShop Sommelier` 与 `Wine shop sommelier` 算一家）；
+  **< 2026-09** 用原始字串。⚠️ 但**店铺主档归并**（`promote_or_link_entities`）**故意只用原始 trim** ——
+  归一化会把「ざくろ銀座店」与「ざくろ 銀座店」误并成一家（8 月基准证明是两家，别顺手"修"它）。
+  组内取 ① deploy=YES（→2点）② 非 AUDIT_FAILED（→1点）
   ③ 纯 AUDIT_FAILED 无投放（→0点，不入正式表）；同级取 modified 最早；跨月不互压。
 - **工资**：每点 250 円（可配），每满门槛点奖 3000（默认 68，`BONUS_GROUP_SCHEDULE` 按月可配）。
 - **找平**：偏差 = 对账金额 − 系统已发（负=扣/正=补），自动写表；发薪时上期扣补→下期→递延下月。
@@ -119,7 +134,7 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
   现在**唯一权威 = `period.prior_debt_map()`**（读账表），扣钱/薪资找平页/绩效页三处都走它。
 - **薪资四表**：`payroll_period_rows`（应发，可重算）/ `payroll_payments`（实发台账，不可改写，
   **导出发薪表即登记**）/ `payroll_adjusts`（进度）/ `payroll_settlement_links`（发放↔找平）。
-- **数据自洽**：`scripts/verify_payroll_logic.py`（或 MCP `visit_verify`）8 项互证；对线上用 `scripts/compare_with_prod.py`。
+- **数据自洽**：`scripts/verify_payroll_logic.py`（或 MCP `visit_verify`）9 项互证（A1–A9）；对线上用 `scripts/compare_with_prod.py`。
 - **迁移必须真跑**：`tests_web/test_migrations.py` 在临时库 `alembic upgrade head` 并核对 ORM 列；
   本地库不跑 alembic（`create_all` + 手工 `ALTER`），新增表/列两边都要补。
 - **导出文件名含中文**：`filename=` 必须 ASCII、中文走 `filename*`（否则响应头 latin-1 报错）。
@@ -145,8 +160,12 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
 
 | 文件 | 作用 |
 |---|---|
-| `docs/README.md` | **文档地图**（什么情况读哪份） |
-| `docs/文件索引.tsv` | 全仓 400+ 文件的索引（`scripts/idx.py` 查） |
-| `docs/索引.md` | 跨模块速查表（路由 / 服务层 / 模型 / 测试 / 部署） |
-| `docs/specs-*.md` | 各期设计规格（团队/车站任务/日期计划/作业域/消息/MCP） |
+| `docs/README.md` | **文档地图**（"我要干什么 → 读哪份"） |
+| `docs/交接-当前状态.md` | **当前状态 / 交接**：线上实况 + 还欠什么 + 发布记录 + backlog |
+| `docs/文件索引.tsv` | 全仓 400+ 文件的索引（`./.venv/bin/python scripts/idx.py 关键词` 查） |
 | `docs/记录-*.md` | 按功能拆的**实施记录**（口径、踩坑、实测数据）——只读要改的那一个 |
+| `docs/MCP对接手册.md` | 对接其它系统时读（协议 / OAuth / **§4.6 工具设计规范** / 发布验收） |
+| `docs/发布清单-作业域.md` | 作业域特有的发布前核对；**总流程以本文件 §发布流程 为准** |
+
+> 各期 `specs-*.md`（设计规格）已于 2026-10-17 并入上面的实施记录与手册后删除；
+> 需要时 `git show <commit>^:docs/<文件>` 从历史取回。

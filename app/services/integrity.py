@@ -14,6 +14,7 @@
   A6 台账快照 vs 当前应发（**分歧提示**，非错误：计划可变、已发的钱不可改）
   A7 抵扣来源可反查（月份/找平行/对账任务存在）
   A8 递延链符号一致
+  A9 应发表调整列 == 差异列（防双源）
 
 返回：{"ok": bool, "checks": [{id, name, status, count, samples}], "summary": {...}}
 status: pass / fail / info

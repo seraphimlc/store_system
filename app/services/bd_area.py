@@ -4,7 +4,7 @@
 数据源：**総務省「全国地方公共団体コード」**（官方 Excel，免费）
   https://www.soumu.go.jp/denshijiti/code.html
 
-设计 `docs/specs-bd-ops-layer.md` §3.3 / §5.1：
+设计见 `docs/记录-作业域.md`（车站三层资产）：
 片区（bd_zone）由**丁目集合**构成，所以行政区划是作业域的地基。
 **只读同步，不自造坐标系。**
 

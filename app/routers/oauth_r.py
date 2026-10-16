@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MCP OAuth 端点（挂在现有 web 应用上，规格：docs/specs-mcp-oauth.md §二）。
+"""MCP OAuth 端点（挂在现有 web 应用上，规格：docs/MCP对接手册.md §3）。
 
 - `/.well-known/oauth-protected-resource` / `oauth-authorization-server`：发现
 - `POST /oauth/register`：动态客户端注册（DCR）
