@@ -750,11 +750,16 @@ def test_my_plan_requires_login(client):
 
 def test_my_plan_page_renders_three_states(client, frozen):
     _staff(client)
+    # ⚠️ **别用 `date.today()`**：那是真实日期，而页面按 `frozen` 展示
+    #    `default_period(frozen)` = 2026-10-H1（10-01~10-15）。
+    #    两者一旦不同期（真实日期跑出 10-15 就会），自报落在页面外 → 断言假红。
+    #    这里取"页面当前展示那一期的第一天"，与页面口径同源。
+    d0 = date_plan.period_bounds(date_plan.default_period(frozen))[0]
     db = appdb.SessionLocal()
-    db.add(StaffDailyReport(person_code="P1", report_date=date.today(),
+    db.add(StaffDailyReport(person_code="P1", report_date=d0,
                             p1_cnt=1, p2_cnt=0, total_cnt=1))
     db.commit()
-    date_plan.mark_reported(db, "P1", date.today())      # 自报写透（真实链路）
+    date_plan.mark_reported(db, "P1", d0)                # 自报写透（真实链路）
     db.close()
     r = client.get("/my/plan")
     assert r.status_code == 200
@@ -1061,10 +1066,15 @@ def test_admin_plan_page_defaults_to_open_period(client, frozen):
     assert "2026-10-01" in r.text                     # frozen = 09-25 → 默认 2026-10-H1
 
 
-def test_admin_plan_export_xlsx(client):
+def test_admin_plan_export_xlsx(client, monkeypatch):
     """导出照"排班计划"参考表排版：说明行 + 标题行 + 表头 + 七曜行 + 数据；
     **没有区域标识行**、**没有登记列**。"""
     _admin(client)
+    # ⚠️ 路由里导出用的是 `date_plan.jst_today()`（**真实**日期）来判定"已过"：
+    #    真实日期一进入 10-16（JST），甲亲手登记的可出勤就会**按设计**变成
+    #    △「计划可出勤但未自报（没来）」（口径见 cell_state："今天仍显示计划值，次日才判"），
+    #    而这里断言的是 ○ → 跑到那天必假红。把"今天"钉在期初（10-10），10-16 才在未来。
+    monkeypatch.setattr(date_plan, "jst_today", lambda: TODAY)
     import io
 
     from openpyxl import load_workbook

@@ -17,7 +17,7 @@ from app.db import Base
 from app.models import (User, BdStation, BdTask, BdTaskAssign, BdTaskProgress,
                         StaffDailyReport,
                         BdTeam, BdTeamMember, Person, User)
-from app.services import bd_teams, bd_tasks
+from app.services import bd_leave, bd_teams, bd_tasks
 from tests.helpers import form_token
 
 ADMIN_PW = "pw123456"
@@ -1065,7 +1065,7 @@ def test_leader_can_use_plan_page_and_leave(client, seeded):
     assert p.status_code == 200, "队长必须能登记出勤计划"
     assert 'data-testid="leave-card"' in p.text
     r = _post(client, "/my/leave",
-              {"start_date": date.today().isoformat(), "end_date": "",
+              {"start_date": bd_leave.today().isoformat(), "end_date": "",
                "reason": "休假"}, from_path="/my/plan")
     assert r.status_code == 303
     p2 = client.get("/my/plan")
@@ -1083,7 +1083,7 @@ def test_leave_cannot_be_set_for_someone_else(client, seeded):
     from app.services import bd_leave
     _login(client, "tangjing")
     r = _post(client, "/my/leave",
-              {"start_date": date.today().isoformat(), "end_date": "",
+              {"start_date": bd_leave.today().isoformat(), "end_date": "",
                "reason": "试", "person_code": "P1"}, from_path="/my/plan")
     assert r.status_code == 303
     db = appdb.SessionLocal()
