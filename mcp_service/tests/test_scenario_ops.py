@@ -482,7 +482,7 @@ def _registered_names():
 
 def test_tools_list_admin_26():
     names = _registered_names()
-    assert len(names) == 26
+    assert len(names) == 27
 
 
 def test_tools_list_staff_6():

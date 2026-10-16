@@ -62,7 +62,7 @@ location /mcp {
 | Origin | 客户端**不发 Origin** → 服务端的 DNS-rebinding 白名单要放行"缺失 Origin" |
 | Host 校验 | 经反代时 Host 是域名 → **必须把域名加入 allowed_hosts**（否则直接拒） |
 | 凭据存储 | 客户端按账号**加密存储**在本机（`~/.workbuddy/connectors/<id>/`） |
-| 工具清单缓存 | 客户端**缓存 tools/list** → 服务端改了工具要**重连**才生效（数量与档位：员工 6 / 队长 9 / 管理员 24） |
+| 工具清单缓存 | 客户端**缓存 tools/list** → 服务端改了工具要**重连**才生效（数量与档位：员工 6 / 队长 9 / 管理员 27） |
 | 工具级过滤 | 客户端支持 `disabledTools`（可用于按连接器屏蔽工具） |
 | OAuth | **支持 MCP OAuth**：`/.well-known/oauth-protected-resource`、PKCE、动态注册、`token_endpoint`、device_code |
 
@@ -171,6 +171,11 @@ location /mcp {
 > ⚠️ **2026-10-10 更新：现在共 26 个** —— 作业域再加 1 个
 > **`visit_day_report`**（管理员改/查某员工某天的自报 = 点数 + 当天任务进展；
 > 那天没有自报时**只能补录点数**），仅管理员档。
+> ⚠️ **2026-10-16 更新：现在共 27 个** —— 作业域再加 1 个
+> **`visit_task_import`**（批量导入车站任务：线路执行计划表 Excel → 一批车站任务，
+> 「预览 → 确认」两步；只给没有任务的车站建、**已有任务一律不动**、
+> **文件里认不出负责队就整份拒收**），仅管理员档、需 `read,write` scope。
+> ⚠️ 工具清单是**客户端缓存**的：加完工具要**删连接器重连**才会出现（见 §2）。
 
 #### 4.6.1 核心原则
 
@@ -223,9 +228,11 @@ location /mcp {
 | 员工侧 6 个 | `visit_whoami` / `visit_my_perf`（view=month\|daily）/ `visit_my_pay`（一次给全：进度+台账+轨迹） / **`visit_my_tasks`**（我的任务：今天派的 ∪ 没做完自动延续 + 今天已填点数） / **`visit_self_report`**（点数+进度**一次提交**） / **`visit_task_report`**（单条报进度，含"队长确认后当天锁住"校验） |
 | **队长侧 3 个**（2026-10-06 新增档位） | **`visit_team_tasks`**（本队任务 + 待确认队列，tab 按"有没有分人"）/ **`visit_task_assign`**（派工 / 改派 / **回收**=person_codes 传 `[]`）/ **`visit_task_confirm`**（确认 / **一键全确认** all_today=True / 驳回 reject=True+pct） |
 | **管理员侧新增 3 个** | **`visit_task_board`**（任务总表：tab 计数 + 任务行 + 按队汇总 + 停滞口径）/ **`visit_task_return`**（按线路**批量撤回**到车站池，只撤没分到人的）/ **`visit_day_report`**（2026-10-10：改/查某员工某天的自报 —— 点数 + 当天任务进展，一次保存；补录只能点数） |
+| **`visit_task_import`**（2026-10-16） | 线路执行计划表 Excel → 一批车站任务。`action='preview'` 先看（返回 `blob_sha`/`layout`/`summary`/`rows`），再 `action='apply'` + 同一个 `blob_sha` 真建。**已有任务不动、不新建车站、认不出负责队整份拒收**；对不上的行放进 `skip_rows` 才放行。与 Web 端 `/tasks/import` **同一套服务层**（`app/services/bd_task_import.py`） |
 
-> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 9** / 管理员 26。
-> （2026-10-10 加 `visit_day_report` → 管理员档 25 → 26。）
+> **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 9** / 管理员 27。
+> （2026-10-10 加 `visit_day_report` → 管理员档 25 → 26；
+> 2026-10-16 加 `visit_task_import` → 26 → 27。）
 > 队长档 = 员工档 + 3 个本队任务工具。作业域工具与 Web 端**走同一套服务层**
 > （`app/services/bd_tasks.py` 等），口径不会漂移；能力层在 `mcp_service/task_ops.py`。
 

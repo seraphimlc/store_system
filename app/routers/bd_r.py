@@ -6,11 +6,12 @@
 
 规格：`docs/specs-team-management.md`、`docs/specs-station-tasks.md`。
 """
+import os
 from datetime import date, datetime
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -550,6 +551,228 @@ def task_new_create(request: Request,
     if r["skipped"]:
         m += "；跳过 %d 个（已有任务）" % r["skipped"]
     return RedirectResponse(back + "&msg=%s" % _q(m), status_code=303)
+
+
+# ------------------------------------------------ 批量导入任务（线路执行计划表）
+# 用户 2026-10-15/16 手工导过 3 次（每队一份「线路执行计划」Excel）。这里把那套
+# 流程做成页面：上传 → 列识别（可人工纠正）→ 预览分类 → 确认建任务。
+# 口径见 app/services/bd_task_import.py（已有任务一律不动、不新建车站、认不出队名整份拒收）。
+
+#: 可人工纠正的列（表单字段名 col_<key>）
+_IMPORT_COLS = (
+    ("line", "线路"), ("station", "车站"), ("team", "负责队"),
+    ("source", "任务来源"), ("status", "状态"), ("done_date", "完成日"),
+    ("note", "备注"),
+)
+_IMPORT_COL_KEYS = tuple(k for k, _l in _IMPORT_COLS)
+
+
+def _col_letters(n: int) -> List[str]:
+    """0→A、25→Z、26→AA（把列号显示成 Excel 列名，给人对表用）。"""
+    out = []
+    for i in range(max(0, int(n or 0))):
+        s, k = "", i
+        while True:
+            s = chr(ord("A") + k % 26) + s
+            k = k // 26 - 1
+            if k < 0:
+                break
+        out.append(s)
+    return out
+
+
+def _import_layout(header_row: str, cols: dict) -> dict:
+    """表单 → layout。表头行/列号没填的就不指定（用自动识别）。
+
+    ⚠️ 这里**不填 n_cols** —— 列数由 `build_plan` 从工作表本身数
+    （若按"已选中的最大列号 +1"来定，人工改一次映射后下拉列就缩水了，
+    想再选更靠右的列就选不到）。
+    """
+    from app.services import bd_task_import as ti
+    out = {}
+    for key in _IMPORT_COL_KEYS:
+        v = str(cols.get("col_" + key) or "").strip()
+        if v.isdigit():
+            out[key] = int(v)
+    if "station" not in out:
+        raise ti.TaskImportError("请指定「车站」列（没有它认不出哪个单元格是站名）")
+    hr = str(header_row or "").strip()
+    return {"header_row": int(hr) if hr.isdigit() and int(hr) > 0 else 1,
+            "cols": out, "source": "manual"}
+
+
+def _import_ncols(layout, path):
+    """给人工布局补上列数（预览页的列下拉要用；auto 布局本来就有）。"""
+    if not layout or layout.get("n_cols"):
+        return layout
+    from app.services import bd_task_import as ti
+    try:
+        return dict(layout, n_cols=ti.sheet_n_cols(path))
+    except Exception:                      # noqa: BLE001 —— 只是显示用，读不到就别翻车
+        return dict(layout, n_cols=max(layout.get("cols", {}).values() or [0]) + 1)
+
+
+def _import_ctx(request, user, *, blob_sha="", blob_name="", layout=None,
+                plan=None, msg="", err=""):
+    """预览页上下文（上传前/预览后共用）。"""
+    rows = (plan or {}).get("rows") or []
+    lay = layout or {"header_row": 1, "cols": {}, "n_cols": 0}
+    return {
+        "request": request, "current_user": user,
+        "blob_sha": blob_sha, "blob_name": blob_name,
+        "plan": plan, "layout": lay,
+        "col_fields": _IMPORT_COLS, "col_keys": list(_IMPORT_COL_KEYS),
+        "n_cols": lay.get("n_cols") or 0,
+        "col_letters": _col_letters(lay.get("n_cols") or 0),
+        "summary": (plan or {}).get("summary") or {
+            "rows": 0, "create_stations": 0, "existing": 0, "skipped": 0,
+            "bad": 0, "teams": []},
+        "create_rows": [r for r in rows if r.create],
+        "skip_rows_list": [r for r in rows if r.decision == "skip"],
+        "bad_rows": [r for r in rows if r.decision == "bad"],
+        "msg": msg, "err": err,
+    }
+
+
+def _import_render(request, user, **kw):
+    return templates.TemplateResponse("bd_task_import.html",
+                                      _import_ctx(request, user, **kw))
+
+
+@router.get("/tasks/import", response_class=HTMLResponse)
+def task_import_page(request: Request, msg: str = "", err: str = "",
+                     user: Optional[User] = Depends(require_login),
+                     db: Session = Depends(get_db)):
+    """批量导入任务：上传线路执行计划表。"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    return _import_render(request, user, msg=msg, err=err)
+
+
+@router.post("/tasks/import", response_class=HTMLResponse)
+async def task_import_preview(request: Request,
+                              file: Optional[UploadFile] = File(None),
+                              blob_sha: str = Form(""), blob_name: str = Form(""),
+                              header_row: str = Form(""),
+                              col_line: str = Form(""), col_station: str = Form(""),
+                              col_team: str = Form(""), col_source: str = Form(""),
+                              col_status: str = Form(""), col_done_date: str = Form(""),
+                              col_note: str = Form(""),
+                              csrf_token: str = Form(""),
+                              user: Optional[User] = Depends(require_login),
+                              db: Session = Depends(get_db)):
+    """上传计划文件（或带着已存文件改列映射重解析）→ 出预览。**不写库。**"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_task_import as ti
+
+    cols = {"col_line": col_line, "col_station": col_station, "col_team": col_team,
+            "col_source": col_source, "col_status": col_status,
+            "col_done_date": col_done_date, "col_note": col_note}
+
+    # ① 拿文件：新上传，或复用之前存下的那份（改列映射重解析）
+    if file is not None and (file.filename or "").strip():
+        content = await file.read()
+        if not (file.filename or "").lower().endswith(".xlsx"):
+            return _import_render(request, user, err="仅支持 .xlsx 文件")
+        from app.config import get_settings
+        if len(content) > get_settings().max_upload_mb * 1024 * 1024:
+            return _import_render(request, user,
+                                  err="超过 %dMB 上限" % get_settings().max_upload_mb)
+        blob_sha, path = ti.save_blob(content)
+        blob_name = file.filename
+    elif blob_sha:
+        try:
+            path = ti.blob_path(blob_sha)
+        except ti.TaskImportError as e:
+            return _import_render(request, user, err=str(e))
+        if not os.path.exists(path):
+            return _import_render(request, user, err="文件已过期，请重新上传")
+    else:
+        return _import_render(request, user, err="请选择要导入的 .xlsx 文件")
+
+    # ② 列映射：表单给了表头行就用人工的，否则自动识别
+    layout = None
+    if str(header_row or "").strip():
+        try:
+            layout = _import_layout(header_row, cols)
+        except ti.TaskImportError as e:
+            return _import_render(request, user, blob_sha=blob_sha,
+                                  blob_name=blob_name, err=str(e))
+    # ③ 只读解析 + 分类
+    try:
+        plan = ti.build_plan(db, path, layout)
+    except ti.TaskImportError as e:
+        return _import_render(request, user, blob_sha=blob_sha,
+                              blob_name=blob_name,
+                              layout=_import_ncols(layout, path), err=str(e))
+    return _import_render(request, user, blob_sha=blob_sha, blob_name=blob_name,
+                          layout=plan["layout"], plan=plan,
+                          msg="已解析 %d 行，确认无误后点「确认导入」"
+                              % plan["summary"]["rows"])
+
+
+@router.post("/tasks/import/apply")
+def task_import_apply(request: Request,
+                      blob_sha: str = Form(""), blob_name: str = Form(""),
+                      header_row: str = Form(""),
+                      col_line: str = Form(""), col_station: str = Form(""),
+                      col_team: str = Form(""), col_source: str = Form(""),
+                      col_status: str = Form(""), col_done_date: str = Form(""),
+                      col_note: str = Form(""),
+                      skip_rows: Optional[List[str]] = Form(None),
+                      csrf_token: str = Form(""),
+                      user: Optional[User] = Depends(require_login),
+                      db: Session = Depends(get_db)):
+    """确认导入：给没任务的车站建任务并派队。**已有任务一律不动。**"""
+    g = _admin_guard(user)
+    if g:
+        return g
+    if not csrf_ok(request, csrf_token):
+        return HTMLResponse("CSRF 校验失败", status_code=400)
+    from app.services import bd_task_import as ti
+
+    cols = {"col_line": col_line, "col_station": col_station, "col_team": col_team,
+            "col_source": col_source, "col_status": col_status,
+            "col_done_date": col_done_date, "col_note": col_note}
+    try:
+        layout = _import_layout(header_row, cols)
+        path = ti.blob_path(blob_sha)
+    except ti.TaskImportError as e:
+        return _import_render(request, user, err=str(e))
+    if not os.path.exists(path):
+        return _import_render(request, user, err="文件已过期，请重新上传")
+
+    skips = [x for x in (skip_rows or []) if str(x).strip().isdigit()]
+    try:
+        res = ti.apply_plan(db, path, layout, skip_rows=skips, actor_user=user)
+    except ti.TaskImportError as e:
+        db.rollback()
+        plan = None
+        try:                       # 回到预览页，让人接着处理
+            plan = ti.build_plan(db, path, layout)
+        except ti.TaskImportError:
+            plan = None
+        return _import_render(
+            request, user, blob_sha=blob_sha, blob_name=blob_name,
+            layout=(plan["layout"] if plan else _import_ncols(layout, path)),
+            plan=plan, err=str(e))
+
+    m = "已按计划新建 %d 个任务" % res["created"]
+    if res["by_team"]:
+        m += "（%s）" % "、".join("%s %d 个" % (t["team"], t["created"])
+                                 for t in res["by_team"])
+    if res["existing_untouched"]:
+        m += "；已有任务 %d 个未改动" % res["existing_untouched"]
+    if res["skipped_rows"]:
+        m += "；跳过 %d 行" % res["skipped_rows"]
+    if res["skipped"]:          # 计划外又撞上已有任务（正常应为 0，出现说明并发写入了）
+        m += "；另有 %d 个已有任务未动" % res["skipped"]
+    return RedirectResponse(_with_msg("/tasks", "msg", m), status_code=303)
 
 
 @router.post("/tasks/{task_id}/progress")

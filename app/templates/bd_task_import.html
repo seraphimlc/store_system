@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}{{ t('批量导入任务') }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>{{ t('批量导入任务') }}</h1>
+  <span class="sub">{{ t('上传线路执行计划表 → 核对 → 建任务（已有任务一律不动）') }}</span>
+  <div class="actions">
+    <a class="btn ghost" href="/tasks">{{ t('任务列表') }}</a>
+    <a class="btn ghost" href="/tasks/new">{{ t('按线路勾选建任务') }}</a>
+  </div>
+</div>
+
+{% if msg %}<div class="msg ok" data-testid="import-msg">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg err" data-testid="import-err">{{ err }}</div>{% endif %}
+
+{# ① 上传 #}
+<div class="card" style="margin-bottom:.8rem">
+  <form method="post" action="/tasks/import" enctype="multipart/form-data"
+        data-testid="task-import-upload">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <div class="form-grid">
+      <label class="fld">{{ t('执行计划文件（.xlsx）') }}
+        <input type="file" name="file" accept=".xlsx" required
+               data-testid="task-import-file"></label>
+      <div class="form-actions" style="align-items:flex-end">
+        <button class="btn" type="submit" data-testid="task-import-preview">
+          {{ t('解析并预览') }}</button>
+      </div>
+    </div>
+    <p class="hint">
+      {{ t('表里必须有一列写明每行归哪个队（负责队／既有归属）；认不出队名的文件会被拒收。') }}
+      {{ t('车站按「线路＋站名」匹配；对不上的会单独列出，不会猜、也不会新建车站。') }}
+    </p>
+  </form>
+</div>
+
+{% if blob_sha and layout.cols %}
+{# ② 列识别结果（可人工纠正后重新解析）
+   ⚠️ 条件用「有没有 blob_sha + 列映射」而不是 `plan`：重新解析被拒（如认不出负责队）时
+   也要留在这一页，否则人改错了就没法改回来、只能重传。 #}
+<form method="post" action="/tasks/import" data-testid="task-import-layout">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="blob_sha" value="{{ blob_sha }}">
+  <input type="hidden" name="blob_name" value="{{ blob_name }}">
+  <div class="card" style="margin-bottom:.8rem">
+    <h3 style="margin-top:0">{{ t('列识别') }}
+      <span class="hint">{{ t('识别错了就在下面改，再点「重新解析」') }}</span></h3>
+    <div class="form-grid">
+      <label class="fld">{{ t('表头行') }}
+        <input type="number" name="header_row" min="1" value="{{ layout.header_row }}"
+               style="width:6rem" data-testid="layout-header-row"></label>
+      {% for key, label in col_fields %}
+      <label class="fld">{{ t(label) }}
+        <select name="col_{{ key }}" data-testid="layout-col-{{ key }}">
+          <option value="">{{ t('（不指定）') }}</option>
+          {% for j in range(n_cols) %}
+          <option value="{{ j }}" {% if layout.cols.get(key) == j %}selected{% endif %}>
+            {{ col_letters[j] }}</option>
+          {% endfor %}
+        </select></label>
+      {% endfor %}
+      <div class="form-actions" style="align-items:flex-end">
+        <button class="btn ghost" type="submit" data-testid="layout-reparse">
+          {{ t('重新解析') }}</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% endif %}
+
+{% if plan %}
+{# ③ 预览 + 确认导入 #}
+<form method="post" action="/tasks/import/apply" data-testid="task-import-apply">
+  <input type="hidden" name="_ft" value="{{ form_token() }}">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+  <input type="hidden" name="blob_sha" value="{{ blob_sha }}">
+  <input type="hidden" name="blob_name" value="{{ blob_name }}">
+  <input type="hidden" name="header_row" value="{{ layout.header_row }}">
+  {% for key in col_keys %}
+  <input type="hidden" name="col_{{ key }}" value="{{ layout.cols.get(key, '') }}">
+  {% endfor %}
+
+  <div class="card" style="margin-bottom:.8rem">
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap">
+      <h3 style="margin:0">{{ t('预览') }}</h3>
+      <span class="hint" data-testid="import-summary">
+        {{ t('共') }} {{ summary.rows }} {{ t('行') }} ·
+        <b>{{ t('将新建') }} {{ summary.create_stations }}</b> {{ t('个任务') }} ·
+        {{ t('已有任务不动') }} {{ summary.existing }} ·
+        {{ t('跳过') }} {{ summary.skipped }} {{ t('行') }} ·
+        {% if summary.bad %}<span class="pill err">{{ t('对不上') }} {{ summary.bad }} {{ t('行') }}</span>{% endif %}
+      </span>
+      <span style="flex:1"></span>
+      <span class="hint">{{ t('派给') }}：{{ summary.teams|join('、') }}</span>
+    </div>
+    <div class="form-actions" style="margin-top:.6rem">
+      <button class="btn" type="submit" data-testid="task-import-confirm"
+              {% if summary.bad and not bad_all_skipped %}{% endif %}>
+        {{ t('确认导入') }}</button>
+    </div>
+    <p class="hint">{{ t('只会给「没有任务的车站」建任务并派给表上写的队；已有任务不改归属、不改进度。') }}</p>
+  </div>
+
+  {% if bad_rows %}
+  <div class="card" style="margin-bottom:.8rem">
+    <h3 style="margin-top:0">{{ t('对不上的站（需要处理）') }}</h3>
+    <p class="hint">{{ t('这些行在车站表里匹配不上。勾选「跳过」后可以先把其余的导进去；不勾选则不会写库。') }}</p>
+    <div class="tbl-wrap">
+      <table class="grid-tbl" data-testid="bad-rows">
+        <thead><tr>
+          <th style="width:5rem">{{ t('跳过') }}</th>
+          <th>{{ t('行') }}</th><th>{{ t('线路') }}</th><th>{{ t('表上站名') }}</th>
+          <th>{{ t('缺哪个') }}</th><th>{{ t('近似站名') }}</th>
+        </tr></thead>
+        <tbody>
+        {% for r in bad_rows %}
+          <tr><td><input type="checkbox" name="skip_rows" value="{{ r.row_no }}"
+                         data-testid="skip-row-{{ r.row_no }}"></td>
+            <td>{{ r.row_no }}</td><td>{{ r.line }}</td><td>{{ r.station_raw }}</td>
+            <td>{{ r.missing|join('、') }}</td>
+            <td class="hint">{{ r.near|join('、') or '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if create_rows %}
+  <div class="card" style="margin-bottom:.8rem">
+    <h3 style="margin-top:0">{{ t('将新建') }} {{ summary.create_stations }} {{ t('个任务') }}</h3>
+    <div class="tbl-wrap">
+      <table class="grid-tbl" data-testid="create-rows">
+        <thead><tr><th>{{ t('行') }}</th><th>{{ t('派给') }}</th>
+          <th>{{ t('线路') }}</th><th>{{ t('表上站名') }}</th>
+          <th>{{ t('对应车站') }}</th><th>{{ t('匹配') }}</th></tr></thead>
+        <tbody>
+        {% for r in create_rows %}{% for pid, nm, ln in r.create %}
+          <tr><td>{{ r.row_no }}</td><td>{{ r.team_name }}</td>
+            <td>{{ r.line }}</td><td>{{ r.station_raw }}</td>
+            <td><b>{{ nm }}</b></td><td class="hint">{{ ln }}</td></tr>
+        {% endfor %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if skip_rows_list %}
+  <div class="card" style="margin-bottom:.8rem">
+    <h3 style="margin-top:0">{{ t('跳过') }} {{ summary.skipped }} {{ t('行') }}</h3>
+    <div class="tbl-wrap">
+      <table class="grid-tbl" data-testid="skip-rows">
+        <thead><tr><th>{{ t('行') }}</th><th>{{ t('表上站名') }}</th>
+          <th>{{ t('原因') }}</th></tr></thead>
+        <tbody>
+        {% for r in skip_rows_list %}
+          <tr><td>{{ r.row_no }}</td><td>{{ r.station_raw }}</td>
+            <td class="hint">{{ r.skip_reason }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

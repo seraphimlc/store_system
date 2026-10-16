@@ -23,6 +23,7 @@ from mcp_service.annotations import read as read_ann
 from mcp_service.annotations import write as write_ann
 from mcp_service.tools import _client_info, _write_call, actor_from_ctx
 from mcp_service.capability import MONTH_PATTERN
+import os
 import re
 
 
@@ -298,6 +299,138 @@ def visit_upload(ctx: Context, filename: str | None = None,
                   {"filename": filename, "path": path,
                    "has_content": bool(content_base64), "dry_run": dry_run,
                    "month": month, "kind": kind},
+                  run, retryable=False)
+
+
+# --------------------------- visit_task_import ---------------------------
+
+def _task_import_rows(plan, limit: int = 400) -> list[dict[str, Any]]:
+    """计划 → 可读行列表（只回该回的两类：要建的、对不上的）。"""
+    out = []
+    for r in plan["rows"]:
+        if r.decision == "create":
+            out.append({"row": r.row_no, "decision": "create", "line": r.line,
+                        "station": r.station_raw, "team": r.team_name,
+                        "stations": [{"station_id": pid, "name": nm, "line": ln}
+                                     for pid, nm, ln in r.create]})
+        elif r.decision == "bad":
+            out.append({"row": r.row_no, "decision": "bad", "line": r.line,
+                        "station": r.station_raw, "missing": r.missing,
+                        "near": r.near})
+    return out[:limit]
+
+
+def visit_task_import(ctx: Context, content_base64: str | None = None,
+                      path: str | None = None, filename: str | None = None,
+                      action: str = "preview", blob_sha: str | None = None,
+                      header_row: int | None = None,
+                      cols: dict[str, Any] | None = None,
+                      skip_rows: list[Any] | None = None) -> dict[str, Any]:
+    """批量导入车站任务（线路执行计划表）——「预览 → 确认」两步，不猜、不覆盖。"""
+    from mcp_service import write_ops
+
+    def _layout():
+        if not cols and header_row is None:
+            return None, None
+        c: dict[str, int] = {}
+        for k, v in (cols or {}).items():
+            key = str(k).strip()
+            if key.startswith("col_"):
+                key = key[4:]
+            sv = str(v).strip()
+            if sv.isdigit():
+                c[key] = int(sv)
+        if "station" not in c:
+            return None, _envelope_error(
+                "BAD_REQUEST", "cols 里必须指定 station（车站）列",
+                "cols={'line':1,'station':2,'team':3,'source':4}，列号从 0 开始")
+        hr = int(header_row) if header_row else 1
+        return {"header_row": hr, "cols": c, "n_cols": max(c.values()) + 1,
+                "source": "manual"}, None
+
+    def run(db, actor):
+        from app.services import bd_task_import as ti
+
+        # ⚠️ 行列校验之前先过写闸门：`_write_call` 只按角色拦（admin 即可），
+        # 「Token 有没有 write scope」由 require_write 判（与 visit_upload 一致）。
+        guards.require_write(actor)
+        if action not in ("preview", "apply"):
+            return _envelope_error("BAD_PARAM", f"未知 action：{action!r}",
+                                   "可选：preview（默认，只预览）/ apply（确认导入）")
+        layout, bad = _layout()
+        if bad:
+            return bad
+
+        # ① 定位文件：优先用预览时返回的 blob_sha（web 与 mcp 挂同一个上传卷）
+        use_sha = blob_sha
+        if use_sha:
+            try:
+                file_path = ti.blob_path(use_sha)
+            except ti.TaskImportError as e:
+                return _envelope_error("BAD_PARAM", str(e), "请重新上传文件")
+            if not os.path.exists(file_path):
+                return _envelope_error(
+                    "NOT_FOUND", "文件不存在（可能已被清理）",
+                    "请重新上传；预览与导入之间文件会保留在上传目录")
+        elif content_base64 or path:
+            if content_base64 and path:
+                return _envelope_error("BAD_REQUEST", "path 与 content_base64 不可同时提供",
+                                       "跨机器用 content_base64；本机路径模式用 path")
+            if content_base64:
+                content = write_ops.decode_base64(content_base64)
+                use_sha, file_path = ti.save_blob(content)
+            else:
+                if not write_ops.allow_local_path():
+                    return _envelope_error(
+                        "FORBIDDEN_TOOL", "本机路径模式未开启",
+                        "请改用 content_base64 传文件内容")
+                file_path = str(path)
+                if not os.path.exists(file_path):
+                    return _envelope_error("NOT_FOUND", f"文件不存在：{path}", "请确认路径")
+        else:
+            return _envelope_error(
+                "BAD_REQUEST", "必须提供 content_base64 / path / blob_sha 之一",
+                "首次调用传文件内容（content_base64）；确认导入时传预览返回的 blob_sha")
+
+        # ② 确认导入
+        if action == "apply":
+            skips = [str(x) for x in (skip_rows or []) if str(x).strip().isdigit()]
+            try:
+                res = ti.apply_plan(db, file_path, layout, skip_rows=skips,
+                                    actor_user=actor)
+            except ti.TaskImportError as e:
+                db.rollback()
+                return _envelope_error(
+                    "TASK_IMPORT_REJECTED", str(e),
+                    "对不上的行需先处理：把它们放进 skip_rows 跳过，或在车站表里补站",
+                    retryable=False)
+            return {"ok": True, "data": {
+                "applied": True, "created": res["created"],
+                "by_team": res["by_team"],
+                "existing_untouched": res["existing_untouched"],
+                "skipped_rows": res["skipped_rows"], "rows": res["rows"]}}
+
+        # ③ 预览（只读）
+        try:
+            plan = ti.build_plan(db, file_path, layout)
+        except ti.TaskImportError as e:
+            return _envelope_error(
+                "TASK_IMPORT_REJECTED", str(e),
+                "请让对方在文件里写清楚「负责队」列，或核对表头行/列名后重试",
+                retryable=False)
+        return {"ok": True, "data": {
+            "applied": False, "blob_sha": use_sha, "filename": filename,
+            "layout": plan["layout"], "summary": plan["summary"],
+            "teams_in_file": plan["team_names_found"],
+            "rows": _task_import_rows(plan),
+            "next": "确认无误后带 action='apply' 与同一个 blob_sha 再调一次；"
+                    "summary.bad>0 时把这些 row 放进 skip_rows 即「跳过它们、先导其余的」"}}
+
+    return _write(ctx, "visit_task_import",
+                  {"filename": filename, "path": path, "action": action,
+                   "blob_sha": blob_sha, "has_content": bool(content_base64),
+                   "header_row": header_row, "cols": bool(cols),
+                   "skip_rows": list(skip_rows or [])},
                   run, retryable=False)
 
 
@@ -881,6 +1014,22 @@ _DESC = {
         "**只返回本人数据，无 person 参数**；不给他人/公司级数据（用户问公司级数据时告知无权限）。"
         "金额为日元（currency=JPY）。只读。"
     ),
+    "visit_task_import": (
+        "**批量导入车站任务**（管理员）：把「线路执行计划表」（Excel 里写明 线路/车站/负责队）"
+        "一次建成一批车站任务，并把任务派给表里写的队。"
+        "两步走：① action='preview'（默认）传文件 → 返回 layout（识别到的表头行与列表）、"
+        "summary（将新建多少 / 已有任务多少 / 对不上多少）、rows（要建的与对不上的）；"
+        "② 核对后用 action='apply' + **同一个 blob_sha** 确认导入。"
+        "**已有任务一律不动**（不换归属、不改进度）；**不新建车站**；"
+        "车站按「线路＋站名」匹配，站群「A／B」会拆成两个站。"
+        "文件里认不出「负责队」列（或缺这一列、写着「待分配」）→ 整份拒收（TASK_IMPORT_REJECTED），"
+        "**不要替它猜队名**，让交文件方补上负责队再传。"
+        "summary.bad>0 说明有站对不上：把那些 row 号放进 skip_rows 即「跳过它们、先导其余的」；"
+        "不传 skip_rows 则一条都不会写库。"
+        "传文件用 content_base64（本机路径模式才可用 path）。"
+        "什么时候用我：一次要建「几十上百个」车站任务、且手上有执行计划表时；"
+        "零散建任务用 visit_task_assign。"
+    ),
     "visit_upload": (
         "**统一上传入口**：把巡店/对账文件丢进来，自动识别类型并走对应通道，无需自己判断。"
         "必须提供 path 或 content_base64 之一（不可同时、不可都不）。"
@@ -991,7 +1140,9 @@ _WRITE_TOOLS = {"visit_upload", "visit_payroll_export", "visit_rebuild",
                 "visit_self_report", "visit_task_report", "visit_task_assign",
                 "visit_task_confirm", "visit_task_return", "visit_task_transfer",
                 # 管理员改某员工某天的自报（点数 + 当天进展，2026-10-10）
-                "visit_day_report"}
+                "visit_day_report",
+                # 批量导入车站任务（线路执行计划表，2026-10-16）
+                "visit_task_import"}
 
 _WRITE_TITLES = {
     # 作业域（团队 / 车站 / 任务）
@@ -1002,6 +1153,7 @@ _WRITE_TITLES = {
     "visit_task_confirm": "确认 / 一键全确认 / 驳回",
     "visit_task_return": "撤回任务到车站池",
     "visit_task_transfer": "转给别的队（队长间换活）",
+    "visit_task_import": "批量导入车站任务",
     "visit_upload": "上传巡店/对账文件",
     "visit_payroll_export": "导出发薪表",
     "visit_rebuild": "月度重算",
@@ -1368,6 +1520,20 @@ def register(mcp: MCPServer) -> None:
                   dry_run: bool = False) -> dict[str, Any]:
         return visit_upload(ctx, filename=filename, content_base64=content_base64,
                             path=path, month=month, kind=kind, dry_run=dry_run)
+
+    @mcp.tool(name="visit_task_import", title=_WRITE_TITLES["visit_task_import"],
+              annotations=_annotations("visit_task_import"),
+              description=_DESC["visit_task_import"])
+    def _t_task_import(ctx: Context, content_base64: str | None = None,
+                       path: str | None = None, filename: str | None = None,
+                       action: str = "preview", blob_sha: str | None = None,
+                       header_row: int | None = None,
+                       cols: dict[str, Any] | None = None,
+                       skip_rows: list[Any] | None = None) -> dict[str, Any]:
+        return visit_task_import(ctx, content_base64=content_base64, path=path,
+                                 filename=filename, action=action,
+                                 blob_sha=blob_sha, header_row=header_row,
+                                 cols=cols, skip_rows=skip_rows)
 
     @mcp.tool(name="visit_overview", title=_READ_TITLES["visit_overview"],
               annotations=_annotations("visit_overview"), description=_DESC["visit_overview"])

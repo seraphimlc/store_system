@@ -102,7 +102,7 @@ def test_sdk_roundtrip(server):
                 # 26 个（含 6 个员工工具 + 4 个队长工具 + 16 个管理员工具）
                 assert {"visit_verify", "visit_overview", "visit_upload",
                         "visit_whoami"} <= names
-                assert len(names) == 26
+                assert len(names) == 27
 
                 # 信封（A4 的服务端侧证据）
                 res = await session.call_tool("visit_whoami", {})
