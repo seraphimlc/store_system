@@ -1304,6 +1304,27 @@ def test_staff_analysis_sample_accepts_single_month(client):
     db.close()
 
 
+def test_staff_sample_ok_is_scoped_to_that_month(client):
+    """门槛必须**只看当期**。
+
+    ⚠️ 回归（2026-10-17 审查抓到）：`staff_sample_ok(db, code, month)` 原来**根本没用
+    `month`** —— 它把 `staff_series`（该人**所有月份**）的 records 全加起来比 >=5。
+    于是「7 月有 42 条、9 月一条都没有」的人在 2026-09 也被判样本足够 → 给空月份生成分析。
+    上面那条 `test_staff_analysis_sample_accepts_single_month` 只喂单月数据，测不出这个。
+    """
+    from app.models import MonthPerfRecord
+    from app.services import dashboard as D
+
+    db = appdb.SessionLocal()
+    _person(db, "S1", "上个月才干过")
+    db.add(MonthPerfRecord(month="2026-07", person_code="S1", records=42,
+                           p1=30, p2=12, points=54, salary=13500))
+    db.commit()
+    assert D.staff_sample_ok(db, "S1", "2026-07") is True      # 当期有 42 条 → 可以
+    assert D.staff_sample_ok(db, "S1", "2026-09") is False     # 当期一条都没有 → 不生成
+    db.close()
+
+
 def test_single_month_employee_gets_analysis(client, monkeypatch):
     """单月员工也能生成分析（AI 打桩）：落一行 staff_analyses；没有上月 → prompt 不做环比。"""
     from app.models import MonthPerfRecord, StaffAnalysis
@@ -1433,3 +1454,101 @@ def test_missed_plan_is_triangle_not_cross(client, monkeypatch):
     assert by_name["甲"][3] == "△"          # 10-01
     assert by_name["甲"][4] == "×"          # 10-02 计划不出勤
     assert by_name["丙"][3] == "×"
+
+
+# ---------------- 假期模式 → 出勤计划（plan_leave） ----------------
+# ⚠️ 2026-10-17 审查发现这块**全仓零覆盖**（`grep apply_leave|clear_leave tests_web tests` = 0）：
+# 三条"不抢"规则、按 leave_id 精确撤销、`reported=True` 只解绑、以及"都不 commit"都没人锁。
+# 用户口径见 `app/services/plan_leave.py` 头部（2026-10-03）。
+
+
+def _plan_row(db, code, d, **kw):
+    db.add(StaffDatePlan(person_code=code, plan_date=d, **kw))
+    db.flush()
+
+
+def test_apply_leave_does_not_grab_reported_self_marked_or_past(client):
+    """三条"不抢"：① 今天之前不标 ② 已自报不动 ③ 员工亲手标的 ×（leave_id 为空）不动。"""
+    from app.services import plan_leave
+
+    db = appdb.SessionLocal()
+    _person(db, "P1", "甲")
+    today = date(2026, 10, 10)
+    _plan_row(db, "P1", date(2026, 10, 9), available=True)     # 昨天：规则 ①
+    _plan_row(db, "P1", date(2026, 10, 10), available=True)    # 今天：默认 ○ → 该被标
+    _plan_row(db, "P1", date(2026, 10, 11), available=True,
+              reported=True)                                   # 规则 ② 已自报
+    _plan_row(db, "P1", date(2026, 10, 12), available=False,
+              leave_id=None)                                   # 规则 ③ 自己标的 ×
+    db.commit()                                                # 10-13 没有行 → 该被新建
+
+    rep = plan_leave.apply_leave(db, "P1", 7, date(2026, 10, 9),
+                                 date(2026, 10, 13), today=today)
+    assert (rep["marked"], rep["skipped"]) == (2, 2)           # 标了 10-10 / 10-13
+
+    got = {r.plan_date: r for r in db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P1").all()}
+    assert got[date(2026, 10, 9)].available is True            # ① 过去没被碰
+    for d in (date(2026, 10, 10), date(2026, 10, 13)):         # 标成 × 且挂了本假期
+        assert got[d].available is False
+        assert got[d].source == "leave"
+        assert got[d].leave_id == 7
+    assert got[date(2026, 10, 11)].available is True           # ② 已自报原样
+    assert got[date(2026, 10, 12)].leave_id is None            # ③ 没被认领
+
+    # 不 commit（由调用方统一提交）：回滚后新建的行消失、改过的行复原
+    db.rollback()
+    left = {r.plan_date for r in db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P1").all()}
+    assert date(2026, 10, 13) not in left
+    db.close()
+
+
+def test_clear_leave_only_unbinds_reported_and_is_scoped_to_one_leave(client):
+    """撤假期：`reported=False` 的行删掉、`reported=True` 的只解绑；不许波及别的假期。"""
+    from app.services import plan_leave
+
+    db = appdb.SessionLocal()
+    _person(db, "P1", "甲")
+    _plan_row(db, "P1", date(2026, 10, 10), available=False, reported=True,
+              source="leave", leave_id=7)      # 实际出勤过 → 事实要留
+    _plan_row(db, "P1", date(2026, 10, 11), available=False, reported=False,
+              source="leave", leave_id=7)      # 自动标的 → 删
+    _plan_row(db, "P1", date(2026, 10, 20), available=False, reported=False,
+              source="leave", leave_id=8)      # 另一个假期 → 不许碰
+    db.commit()
+
+    assert plan_leave.clear_leave(db, 7) == 2
+    db.commit()
+    got = {r.plan_date: r for r in db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P1").all()}
+    assert date(2026, 10, 11) not in got                       # 自动标的行被删
+    keep = got[date(2026, 10, 10)]                             # 已自报 → 只解绑
+    assert keep.leave_id is None
+    assert keep.available is False and keep.reported is True    # 事实保留
+    assert got[date(2026, 10, 20)].leave_id == 8               # 精确：只撤 7
+    assert plan_leave.leave_days(db, "P1", date(2026, 10, 1),
+                                 date(2026, 10, 31)) == 1
+    db.close()
+
+
+def test_apply_leave_open_ended_is_capped_by_max_days(client):
+    """结束日未定（`end=None`）时按 `max_days` 截断，不会无限铺。
+
+    口径注意：`d1 = d0 + max_days` 且循环**含端点** → 实际标 `max_days + 1` 天
+    （`max_days` 只是防跑飞的硬上限，默认 400，差一天无影响）。
+    """
+    from app.services import plan_leave
+
+    db = appdb.SessionLocal()
+    _person(db, "P1", "甲")
+    rep = plan_leave.apply_leave(db, "P1", 9, date(2026, 10, 10), None,
+                                 today=date(2026, 10, 10), max_days=3)
+    db.commit()
+    assert rep["until"] == "未定"
+    assert rep["marked"] == 4
+    days = [r.plan_date for r in db.query(StaffDatePlan).filter(
+        StaffDatePlan.person_code == "P1").all()]
+    assert sorted(days) == [date(2026, 10, 10), date(2026, 10, 11),
+                            date(2026, 10, 12), date(2026, 10, 13)]
+    db.close()

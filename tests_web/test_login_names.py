@@ -44,6 +44,9 @@ def test_login_name_fallback_rule_when_unconfigured(client, monkeypatch):
         name = login_names.login_name_for(db, "甘子杰", "2188240606734603")
         assert name == "ganzijie"
         name2 = login_names.login_name_for(db, "小川逸", "2188240606634082")
-        assert name2 == "xiaochuanyix" or name2.startswith("xiaochuan")
+        # ⚠️ 原断言 `== "xiaochuanyix" or startswith("xiaochuan")`：左边其实是**错值**
+        #    （实测拼音回退给的是 "xiaochuanyi"），靠右边那个几乎必然真的分支保命。
+        #    钉死真值：pypinyin 读音若变，宁可红一次也别静默放行。
+        assert name2 == "xiaochuanyi"
     finally:
         db.close()

@@ -220,7 +220,10 @@ def staff_sample_ok(db, code, month) -> bool:
     而且历史月份只按当月生成、永远不会补 —— 改成只要当期有足够样本，一个人也能出分析
     （没有上月数据时，prompt 里不做环比，只跟全公司比）。
     """
-    ss = staff_series(db, code)
+    # ⚠️ 必须**只看当期**：`staff_series` 返回该人**所有月份**，原来把全历史 records 求和，
+    #    于是「7 月有 42 条、9 月一条都没有」的人在 2026-09 也被判样本足够 → 会给空月份
+    #    生成分析（`month` 参数原来完全没被用到，docstring 却写「当期有数据」）。
+    ss = [x for x in staff_series(db, code) if x.get("month") == month]
     if not ss:
         return False
     return sum(x["records"] for x in ss) >= 5

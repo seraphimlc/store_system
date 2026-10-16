@@ -8,13 +8,26 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 DB = Path(__file__).resolve().parent.parent.parent / "store_settle_live.db"
+
+# ⚠️ 这个库是**本地真实库**（132MB，`.gitignore` 忽略 `*.db`，不进仓库）。
+# 没有这行 skipif 时，干净检出/新机器上 `sqlite3.connect("file:...?mode=ro")` 会直接
+# `OperationalError: unable to open database file` —— 是 **ERROR 不是 skip**，
+# 整条采集/CI 被拖红。表结构（api_tokens / mcp_audit_log / sealed_months /
+# rebuild_snapshots）的权威断言在 `tests_web/test_migrations.py`（它自己起临时库跑
+# alembic upgrade head），本文件只是"在本机真实库上再确认一次"。
+needs_live_db = pytest.mark.skipif(
+    not DB.exists(),
+    reason="需要本地 store_settle_live.db（不进仓库）；schema 断言由 tests_web/test_migrations.py 负责")
 
 
 def _ro():
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 
 
+@needs_live_db
 def test_four_tables_exist():
     con = _ro()
     try:
@@ -26,6 +39,7 @@ def test_four_tables_exist():
             "rebuild_snapshots"} <= names
 
 
+@needs_live_db
 def test_sealed_months_table_is_queryable():
     """封账是**运行期可变配置**（可封可解），故只断言表可用，不断言当前内容。
 
@@ -39,6 +53,7 @@ def test_sealed_months_table_is_queryable():
         con.close()
 
 
+@needs_live_db
 def test_token_prefix_unique_index_exists():
     con = _ro()
     try:

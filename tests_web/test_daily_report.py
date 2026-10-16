@@ -266,7 +266,8 @@ def test_my_report_requires_csrf_and_staff(client):
                                         "p1_cnt": "1", "p2_cnt": "0"},
                     follow_redirects=False)
     assert r.status_code == 400
-    client.get("/logout")
+    # （原处有 `client.get("/logout")`：GET /logout 是 405、并非登出；
+    #   下面的 login 本来就会换掉会话 cookie，故删除该空操作。）
     db = appdb.SessionLocal()
     if db.query(User).filter(User.username == "admin").first() is None:
         db.add(User(username="admin", password_hash=hash_password("pw123456"),
@@ -887,7 +888,8 @@ def test_analyze_and_retry_routes_admin_only(client, monkeypatch):
     page = client.get("/staff-reports/compare?start=2026-09-16&end=2026-09-17")
     assert page.status_code == 200 and "AI 分析报告" in page.text
     # 员工被拦
-    client.get("/logout")
+    # （原处有 `client.get("/logout")`：GET /logout 是 405、并非登出；
+    #   下面的 login 本来就会换掉会话 cookie，故删除该空操作。）
     _seed_staff(client, person_code="P1", username="emp1", name="甲")
     _login_staff(client)
     r2 = client.post("/staff-reports/compare/analyze",

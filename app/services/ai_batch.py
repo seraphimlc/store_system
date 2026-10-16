@@ -7,6 +7,7 @@
 - 其余（unknown/medium/low）：写回 ai_decision/ai_confidence/ai_reason，仍留人工。
 """
 import json
+import time
 
 import httpx
 

@@ -195,3 +195,42 @@ def _csrf_of(client, path="/config"):
     return m.group(1) if m else ""
 
 
+def _login_leader(client, username="lead1", person_code="L1"):
+    db = appdb.SessionLocal()
+    if db.query(User).filter(User.username == username).first() is None:
+        db.add(User(username=username, display_name="队长甲", role="leader",
+                    is_active=True, status="active", person_code=person_code,
+                    password_hash=hash_password("demo123"),
+                    must_change_password=False))
+        if db.get(Person, person_code) is None:
+            db.add(Person(code=person_code, display_name="队长甲"))
+        db.commit()
+    db.close()
+    client.post("/login", data={"username": username, "password": "demo123"},
+                follow_redirects=False)
+
+
+def test_staff_and_leader_cannot_post_to_tasks_prefix(client):
+    """`/tasks/` 前缀**只放行 GET**（`app/main.py::_staff_path_ok`）。
+
+    ⚠️ 这块此前**零测试**（`_staff_path_ok` 全仓只在 `app/main.py` 出现；我把它改成
+    无条件放行后 23 条相关用例全绿）。任务详情 GET 的放行与数据隔离已由
+    `test_team_task.py::test_task_detail_*` 覆盖，缺的是**写端点**这一半：
+    员工/队长直发 POST 必须被中间件在**路由之前**弹回自己首页。
+
+    注意落点不同：员工 → `/my/plan`（或 /my/report），队长 → `/my/tasks`。
+    """
+    _staff(client, "emp1", "员工甲", "P1")
+    for p in ("/tasks/new", "/tasks/1/progress", "/tasks/assign",
+              "/tasks/import/apply", "/tasks/1"):
+        r = client.post(p, data={"csrf_token": "x"}, follow_redirects=False)
+        assert r.status_code == 302, f"员工 POST {p} 应被拦(302)，实际 {r.status_code}"
+        assert r.headers["location"].startswith(("/my/plan", "/my/report", "/login")), \
+            f"员工 POST {p} 落点异常：{r.headers['location']}"
+
+    _login_leader(client)
+    for p in ("/tasks/new", "/tasks/1/progress"):
+        r = client.post(p, data={"csrf_token": "x"}, follow_redirects=False)
+        assert r.status_code == 302, f"队长 POST {p} 应被拦(302)，实际 {r.status_code}"
+        assert r.headers["location"].startswith(("/my/tasks", "/login")), \
+            f"队长 POST {p} 落点异常：{r.headers['location']}"

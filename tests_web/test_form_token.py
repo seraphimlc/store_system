@@ -84,7 +84,8 @@ def test_token_bound_to_user(client):
     _seed_staff(client)
     _login(client, "emp1")
     ft = _token_from(client)
-    client.get("/logout")
+    # （原处有 `client.get("/logout")`：GET /logout 是 405、并非登出；
+    #   下面的 login 本来就会换掉会话 cookie，故删除该空操作。）
     _seed_staff(client, username="emp2", code="P2", name="乙")
     _login(client, "emp2")
     r = client.post("/my/report", data={"_ft": ft, "csrf_token": "x",

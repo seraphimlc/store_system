@@ -349,8 +349,24 @@ def create_tasks(db: Session, station_ids: Sequence[int], by: str = "",
     if station_ids:
         have = {sid for (sid,) in db.query(BdTask.station_id)
                 .filter(BdTask.station_id.in_(list(station_ids))).all()}
+    # ⚠️ 还要按「物理车站」判占用（`_place_ids_taken`：place 口径 + 老 station 口径都算）。
+    #    任务单位是**物理车站**，只查 `station_id` 会出现"同一个车站两个任务"：
+    #    实测 ① place 口径任务已存在时本函数会再建一个 ② 跨线两行同属一个 place
+    #    时本批内会各建一个。本批新建的 place 也记进 taken，防批内重复。
+    _place_of = {}
+    taken_places = set()
+    if station_ids:
+        _place_of = {sid: pid for (sid, pid) in
+                     db.query(BdStation.id, BdStation.place_id)
+                     .filter(BdStation.id.in_(list(station_ids))).all()}
+        taken_places = {pid for (pid,) in
+                        db.query(_place_ids_taken(db).c[0]).all()}
     for sid in station_ids:
         if sid in have:
+            skipped += 1
+            continue
+        pid = _place_of.get(sid)
+        if pid is not None and pid in taken_places:
             skipped += 1
             continue
         st = db.get(BdStation, sid)
@@ -366,6 +382,8 @@ def create_tasks(db: Session, station_ids: Sequence[int], by: str = "",
                       new=("派给 %s" % (db.get(BdTeam, team_id).name
                                        if team_id else "（未派队）")))
         created += 1
+        if pid is not None:
+            taken_places.add(pid)
     db.flush()
     return {"created": created, "skipped": skipped}
 

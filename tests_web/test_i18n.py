@@ -154,3 +154,31 @@ def test_i18n_prune_runs_as_script():
     assert r.returncode == 0, r.stderr
     assert "拟删除死键" in r.stdout, r.stdout
     assert "NameError" not in r.stderr, r.stderr
+
+
+def test_i18n_dict_hygiene_no_duplicate_or_quoted_keys():
+    """字典卫生：`_JA`/`_ZH` 不许有重复键、键里不许含双引号。
+
+    ⚠️ 回归（2026-10-17 审查抓到）：`_JA` 曾有 **12 组重复键**，其中两组**值不同、
+    后出现者静默覆盖前者** —— `"原因"`（`原因` 被 `理由` 覆盖）、`"派给"`
+    （`割当：` 被 `割当先` 覆盖）。Python 不报错，只有页面上用错词才看得见。
+    键含 `"` 会直接破坏 `app/i18n.py` → 页面 500（AGENTS.md 铁律 6）。
+    """
+    import ast
+    import collections
+    from pathlib import Path
+
+    src = (Path(__file__).parent.parent / "app" / "i18n.py").read_text(encoding="utf-8")
+    seen = []
+    for node in ast.parse(src).body:
+        if not (isinstance(node, ast.Assign)
+                and getattr(node.targets[0], "id", "") in ("_JA", "_ZH")):
+            continue
+        name = node.targets[0].id
+        seen.append(name)
+        keys = [k.value for k in node.value.keys if isinstance(k, ast.Constant)]
+        dup = [k for k, n in collections.Counter(keys).items() if n > 1]
+        assert not dup, "%s 有重复键 %r（后出现者静默覆盖前者）" % (name, dup)
+        bad = [k for k in keys if '"' in k]
+        assert not bad, "%s 的键含双引号 %r（会破坏字典）" % (name, bad)
+    assert seen, "没找到 _JA/_ZH：i18n 结构变了，请更新本测试"

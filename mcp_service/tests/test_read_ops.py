@@ -542,12 +542,14 @@ def test_envelope_empty_is_ok_not_error(db):
 # ---------------- 注册清单（能力层不注册工具；工具注册在 scenario_ops） ----------------
 
 def test_no_register_in_read_ops():
-    """场景化重构：read_ops 不再注册任何工具（能力函数供 scenario_ops 调用）。"""
-    from mcp.server.mcpserver import MCPServer
-    mcp = MCPServer(name="t", version="0.0.0")
-    assert not hasattr(read_ops, "register") or callable(read_ops.register)
-    tools = asyncio.run(mcp.list_tools())
-    assert tools == []
+    """场景化重构：read_ops 不再注册任何工具（能力函数供 scenario_ops 调用）。
+
+    ⚠️ 别写成 `not hasattr(...) or callable(...)` —— 那个式子对任何模块恒真，
+    等于没断言（原实现还顺手 new 了个空 MCPServer 断言 `tools == []`，测的是
+    MCPServer 自己）。正确的断言就是「没有 register」这一件事。
+    """
+    assert not hasattr(read_ops, "register"), (
+        "read_ops 不该有 register：工具注册已集中到 scenario_ops / task_ops 等")
 
 
 # ---------------- 只读证据 ----------------

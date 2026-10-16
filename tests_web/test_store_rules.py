@@ -18,5 +18,9 @@ def test_all_blank_returns_empty():
 
 
 def test_norm_name_removes_wide_spaces_case():
-    assert norm_name("５０円焼きとり　どん竜") == norm_name("50円やきとりどん竜") or True
+    # ⚠️ 原样本「５０円焼きとり　どん竜」vs「50円やきとりどん竜」**本来就不相等**
+    #    （焼 ≠ や，那不归归一化管），却被 `or True` 盖成了恒真断言、永不失败。
+    #    换成真正等价的样本：全角→半角、全角空格剥掉、大小写折叠。
+    assert norm_name("Ｗｉｎｅ　Ｓｈｏｐ") == norm_name("wine shop")
+    assert norm_name("７－ＥＬＥＶＥＮ") == norm_name("7-eleven")
     assert "　" not in norm_name("a　b") and " " not in norm_name("a　b")

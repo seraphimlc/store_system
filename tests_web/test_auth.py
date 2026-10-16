@@ -33,8 +33,8 @@ def test_anonymous_redirected(client):
     # / → /dashboard（需登录）→ /login；任意环节均要求登录
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302
-    loc = r.headers["location"]
-    assert loc in ("/dashboard", "/login")
+    # 实测未登录 GET / → 302 /login（`/dashboard` 自身也要登录，不会先跳它）
+    assert r.headers["location"] == "/login"
     final = client.get("/perf", follow_redirects=True)
     assert str(final.url).endswith("/login")
 
@@ -79,3 +79,15 @@ def test_session_token_roundtrip():
     assert d["uid"] == 7 and d["csrf"]
     assert read_session_token("garbage") is None
     assert read_session_token(None) is None
+
+
+def test_logout_is_post_only_get_does_not_log_out(client, admin_user):
+    """登出只有 POST；`GET /logout` 是 405、**没有任何效果**。
+
+    ⚠️ 此前有 6 处测试把 `client.get("/logout")` 当登出用（全仓 grep 到 405 才知道是
+    空操作），靠后面再 `login()` 覆盖 cookie 才继续绿。钉住这点防止复发。
+    """
+    login(client)
+    r = client.get("/logout", follow_redirects=False)
+    assert r.status_code == 405
+    assert client.get("/perf", follow_redirects=False).status_code == 200   # 仍登录着

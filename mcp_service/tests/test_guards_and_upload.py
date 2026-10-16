@@ -93,8 +93,20 @@ def test_assert_not_sealed_lists_hits(db):
 
 # ---------- 源守卫 ----------
 
-def test_assert_has_source_ok_when_raw_exists(db):
-    guards.assert_has_source(db, "2026-09")      # 空库：raw=0 且 formal=0 → 放行
+def test_assert_has_source_allows_month_with_raw_rows(db):
+    """raw>0 → 放行（重算不会清空）。
+
+    ⚠️ 原名 `test_assert_has_source_ok_when_raw_exists` 名实不符：fixture 是空库
+    （raw=0 且 formal=0），走的是「两者皆空」那条分支，**正向路径（raw>0）从没被
+    覆盖过**。与 `test_write_tools.py::test_rebuild_source_guard_blocks_empty_month`
+    的 NO_SOURCE_ROWS 成对。
+    """
+    from app.models import RawRecord
+    db.add(RawRecord(import_id=1, sheet_name="Sheet1", excel_row=2,
+                     store_id_raw="0101", store_name_local_raw="テスト店",
+                     modified_raw="2026-09-05 10:00:00", visible_raw="YES"))
+    db.commit()
+    guards.assert_has_source(db, "2026-09")       # 不抛异常 = 放行
 
 
 # ---------- 上传编排（mock）----------

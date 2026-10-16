@@ -68,3 +68,25 @@ def test_ai_not_configured(three_pairs):
     out = ai_batch.run_batch(db, [])
     assert out == {"configured": False}
     db.close()
+
+
+def test_call_chunk_retries_with_backoff_then_raises(monkeypatch):
+    """重试路径必须真能跑。
+
+    ⚠️ 回归（2026-10-17 审查抓到）：`_call_chunk` 用了 `time.sleep(6 * (i + 1))`，
+    但 `app/services/ai_batch.py` **没有 `import time`** → 第一次重试就 NameError，
+    被 `run_batch` 的 `except Exception` 吞成 `AI调用失败(NameError)`，
+    **把真实的 API 错误盖掉**。原有测试打桩的是 `_call`，永远进不到这里。
+    """
+    attempts, slept = [], []
+
+    def boom(pairs, timeout=300.0):
+        attempts.append(pairs)
+        raise RuntimeError("对端 502")
+
+    monkeypatch.setattr(ai_batch, "_call", boom)
+    monkeypatch.setattr(ai_batch.time, "sleep", lambda s: slept.append(s))
+    with pytest.raises(RuntimeError, match="对端 502"):
+        ai_batch._call_chunk([{"id": 1}])
+    assert len(attempts) == ai_batch.RETRIES + 1      # 首次 + RETRIES 次重试
+    assert slept == [6 * (i + 1) for i in range(ai_batch.RETRIES)]   # 退避 6s / 12s

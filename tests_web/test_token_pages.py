@@ -89,7 +89,8 @@ def test_employee_self_service_token_page_removed(client):
     assert r.status_code == 302 and r.headers["location"].startswith(
         ("/my/plan", "/my/report", "/my/perf"))
     # 路由本身已删除：管理员绕过员工白名单 → 404 / 405
-    client.get("/logout")
+    # （原处有 `client.get("/logout")`：GET /logout 是 405、并非登出；
+    #   下面的 login 本来就会换掉会话 cookie，故删除该空操作。）
     _login(client, "admin")
     assert client.get("/my/token", follow_redirects=False).status_code == 404
     assert client.post("/my/token/issue", data={"_ft": form_token(client), "name": "x", "scope": "read"},
@@ -196,9 +197,7 @@ def test_audit_page_removed_but_data_kept(client):
     _login(client, "admin")
     assert client.get("/mcp-audit", follow_redirects=False).status_code == 404
     assert "MCP 审计" not in client.get("/staff-admin").text
-    db = _db()
-    try:
-        from app.models import McpAuditLog
-        assert db.query(McpAuditLog).count() >= 0          # 表还在（数据供离线统计）
-    finally:
-        db.close()
+    # ⚠️ 原来写的是 `db.query(McpAuditLog).count() >= 0` —— count 不可能为负，恒真。
+    #    本意是"审计表还在（页面撤了，数据留给离线统计）"，那就直接断言表存在。
+    from app.db import Base
+    assert "mcp_audit_log" in Base.metadata.tables

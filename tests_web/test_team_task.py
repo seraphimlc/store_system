@@ -1786,7 +1786,7 @@ def test_import_rail_renorms_legacy_station_name(seeded):
     try:
         st = bd_tasks.create_station(db, "箱根ケ崎")          # 旧写法
         db.flush()
-        assert st.name_norm == "箱根ヶ崎" or True
+        assert st.name_norm == "箱根ヶ崎"          # ケ→ヶ 归一（别加 `or True`）
         st.name_norm = "箱根ケ崎"                              # 人为退回旧键
         db.commit()
         payload = {"lines": [{"operator": "東日本旅客鉄道", "name": "八高線",
@@ -4876,7 +4876,10 @@ def test_logs_page_filters(client, seeded):
     h3 = client.get("/logs?dfrom=2099-01-01").text
     assert "ターゲット駅" not in h3
     # 筛选表单存在 + 分页带筛选
-    assert 'data-testid="log-filter"' in h and "&kw=" in h or True
+    # ⚠️ 原来写的是 `... and "&kw=" in h or True` —— 恒真；而且日志页**根本没有
+    #    分页条**（`bd_logs.html` 无 pager、路由也没传 `pager/page_qs`），
+    #    `&kw=` 那种"分页保参"链接不可能存在。只断言真正成立的那半。
+    assert 'data-testid="log-filter"' in h
     assert 'data-testid="log-kw"' in h and 'data-testid="log-from"' in h
 
 
@@ -5680,3 +5683,35 @@ def test_conflict_msg_tells_which_constraint():
         assert "同一天" in m and "别的队" not in m, m
     # ③ 没见过的冲突也要给话，别裸抛
     assert "刷新页面" in bd_teams._conflict_msg(mk("something else entirely"))
+
+
+def test_create_tasks_never_double_creates_a_physical_station(client):
+    """「1 物理车站 = 1 任务」：place 口径任务已存在时，按 `station_id` 建任务必须跳过。
+
+    ⚠️ 回归（2026-10-17 审查抓到并复现）：`bd_tasks.create_tasks` 的 `have` 只查
+    `BdTask.station_id`，而同文件的 `_place_ids_taken` 明确写着「少了任何一边都会出现
+    同一个车站两个任务」。唯一生产调用方 `bd_import_rail(make_tasks=True)` 因此会在
+    「物理车站已有 place 口径任务」时再建一个 → 同一车站 2 个任务。
+    （同批内两行同属一个 place 的情形一并修掉了，靠循环里的 `taken_places.add`。）
+    """
+    import app.db as appdb
+    from app.models import BdStation, BdTask
+
+    db = appdb.SessionLocal()
+    _line, places = _place_fixture(db, names=("甲站", "乙站"))
+    p0 = places[0].id
+    db.add(BdTask(place_id=p0, station_id=None, source_type="station",
+                  state="unassigned", pct=0))
+    db.commit()
+    sids = sorted(s.id for s in db.query(BdStation)
+                  .filter(BdStation.place_id == p0).all())
+    assert sids, "前提：该物理车站至少有一行 bd_station"
+
+    rep = bd_tasks.create_tasks(db, sids)
+    db.commit()
+    assert rep == {"created": 0, "skipped": len(sids)}
+    n = db.query(BdTask).filter(BdTask.place_id == p0).count()
+    n += (db.query(BdTask).join(BdStation, BdTask.station_id == BdStation.id)
+          .filter(BdStation.place_id == p0).count())
+    assert n == 1, "同一物理车站出现了 %d 个任务" % n
+    db.close()

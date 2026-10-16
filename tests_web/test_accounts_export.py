@@ -119,9 +119,11 @@ def test_first_login_forces_password_change(client):
     db.close()
     assert client.get("/my/perf", follow_redirects=False).status_code == 200
     # 新口令可登录、旧口令不行
-    client.get("/logout")
+    # （原处有 `client.get("/logout")`：GET /logout 是 405、并非登出；
+    #   下面的 login 本来就会换掉会话 cookie，故删除该空操作。）
     assert _login(client, "empA", "newpass123").status_code == 302
-    client.get("/logout")
+    # （原处有 `client.get("/logout")`：GET /logout 是 405、并非登出；
+    #   下面的 login 本来就会换掉会话 cookie，故删除该空操作。）
     assert _login(client, "empA", "demo123").status_code == 401   # 老口令已失效（401 + 登录页）
 
 
