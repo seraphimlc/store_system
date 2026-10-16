@@ -45,7 +45,7 @@
         </div>
         {% else %}<span class="pill run">{{ f.status }}</span>{% endif %}
       </td>
-      <td>{{ f.uploaded_at.strftime('%m-%d %H:%M') }}</td>
+      <td>{{ jst(f.uploaded_at, '%m-%d %H:%M') }}</td>
       <td>
         <span style="display:flex;gap:.4rem;flex-wrap:wrap">
         {% if f.status == 'parsed' %}

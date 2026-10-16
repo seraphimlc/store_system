@@ -44,7 +44,7 @@
           {% elif task.status == 'pending' %}<span class="pill run">{{ t('排队中') }}</span>
           {% elif task.status == 'failed' %}<span class="pill err">{{ t('失败') }}</span>
           {% else %}<span class="pill">{{ task.status }}</span>{% endif %}</td>
-      <td>{{ task.created_at.strftime('%m-%d %H:%M') }}</td>
+      <td>{{ jst(task.created_at, '%m-%d %H:%M') }}</td>
       <td>
         {% if task.status in ('done', 'parsed') %}
         <a class="btn ghost" style="padding:.12rem .45rem;font-size:.82rem"

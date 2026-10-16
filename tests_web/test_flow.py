@@ -457,6 +457,52 @@ def test_rebuild_month_no_double_count_on_backfill(client, tmp_path):
     db.close()
 
 
+def test_rebuild_month_never_commits_an_empty_month(client, tmp_path):
+    """重建当月正式表时，不得出现「已删除、尚未重建」的中间提交。
+
+    2026-10-16 线上实测：原来是「先删 → commit → 再逐条重插 → commit」，
+    重建 2 万多行要几分钟，这期间全库读到该月正式表是 **0 条**（客户导入期间
+    看板/绩效/工资显示 0 店 0 点 0 円）。本用例在每个 commit 时刻查一次该月条数：
+    任何一次提交都不允许是 0，否则就是又把「空月」暴露给了其它会话。
+    """
+    from datetime import date
+    _seed_admin(client)
+    db = appdb.SessionLocal()
+    admin = db.query(User).first()
+    f1 = _up(db, admin, "r1.xlsx", [
+        ["S-X", "店X", "", "2026-08-05 10:00:00", "甲(111)", "R1",
+         "YES", "YES", "NO"],
+        ["S-Y", "店Y", "", "2026-08-06 10:00:00", "甲(111)", "R2",
+         "YES", "YES", "NO"],
+    ], tmp_path)
+    db.close()
+    flow.process_import(db_fresh(), f1.id)
+    db = appdb.SessionLocal()
+    assert flow.finalize_import(db, f1.id)["ok"] is True
+    db.close()
+
+    db = appdb.SessionLocal()
+    seen = []
+    real_commit = db.commit
+
+    def spy_commit():
+        seen.append(db.query(FormalRecord).filter(
+            FormalRecord.japan_date >= date(2026, 8, 1),
+            FormalRecord.japan_date < date(2026, 9, 1)).count())
+        real_commit()
+
+    db.commit = spy_commit
+    try:
+        res = flow.rebuild_month(db, "2026-08")
+    finally:
+        db.commit = real_commit
+    assert res["ok"] is True
+    assert res["formal_after"] == 2
+    assert seen, "没有观察到任何提交，用例失去意义"
+    assert 0 not in seen, f"重建期间提交过一个空月份：各次提交时当月条数={seen}"
+    db.close()
+
+
 def test_rebuild_month_keeps_approved_appeal(client, tmp_path):
     """rebuild_month 不得推翻「申诉经管理员认可」改判有效的记录。"""
     _seed_admin(client)

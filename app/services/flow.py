@@ -538,10 +538,15 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         } for f in before], ensure_ascii=False, default=str),
         row_count=len(before)))
     db.commit()
+    # ⚠️ 删除与下面的重建必须在**同一个事务**里提交 —— 这里不能再来一次 commit。
+    # 2026-10-16 实测踩到：原来删完先 commit，重建 2 万多行要几分钟，这段时间里
+    # 全库读到的该月正式表是**空的**（客户导入期间看板/绩效/工资显示"0 店 0 点 0 円"；
+    # 我们排查线上导入时也被它骗过一次，误以为没入正式表）。更糟的是：进程若在这中间
+    # 被杀（部署/重启/OOM），该月就真空了且不会自愈，要人工再点一次重建。
+    # 合成一个事务后：读者要么看到旧数据、要么看到新数据，中途异常整体回滚（该月保持原样）。
     db.query(FormalRecord).filter(
         FormalRecord.japan_date >= lo,
         FormalRecord.japan_date < hi).delete()
-    db.commit()
     added = 0
     # 从档排除（精确名单 + 自动合并留痕）：同店异写法的店已归并从档，重建时不入
     # 正式表，保证"同一家店不同写法只算一次"（数据修复定的"最合理识别逻辑"）。
