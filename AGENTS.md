@@ -83,11 +83,21 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
 
 1. 本地全量测试过 → commit → `git push origin main`。
 2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
-   `rsync -a --delete -e ssh --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.db' --exclude 'data/' --exclude '.pytest_cache' --exclude '.DS_Store' ./ store-prod:/opt/store-settle/releases/$TS/`
-3. `ssh store-prod "cp /opt/store-settle/current/deploy/.env /opt/store-settle/releases/$TS/deploy/.env; rm -f /opt/store-settle/current; ln -s /opt/store-settle/releases/$TS /opt/store-settle/current"`
+   `rsync -a --delete -e ssh --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.db' --exclude 'data/' --exclude '.pytest_cache' --exclude '.DS_Store' --exclude '.env' ./ store-prod:/opt/store-settle/releases/$TS/`
+3. `ssh store-prod "install -m600 /opt/store-settle/deploy.env /opt/store-settle/releases/$TS/deploy/.env; rm -f /opt/store-settle/current; ln -s /opt/store-settle/releases/$TS /opt/store-settle/current"`
+   **生产配置 = `<release>/deploy/.env`**（compose 写的是 `env_file: .env`，相对 `deploy/` 解析），
+   **标准副本 = `/opt/store-settle/deploy.env`**（2026-10-17 起建）。
+   ⚠️ **仓库根目录那份 `.env` 是本地开发配置**（`DATABASE_URL=sqlite`、**另一个 AI key**）——
+   rsync 会把旧版带上服务器，但**容器根本不读它**（所以第 2 步直接 `--exclude '.env'`）。
+   ⚠️ 漏放 `deploy/.env` 时 `docker compose up` 会**直接报错**（这是好事：失败而非静默用错 key）。
+   2026-10-17 踩到：老文档写 `cp /opt/store-settle/current/deploy/.env`，而当时那个 release
+   **恰好没这份文件** → `cp` 失败。**核对容器真实配置**要
+   `docker exec deploy-web-1 printenv AI_API_KEY`（和文件比对，别只看文件）。
 4. `ssh store-prod "cd /opt/store-settle/current/deploy && docker compose build web mcp && docker compose up -d --no-deps web mcp"`
    （entrypoint 自动 `alembic upgrade`）。**⚠️ 必须同时建 `mcp`**：只建 `web` 的话 MCP 容器还是旧代码，
    新工具不会生效（2026-10-06 实测踩到）。`mcp` 容器**不跑迁移**（迁移统一由 `web` 负责）。
+   ⚠️ **别用 `| tail` 接在 compose 后面**：管道会吃掉退出码，`set -e` 也拦不住
+   （2026-10-17 因此误判 `up` 成功）。要么不加管道，要么 `set -o pipefail`。
 5. 公网走查（健康/绩效/找平/对账/产品页）。改数据前先 `pg_dump` 备份。
 6. 旧机（`ssh store-old`）只留数据供回滚，不参与发布。
 7. **nginx 改动不走发布**：宿主机 `/etc/nginx/conf.d/store.conf` 手工改（改前 `cp -a` 备份、`nginx -t` 通过再
