@@ -275,6 +275,25 @@ def set_members(db: Session, team_id: int,
     for code, role in desired.items():
         m = active.get(code)
         if m is None:
+            # ⚠️ 同一天「移出本队 → 又加回本队」：库里**已经有一行**
+            # `(team_id, person_code, day)`，只是 `end_date` 已收口。
+            # `uq_bd_team_member(team_id, person_code, start_date)` 不允许再插一行，
+            # 硬插会 IntegrityError → 被下面 catch 成"被别的队圈走了"（**指错方向**，
+            # 人会一直加不上：2026-10-16 线上 アサダ 就是这么被卡住的）。
+            # 唯一键含 `start_date`，所以只能**复用这行、把 end_date 清掉**。
+            again = (db.query(BdTeamMember)
+                     .filter(BdTeamMember.team_id == team_id,
+                             BdTeamMember.person_code == code,
+                             BdTeamMember.start_date == day).one_or_none())
+            if again is not None:
+                again.end_date = None
+                again.role = role
+                added += 1
+                bd_log.log_op(db, actor_user, "member", "create", ref_id=team_id,
+                              ref_label=_label(code), field="成员", old="",
+                              new="%s（%s）" % (names.get(code, code), _role_cn(role)),
+                              note="当天移出后又加回（复用原记录，不新增行）")
+                continue
             db.add(BdTeamMember(team_id=team_id, person_code=code, role=role,
                                 start_date=day))
             added += 1
@@ -291,15 +310,27 @@ def set_members(db: Session, team_id: int,
                           note="队长任免")
     try:
         db.flush()
-    except IntegrityError:
-        # 兜底：并发 / 绕过服务层时撞上「一人同时只能在一个队」的部分唯一索引
-        # （uq_bd_team_member_active_person）→ 给一句人话，别抛 500
+    except IntegrityError as e:
+        # 兜底：并发 / 绕过服务层时撞上唯一约束 → 给一句人话，别抛 500。
+        # ⚠️ 必须**分清是哪一个**约束，否则就复现了上面那个"让人去原队移出、
+        # 可他本来就不在任何队"的死循环（SQLite 报列名、PG 报约束名，两套都要认）。
         db.rollback()
-        raise TeamError("保存冲突：有人刚被别的队圈走了（一个队员只能在一个队）。"
-                        "请刷新页面重试；要调人请先在他原来的队移出。")
+        raise TeamError(_conflict_msg(e))
     roles = sync_account_roles(db)
     return {"added": added, "removed": removed, "changed": changed,
             "promoted": roles["promoted"], "demoted": roles["demoted"]}
+
+
+def _conflict_msg(e) -> str:
+    """把唯一约束冲突翻译成人话（**两个约束的含义完全不同，别混**）。"""
+    t = str(getattr(e, "orig", e)).lower()
+    if "uq_bd_team_member_active_person" in t or ("person_code" in t and "start_date" not in t):
+        return ("保存冲突：有人刚被别的队圈走了（一个队员只能在一个队）。"
+                "请刷新页面重试；要调人请先在他原来的队移出。")
+    if "start_date" in t or "uq_bd_team_member" in t:
+        return ("保存冲突：同一天内在同一个队重复登记了同一个人。"
+                "请刷新页面重试；若反复出现，请把队名 + 人名 + 时间发给管理员查日志。")
+    return "保存冲突：数据已被改动，请刷新页面重试。（%s）" % t[:160]
 
 
 def sync_account_roles(db: Session) -> dict:

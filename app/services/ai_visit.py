@@ -66,13 +66,29 @@ def _rules_prompt(preview: str) -> str:
 _DEPLOYS = ("YES", "NO", "")
 
 
+def _rule_points(s: str):
+    """从一条条文里取点数：`计N点` / `=N` / `N点`；取不到 → None。"""
+    for pat in (r"计\s*([0-9]+)\s*点", r"=\s*([0-9]+)\s*点?", r"([0-9]+)\s*点"):
+        m = re.search(pat, s)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def rules_from_sheet(path: str) -> list:
     """从文件「规则」页直接读点数口径。读懂才返回；读不懂返回 []，交给模型/默认。
 
-    2026-10 文件写成四条句子，不用等号：
-    AUDIT_SUCCESS + YES = 2；AUDIT_SUCCESS + NO/空白 = 1；
-    AUDIT_FAILED / OTHER 无论投放 = 0；AUDITING / NOT_REQUEST / 空白 = 暂不计分。
-    只收这一种写全了的条文。半截、或和这四条对不上的，一律不猜。
+    2026-10 起文件写成四条句子，不用等号：
+      AUDIT_SUCCESS + YES            = 计N点
+      AUDIT_SUCCESS + NO/空白        = 计M点
+      AUDIT_FAILED / OTHER（无论投放）= 计0点（不计入有效成绩）
+      AUDITING / NOT_REQUEST / 空白  = 暂不计分
+    ⚠️ **点数一律从条文里读**（N、M），绝不硬编码：
+    2026-09 的写法是 YES=2；2026-10 的文件改成了 YES=**1**。
+    老实现把「计2点」写死在正则里 → 对 10 月的文件**永远匹配不上** → 返回 [] →
+    回退到模型现猜。模型每次猜的规则可能不一样，而 0 点的行不进正式表，
+    于是**同一份文件导两次，「有效条数」会不一样**（2026-10-16 线上实例）。
+    四条必须齐全才采用（半截规则页不用，避免盖掉默认口径）。
     """
     from openpyxl import load_workbook
     try:
@@ -84,31 +100,47 @@ def rules_from_sheet(path: str) -> list:
         text = []
         for name in names[:3]:
             for row in wb[name].iter_rows(min_row=1, max_row=60, values_only=True):
-                cell = row[0] if row else None
-                if cell:
-                    text.append(str(cell))
+                for cell in (row or ()):
+                    if cell is not None and str(cell).strip():
+                        text.append(str(cell))
     finally:
         wb.close()
     blob = "\n".join(text)
     if not blob.strip():
         return []
-    # 四条都要在，且点数对得上。缺一条就不用这页，避免半截规则盖掉默认口径。
-    ok = (
-        re.search(r"AUDIT_SUCCESS[^\n]{0,40}YES[^\n]{0,20}计\s*2\s*点", blob)
-        and re.search(r"AUDIT_SUCCESS[^\n]{0,40}NO[^\n]{0,12}空白[^\n]{0,16}计\s*1\s*点", blob)
-        and re.search(r"AUDIT_FAILED[^\n]{0,16}OTHER[^\n]{0,30}计\s*0\s*点", blob)
-        and re.search(r"AUDITING[^\n]{0,24}NOT_REQUEST[^\n]{0,24}暂不计分", blob)
-    )
-    if not ok:
+    # 逐条读点数；四条里缺任何一条都不用这页。
+    got = {"yes": None, "no": None, "zero": None, "zero_sts": [], "pending": False}
+    for s in blob.splitlines():
+        s = s.strip()
+        if not s:
+            continue
+        if "不计分" in s:                       # 「暂不计分」条文：不产生规则
+            if "AUDITING" in s or "NOT_REQUEST" in s:
+                got["pending"] = True
+            continue
+        pts = _rule_points(s)
+        if pts is None:
+            continue
+        if "AUDIT_SUCCESS" in s:
+            if "YES" in s and got["yes"] is None:
+                got["yes"] = pts
+            if ("NO" in s or "空白" in s) and got["no"] is None:
+                got["no"] = pts
+        elif "AUDIT_FAILED" in s or "OTHER" in s:
+            got["zero"] = pts
+            got["zero_sts"] = [x for x in ("AUDIT_FAILED", "OTHER") if x in s]
+    if (got["yes"] is None or got["no"] is None or got["zero"] is None
+            or not got["pending"]):
         return []
     rules = []
     for status in ("AUDIT_SUCCESS",):
-        rules.append({"visible": [status], "deploy": ["YES"], "points": 2})
-        rules.append({"visible": [status], "deploy": ["NO"], "points": 1})
-        rules.append({"visible": [status], "deploy": [""], "points": 1})
-    for status in ("AUDIT_FAILED", "OTHER"):
+        rules.append({"visible": [status], "deploy": ["YES"], "points": got["yes"]})
+        rules.append({"visible": [status], "deploy": ["NO"], "points": got["no"]})
+        rules.append({"visible": [status], "deploy": [""], "points": got["no"]})
+    for status in (got["zero_sts"] or ["AUDIT_FAILED", "OTHER"]):
         for deploy in _DEPLOYS:
-            rules.append({"visible": [status], "deploy": [deploy], "points": 0})
+            rules.append({"visible": [status], "deploy": [deploy],
+                          "points": got["zero"]})
     # AUDITING / NOT_REQUEST / 空白不在规则里：计分时未匹配 = 0，且不进正式表。
     return rules
 

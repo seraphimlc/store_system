@@ -340,6 +340,52 @@ def test_rules_from_sheet_overrides_model_guess(tmp_path, monkeypatch):
     assert av.rules_from_sheet(p) == []
 
 
+def test_rules_from_sheet_reads_points_from_text_not_hardcoded(tmp_path):
+    """**点数必须从条文里读**，不能写死（2026-10-16 线上事故）。
+
+    真实 10 月文件的规则页把「AUDIT_SUCCESS + YES」从 9 月的 2 点改成了 **1 点**。
+    老实现把「计2点」硬写进正则 → 对这份文件**永远读不出来** → 返回 [] →
+    回退给模型现猜。模型每次猜的规则可能不同，而 0 点的行不进正式表，
+    于是同一份文件导两次「有效条数」就差十几条（用户上报的现象）。
+    """
+    from openpyxl import Workbook
+    from datetime import date
+    import app.services.ai_visit as av
+    from store_settle.rules import point_for
+    p = str(tmp_path / "real_oct.xlsx")
+    wb = Workbook()
+    wb.active.append(["Store ID", "Store Name-Local", "Modified Time"])
+    rule = wb.create_sheet("规则")
+    # ↓↓↓ 与线上文件逐字一致（含「计1点」）
+    rule.append(["请读取第一个Sheet的数据，第2行为表头，第3行起为店铺记录。"])
+    rule.append([])
+    rule.append(["审核状态使用“Review status”列，新物料投放使用“Deploy New A+POSM”列，"
+                 "按以下规则计算："])
+    rule.append(["1. Review status为AUDIT_SUCCESS，且Deploy New A+POSM为YES的，计1点。"])
+    rule.append(["2. Review status为AUDIT_SUCCESS，且Deploy New A+POSM为NO或空白的，计1点。"])
+    rule.append(["3. Review status为AUDIT_FAILED或OTHER的，无论是否投放新物料，"
+                 "均计0点，不计入有效成绩及报酬。"])
+    rule.append(["4. Review status为AUDITING、NOT_REQUEST、空白或其他未列明状态的，"
+                 "暂不计分，列为待复核。"])
+    wb.save(p)
+
+    rules = av.rules_from_sheet(p)
+    assert rules, "四条齐全的真实规则页必须能读出来（老实现读不出）"
+    assert point_for(date(2026, 10, 1), "YES", date(2026, 7, 9), "AUDIT_SUCCESS", rules) == 1
+    assert point_for(date(2026, 10, 1), "NO", date(2026, 7, 9), "AUDIT_SUCCESS", rules) == 1
+    assert point_for(date(2026, 10, 1), "", date(2026, 7, 9), "AUDIT_SUCCESS", rules) == 1
+    # AUDIT_FAILED / OTHER 无论投放都是 0 点 → 不进正式表
+    for dep in ("YES", "NO", ""):
+        assert point_for(date(2026, 10, 1), dep, date(2026, 7, 9),
+                         "AUDIT_FAILED", rules) == 0
+        assert point_for(date(2026, 10, 1), dep, date(2026, 7, 9),
+                         "OTHER", rules) == 0
+    # 待复核的状态不在规则里 → 0 点
+    assert point_for(date(2026, 10, 1), "YES", date(2026, 7, 9), "AUDITING", rules) == 0
+    # 规则里**不能**出现 2 点（这份文件就是 1 点）
+    assert all(r["points"] != 2 for r in rules), rules
+
+
 def test_default_rules_user_口径():
     """用户口径固化：新物料YES=2点；S1∈{OTHER,AUDIT_SUCCESS}=1点；其它不计点。"""
     from datetime import date

@@ -5629,3 +5629,55 @@ def test_reviews_reject_post_no_origin(client, seeded):
     assert db.get(BdTask, tid).pct == 0
     assert db.get(BdTask, tid).state == "doing"
     db.close()
+
+
+def test_readd_same_person_same_team_same_day(seeded):
+    """同一天把某人移出本队、又加回本队 → 必须能加上（アサダ 2026-10-16 线上踩到）。
+
+    `bd_team_member` 有 **两个**唯一约束：
+      - `uq_bd_team_member_active_person`：`person_code` 在 `end_date IS NULL` 上唯一
+      - `uq_bd_team_member`：`(team_id, person_code, start_date)` 唯一
+    服务层只挡了第一个；「移出 + 当天再加回」会在第二个上撞 IntegrityError，
+    然后被 catch 成"有人刚被别的队圈走了"——**报错完全指错方向**，管理员怎么试都加不上。
+    """
+    db = appdb.SessionLocal()
+    tid = seeded["team"]
+    # 当天已在队里（seeded 里 P2 已入队）→ 移出
+    bd_teams.set_members(db, tid, [("P1", "leader")])
+    db.commit()
+    assert [m["person_code"] for m in bd_teams.team_members(db, tid)] == ["P1"]
+
+    # 同一队、同一天，把人加回来
+    res = bd_teams.set_members(db, tid, [("P1", "leader"), ("P2", "member")])
+    db.commit()
+    assert res["added"] == 1
+    assert [m["person_code"] for m in bd_teams.team_members(db, tid)] == ["P1", "P2"]
+
+    # 历史仍然只有一行（不是两行同 start_date）
+    rows = (db.query(BdTeamMember)
+            .filter(BdTeamMember.team_id == tid,
+                    BdTeamMember.person_code == "P2").all())
+    assert len(rows) == 1, [(r.id, r.start_date, r.end_date) for r in rows]
+    assert rows[0].end_date is None
+    db.close()
+
+
+def test_conflict_msg_tells_which_constraint():
+    """两个唯一约束要报**不同**的人话（报错指错方向会让人反复白试）。"""
+    from sqlalchemy.exc import IntegrityError
+
+    def mk(text):
+        return IntegrityError("INSERT", {}, Exception(text))
+
+    # ① 一人同时在两队（PG 报约束名 / SQLite 报列名）
+    for t in ('duplicate key value violates unique constraint "uq_bd_team_member_active_person"',
+              "UNIQUE constraint failed: bd_team_member.person_code"):
+        assert "别的队圈走" in bd_teams._conflict_msg(mk(t))
+    # ② 同队同天重复登记（修复前被误报成 ①）
+    for t in ('duplicate key value violates unique constraint "uq_bd_team_member"',
+              "UNIQUE constraint failed: bd_team_member.team_id, "
+              "bd_team_member.person_code, bd_team_member.start_date"):
+        m = bd_teams._conflict_msg(mk(t))
+        assert "同一天" in m and "别的队" not in m, m
+    # ③ 没见过的冲突也要给话，别裸抛
+    assert "刷新页面" in bd_teams._conflict_msg(mk("something else entirely"))
