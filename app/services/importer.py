@@ -95,7 +95,8 @@ def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
         ai_note = f"布局(人工纠正): 表头行{layout.get('header_row')} 列{layout.get('cols')}"
     else:
         from app.services.ai_visit import (ai_parse_visit_layout,
-                                           default_layout, merge_defaults)
+                                           default_layout, merge_defaults,
+                                           rules_from_sheet)
         try:
             used = ai_parse_visit_layout(imp.stored_path) or None
         except Exception as e:  # noqa: BLE001
@@ -116,6 +117,14 @@ def parse_file(imp: ImportFile, db, layout: Optional[dict] = None) -> None:
                 ai_note = "AI 布局解析: 无结果，回退规则解析"
     if used:
         used = merge_defaults(used)
+    # 模型没认出布局、或回退了默认口径时，文件规则页仍优先于 .env 默认。
+    # 人工纠正的布局不在这里改（用户在页面上改过的以页面为准）。
+    if used and not layout:
+        sheet_rules = rules_from_sheet(imp.stored_path)
+        if sheet_rules:
+            used = dict(used)
+            used["point_rules"] = sheet_rules
+            used["rules_source"] = "sheet"
     try:
         res = engine_loader.load_workbook(
             imp.stored_path, filename=imp.file_name, col_override=used)

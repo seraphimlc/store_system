@@ -852,7 +852,9 @@ def _sheet_preview(path: str, max_rows: int = 14, max_cols: int = 12):
                 continue
             lines.append(f"# sheet: {sn}")
             for ri, r in enumerate(rows):
-                cells = [str(c)[:24] if c is not None else ""
+                # 规则/说明页要给全文（点数规则写在一格里，截 24 字会把口径切掉）
+                width = 160 if sn in rule_sheets else 24
+                cells = [str(c)[:width] if c is not None else ""
                          for c in r[:max_cols]]
                 lines.append(f"R{ri}: " + " | ".join(
                     f"[{ci}]{v}" for ci, v in enumerate(cells)))

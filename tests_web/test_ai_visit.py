@@ -267,6 +267,79 @@ def test_ai_visit_reasoning_model_output(monkeypatch, tmp_path):
     assert out["source"] == "ai"
 
 
+def test_rules_sheet_prose_reaches_the_prompt(tmp_path):
+    """规则页写成「计2点 / 暂不计分」时，整段都要进提示词。
+
+    2026-10 文件的规则页不再用等号。截短或只挑含「点/=」的行，会把
+    「AUDITING 暂不计分」这条切掉，模型就套系统默认口径。
+    """
+    from openpyxl import Workbook
+    from app.services.ai_visit import _rules_prompt
+    from app.services.recon import _sheet_preview
+    p = str(tmp_path / "oct.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "STORE_TASK_EXCEL_SHEET "
+    ws.append(["Store Information"])
+    ws.append(["Store ID", "Store Name-Local", "Modified Time", "Submitter",
+               "Sales Activity", "Review status", "Deploy New A+POSM"])
+    rule = wb.create_sheet("规则")
+    rule.append(["请读取第一个Sheet的数据，第2行为表头，第3行起为店铺记录。"])
+    rule.append([None])
+    rule.append(["审核状态使用“Review status”列，新物料投放使用“Deploy New A+POSM”列，按以下规则计算："])
+    rule.append(["1. Review status为AUDIT_SUCCESS，且Deploy New A+POSM为YES的，计2点。"])
+    rule.append(["4. Review status为AUDITING、NOT_REQUEST、空白或其他未列明状态的，暂不计分，列为待复核。"])
+    wb.save(p)
+    prompt = _rules_prompt(_sheet_preview(p))
+    assert "计2点" in prompt
+    assert "暂不计分" in prompt
+    assert "Deploy New A+POSM" in prompt
+
+
+def test_rules_from_sheet_overrides_model_guess(tmp_path, monkeypatch):
+    """文件规则页写全四条时，以页上条文为准，模型少给的不能覆盖。"""
+    from datetime import date
+    from openpyxl import Workbook
+    import app.services.ai_visit as av
+    from store_settle.rules import point_for
+    p = str(tmp_path / "oct.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Store ID", "Store Name-Local", "Modified Time", "Submitter",
+               "Sales Activity", "Review status", "Deploy New A+POSM"])
+    ws.append(["S1", "店A", "2026-10-01 10:00:00", "甲(111)",
+               "POSM", "AUDIT_SUCCESS", "YES"])
+    rule = wb.create_sheet("规则")
+    rule.append(["1. Review status为AUDIT_SUCCESS，且Deploy New A+POSM为YES的，计2点。"])
+    rule.append(["2. Review status为AUDIT_SUCCESS，且Deploy New A+POSM为NO或空白的，计1点。"])
+    rule.append(["3. Review status为AUDIT_FAILED或OTHER的，无论是否投放新物料，均计0点。"])
+    rule.append(["4. Review status为AUDITING、NOT_REQUEST、空白或其他未列明状态的，暂不计分。"])
+    wb.save(p)
+    monkeypatch.setattr(av, "_ai_configured", lambda: True)
+
+    def fake_chat(prompt, **kw):
+        if "header_row" in prompt:
+            return ('{"header_row": 0, "store_id": 0, "store_name": 1, '
+                    '"modified_time": 2, "submitter": 3, "visible": 5, "deploy": 6}')
+        # 模型漏掉「暂不计分」，还把 OTHER+YES 猜成 2 点
+        return ('{"point_rules": [{"visible": ["AUDIT_SUCCESS", "OTHER"], '
+                '"deploy": ["YES"], "points": 2}]}')
+
+    monkeypatch.setattr(av, "_chat", fake_chat)
+    out = av.ai_parse_visit_layout(p)
+    assert out["rules_source"] == "sheet"
+    b = date(2026, 7, 9)
+    rules = out["point_rules"]
+    assert point_for(date(2026, 10, 1), "YES", b, "AUDIT_SUCCESS", rules) == 2
+    assert point_for(date(2026, 10, 1), "", b, "AUDIT_SUCCESS", rules) == 1
+    assert point_for(date(2026, 10, 1), "YES", b, "OTHER", rules) == 0
+    assert point_for(date(2026, 10, 1), "NO", b, "AUDITING", rules) == 0
+    # 半截规则页不采用，避免盖掉默认口径
+    rule["A4"] = "4. 其他状态另议。"
+    wb.save(p)
+    assert av.rules_from_sheet(p) == []
+
+
 def test_default_rules_user_口径():
     """用户口径固化：新物料YES=2点；S1∈{OTHER,AUDIT_SUCCESS}=1点；其它不计点。"""
     from datetime import date

@@ -32,10 +32,26 @@ def _cols_prompt(preview: str) -> str:
 
 
 def _rules_prompt(preview: str) -> str:
-    """仅当预览含『规则/说明』页文本（取含点/等号/竖线的行）时构造。"""
-    lines = [ln for ln in preview.splitlines()
-             if ("规则" in ln or "说明" in ln or ln.startswith("# 规则"))
-             and ("=" in ln or "点" in ln or "|" in ln)]
+    """仅当预览含『规则/说明』页文本时构造。
+
+    规则页整段都要给模型（2026-10 文件把口径写成「计2点 / 暂不计分」，
+    不再用等号；只挑含「点/=」的行会把「待复核不计分」这条切掉）。
+    """
+    lines = []
+    in_rules = False
+    for ln in preview.splitlines():
+        if ln.startswith("# ") and ("规则" in ln or "说明" in ln):
+            in_rules = True
+            lines.append(ln)
+            continue
+        if in_rules and ln.startswith("# "):
+            in_rules = False
+        if in_rules:
+            lines.append(ln)
+            continue
+        if (("规则" in ln or "说明" in ln) and
+                ("=" in ln or "点" in ln or "|" in ln or "计" in ln)):
+            lines.append(ln)
     if not lines:
         return ""
     return (
@@ -45,6 +61,56 @@ def _rules_prompt(preview: str) -> str:
         "要求：覆盖所有取值组合；未投放/空白的点数也要列（空值写 \"\"）；"
         "按组合不计成绩的写 0。只输出 JSON，不要解释。\n\n"
         + "\n".join(lines[:40]))
+
+
+_DEPLOYS = ("YES", "NO", "")
+
+
+def rules_from_sheet(path: str) -> list:
+    """从文件「规则」页直接读点数口径。读懂才返回；读不懂返回 []，交给模型/默认。
+
+    2026-10 文件写成四条句子，不用等号：
+    AUDIT_SUCCESS + YES = 2；AUDIT_SUCCESS + NO/空白 = 1；
+    AUDIT_FAILED / OTHER 无论投放 = 0；AUDITING / NOT_REQUEST / 空白 = 暂不计分。
+    只收这一种写全了的条文。半截、或和这四条对不上的，一律不猜。
+    """
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001  损坏文件交给后面的解析失败
+        return []
+    try:
+        names = [n for n in wb.sheetnames if "规则" in n or "说明" in n]
+        text = []
+        for name in names[:3]:
+            for row in wb[name].iter_rows(min_row=1, max_row=60, values_only=True):
+                cell = row[0] if row else None
+                if cell:
+                    text.append(str(cell))
+    finally:
+        wb.close()
+    blob = "\n".join(text)
+    if not blob.strip():
+        return []
+    # 四条都要在，且点数对得上。缺一条就不用这页，避免半截规则盖掉默认口径。
+    ok = (
+        re.search(r"AUDIT_SUCCESS[^\n]{0,40}YES[^\n]{0,20}计\s*2\s*点", blob)
+        and re.search(r"AUDIT_SUCCESS[^\n]{0,40}NO[^\n]{0,12}空白[^\n]{0,16}计\s*1\s*点", blob)
+        and re.search(r"AUDIT_FAILED[^\n]{0,16}OTHER[^\n]{0,30}计\s*0\s*点", blob)
+        and re.search(r"AUDITING[^\n]{0,24}NOT_REQUEST[^\n]{0,24}暂不计分", blob)
+    )
+    if not ok:
+        return []
+    rules = []
+    for status in ("AUDIT_SUCCESS",):
+        rules.append({"visible": [status], "deploy": ["YES"], "points": 2})
+        rules.append({"visible": [status], "deploy": ["NO"], "points": 1})
+        rules.append({"visible": [status], "deploy": [""], "points": 1})
+    for status in ("AUDIT_FAILED", "OTHER"):
+        for deploy in _DEPLOYS:
+            rules.append({"visible": [status], "deploy": [deploy], "points": 0})
+    # AUDITING / NOT_REQUEST / 空白不在规则里：计分时未匹配 = 0，且不进正式表。
+    return rules
 
 
 def _norm_rules(pr):
@@ -115,8 +181,14 @@ def ai_parse_visit_layout(path: str) -> dict:
                     pr = _norm_rules(d2.get("point_rules"))
                     if pr:
                         out["point_rules"] = pr
+                        out["rules_source"] = "ai"
             except Exception:  # noqa: BLE001
                 pass
+        # 文件规则页能直接读懂时，以页上条文为准，模型猜的不能覆盖。
+        sheet_rules = rules_from_sheet(path)
+        if sheet_rules:
+            out["point_rules"] = sheet_rules
+            out["rules_source"] = "sheet"
         return out
     except Exception:  # noqa: BLE001
         return {}
