@@ -14,6 +14,11 @@
 | `clean_status` | Bitmap Index Scan | 30.2 ms |
 | `(clean_status, substr(modified_raw,1,7))` | Bitmap Index Scan | **11.1 ms** |
 
+上线前又在**生产 dump 还原的临时 PG17**（同 148,851 行，`analyze` 后）复测：
+无索引 **122.4 ms**（Parallel Seq Scan）→ 本迁移之后 **23.2 ms**
+（Bitmap Index Scan on `ix_raw_records_cs_modmonth`）—— 容器比本机慢，
+需要引用数字时以这个**生产口径**为准（2026-10-17 `20261017_185645` 已上线）。
+
 ⚠️ **报告里说的"给 `modified_raw` 加普通索引"其实没用**：查询过滤的是
 `substr(modified_raw,1,7)`（月份前缀），普通 btree 对这种**列上的函数**不生效
 （除非 collation 是 C 且写成 `LIKE '2026-09%'`）。所以这里直接给表达式建索引。
