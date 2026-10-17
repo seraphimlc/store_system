@@ -142,9 +142,6 @@ def build_payroll_workbook(db, month, period="half1"):
 
     rows = perf.month_perf(db, month)
     summary = perf.company_summary(db, month)
-    adj = _payroll.carry_map(db, month) if month else {}
-    adj_amt_map = {k: v[1] for k, v in adj.items()}
-    adj_amt_total = sum(adj_amt_map.values())
 
     bold = Font(bold=True)
     wb = Workbook()
@@ -157,6 +154,10 @@ def build_payroll_workbook(db, month, period="half1"):
                             r["half2"], r["half2_amt"], r["half2_bonus"])
                 for r in payroll_rows}
     half_stats = (_payroll.half_stats_map(db, month) if month else {})
+    # 「找平 / 应付」走**唯一实现** `pay_plan`（与绩效页同一个函数）：
+    # 上半月=已实扣+未回收、不够扣发 0；下半月=上半月没吸收完的余数。
+    plan = _payroll.pay_plan(db, month, half_map) if month else {}
+    key = "h1" if period == "half1" else "h2"
     is_h1 = period == "half1"
     ws1.title = ("上半月发薪1-15" if is_h1 else "下半月发薪16-月末") + (
         f"·{month}" if month else "")
@@ -178,17 +179,17 @@ def build_payroll_workbook(db, month, period="half1"):
             st = hs["h2"]
         hp1, hp2 = st[1], st[2]
         hrate = (hp2 / (hp1 + hp2)) if (hp1 + hp2) else 0.0
-        carry = adj_amt_map.get(r["code"], 0) if is_h1 else 0
-        t_pay += hamt + carry
+        carry, pay = plan.get(r["code"], {"h1": (0, 0), "h2": (0, 0)})[key]
+        t_pay += pay
         ws1.append([r["code"], r["name"], hpts, st[0],
                     f"{hp1} / {hp2}", round(hrate, 4),
-                    hbonus, hamt, carry, hamt + carry])
+                    hbonus, hamt, carry, pay])
     ws1.append([])
     ws1.append(["合计", "", "", summary["records"],
                 f"{summary['p1']} / {summary['p2']}",
                 round(summary["rate37"], 4), "",
                 sum(h[1 if is_h1 else 4] for h in half_map.values()),
-                (adj_amt_total if is_h1 else 0), t_pay])
+                sum(p[key][0] for p in plan.values()), t_pay])
     for c in range(1, 11):
         ws1.cell(ws1.max_row, c).font = bold
     # 每人一个 sheet：该员工本期内所有有效巡店记录（逐条，便于对账）

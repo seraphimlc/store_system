@@ -62,7 +62,8 @@
       {% set st = hs['h1'] %}
     {% else %}
       {% set hpts = hf[3] %}{% set hamt = hf[4] %}{% set hbonus = hf[5] %}
-      {% set carry = 0 %}
+      {# 下半月也要显示找平：上半月没吸收完的余数（与 pay_plan/台账同源） #}
+      {% set carry = carry2_map.get(r.code, 0) %}
       {% set st = hs['h2'] %}
     {% endif %}
     {% set hp1 = st[1] %}{% set hp2 = st[2] %}

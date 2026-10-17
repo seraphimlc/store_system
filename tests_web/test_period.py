@@ -464,3 +464,144 @@ def test_carry_map_does_not_double_count_partial_recovery(client):
     assert p1 < 0 and 0 == max(p1, 0)
     assert -p1 == 187500 == -pay.adjust_leftover
     db.close()
+
+
+def test_pay_plan_is_the_single_rule_for_both_halves(client):
+    """两期发薪规则**唯一实现**：上半月不够扣 → 发 0、余数转下半月。
+
+    绩效页与发薪表导出共用 `period.pay_plan`（2026-10-17 前各写一套，
+    导出还**不夹取** → 表里会出现负工资；且下半月一律不显示找平 → 余数凭空消失）。
+    """
+    db = appdb.SessionLocal()
+    # 甲：小额找平（王俊岩型）——上半月毛额够扣
+    # 乙：大额找平（文伊琪型）——上半月被整笔划走，余数转下半月
+    db.add_all([Person(code="A", display_name="甲"), Person(code="B", display_name="乙")])
+    db.add_all([
+        PayrollAdjust(source_month="2026-09", person_code="A", adjust_amount=-3250,
+                      settled_amount=0, remaining=-3250, status="in_progress",
+                      updated_at=datetime.utcnow()),
+        PayrollAdjust(source_month="2026-09", person_code="B",
+                      adjust_amount=-294000, settled_amount=0,
+                      remaining=-294000, status="in_progress",
+                      updated_at=datetime.utcnow()),
+    ])
+    db.commit()
+    half_map = {"A": (0, 262750, 16250, 0, 50000, 0),
+                "B": (0, 106500, 0, 0, 200000, 0)}
+    plan = period.pay_plan(db, "2026-10", half_map)
+
+    # 甲：扣 3,250 → 259,500；下半月没有余数
+    assert plan["A"]["h1"] == (-3250, 259500)
+    assert plan["A"]["h2"][0] == 0 and plan["A"]["h2"][1] == 50000
+    # 乙：找平 294,000 > 毛额 106,500 → 上半月发 0（**不是负数**），
+    #     余 187,500 转下半月 → 下半月应付 200,000 − 187,500 = 12,500
+    assert plan["B"]["h1"] == (-294000, 0)
+    assert plan["B"]["h2"] == (-187500, 12500)
+    # 铁律：两期应付都不许为负（导出原来会把负数直接落表）
+    for c, v in plan.items():
+        for k in ("h1", "h2"):
+            assert v[k][1] >= 0, f"{c}.{k} 出现负工资 {v[k][1]}"
+
+    # 登记上半月发薪后，下半月的找平必须等于台账剩余（record_payment 读的那个数）
+    assert period.record_payment(db, "2026-10", "B", seq=1,
+                                 amount=106500, points=0) is True
+    b = db.query(PayrollPayment).filter(
+        PayrollPayment.month == "2026-10", PayrollPayment.person_code == "B").one()
+    assert b.adjust_applied == -106500 and b.adjust_leftover == -187500
+    plan2 = period.pay_plan(db, "2026-10", half_map)
+    assert plan2["B"]["h2"][0] == b.adjust_leftover == -187500
+    assert plan2["B"]["h2"][0] == period.prior_debt_map(db, "2026-10")["B"]
+    db.close()
+
+
+def test_payroll_export_matches_ledger(client):
+    """发薪表导出（**导出发薪表即登记**，运营照它付钱）里的「找平/应付」必须等于台账。
+
+    2026-10-17 事故前这张表有三个毛病：① 找平只读 `remaining` → 已实扣的消失（应付虚增）；
+    ② 不做夹取，`毛额+找平` 直接落表 → **出现负工资**；③ 下半月一律不显示找平
+    → 上半月扣不完的余数凭空消失，可 `record_payment` 照扣（表与台账又不一致）。
+    """
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    from app.models import MonthPerfRecord
+    from app.services import report
+
+    db = appdb.SessionLocal()
+    db.add_all([Person(code="A", display_name="甲"),
+                Person(code="B", display_name="乙")])
+    for code, salary in (("A", 262750), ("B", 206500)):
+        db.add(MonthPerfRecord(month="2026-10", person_code=code, records=1,
+                               p1=1, p2=0, points=1, salary=salary,
+                               per_point=250))
+    db.add_all([
+        # 甲（王俊岩型）：下半月 50,000
+        PayrollPeriodRow(month="2026-10", person_code="A",
+                         half1_points=986, half2_points=0,
+                         half1_records=1, half1_p1=1, half1_p2=0,
+                         half2_records=0, half2_p1=0, half2_p2=0,
+                         half1_bonus=16250, half2_bonus=0,
+                         half1_amount=262750, half2_amount=50000,
+                         settle_amount=0, prev_adjust_points=0,
+                         prev_adjust_amount=0, diff_points=0, diff_amount=0,
+                         adjust_points=0, adjust_amount=0),
+        # 乙（文伊琪型）：下半月 200,000，上半月不够扣
+        PayrollPeriodRow(month="2026-10", person_code="B",
+                         half1_points=426, half2_points=0,
+                         half1_records=1, half1_p1=1, half1_p2=0,
+                         half2_records=0, half2_p1=0, half2_p2=0,
+                         half1_bonus=0, half2_bonus=0,
+                         half1_amount=106500, half2_amount=200000,
+                         settle_amount=0, prev_adjust_points=0,
+                         prev_adjust_amount=0, diff_points=0, diff_amount=0,
+                         adjust_points=0, adjust_amount=0),
+    ])
+    db.add_all([
+        PayrollAdjust(source_month="2026-09", person_code="A",
+                      adjust_amount=-3250, settled_amount=0, remaining=-3250,
+                      status="in_progress", updated_at=datetime.utcnow()),
+        PayrollAdjust(source_month="2026-09", person_code="B",
+                      adjust_amount=-294000, settled_amount=0,
+                      remaining=-294000, status="in_progress",
+                      updated_at=datetime.utcnow()),
+    ])
+    db.commit()
+    # 运营点导出那一刻 = 登记上半月发薪（台账在此刻落定）
+    assert period.record_payment(db, "2026-10", "A", seq=1,
+                                 amount=262750, points=986, bonus=16250)
+    assert period.record_payment(db, "2026-10", "B", seq=1,
+                                 amount=106500, points=426)
+    db.commit()
+
+    def sheet(period_):
+        data, _ = report.build_payroll_workbook(db, "2026-10", period_)
+        return [list(r) for r in
+                load_workbook(BytesIO(data)).active.iter_rows(values_only=True)]
+
+    def row_of(rows, code):
+        for r in rows:
+            if r and r[0] == code:
+                return r
+        raise AssertionError(f"表里没有 {code}")
+
+    h1 = sheet("half1")
+    a, b = row_of(h1, "A"), row_of(h1, "B")
+    # 甲：原本已实扣 3,250 → 表里必须显示 −3,250、应付 259,500（修前是 0 / 262,750）
+    assert a[7] == 262750 and a[8] == -3250 and a[9] == 259500
+    # 乙：找平 294,000 > 毛额 106,500 → 应付 0（**不是 −187,500**）
+    assert b[7] == 106500 and b[8] == -294000 and b[9] == 0
+    # 铁律：整张表不许出现负工资
+    for r in h1:
+        if r and isinstance(r[0], str) and r[0] not in ("合计",) and r[9] is not None:
+            assert r[9] is None or not isinstance(r[9], (int, float)) or r[9] >= 0
+
+    h2 = sheet("half2")
+    a2, b2 = row_of(h2, "A"), row_of(h2, "B")
+    assert a2[8] == 0 and a2[9] == 50000                    # 甲：余数 0
+    assert b2[8] == -187500 and b2[9] == 12500              # 乙：余数转下半月
+    # 与台账一致：下半月显示的找平 = record_payment 记的 adjust_leftover
+    pay_b = db.query(PayrollPayment).filter(
+        PayrollPayment.month == "2026-10", PayrollPayment.person_code == "B").one()
+    assert b2[8] == pay_b.adjust_leftover == -187500
+    db.close()

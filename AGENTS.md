@@ -125,13 +125,23 @@ with create_engine('sqlite:///./store_settle_live.db').connect() as c:
 
 - **店铺主档自动化**：上传后台自动 建候选对 → 合并 exact → 受影响月重算；历史坑是"候选对从未生成"
   → 同店不同写法各算一家（8 月多 4 条）。测试 `tests_web/test_store_auto.py`。
-- **找平债务跨月**：某人某月无工资行时，结转必须从**找平表** `payroll_adjusts.remaining` 读，
-  只读"上月找平行"会丢债务（实测 11 人 / -89,750 收不回）。
-  ⚠️ **同一坑的反面（2026-10-17 踩到）**：`payroll_period_rows.prev_adjust_amount` 是**生成时的快照**，
-  不能当权威 —— 它不反映此后实际发生的回收，会把**已经扣过的**再结转一次。
-  实测：8 月那两笔 9 月已扣（账表 `remaining=0/settled`），9 月链子却仍写 −1,889,000
-  （账表 −1,296,500）→ 而 `record_payment` 读链子扣钱 → **10 月会全公司多扣 ¥592,500**。
-  现在**唯一权威 = `period.prior_debt_map()`**（读账表），扣钱/薪资找平页/绩效页三处都走它。
+- **找平债务跨月**：「**还欠多少**」和「**该月要扣/补多少**」是**两个数**，别混（混了就是钱付错）：
+  - 「还欠多少」= `period.prior_debt_map()`（读 `payroll_adjusts.remaining`，只含**未回收**）→
+    **登记发薪**扣钱用它（`record_payment`）。某人某月无工资行时结转必须从找平表读，
+    只读"上月找平行"会丢债务（实测 11 人 / -89,750 收不回）。
+  - 「该月要扣/补多少」= `period.carry_map()` = `payroll_settlement_links`（**本月已实扣**）
+    **+** `prior_debt_map()`（仍未回收）→ **绩效页 / 发薪表导出**用它。
+    ⚠️ **2026-10-17 踩到**：这两处原来只读 `prior_debt_map`，可欠款一旦被**本月的发放**回收，
+    `remaining` 就归 0/`settled` → **已经扣掉的那部分从「应付」里消失** → 应付虚增回毛额。
+    实测 2026-10：9 月偏差 −1,386,250 = 已实扣 −966,750 + 未回收 −419,500；页面/导出应付合计
+    显示 **5,891,000**，台账实付 **5,069,250** → **虚增 821,750**（王俊岩 262,750 应显 259,500）。
+  - 也别读 `payroll_period_rows.prev_adjust_amount`（**生成时快照**，不反映此后实际回收，
+    会把**已经扣过的**再结转一次：9 月链子 −1,889,000 vs 账表 −1,296,500 → **10 月多扣 ¥592,500**）。
+  - **两期发薪规则唯一实现 = `period.pay_plan()`**（绩效页 `settle_r` 与发薪表导出 `report` 共用）：
+    上半月不够扣 → 本期发 0、余数转下半月。⚠️ 导出原来**不夹取**（会出负工资）、
+    **下半月不显示找平**（余数凭空消失，可 `record_payment` 照扣）。
+  守门测试：`tests_web/test_period.py` 的 `test_carry_map_keeps_amount_already_recovered_this_month`
+  / `test_pay_plan_is_the_single_rule_for_both_halves` / `test_payroll_export_matches_ledger`。
 - **薪资四表**：`payroll_period_rows`（应发，可重算）/ `payroll_payments`（实发台账，不可改写，
   **导出发薪表即登记**）/ `payroll_adjusts`（进度）/ `payroll_settlement_links`（发放↔找平）。
 - **数据自洽**：`scripts/verify_payroll_logic.py`（或 MCP `visit_verify`）9 项互证（A1–A9）；对线上用 `scripts/compare_with_prod.py`。

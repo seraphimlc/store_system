@@ -412,17 +412,11 @@ def perf(request: Request,
                                r["half2"], r["half2_amt"], r["half2_bonus"])
     # 按期的 有效店/1点/2点（期视图这三列只看该期，避免全月数据误导）
     half_stats = _payroll.half_stats_map(db, month) if month else {}
-    # 两期应付（金额找平）：上半月应付=上半月金额+上月金额余量(正补负扣)；
-    # 若上半月不够扣(为负)→上半月发0、剩余负数转到下半月继续扣。
-    pay_map = {}
-    for r in rows:
-        hf = half_map.get(r["code"], (0, 0, 0, 0, 0, 0))
-        carry = adj_amt_map.get(r["code"], 0)
-        p1 = hf[1] + carry
-        if p1 < 0:
-            pay_map[r["code"]] = (0, hf[4] + p1)
-        else:
-            pay_map[r["code"]] = (p1, hf[4])
+    # 两期应付（金额找平）：**走 `period.pay_plan` 唯一实现**（与发薪表导出同一个函数）。
+    # 上半月=carry_map（已实扣+未回收）、不够扣发 0；下半月=上半月没吸收完的余数。
+    plan = _payroll.pay_plan(db, month, half_map) if month else {}
+    pay_map = {c: (v["h1"][1], v["h2"][1]) for c, v in plan.items()}
+    carry2_map = {c: v["h2"][0] for c, v in plan.items()}   # 下半月的找平金额
     if period not in ("half1", "half2"):
         period = "half1"
     perf.warm_config(db, month)
@@ -451,7 +445,8 @@ def perf(request: Request,
         "per_point": per_point, "half_stats": half_stats,
         "cur_adj": cur_adj, "half_map": half_map,
         "bonus_g": bonus_g, "bonus_a": bonus_a,
-        "pay_map": pay_map, "dup_map": dup_map, "dup_total": dup_total,
+        "pay_map": pay_map, "carry2_map": carry2_map,
+        "dup_map": dup_map, "dup_total": dup_total,
         "payroll_rows": payroll_rows, "payroll_total": payroll_total,
         "page_state": page_state})
 

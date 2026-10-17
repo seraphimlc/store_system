@@ -5,6 +5,7 @@
 上月修正 = 上月该员工对账偏差；
 本月对账偏差 = 对账 − (上半月+下半月) + 上月修正（>0 少付需补，<0 多付需扣；可手改）。
 """
+import logging
 from datetime import date as _date
 
 from typing import Any
@@ -12,6 +13,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import FormalRecord, PayrollPeriodRow, Person, ReconResult, ReconTask
+
+_log = logging.getLogger(__name__)
 
 
 def _prev_month(month: str) -> str:
@@ -727,19 +730,74 @@ def sync_period_table(db: Session, month: str, per_point: int = None) -> dict:
     # 同步**找平表**（进度落库：谁欠多少、已还多少、是否结清）
     try:
         sync_adjusts(db, month)
-    except Exception:  # noqa: BLE001  找平表同步失败不影响主流程
+    except Exception:  # noqa: BLE001  找平表同步失败不阻断主流程，但**绝不能静默**
         db.rollback()
+        # ⚠️ 2026-10-17：这里原来只 rollback、不留痕迹。可这一步失败 =
+        # 「应发表 `payroll_period_rows` 已提交、找平账本 `payroll_adjusts` 没更新」
+        # → 两边**永久分叉**（钱会算错），而且现场看不出任何异常。
+        # 现在打 ERROR + 栈（标准库 last-resort handler 会写 stderr → 进 docker logs）。
+        _log.exception(
+            "sync_adjusts(%s) 失败：找平账本未同步，应发表与账本已分叉 —— "
+            "绩效页/发薪表/发薪登记的数字都可能偏，重跑该月对账或手工核对", month)
     return {"rows": len(codes), "month": month, "settle": len(settle)}
+
+
+def pay_plan(db: Session, month: str, half_map: dict) -> dict:
+    """该月**两期**发薪的「找平金额 / 本期应付」→ {code: {"h1": (找平, 应付),
+    "h2": (找平, 应付)}}。
+
+    ⚠️ **规则唯一实现**：绩效页（`settle_r`）与发薪表导出（`report`）**都必须走这里**，
+    别再各写一套 —— 2026-10-17 出钱付错，根子就是"同一件事、两套算法"。
+
+    规则：
+    - **上半月**找平 = `carry_map(month)`（本月**已实扣** + **仍未回收**）；
+      应付 = 毛额 + 找平；**不够扣 → 本期发 0、余数转下半月继续扣**。
+    - **下半月**找平 = 上半月**没吸收完**的余数，正是 `record_payment` 下半月会读的
+      `prior_debt_map` → 表与台账天然一致。
+
+    上半月"吸收了多少"以**已登记发放**的 `adjust_applied` 为准（台账权威）；
+    未登记时按 `record_payment` 同式预计（`max(找平, −毛额)`）。
+
+    ⚠️ 顺带修掉两个缺陷（2026-10-17 核对）：
+    ① 发薪表导出原来**不夹取**，`毛额 + 找平` 直接落表 → **会出现负工资**；
+    ② 导出原来**下半月一律不显示找平**（`if is_h1 else 0`）→ 上半月扣不完的余数在
+       下半月表里消失，可 `record_payment` 照扣 → 表和台账又不一致。
+    """
+    from app.models import PayrollPayment
+
+    if not month:
+        return {}
+    carry = carry_map(db, month)                     # {code: [余量点, 金额]}
+    reg: dict = {}
+    for p in db.query(PayrollPayment).filter(
+            PayrollPayment.month == month).all():
+        reg.setdefault(p.person_code, {})[p.seq] = p.adjust_applied or 0
+    out = {}
+    for code, h in half_map.items():
+        a1 = h[1] or 0
+        d0 = carry.get(code, [0, 0])[1]              # 本期要扣/补的全部上期找平
+        pay1 = a1 + d0
+        pay1 = 0 if pay1 < 0 else pay1                # 不够扣 → 本期发 0
+        absorbed = reg.get(code, {}).get(1)
+        if absorbed is None:                          # 上半月未登记 → 按同式预计
+            absorbed = d0 if d0 > 0 else max(d0, -a1)
+        carry2 = d0 - absorbed                        # 下半月继续扣/补
+        pay2 = (h[4] or 0) + carry2
+        pay2 = 0 if pay2 < 0 else pay2
+        out[code] = {"h1": (d0, pay1), "h2": (carry2, pay2)}
+    return out
 
 
 def period_rows(db: Session, month: str):
     """该月偏差表行（含姓名），按人排序。"""
     names = {p.code: p.display_name for p in db.query(Person).all()}
-    # 「上月修正」= 本月要扣/补的结转金额。**读账表**（payroll_adjusts）而不是上月行
-    # 的 `prev_adjust_amount`：后者是生成时的快照，会把已经扣过的再显示一次
-    # （实测 2026-09 合计 −1,889,000 vs 账表 −1,296,500，差的就是 8 月已收的 −592,500）。
+    # 「上月修正」= 本月要扣/补的结转金额。**读 `carry_map`**（= 本月已实扣 + 仍未回收），
+    # 与绩效页/发薪表导出**同一个数**。⚠️ 只读 `prior_debt_map`（未回收余量）是错的：
+    # 欠款被本月的发放回收后余量归 0，已经扣掉的那部分会从这一列消失
+    # （2026-10：王俊岩应显 −3,250，只读余量会显 0）。也别读上月行的 `prev_adjust_amount`
+    # （生成时快照，会把已经扣过的再显示一次：2026-09 链子 −1,889,000 vs 账表 −1,296,500）。
     pm = _prev_month(month)
-    carry = prior_debt_map(db, month)
+    carry = carry_map(db, month)
     carry_pt = {r.person_code: r.prev_adjust_points for r in
                 db.query(PayrollPeriodRow).filter(
                     PayrollPeriodRow.month == pm).all()}
@@ -756,7 +814,7 @@ def period_rows(db: Session, month: str):
             "half1_bonus": r.half1_bonus, "half2_bonus": r.half2_bonus,
             "half1_amt": r.half1_amount, "half2_amt": r.half2_amount,
             "settle_amt": r.settle_amount,
-            "prev_amt": carry.get(r.person_code, 0),   # 上月结转(本月要扣/补)
+            "prev_amt": (carry.get(r.person_code) or [0, 0])[1],  # 本月要扣/补
             "diff_amt": r.diff_amount,
             "adj": r.adjust_points, "adj_amt": r.adjust_amount,
             "updated_by": r.updated_by, "updated_at": r.updated_at,
