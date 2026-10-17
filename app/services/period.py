@@ -29,7 +29,12 @@ def prior_debt_map(db: Session, month: str) -> dict:
 
     ⚠️ **这是「还欠多少」，不是「这个月要扣多少」**（两个数，混了就是钱付错）：
 
-    - **「还欠多少」= 本函数**（唯一权威）：找平表 `payroll_adjusts.remaining`，由
+    📌 **名字别混**（2026-10-17 澄清）：**债务的权威是账表 `payroll_adjusts.remaining`**，
+    本函数只是它的读口。`sync_period_table` 里另有一个**临时 dict 也叫 `prior_debt`**
+    ——那个中间量**不是权威、也不该被任何读路径当依据**（算薪终稿拍板 #1 说的
+    "prior_debt 不是表、不是权威"指的是它）。两者同名不同物。
+
+    - **「还欠多少」= 本函数**（读上面那张账表）：由
       `allocate_settlement` 按 FIFO 逐笔冲销维护（`sync_adjusts` 只重写
       adjust_amount/settled/remaining，不会被结转链污染）。**登记发薪扣钱用它**
       （`record_payment`）—— 欠款可能在某人某月没有工资行，只读"上月找平行"会丢债务。
