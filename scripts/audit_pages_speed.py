@@ -47,7 +47,8 @@ PAGES = [
     ("/dashboard/analysis", "公司总体分析（AI）"),
     ("/perf?month=" + MONTH, "绩效页"),
     ("/v3/perf?month=" + MONTH, "绩效页(v3)"),
-    ("/perf/export?month=" + MONTH, "绩效导出"),
+    # ⚠️ 有写副作用（幂等登记发放台账）→ 默认跳过，要测设 INCLUDE_WRITE=1，见文件头
+    ("/perf/export?month=" + MONTH, "绩效导出[会写台账]"),
     ("/payroll-settle?month=" + MONTH, "发薪结算"),
     ("/payroll-settle/export?month=" + MONTH, "发薪表导出"),
     ("/recon?month=" + MONTH, "对账页"),
