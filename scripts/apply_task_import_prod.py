@@ -22,10 +22,22 @@ from app.db import SessionLocal
 from app.models import BdTask, User
 from app.services import bd_task_import as TI
 
+#: 每份文件要**勾选跳过**的行（服务口径：对不上的行必须勾掉才允许写）。
+#: 首轮（2026-10-17 上午）跳过的是 2 个真问题，当天下午都补掉了：
+#:   · 千叶C 行22 `幕張豊砂` —— 库里没有这个站 → 已用
+#:     `scripts/add_station_from_osm.py` 补进资产（坐标取 OSM）
+#:   · 埼玉A 行34 `獨協大学前〈草加松原〉` —— 库里是 `獨協大学前` 同站异写
+#:     → 已让站名归一支持去「附注」后缀
+#: 所以 `MODE=fixup` 时把跳过清空 —— 重跑整份文件是**幂等**的：
+#: 已建好的行会变成"已有任务，不改归属"（skip），只会补建那 2 个站。
+SKIPS = {"千叶B线": [], "千叶C线": [22], "埼玉A线": [34]}
+if os.environ.get("MODE") == "fixup":
+    SKIPS = {k: [] for k in SKIPS}
+
 JOBS = [
-    ("千叶B线", "/tmp/tp/b.xlsx", "E陈嘉溢队", []),
-    ("千叶C线", "/tmp/tp/c.xlsx", "E陈嘉溢队", [22]),
-    ("埼玉A线", "/tmp/tp/a.xlsx", "F甘子杰队", [34]),
+    ("千叶B线", "/tmp/tp/b.xlsx", "E陈嘉溢队"),
+    ("千叶C线", "/tmp/tp/c.xlsx", "E陈嘉溢队"),
+    ("埼玉A线", "/tmp/tp/a.xlsx", "F甘子杰队"),
 ]
 DRY = os.environ.get("APPLY") != "1"
 
@@ -37,7 +49,8 @@ print("执行账号 =", getattr(admin, "username", None),
 before = {t.id: t.team_id for t in db.query(BdTask).all()}
 print("写前任务总数 =", len(before))
 
-for label, path, team, skips in JOBS:
+for label, path, team in JOBS:
+    skips = SKIPS.get(label, [])
     print("=" * 88)
     print(label, path, "→", team, "| 跳过行:", skips or "无")
     raw_bytes = open(path, "rb").read()               # 原始文件先归档

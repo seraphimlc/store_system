@@ -61,7 +61,7 @@ line = db.execute(text("SELECT id, name, operator FROM bd_line WHERE name=:n"),
                   {"n": LINE_NAME}).first()
 if line is None:
     raise SystemExit("库里没有线路 %s" % LINE_NAME)
-print("\n线路：id=%s %s（%s）" % line[0], line[1], line[2])
+print("\n线路：id=%s %s（%s）" % tuple(line))
 
 before = db.execute(text("""SELECT COUNT(*) FROM bd_station""")).scalar()
 exist = db.execute(text("""SELECT id, pref, lon, lat, place_id FROM bd_station

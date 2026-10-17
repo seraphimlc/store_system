@@ -5787,3 +5787,31 @@ def test_exports_carry_latin1_safe_content_disposition(client, seeded):
         cd = r.headers["content-disposition"]
         assert "filename*=" in cd, "%s 少了 filename*（真名含中文时会 latin-1 崩）" % url
         cd.encode("latin-1")        # 头本身必须能编出去（这正是会 500 的那一步）
+
+
+def test_raw_sql_never_puts_select_alias_in_having(client):
+    """守门：手写 SQL 的 `HAVING` 不许引用 SELECT 别名。
+
+    **SQLite 允许、PG 报 `column "c" does not exist`** → 单测全绿、线上必崩。
+    2026-10-17 实测：车站资产体检（`bd_places.integrity_issues`）两处这么写，
+    在线上 PG 直接抛错 —— 也就是这项体检**从来没在线上跑通过**。
+    正确写法 = 在 HAVING 里重写表达式（`HAVING COUNT(*) > 1`），或包一层子查询。
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    bad = []
+    for p in sorted((root / "app").rglob("*.py")):
+        src = p.read_text(encoding="utf-8")
+        # 只认"裸别名 + 比较符"：带点（p.n_line）和函数调用（COUNT(）都不会命中
+        for m in re.finditer(r"HAVING\s+([A-Za-z_]\w*)\s*(?:[<>=!]|\bIN\b)",
+                             src, re.IGNORECASE):
+            alias = m.group(1)
+            if not re.search(r"\)\s*%s\b" % re.escape(alias), src):
+                continue          # 不是本文件里定义的 SELECT 别名 → 放过
+            bad.append("%s:%d  HAVING %s"
+                       % (p.relative_to(root),
+                          src[:m.start()].count("\n") + 1, alias))
+    assert not bad, (
+        "HAVING 里引用了 SELECT 别名（SQLite 忍、PG 崩）：\n" + "\n".join(bad))

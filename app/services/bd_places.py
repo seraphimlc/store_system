@@ -153,9 +153,13 @@ def integrity_issues(db: Session) -> List[dict]:
         .filter(BdStation.lon.is_(None)).count())
 
     # ② 同组必须同名同县（N02 保证了，这里防我们自己写坏）
+    # ⚠️ HAVING 里**必须重写表达式**，不能引用 SELECT 别名：SQLite 允许，PG 报
+    #    `column "c" does not exist` → 2026-10-17 实测这个体检查在线上直接崩，
+    #    等于它从来没在线上跑通过。
     dup = db.execute(text(
         "SELECT group_code, COUNT(DISTINCT name_norm) c FROM bd_station "
-        "WHERE group_code != '' GROUP BY group_code HAVING c > 1")).all()
+        "WHERE group_code != '' GROUP BY group_code "
+        "HAVING COUNT(DISTINCT name_norm) > 1")).all()
     add("同组站名不一致", "同一物理车站出现两种站名：%s" % (dup[:3],), len(dup))
 
     # ③ place.n_line 必须等于成员数（冗余字段不能漂）
@@ -178,7 +182,7 @@ def integrity_issues(db: Session) -> List[dict]:
     # ⑤ 重复的 (线路, 站名)
     dup2 = db.execute(text(
         "SELECT line_id, name_norm, COUNT(*) c FROM bd_station "
-        "GROUP BY line_id, name_norm HAVING c > 1")).all()
+        "GROUP BY line_id, name_norm HAVING COUNT(*) > 1")).all()
     add("同线重名", "(line_id, name_norm) 重复：%s" % (dup2[:3],), len(dup2))
 
     # ⑥ 孤儿 place（没有任何站指过来）
