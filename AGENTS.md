@@ -140,8 +140,14 @@ with create_engine('sqlite:///./store_settle_live.db').connect() as c:
   - **两期发薪规则唯一实现 = `period.pay_plan()`**（绩效页 `settle_r` 与发薪表导出 `report` 共用）：
     上半月不够扣 → 本期发 0、余数转下半月。⚠️ 导出原来**不夹取**（会出负工资）、
     **下半月不显示找平**（余数凭空消失，可 `record_payment` 照扣）。
+  - ⚠️ **`adjust_records` 不是钱的口径**：它只由对账页「手工确认找平」写入，**线上长期 0 行**，
+    只是对账任务的确认留痕。页面/报告别读它（2026-10-17 修掉两处：`/my/perf` 应付合计、
+    对账报告应付合计 —— 员工端因此曾显示**毛额**）。外部《薪资公式终稿》的拍板 #6
+    `carry_in = Σ remaining WHERE status='in_progress'` 会丢「本月已实扣」→
+    **落地必须写 `carry_in := carry_map()`**（该终稿是提案：`apply_half_offset`/`carry_in` 全仓不存在）。
   守门测试：`tests_web/test_period.py` 的 `test_carry_map_keeps_amount_already_recovered_this_month`
-  / `test_pay_plan_is_the_single_rule_for_both_halves` / `test_payroll_export_matches_ledger`。
+  / `test_pay_plan_is_the_single_rule_for_both_halves` / `test_payroll_export_matches_ledger`
+  / `test_my_perf_shows_same_adjust_as_admin`。
 - **薪资四表**：`payroll_period_rows`（应发，可重算）/ `payroll_payments`（实发台账，不可改写，
   **导出发薪表即登记**）/ `payroll_adjusts`（进度）/ `payroll_settlement_links`（发放↔找平）。
 - **数据自洽**：`scripts/verify_payroll_logic.py`（或 MCP `visit_verify`）9 项互证（A1–A9）；对线上用 `scripts/compare_with_prod.py`。

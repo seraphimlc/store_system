@@ -113,8 +113,12 @@ def test_team_tasks_confirm_and_reject(db):
     assert task_ops.confirm_day(db, leader, team_ids=[1])["confirmed"] == 1
     t2 = task_ops.team_tasks(db, [1])
     assert t2["counts"]["pending"] == 0 and t2["counts"]["done"] == 1
-    # 驳回（队长对已确认的 100%）→ 员工原值保留
-    rej = task_ops.reject(db, leader, task_id=tid, pct=40, note="照片没拍全")
+    # 驳回（对已确认的 100%）→ 员工原值保留
+    # ⚠️ 2026-10-17：判权下沉到服务层后，这里必须**管理员**来做 ——
+    # `can_reject` 口径是「队长确认之后只有管理员能驳回」（避免队长自己确认自己驳回），
+    # 而 MCP 原来绕过了这条（服务层没判权）→ 现在与服务端/网页同口径。
+    admin = _Actor(role="admin", username="admin", person_code=None, uid=9)
+    rej = task_ops.reject(db, admin, task_id=tid, pct=40, note="照片没拍全")
     assert rej["pct"] == 40
     row = bd_tasks.day_progress_map(db, [tid]).get(tid)
     assert row.review_status == "rejected" and row.reported_pct == 100

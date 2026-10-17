@@ -575,3 +575,36 @@ def test_all_capabilities_work_on_readonly_connection(db):
     finally:
         ro.close()
         eng.dispose()
+
+
+# ---------------- 2026-10-17：file_report 只取需要的列 ----------------
+
+def test_file_report_never_selects_original_row(db):
+    """铁律 #2：读 `raw_records` 的唯一例外是 `bd_store.py`（建门店宇宙），
+    而这个工具只需要 10 个窄列 → 不得把 `original_row` 等大字段、更不得整文件全列
+    水合回来（原来 `db.query(RawRecord).all()` 会把整个文件的行整行拉进内存）。
+
+    做法：监听会话发出的 SQL，断言查 `raw_records` 的语句里没有 `original_row`，
+    且计数用 SQL 分组（不是把行拉回来自己数）。
+    """
+    from sqlalchemy import event
+    s, _path = db                      # fixture 返回 (Session, db_path)
+    seen = []
+    eng = s.get_bind()
+
+    def _rec(conn, cursor, statement, params, context, executemany):
+        seen.append(statement)
+
+    event.listen(eng, "before_cursor_execute", _rec)
+    try:
+        got = read_ops.file_report(s, 1)
+    finally:
+        event.remove(eng, "before_cursor_execute", _rec)
+
+    raw_sql = [s for s in seen
+               if "raw_records" in s and s.lstrip().lower().startswith("select")]
+    assert raw_sql, seen
+    assert all("original_row" not in s for s in raw_sql), raw_sql
+    low = " ".join(s.lower() for s in raw_sql)
+    assert "count(" in low and "group by" in low, raw_sql
+    assert got["raw_total"] >= 1

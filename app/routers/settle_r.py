@@ -92,7 +92,15 @@ def my_perf(request: Request,
                if m["code"] == code), None)
     summary = None
     if me:
-        adj = perf.adjust_map(db, month).get(code, 0)
+        # ⚠️ 找平必须走 `carry_map()`（与管理端 `/perf`、发薪表导出同一口径）。
+        # 原来读 `perf.adjust_map()` → 只查 `adjust_records`，而那张表只由对账页
+        # 「手工确认找平」写入、**线上长期 0 行** → 员工端找平恒 0、应付合计显示**毛额**，
+        # 实际发薪却会扣（2026-10 实测 55 人 / −1,386,250）→ 员工看到的比拿到的多。
+        # 这也是那份终稿「拍板 #4：废弃手工确认找平」要求的（`adjust_records` 停用）。
+        # 守门测试 tests_web/test_period.py::test_my_perf_shows_same_adjust_as_admin
+        from app.services import period as _payroll
+        _carry = _payroll.carry_map(db, month).get(code) or [0, 0]
+        adj = _carry[1]
         from app.services import perf as _pf
         summary = {"records": me["records"], "p1": me["p1"], "p2": me["p2"],
                    "points": me["points"], "amount": me["amount"],
@@ -516,29 +524,35 @@ def perf_export(request: Request, user: Optional[User] =
 def recon_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), msg: str = "",
-                  task_id: int = 0):
+                  task_id: int = 0, page: int = 1, per: int = 0):
     if user is None or user.role != "admin":
         return _denied()
     from app.models import ReconDayRow, ReconResult, ReconTask
+    from app.services import paging as _paging
     tasks = (db.query(ReconTask)
              .filter(ReconTask.kind == "monthly_v3")
              .order_by(ReconTask.id.desc()).all())
     cur = db.get(ReconTask, task_id) if task_id else None
     diffs = (db.query(ReconResult).filter(ReconResult.task_id == task_id)
              .order_by(ReconResult.submitter_code).all()) if cur else []
+    # ⚠️ 2026-10-17：员工×日 明细原来一次性 `.all()` 全渲染（大月可上千行）→ 改真分页。
+    #    `day_pager` 为 None 表示没选任务（不查）。
+    day_pager = None
     day_rows = []
     if cur:
         from app.models import Person
         _names = {p.code: p.display_name for p in db.query(Person).all()}
+        _q = (db.query(ReconDayRow)
+              .filter(ReconDayRow.task_id == task_id)
+              .order_by(ReconDayRow.ref_date, ReconDayRow.person_code))
+        day_pager = _paging.paginate(_q, page=page,
+                                     per=per or _paging.PER_DEFAULT)
         day_rows = [{
             "ref_date": d.ref_date, "person_code": d.person_code,
             "name": _names.get(d.person_code, ""),
             "sys_points": d.sys_points or 0, "rep_points": d.rep_points or 0,
             "diff": d.diff or 0, "side": d.side, "note": d.note or ""}
-            for d in (db.query(ReconDayRow)
-                      .filter(ReconDayRow.task_id == task_id)
-                      .order_by(ReconDayRow.ref_date,
-                                ReconDayRow.person_code).all())]
+            for d in day_pager["rows"]]
     sys_rows = []
     diff_rows = []
     next_month = ""
@@ -546,12 +560,18 @@ def recon_page(request: Request,
         from app.services import recon as vr
         from app.services import perf as _vp
 
-        def _pay_diff(_db, sys_p, rep_p, mth):
-            pp = _vp.month_per_point(_db, mth)
-            return _vp.salary_for(rep_p, pp, mth) - _vp.salary_for(sys_p, pp, mth)  # 负=扣款/正=补款
+        # ⚠️ 2026-10-17：原来每次 `_pay_diff` 都调一次 `month_per_point`，而配置缓存**冷**
+        #    时它会回退去查 `month_perf_records` → 逐行 N+1（对账页首次打开最慢就慢在这）。
+        #    现在预热一次配置 + 把单价提到循环外算一次。
+        _mth = (cur.params or {}).get("month", "")
+        _vp.warm_config(db, _mth)
+        _pp = _vp.month_per_point(db, _mth)
+
+        def _pay_diff(sys_p, rep_p, pp):
+            return _vp.salary_for(rep_p, pp, _mth) - _vp.salary_for(sys_p, pp, _mth)  # 负=扣款/正=补款
 
         amap = vr.task_adjust_map(db, task_id)
-        next_month = vr._next_month((cur.params or {}).get("month", ""))
+        next_month = vr._next_month(_mth)
         for d in diffs:
             diff_rows.append({
                 "code": d.submitter_code,
@@ -560,9 +580,8 @@ def recon_page(request: Request,
                 "sys": d.system_value or 0, "rep": d.report_value or 0,
                 "diff": d.diff or 0,
                 # 应找平金额(円,含奖金) = 系统已发金额 − 对账金额(工资规则)
-                "amount": _pay_diff(db, d.system_value or 0,
-                                    d.report_value or 0,
-                                    (cur.params or {}).get("month", "")),
+                "amount": _pay_diff(d.system_value or 0,
+                                    d.report_value or 0, _pp),
                 "adjusted": amap.get(d.submitter_code)})
         if (cur.summary or {}).get("sys_only"):
             from app.models import Person
@@ -571,13 +590,13 @@ def recon_page(request: Request,
                         for c in (cur.summary or {}).get("sys_only", [])]
     kind = (cur.summary or {}).get("kind") if cur else ""
     # 对账可选月份：有对账任务的月份 ∪ 有正式数据的月份（倒序；默认当前任务月/最新）
-    from app.models import FormalRecord as _FR, MonthPerfRecord as _MPR
+    # ⚠️ 2026-10-17：原来为凑月份把 `formal_records` / `month_perf_records` **整表 all()**
+    #    拉进 Python（7 万行）——与 §5.11 修 `/perf` 时同一处遗漏，改用现成的 DISTINCT 服务。
+    from app.services import months as _months_svc
     months = {((t.params or {}).get("month", ""))[:7] for t in tasks}
-    for (_m,) in db.query(_MPR.month).all():
-        months.add(str(_m)[:7])
-    for (_d,) in db.query(_FR.japan_date).filter(
-            _FR.japan_date.isnot(None)).all():
-        months.add(str(_d)[:7])
+    months |= set(_months_svc.formal_months(db))
+    months |= set(_months_svc.perf_months(db))
+    months.discard("")
     months = sorted(months, reverse=True)
     cur_month = (cur.params or {}).get("month", "") if cur else ""
     if cur_month not in months and months:
@@ -599,7 +618,10 @@ def recon_page(request: Request,
         "tasks": tasks, "cur": cur, "diffs": diff_rows,
         "sys_rows": sys_rows, "next_month": next_month,
         "months": months, "cur_month": cur_month,
-        "day_rows": day_rows, "kind": kind, "page_state": page_state})
+        "day_rows": day_rows, "pager": day_pager,
+        "day_total": (day_pager["total"] if day_pager else 0),
+        "page_qs": _paging.qs(request.query_params),
+        "kind": kind, "page_state": page_state})
 
 
 @router.post("/recon/upload2")

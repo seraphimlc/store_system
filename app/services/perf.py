@@ -169,17 +169,23 @@ def adjust_map(db, month: str = ""):
 
 def month_dup_map(db, month: str = "") -> dict:
     """该月每人「重复巡店」数量（clean_status=cross_file_dup，同店同月只保留一条、
-    其余判重复——重复多说明效率低）。返回 {person_code: n}。"""
+    其余判重复——重复多说明效率低）。返回 {person_code: n}。
+
+    ⚠️ 原来把 `clean_status='cross_file_dup'` 的行**全部 ORM 水合进 Python**，
+    再逐行比 `modified_raw[:7] == month`（月度绩效页与员工页都走它）——线上该状态
+    5 万+ 行 / 126MB，纯浪费。现在月份过滤与分组都在 SQL 里（`substr` 三方言通用），
+    只回传「人 → 条数」；索引见迁移 `raw_records.clean_status`。
+    """
+    from sqlalchemy import func as _f
     from app.models import RawRecord
+    q = (db.query(RawRecord.submitter_code, _f.count())
+         .filter(RawRecord.clean_status == "cross_file_dup"))
+    if month:
+        q = q.filter(_f.substr(RawRecord.modified_raw, 1, 7) == month)
     out = {}
-    q = db.query(RawRecord).filter(
-        RawRecord.clean_status == "cross_file_dup")
-    for r in q.all():
-        if month and (r.modified_raw or "")[:7] != month:
-            continue
-        c = r.submitter_code
+    for c, n in q.group_by(RawRecord.submitter_code).all():
         if c:
-            out[c] = out.get(c, 0) + 1
+            out[c] = int(n or 0)
     return out
 
 

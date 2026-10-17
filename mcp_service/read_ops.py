@@ -148,11 +148,28 @@ def file_report(db, file_id: int, bucket: str | None = None) -> dict[str, Any]:
                        "可选分桶：" + "、".join(sorted(known)) + "、appealing")
 
     SAMPLE = 5
-    rows = db.query(RawRecord).filter(RawRecord.import_id == file_id).all()
+    # ⚠️ 2026-10-17：这里原来 `db.query(RawRecord)...all()` → **整个文件的行全部水合、
+    #    含 `original_row` 大字段**。而铁律 #2 的例外只有 `bd_store.py` 能读 `raw_records`
+    #    且仅限 store_id_raw/store_name_local_raw/modified_raw/submitter_code/original_row；
+    #    这个工具只需要下面 10 个列 → 用 `load_only` 明确屏蔽 `original_row` 等大字段。
+    #    计数同步改成 SQL 分组（不用为了计数把行拉回来）。
+    #    守门测试 mcp_service/tests/test_read_ops_narrow.py
+    from sqlalchemy import func as _sqlf
+    from sqlalchemy.orm import load_only as _load_only
+    _cols = (RawRecord.id, RawRecord.clean_status, RawRecord.store_id_raw,
+             RawRecord.store_name_local_raw, RawRecord.modified_raw,
+             RawRecord.filter_reason, RawRecord.submitter_raw,
+             RawRecord.submitter_code, RawRecord.excel_row,
+             RawRecord.sheet_name)
     counts: dict[str, int] = {}
-    for r in rows:
-        st = _normal_status(r.clean_status)
-        counts[st] = counts.get(st, 0) + 1
+    for _st, _n in (db.query(RawRecord.clean_status, _sqlf.count())
+                    .filter(RawRecord.import_id == file_id)
+                    .group_by(RawRecord.clean_status).all()):
+        _k = _normal_status(_st)
+        counts[_k] = counts.get(_k, 0) + int(_n or 0)
+    raw_total = sum(counts.values())
+    rows = (db.query(RawRecord).filter(RawRecord.import_id == file_id)
+            .options(_load_only(*_cols)).all())
 
     formal_ids = {fr.raw_record_id for fr in db.query(
         FormalRecord.raw_record_id).filter(
@@ -193,7 +210,7 @@ def file_report(db, file_id: int, bucket: str | None = None) -> dict[str, Any]:
     data = {
         "file_id": f.id,
         "file_name": f.file_name,
-        "raw_total": len(rows),
+        "raw_total": raw_total,
         "counts": counts,
         "filtered_total": filtered_total,
         "pending_appeals": pending,

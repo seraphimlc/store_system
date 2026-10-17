@@ -605,3 +605,75 @@ def test_payroll_export_matches_ledger(client):
         PayrollPayment.month == "2026-10", PayrollPayment.person_code == "B").one()
     assert b2[8] == pay_b.adjust_leftover == -187500
     db.close()
+
+
+# ---------------- 2026-10-17 批次：员工端口径 / 死表 / dup_map ----------------
+
+def test_my_perf_shows_same_adjust_as_admin(client):
+    """🐞 员工端 `/my/perf` 的「应付合计」必须与管理端口径一致（都走 `carry_map`）。
+
+    原来员工端读 `perf.adjust_map()` → 只查 `adjust_records`，而那张表**只由对账页
+    「手工确认找平」写入、线上长期 0 行** → 员工端找平恒为 0、应付显示**毛额**，
+    实际发薪却会扣（2026-10 实测 55 人 / −1,386,250）→ 员工看到的比拿到的多。
+    """
+    from app.auth import hash_password
+    from app.models import MonthPerfRecord, User
+    CODE = "P-MYPERF"
+    db = appdb.SessionLocal()
+    db.add(User(username="wjy", password_hash=hash_password("pw123456"),
+                display_name="王俊岩", role="staff", is_active=True,
+                person_code=CODE))
+    db.add(Person(code=CODE, display_name="王俊岩"))
+    # 当月有逐日统计 → 该月才会出现在员工端月份下拉里
+    db.add(PersonDailyStat(person_code=CODE, ref_date=date(2026, 10, 3),
+                           points=986, records=1))
+    # 月绩效：毛额 262,750
+    db.add(MonthPerfRecord(month="2026-10", person_code=CODE, records=1,
+                           p1=986, p2=0, points=986, salary=262750,
+                           per_point=250))
+    # 9 月偏差 −3,250（仍在回收中）→ 10 月要扣 3,250
+    db.add(PayrollAdjust(source_month="2026-09", person_code=CODE,
+                         adjust_amount=-3250, settled_amount=0,
+                         remaining=-3250, status="in_progress",
+                         updated_at=datetime.utcnow()))
+    db.commit()
+    # 管理端口径（同一次会话里直接算，防两边算法再次分叉）
+    assert period.carry_map(db, "2026-10")[CODE][1] == -3250
+    db.close()
+
+    client.post("/login", data={"username": "wjy", "password": "pw123456"},
+                follow_redirects=False)
+    html = client.get("/my/perf?month=2026-10").text
+    assert "262750" in html, "毛额是事实，要显示"
+    assert "259500" in html, "找平后应付 262750−3250=259500 必须出现（修前显示毛额）"
+    assert "-3250" in html, "找平卡片要显示（修前 adjust 恒 0 → 整块不渲染）"
+
+
+def test_month_dup_map_matches_sql_semantics(client):
+    """`month_dup_map` 改成 SQL 分组后口径不变：只数 cross_file_dup、按 modified 月份过滤、
+    空月份算该人全部；无 submitter_code 的行不计。"""
+    from app.models import RawRecord
+    from app.services import perf
+    db = appdb.SessionLocal()
+    # 直接给 raw_records.import_id 填 1/2，不建 imports 行：SQLite 默认不校验 FK，
+    # `month_dup_map` 也不 join imports —— 本测试只关心 clean_status/月份/上报人。
+    rows = [
+        # (import, row, status, modified, submitter)
+        (1, 1, "cross_file_dup", "2026-09-10 09:00:00", "P1"),
+        (1, 2, "cross_file_dup", "2026-09-11 09:00:00", "P1"),
+        (1, 3, "cross_file_dup", "2026-10-02 09:00:00", "P1"),
+        (2, 1, "cross_file_dup", "2026-09-12 09:00:00", "P2"),
+        (2, 2, "valid", "2026-09-12 09:00:00", "P2"),          # 非 dup 不计
+        (2, 3, "cross_file_dup", "2026-09-13 09:00:00", None),  # 无上报人不计
+        (2, 4, "cross_file_dup", None, "P2"),                   # 无日期 → 不属任何月
+    ]
+    for imp, rw, st, mod, sub in rows:
+        db.add(RawRecord(import_id=imp, sheet_name="S", excel_row=rw,
+                         modified_raw=mod or "", clean_status=st,
+                         submitter_code=sub))
+    db.commit()
+    assert perf.month_dup_map(db, "2026-09") == {"P1": 2, "P2": 1}
+    assert perf.month_dup_map(db, "2026-10") == {"P1": 1}
+    # 空月份 = 全部 dup（有上报人的）——含"无日期"那条（与旧 Python 口径一致）
+    assert perf.month_dup_map(db, "") == {"P1": 3, "P2": 2}
+    db.close()

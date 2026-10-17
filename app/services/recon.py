@@ -1211,8 +1211,17 @@ def build_report(db, task_id: int, author_name: str = ""):
 
     # 系统正式口径合计（该月）
     comp = perf.company_summary(db, month) if month else {}
-    adjust_map = perf.adjust_map(db, month)
-    payroll_total = comp.get("total_amount", 0) + sum(adjust_map.values()) * 250
+    # ⚠️ 找平必须走 `carry_map()`（与绩效页/发薪表导出/`record_payment` 同一口径）。
+    # 原来写 `sum(perf.adjust_map(db, month).values()) * 250`：
+    #   ① `adjust_map` 的值是 `[点数, 金额]` **列表** → `sum()` 对列表求和，
+    #      **一旦有人点过「确认找平」（adjust_records 非空）这里就 TypeError**；
+    #   ② 单价硬编码 250，违反"每点金额可配"。
+    # 线上 `adjust_records` 长期 0 行，所以只是"还没炸"，不是没问题。
+    from app.services import period as _period
+    _carry = _period.carry_map(db, month) if month else {}
+    adjust_total = sum((v[1] if isinstance(v, (list, tuple)) else v)
+                       for v in _carry.values())
+    payroll_total = comp.get("total_amount", 0) + adjust_total
 
     bold = Font(bold=True)
     wb = Workbook()
@@ -1235,7 +1244,10 @@ def build_report(db, task_id: int, author_name: str = ""):
         ws.append(["1点店 / 2点店", f"{comp.get('p1',0)} / {comp.get('p2',0)}"])
         ws.append(["总点数", comp.get("total_points", 0)])
         ws.append(["点数工资合计(円)", comp.get("total_amount", 0)])
-        ws.append(["上月找平合计(点)", sum(adjust_map.values())])
+        # `carry_map` 的余量点只作参考（账表是金额口径）→ 取 [0]
+        ws.append(["上月找平合计(点)", sum(
+            (v[0] if isinstance(v, (list, tuple)) else 0)
+            for v in _carry.values())])
         ws.append(["应付合计(円)", payroll_total])
     ws.append([])
     ws.append(["—— 对账比对 ——"])

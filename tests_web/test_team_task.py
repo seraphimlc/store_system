@@ -4326,8 +4326,11 @@ def test_admin_bulk_return_pool_only_without_assignees(client, seeded):
     t2 = db.query(BdTask).order_by(BdTask.id.desc()).first().id   # 有担当
     bd_tasks.assign_members(db, t2, ["P2"], by="admin")
     # t1 造一点进展（"有进展但没分人"也要能撤）
-    tj = db.query(User).filter(User.username == "tangjing").first()
-    bd_tasks.save_progress(db, t1, 30, "干了点", by="tangjing", actor_user=tj)
+    # ⚠️ 2026-10-17：服务层补了鉴权闸门（`can_report`）后，**不能再拿别的队的成员当写手**
+    #    伪造进展（那正是被修掉的越权口子）；管理员也不行（管理员改进展要先有队长确认）。
+    #    这里改用**该任务的队长**（合法写手）。
+    lead = db.query(User).filter(User.username == "ogawa").first()
+    bd_tasks.save_progress(db, t1, 30, "干了点", by="ogawa", actor_user=lead)
     db.commit()
     db.close()
     _login(client, "admin")
@@ -5889,5 +5892,89 @@ def test_create_station_keeps_line_n_station_live(client):
         assert db.get(BdLine, line.id).n_station == 2, "加站后要回填实际站数"
         kinds = {i["kind"] for i in bd_places.integrity_issues(db)}
         assert "线路站数与实际不符" not in kinds
+    finally:
+        db.close()
+
+
+# ---------------- 服务层鉴权（2026-10-17，MCP 越权修复） ----------------
+# 背景：`can_assign` / `can_report` / `can_reject` 原来**只**在 HTTP 路由里查，
+# 服务层不查 → MCP 的三个工具（visit_task_assign / visit_task_progress /
+# visit_task_reject）能拿**任何已登录账号**去写他队任务。这三条测试钉住服务层。
+
+
+def test_service_layer_denies_cross_team_assign(seeded):
+    """非该队队长/非管理员：服务层**直接拒绝**改派担当（不能再只靠路由拦）。"""
+    db = appdb.SessionLocal()
+    try:
+        outsider = db.query(User).filter(User.username == "ganzijie").first()
+        with pytest.raises(bd_tasks.TaskError):
+            bd_tasks.assign_members(db, seeded["task"], ["P2"],
+                                    by="ganzijie", actor_user=outsider)
+        db.rollback()
+        # 队长本人仍然可以派
+        leader = db.query(User).filter(User.username == "ogawa").first()
+        r = bd_tasks.assign_members(db, seeded["task"], ["P2"],
+                                    by="ogawa", actor_user=leader)
+        db.commit()
+        assert r["n"] == 1
+        # 内部调用（actor_user=None，重建/导脚本）不受影响（这里做"清空担当"）
+        r2 = bd_tasks.assign_members(db, seeded["task"], [], by="system")
+        db.commit()
+        assert r2["n"] == 0
+    finally:
+        db.close()
+
+
+def test_service_layer_denies_cross_team_progress(seeded):
+    """非担当/非该队队长/非管理员：服务层拒绝写进展（这正是 MCP 的漏洞口）。"""
+    db = appdb.SessionLocal()
+    try:
+        outsider = db.query(User).filter(User.username == "ganzijie").first()
+        with pytest.raises(bd_tasks.TaskError):
+            bd_tasks.save_progress(db, seeded["task"], 50, "越权写入",
+                                   by="ganzijie", actor_user=outsider)
+        db.rollback()
+        # 该队队长可以写（走"队长调整"口径）
+        leader = db.query(User).filter(User.username == "ogawa").first()
+        r = bd_tasks.save_progress(db, seeded["task"], 50, "队长调整",
+                                   by="ogawa", actor_user=leader)
+        db.commit()
+        assert r["pct"] == 50
+        # 担当本人也可以写（先由队长把 P2 派进去 —— `can_report` 要求"本人是担当"）
+        bd_tasks.assign_members(db, seeded["task"], ["P2"], by="ogawa",
+                                actor_user=leader)
+        db.commit()
+        staff = db.query(User).filter(User.username == "tangjing").first()
+        r2 = bd_tasks.save_progress(db, seeded["task"], 60, "本人上报",
+                                    by="tangjing", actor_user=staff)
+        db.commit()
+        assert r2["pct"] == 60
+    finally:
+        db.close()
+
+
+def test_service_layer_denies_cross_team_reject(seeded):
+    """`reject_progress` 原来**零判权**：任何账号都能驳回。现在服务层拦住。"""
+    db = appdb.SessionLocal()
+    try:
+        # 造一个"已完成、待队长审核"的现场（驳回的前提）：先派担当、再由本人报 100%
+        leader = db.query(User).filter(User.username == "ogawa").first()
+        bd_tasks.assign_members(db, seeded["task"], ["P2"], by="ogawa",
+                                actor_user=leader)
+        staff = db.query(User).filter(User.username == "tangjing").first()
+        bd_tasks.save_progress(db, seeded["task"], 100, "干完了",
+                               by="tangjing", actor_user=staff,
+                               store_count=3)
+        db.commit()
+        outsider = db.query(User).filter(User.username == "ganzijie").first()
+        with pytest.raises(bd_tasks.TaskError):
+            bd_tasks.reject_progress(db, seeded["task"], 50, "越权驳回",
+                                     by="ganzijie", actor_user=outsider)
+        db.rollback()
+        # 该队队长可以驳回
+        r = bd_tasks.reject_progress(db, seeded["task"], 50, "没干完",
+                                     by="ogawa", actor_user=leader)
+        db.commit()
+        assert r["pct"] == 50
     finally:
         db.close()

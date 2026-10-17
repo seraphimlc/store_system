@@ -517,26 +517,34 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
             rr.filtered_by_raw_id = None
             rr.confirm_state = "approved"
     # 重建当月正式表
-    before = [f for f in db.query(FormalRecord).filter(
-        FormalRecord.japan_date >= lo, FormalRecord.japan_date < hi).all()]
-    pts_before = sum(f.points or 0 for f in before)
-    # 改动 B · 重算前证据留存（spec §9）：删除正式表**之前**把该月全量
-    # 序列化存 rebuild_snapshots（同月只保留最近一次：插入前删旧）；
-    # audit_id=None：HTML 路径无审计行，MCP 路径由能力层回填引用。
-    # 快照只能回灌正式表（重算还会改写 clean_status/重建 stats），非整月可逆。
+    # ⚠️ 重算前"证据"只留**摘要**（2026-10-17 用户拍板 A）：
+    #    原来把整月正式表序列化成 JSON 存进 `rebuild_snapshots.payload_json`
+    #    （实测 2026-09 = 34,118 行 / **7.4MB**），但**全仓没有任何代码读它**
+    #    （回灌功能从未实现，MCP 重算工具只有 preview/run）→ 只写不读，
+    #    还是一份 person_code / raw_record_id 的**个人数据副本**。
+    #    现在只留：行数、点数合计、按点数分布（几十字节）。当月正式表随时可由
+    #    `raw_records` 重算复现，真要回滚靠 `pg_dump`。
+    #    顺带把"整月 ORM 全量水合"换成聚合 SQL（原来为了求和要拉 3.4 万行对象）。
+    #    守门测试 tests_web/test_rebuild_snapshot.py
+    from sqlalchemy import func as _func
+    _lo_hi = (FormalRecord.japan_date >= lo, FormalRecord.japan_date < hi)
+    _agg = (db.query(_func.count(FormalRecord.id),
+                     _func.coalesce(_func.sum(FormalRecord.points), 0))
+            .filter(*_lo_hi).one())
+    n_before, pts_before = int(_agg[0] or 0), int(_agg[1] or 0)
+    _by_points = {int(p or 0): int(n) for p, n in
+                  db.query(FormalRecord.points, _func.count())
+                  .filter(*_lo_hi).group_by(FormalRecord.points).all()}
     import json as _json
     db.query(RebuildSnapshot).filter(RebuildSnapshot.month == ym).delete()
     db.add(RebuildSnapshot(
         month=ym, audit_id=None,
-        payload_json=_json.dumps([{
-            "id": f.id, "import_id": f.import_id,
-            "raw_record_id": f.raw_record_id, "person_code": f.person_code,
-            "store_id_raw": f.store_id_raw,
-            "japan_date": str(f.japan_date) if f.japan_date else None,
-            "points": f.points,
-            "created_at": str(f.created_at) if f.created_at else None,
-        } for f in before], ensure_ascii=False, default=str),
-        row_count=len(before)))
+        payload_json=_json.dumps({
+            "kind": "digest", "month": ym, "count": n_before,
+            "points_sum": pts_before, "by_points": _by_points,
+            "note": "只存摘要；全量快照已于 2026-10-17 移除（无人读，且是个人数据副本）",
+        }, ensure_ascii=False),
+        row_count=n_before))
     db.commit()
     # ⚠️ 删除与下面的重建必须在**同一个事务**里提交 —— 这里不能再来一次 commit。
     # 2026-10-16 实测踩到：原来删完先 commit，重建 2 万多行要几分钟，这段时间里
@@ -594,7 +602,7 @@ def rebuild_month(db, month: str, actor_id=None) -> dict:
         synced = True
     except Exception:  # noqa: BLE001
         synced = False
-    return {"ok": True, "files": files, "formal_before": len(before),
+    return {"ok": True, "files": files, "formal_before": n_before,
             "formal_after": len(after), "points_before": pts_before,
             "points_after": pts_after, "synced": synced}
 

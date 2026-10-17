@@ -92,7 +92,7 @@
     —— {{ t('请核对姓名写法（如空格/繁体），或到') }}「{{ t('员工管理') }}」{{ t('确认账号。') }}
   </div>
   {% endif %}
-  <h3 style="font-size:.98rem;margin:.6rem 0 .3rem">{{ t('员工×日 对账明细（只列问题行：') }}{{ day_rows|length }} {{ t('行）') }}</h3>
+  <h3 style="font-size:.98rem;margin:.6rem 0 .3rem">{{ t('员工×日 对账明细（只列问题行：') }}{{ day_total }} {{ t('行）') }}</h3>
   {% if not day_rows %}
   <p class="empty">{{ t('无问题行：逐日逐人点数一致（') }}{{ (cur.summary or {}).get('compared',0) }} {{ t('人全对）') }}</p>
   {% else %}
@@ -114,6 +114,7 @@
     </tr>
     {% endfor %}
   </table></div>
+  {% include "_pager.html" %}
   {% endif %}
 
   {# ---------- 人月差异（找平入口） ---------- #}

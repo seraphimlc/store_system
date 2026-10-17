@@ -916,6 +916,13 @@ def assign_members(db: Session, task_id: int, person_codes: Sequence[str],
         raise TaskError("任务不存在")
     if actor_user is not None:
         by = getattr(actor_user, "username", "") or by
+    # ⚠️ **操作人鉴权**（2026-10-17，MCP 越权修复）：分派/改派/回收只能由
+    #    管理员或**该任务的队长**做（队员不行）。HTTP 路由外面查了 `can_assign`，
+    #    MCP 走服务层没查 → 任何已登录账号都能改别队的担当。
+    #    `actor_user=None` 是内部/脚本调用（重建、导入），保持放行。
+    #    守门测试 tests_web/test_team_task.py::test_service_layer_denies_cross_team_assign
+    if actor_user is not None and not can_assign(db, actor_user, t):
+        raise TaskError("没有权限分派该任务（只有管理员或该任务的队长能派工）")
     codes = []
     for c in person_codes:
         c = (c or "").strip()
@@ -1036,6 +1043,14 @@ def save_progress(db: Session, task_id: int, pct: int, note: str = "",
     if actor_user is not None and not staff_report and not _is_lead \
             and is_admin(actor_user) and not admin_may_adjust(row):
         raise TaskError("这条还没有队长确认，管理员暂不能修改")
+    # ⚠️ **总闸门**（2026-10-17，MCP 越权修复）：上面两条规则只覆盖
+    #    「担当但被锁」和「管理员越前」两种人；**既不是担当、也不是该队队长、也不是管理员**
+    #    的账号两个条件都不满足 → 直接漏过 → 任何已登录账号都能写任意任务的进展
+    #    （HTTP 路由外面有 `can_report` 兜着，MCP 走服务层没有）。
+    #    放在两条具体规则**之后**：错误文案更准（先命中"已确认/管理员暂不能改"）。
+    #    守门测试 tests_web/test_team_task.py::test_service_layer_denies_cross_team_progress
+    if actor_user is not None and not can_report(db, actor_user, t):
+        raise TaskError("没有权限写这条进展（不是你担当、也不是你队的任务）")
     if confirm and row is not None and row.reported_pct is not None:
         p = int(row.reported_pct)             # 「确认」= 认可员工上报的原值
     # ---- 店铺数（用户 2026-10-06）：报 100% 时必填，**允许 0**，空着不行 ----
@@ -1357,6 +1372,12 @@ def reject_progress(db: Session, task_id: int, pct: int, note: str = "",
     pct = int(pct)
     if not (0 <= pct < 100):
         raise TaskError("驳回后的进度必须在 0–99% 之间（不能还是 100%）")
+    # ⚠️ **操作人鉴权**（2026-10-17，MCP 越权修复）：驳回只能由管理员或该任务的队长做
+    #    （口径见 `can_reject`）。HTTP 路由外面查了，MCP 走服务层**一处都没查** →
+    #    任何已登录账号都能驳回别队任务。放在值域校验**之后**，错误文案更准。
+    #    守门测试 tests_web/test_team_task.py::test_service_layer_denies_cross_team_reject
+    if actor_user is not None and not can_reject(db, actor_user, t):
+        raise TaskError("没有权限驳回该任务（只有管理员或该任务的队长能驳回）")
     d = jst_today()
     row = (db.query(BdTaskProgress)
            .filter(BdTaskProgress.task_id == task_id,
