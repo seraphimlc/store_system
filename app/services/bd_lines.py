@@ -142,6 +142,32 @@ def line_options(db: Session, pref: str = "") -> List[BdLine]:
     return list_lines(db, pref=pref)
 
 
+def recount_stations(db: Session, line_id: Optional[int] = None) -> int:
+    """回填 `bd_line.n_station` = **实际 `bd_station` 行数**（冗余字段）。
+
+    ⚠️ 2026-10-17 定口径：这个字段原来只在 N02 导入时写成**源里的 `n`**，
+    而资产体检查（`bd_places.integrity_issues` ④）要求它等于实际行数 →
+    **手工补的站**（实例 `幕張豊砂`，N02-22 里没有）一加进来就漂（京葉線 18 vs 19）。
+    所以：谁动了车站谁回填，`bd_import_rail` 收尾也回填一次。
+
+    返回**真的改了几行**。⚠️ 走 ORM（不用裸 UPDATE）：裸 SQL 会绕过 session 的
+    identity map，调用方马上读 `line.n_station` 会拿到旧值（2026-10-17 单测抓到）。
+    """
+    from sqlalchemy import func
+
+    q = db.query(BdLine)
+    if line_id is not None:
+        q = q.filter(BdLine.id == int(line_id))
+    changed = 0
+    for ln in q.all():
+        actual = (db.query(func.count(BdStation.id))
+                  .filter(BdStation.line_id == ln.id).scalar() or 0)
+        if ln.n_station != actual:
+            ln.n_station = actual
+            changed += 1
+    return changed
+
+
 def station_counts(db: Session) -> dict:
     """按线路统计车站数（列表/下拉里显示）。"""
     from sqlalchemy import func

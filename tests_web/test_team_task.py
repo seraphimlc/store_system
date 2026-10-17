@@ -5815,3 +5815,35 @@ def test_raw_sql_never_puts_select_alias_in_having(client):
                           src[:m.start()].count("\n") + 1, alias))
     assert not bad, (
         "HAVING 里引用了 SELECT 别名（SQLite 忍、PG 崩）：\n" + "\n".join(bad))
+
+
+def test_create_station_keeps_line_n_station_live(client):
+    """手工加站后 `bd_line.n_station` 必须跟着走。
+
+    2026-10-17 实测：给京葉線补 `幕張豊砂` 之后，`n_station` 还是 18（N02 源里的数）
+    而实际 19 行 → 资产体检报「线路站数与实际不符」并非 0 退出（体检从这天起才在
+    线上真跑通，所以这个漂一直没人发现）。口径定为**实际行数**。
+    """
+    from app.models import BdLine
+    from app.services import bd_places, bd_tasks
+
+    db = appdb.SessionLocal()
+    try:
+        line = BdLine(name="テスト線", name_norm="テスト線", operator="テスト鉄道",
+                      operator_short="テスト", kind="private", prefs="13",
+                      n_station=1)
+        db.add(line)
+        db.flush()
+        db.add(BdStation(name="一駅目", name_norm="一駅目", line="テスト線",
+                         line_id=line.id, operator="テスト鉄道", pref="13",
+                         source="mlit"))
+        db.commit()
+        assert line.n_station == 1
+        bd_tasks.create_station(db, "二駅目", line_id=line.id, pref="13",
+                                lon=139.7, lat=35.6)
+        db.commit()
+        assert db.get(BdLine, line.id).n_station == 2, "加站后要回填实际站数"
+        kinds = {i["kind"] for i in bd_places.integrity_issues(db)}
+        assert "线路站数与实际不符" not in kinds
+    finally:
+        db.close()

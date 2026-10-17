@@ -172,6 +172,9 @@ def import_rail(db: Session, payload: Optional[dict] = None, dry: bool = False,
 
     if not dry:
         db.flush()
+        # `bd_line.n_station` 的口径 = **实际行数**（资产体检查 ④），所以导入收尾统一
+        # 回填一次：源里的 `n` 是"N02 那一刻"的站数，认领历史站/手工补站之后就不准了
+        rep["n_station_fixed"] = bd_lines.recount_stations(db)
 
     # ---------- ④ 每个车站自动建任务（车站即任务） ----------
     if make_tasks:

@@ -136,6 +136,11 @@ def create_station(db: Session, name: str, line: str = "", note: str = "",
                    note=(note or "").strip(), status="active", source="manual")
     db.add(st)
     db.flush()
+    if ln is not None:
+        # ⚠️ `n_station` 是"实际行数"口径（资产体检查会查）→ 手工加站必须同步，
+        #    否则刚加完站体检就报「线路站数与实际不符」（2026-10-17 实测）
+        from app.services import bd_lines as _bl
+        _bl.recount_stations(db, ln.id)
     from app.services import bd_places
     bd_places.rebuild_places(db)          # 手工站也进物理车站层（资产完整）
     return st
