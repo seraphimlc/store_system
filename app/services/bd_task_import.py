@@ -118,18 +118,36 @@ def _split_multi(raw: str) -> List[str]:
     return out
 
 
+#: 站名里的「附注」括号对（旧名 / 别名 / 运营方）：文件常写
+#: 「獨協大学前〈草加松原〉」而库里是「獨協大学前」（2026-10-17 实测，
+#: 東武スカイツリーライン）。`（京急）` 那类运营方后缀本来就是同一机制，
+#: 只是括号不同 → 统一成一张表。
+#: ⚠️ NFKC 会把全角「（）」「＜＞」压成半角，所以半角那几个也要留着。
+_ANNOT_PAIRS = (
+    ("（", "）"), ("(", ")"), ("〈", "〉"), ("〔", "〕"), ("【", "】"),
+    ("［", "］"), ("[", "]"), ("＜", "＞"), ("<", ">"),
+)
+
+
 def _name_variants(part: str) -> List[str]:
-    """一个站名段的候选写法：原名 → 去「（京急）」这类后缀 → 两者互换。"""
+    """一个站名段的候选写法：**原名 → 去掉「附注」后缀**（括住的那部分）。
+
+    ⚠️ **原名永远排第一**：只在原名匹配不上时才试去附注的写法 →
+    不会改变任何现有匹配结果，只会让"带旧名/别名"的手工文件也能对上。
+    """
     out = [part]
-    if "（" in part and part.endswith("）"):
-        base = part[:part.find("（")].strip()
-        if base:
-            out.append(base)
-    if "(" in part and part.endswith(")"):
-        base = part[:part.find("(")].strip()
-        if base:
-            out.append(base)
+    for op, cl in _ANNOT_PAIRS:
+        if op in part and part.endswith(cl):
+            base = part[:part.find(op)].strip()
+            if base and base not in out:
+                out.append(base)
     return [x for x in out if x]
+
+
+def _base_name(part: str) -> str:
+    """去掉「附注」后的站名（没有附注就原样返回）——给"近似站名"提示用。"""
+    vs = _name_variants(part)
+    return vs[-1]
 
 
 #: 日文站名里的小假名混写：表上写「保土ケ谷」而库里是「保土ヶ谷」（2026-10-16 实测）。
@@ -313,7 +331,7 @@ def _resolve_group(by_line, by_name, line_raw: str,
 def _near_names(by_name, text: str, limit: int = 8) -> List[str]:
     """近似站名（给人工处理时参考）。键已做过小假名归一。"""
     key = _split_multi(text)[0] if _split_multi(text) else norm(text)
-    key = kana_key(key.split("（")[0].split("(")[0])
+    key = kana_key(_base_name(key))
     if not key:
         return []
     found = [n for n in by_name if key in n or n in key]

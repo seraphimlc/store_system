@@ -97,11 +97,20 @@ def state_labels(lang: str = "zh") -> dict:
 # ---------------- 车站主数据 ----------------
 
 def create_station(db: Session, name: str, line: str = "", note: str = "",
-                   by: str = "", line_id: Optional[int] = None) -> BdStation:
+                   by: str = "", line_id: Optional[int] = None,
+                   pref: str = "", lon: Optional[float] = None,
+                   lat: Optional[float] = None) -> BdStation:
     """新建车站。**唯一键 = (线路, 站名)**（一线一站，用户 2026-10-05 口径）。
 
     `line_id` 给了就挂到线路主档（`line` 文本自动取线路名）+ 同步建"物理车站"层；
     没给就是"无线路"的手工站（此时按站名判重，部分唯一索引兜底）。
+
+    `pref/lon/lat` 可选：**补 N02 里还没有的站**时必须给（否则资产体检查记
+    「缺县 / 缺坐标」）。实例：`幕張豊砂`（JR 京葉線，2023-03 开站，N02-22 里没有）
+    —— 坐标取自 OSM 路线资产的同名 stop（2026-10-17）。
+    ⚠️ 这类行 `ekicode/group_code` **故意留空** → `source="manual"`、物理车站层按
+    「站名+县」归组；将来 N02 新版本一到，`bd_import_rail` 会按 (线路, 站名) 认领它
+    并补齐 MLIT 属性（那条"source != mlit 就 _enrich"的路子）。
 
     ⚠️ 2026-10-05 这个改动**曾经因为打补丁时中途 assert 失败而没写进去**，
     而路由已经在传 `line_id=` → 界面新建车站会 TypeError（测试抓到的）。
@@ -123,6 +132,7 @@ def create_station(db: Session, name: str, line: str = "", note: str = "",
                    line=((ln.name if ln else "") or (line or "").strip()),
                    line_id=(ln.id if ln else None),
                    operator=(ln.operator if ln else ""),
+                   pref=(pref or "").strip(), lon=lon, lat=lat,
                    note=(note or "").strip(), status="active", source="manual")
     db.add(st)
     db.flush()

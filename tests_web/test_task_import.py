@@ -396,3 +396,83 @@ def test_import_requires_admin(client):
                 follow_redirects=False)
     r = client.get("/tasks/import", follow_redirects=False)
     assert r.status_code in (302, 403)
+
+
+# ---------------------------------------------------------------- 附注站名（2026-10-17）
+
+def test_name_variants_strips_annotation_but_keeps_original_first():
+    """「独協大学前〈草加松原〉」→ 候选 = [原名, 去附注]。
+
+    ⚠️ 原名**必须排第一**：只在原名匹配不上时才用去附注的写法 →
+    绝不改变任何现有匹配结果（真库里 0 个站名带附注，实测过）。
+    """
+    assert ti._name_variants("獨協大学前〈草加松原〉") == [
+        "獨協大学前〈草加松原〉", "獨協大学前"]
+    assert ti._name_variants(ti.norm("北千住（東京）")) == ["北千住(東京)", "北千住"]
+    assert ti._name_variants("A[B]") == ["A[B]", "A"]
+    assert ti._name_variants("新宿") == ["新宿"]
+    # 括号不在结尾 → 不许动（官方名里带括号的情况别被误伤）
+    assert ti._name_variants("A〈B〉C") == ["A〈B〉C"]
+    assert ti._name_variants("") == []
+    # 近似站名提示也走同一层（否则对不上时给的"近似"会带上附注）
+    assert ti._base_name("獨協大学前〈草加松原〉") == "獨協大学前"
+
+
+def test_import_matches_station_written_with_old_name_annotation(client, tmp_path):
+    """生产掉行实例：文件写「獨協大学前〈草加松原〉」，库里是「獨協大学前」。"""
+    db = appdb.SessionLocal()
+    _seed_ops(db, ["獨協大学前", "松原"], team="甘子杰队",
+              with_line="東武スカイツリーライン(伊勢崎線)")
+    path = _plan_file(tmp_path, [
+        _row("東武スカイツリーライン(伊勢崎線)", "獨協大学前〈草加松原〉",
+             team="甘子杰队")])
+    plan = ti.build_plan(db, path)
+    assert plan["summary"]["bad"] == 0, [r.station_raw for r in plan["rows"]
+                                         if r.decision == "bad"]
+    assert plan["summary"]["create_stations"] == 1
+    # 落到**去附注后**的那个站（物理车站层）上
+    from app.models import BdStationPlace
+    pid = plan["rows"][0].create[0][0]
+    assert db.get(BdStationPlace, pid).name == "獨協大学前"
+    db.close()
+
+
+def test_annotated_name_still_prefers_the_literal_station(client, tmp_path):
+    """库里**真有一行**叫「獨協大学前〈草加松原〉」时，必须命中它而不是基名那行。"""
+    db = appdb.SessionLocal()
+    _seed_ops(db, ["獨協大学前", "獨協大学前〈草加松原〉"], team="甘子杰队",
+              with_line="東武スカイツリーライン(伊勢崎線)")
+    path = _plan_file(tmp_path, [
+        _row("東武スカイツリーライン(伊勢崎線)", "獨協大学前〈草加松原〉",
+             team="甘子杰队")])
+    plan = ti.build_plan(db, path)
+    assert plan["summary"]["bad"] == 0
+    assert [x[1] for x in plan["rows"][0].create] == ["獨協大学前〈草加松原〉"]
+    db.close()
+
+
+def test_create_station_accepts_pref_and_coords_for_n02_missing_station(client):
+    """补 N02 里没有的站（幕張豊砂 2023 开站）：县/坐标要能落进车站与物理车站层。
+
+    故意**不给 ekicode/group_code** → `source="manual"`、物理车站层按「站名+县」归组，
+    这样资产体检的「数据源对齐」（数 `group_code != ''` 的 N02 派生行）不会被污染。
+    """
+    from app.models import BdStationPlace
+    from app.services import bd_tasks
+
+    db = appdb.SessionLocal()
+    line = BdLine(name="京葉線", name_norm="京葉線", operator="東日本旅客鉄道",
+                  operator_short="JR", kind="jr", prefs="12")
+    db.add(line)
+    db.flush()
+    db.commit()
+    st = bd_tasks.create_station(db, "幕張豊砂", line_id=line.id, pref="12",
+                                 lon=140.02741, lat=35.65793)
+    db.commit()
+    assert (st.pref, st.source, st.ekicode, st.group_code) == ("12", "manual", "", "")
+    assert abs(st.lon - 140.02741) < 1e-9 and abs(st.lat - 35.65793) < 1e-9
+    pl = db.get(BdStationPlace, st.place_id)
+    assert pl is not None and pl.name == "幕張豊砂" and pl.pref == "12"
+    assert abs(pl.lon - 140.02741) < 1e-9 and abs(pl.lat - 35.65793) < 1e-9
+    assert pl.group_code == "" and pl.source == "manual"
+    db.close()
