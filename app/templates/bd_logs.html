@@ -70,7 +70,7 @@
 <div class="form-actions">
   {% set _qs = '&kw=' ~ (kw|urlencode) ~ '&action=' ~ (action|urlencode) ~ '&dfrom=' ~ dfrom ~ '&dto=' ~ dto %}
   {% if page > 1 %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page - 1 }}{{ _qs }}">{{ t('上一页') }}</a>{% endif %}
-  <span class="hint">{{ t('第') }}{{ page }} {{ t('页') }}</span>
+  <span class="hint">{{ t('共') }} {{ total }} {{ t('条') }} · {{ t('第') }} {{ page }} {{ t('页') }}</span>
   {% if rows|length == limit %}<a class="btn ghost" href="/logs?domain={{ domain }}&page={{ page + 1 }}{{ _qs }}">{{ t('下一页') }}</a>{% endif %}
 </div>
 {% endif %}

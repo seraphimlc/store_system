@@ -1509,13 +1509,18 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
     """
     if user is None:
         return RedirectResponse("/login", status_code=302)
-    from app.services import bd_log, bd_perm, bd_teams
+    from app.services import bd_log, bd_perm, bd_teams, paging
     is_admin = user.role == "admin"
     if not (is_admin or bd_perm.can(db, user, "log.view")):
         from app.services import home as _home
         return RedirectResponse(_home.landing_home(db, user), status_code=302)
     limit = 200
-    page = max(1, int(page or 1))
+    # ⚠️ 页码越界必须夹取（2026-10-17 修，与 `bd_tasks.task_board` 同一个坑）：
+    #    原来 `?page=99` 会让 offset 算出 19600 → 空列表，而页面里显示的 `page` 是裸值。
+    total = bd_log.recent_count(db, domain=domain, kw=kw, action=action,
+                                date_from=dfrom, date_to=dto)
+    pager = paging.info_from(total, page, limit)
+    page = pager["page"]
     rows = bd_log.recent(db, domain=domain, limit=limit,
                          offset=(page - 1) * limit,
                          kw=kw, action=action, date_from=dfrom, date_to=dto)
@@ -1534,7 +1539,7 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
         rows = kept
     return templates.TemplateResponse("bd_logs.html", {
         "request": request, "current_user": user, "rows": rows,
-        "domain": domain, "page": page, "limit": limit,
+        "domain": domain, "page": page, "limit": limit, "total": total,
         "domains": bd_log.DOMAINS,
         "domain_labels": bd_log.DOMAIN_LABELS(CURRENT_LANG.get()),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),

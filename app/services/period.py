@@ -764,13 +764,6 @@ def period_rows(db: Session, month: str):
     return out
 
 
-def set_period_diff(db: Session, month: str, person_code: str,
-                    diff: int, user_id: int) -> dict:
-    """（兼容旧调用）把 diff 作为找平增量。"""
-    return set_period_values(db, month, person_code, 0, 0,
-                             user_id=user_id, adjust_delta=diff)
-
-
 def set_period_values(db: Session, month: str, person_code: str,
                       half1_amount: int = 0, half2_amount: int = 0,
                       diff_points=None, user_id: int = 0,

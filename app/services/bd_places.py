@@ -99,11 +99,10 @@ def rebuild_places(db: Session, dry: bool = False) -> dict:
         db.flush()
         # 清理孤儿 place（没有任何站×线指向它）—— 派生数据，重建即可再生
         from sqlalchemy import text as _text
-        ids = [i for (i,) in db.query(BdStationPlace.id).all()
-               if not db.query(BdStation.id).filter(
-                   BdStation.place_id == BdStationPlace.id).first()
-               and not db.query(BdStation.id).filter(
-                   BdStation.place_id == BdStationPlace.id).count()]
+        # ⚠️ 2026-10-17 审查：这里原来先算了个 `ids = [...]` 却从没被用过，
+        #    而且它对**每个** place 都要跑 `.first()` + `.count()` 两条查询
+        #    （1568 个 place ≈ 3136 条白跑的 SQL，纯拖慢重建）。真正的孤儿清理是下面
+        #    这条 NOT EXISTS SQL，删掉死块即可。
         orphans = [i for (i,) in db.execute(_text(
             "SELECT p.id FROM bd_station_place p WHERE NOT EXISTS "
             "(SELECT 1 FROM bd_station s WHERE s.place_id = p.id)")).all()]

@@ -410,21 +410,60 @@ def test_verify_integrity(factory):
 # 验收 2：非法 view/action → BAD_PARAM + 可选值提示
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("call", [
-    lambda: scenario_ops.visit_overview(fake_ctx(), view="bogus"),
-    lambda: scenario_ops.visit_payroll(fake_ctx(), month=MONTH, view="nope"),
-    lambda: scenario_ops.visit_recon(fake_ctx(), view="wat"),
-    lambda: scenario_ops.visit_files(fake_ctx(), view="zzz"),
-    lambda: scenario_ops.visit_store(fake_ctx(), view="zzz"),
-    lambda: scenario_ops.visit_store(fake_ctx(), action="zzz"),
-    lambda: scenario_ops.visit_rebuild(fake_ctx(), month=MONTH, action="zzz"),
-    lambda: scenario_ops.visit_staff(fake_ctx(), action="zzz"),
-    lambda: scenario_ops.visit_config(fake_ctx(), action="zzz"),
-])
-def test_invalid_view_or_action_returns_bad_param(call):
+# ⚠️ 2026-10-17 修：这组用例原来用**未认证**的 `fake_ctx()` 却断言 `BAD_PARAM` —— 等于把
+#    "未授权者也能探测参数合法性"钉成了正确行为，与 `docs/MCP对接手册.md` §4.6
+#    「授权必须在参数校验之前」直接矛盾（校验原先在 `_read/_write` 之前 return）。
+#    现在校验挪进 `_read/_write` 的 `precheck`（`authz.dispatch` 放行后才跑），故拆成两条：
+#    未认证 → `UNAUTHORIZED`；已认证 → 才是 `BAD_PARAM` + 可选值提示。
+def _bad_param_calls(ctx):
+    """`(tool, 调用)` —— tool 用来查它是否属于"需要身份"的工具（`authz.AUTH_REQUIRED_TOOLS`）。"""
+    return [
+        ("visit_overview", lambda: scenario_ops.visit_overview(ctx, view="bogus")),
+        ("visit_payroll", lambda: scenario_ops.visit_payroll(ctx, month=MONTH, view="nope")),
+        ("visit_recon", lambda: scenario_ops.visit_recon(ctx, view="wat")),
+        ("visit_files", lambda: scenario_ops.visit_files(ctx, view="zzz")),
+        ("visit_store", lambda: scenario_ops.visit_store(ctx, view="zzz")),
+        ("visit_store", lambda: scenario_ops.visit_store(ctx, action="zzz")),
+        ("visit_store", lambda: scenario_ops.visit_store(ctx, action="merge")),   # 缺 pair_id/keep
+        ("visit_store", lambda: scenario_ops.visit_store(ctx, action="split")),   # 缺 entity_id
+        ("visit_store", lambda: scenario_ops.visit_store(ctx, action="skip")),    # 缺 pair_id
+        ("visit_rebuild", lambda: scenario_ops.visit_rebuild(ctx, month=MONTH,
+                                                            action="zzz")),
+        ("visit_staff", lambda: scenario_ops.visit_staff(ctx, action="zzz")),
+        ("visit_config", lambda: scenario_ops.visit_config(ctx, action="zzz")),
+        ("visit_day_report", lambda: scenario_ops.visit_day_report(
+            ctx, "P001", date="2026-09-22", action="zzz")),
+        ("visit_my_perf", lambda: scenario_ops.visit_my_perf(ctx, view="zzz")),
+        ("visit_my_pay", lambda: scenario_ops.visit_my_pay(ctx, month="2026-9")),  # BAD_MONTH
+    ]
+
+
+@pytest.mark.parametrize("tool,call", _bad_param_calls(fake_ctx()))
+def test_invalid_param_anonymous_does_not_leak_for_auth_required_tools(tool, call):
+    """授权先于参数校验（手册 §4.6）—— **只对需要身份的工具成立**。
+
+    ⚠️ `authz.enforce`：`actor is None` 时只有 `AUTH_REQUIRED_TOOLS`（写 + 导出）回
+    `UNAUTHORIZED`；**读工具匿名放行是既有设计**（stdio 本地进程；HTTP 模式下
+    `BearerAuthMiddleware` 在更外层就 401 了，根本到不了这里）。所以按真实策略分档断言：
+    - 写/导出：匿名**必须** `UNAUTHORIZED` —— 改前这 6 个写工具会把 `BAD_VIEW`/`BAD_PARAM`
+      直接吐给未授权者，等于免费探测参数合法性；
+    - 读工具：匿名本来就允许，返回参数错误没有泄露问题（也没有"授权"这一步可先做）。
+    """
+    from mcp_service import authz
     got = call()
     assert got["ok"] is False
-    assert got["error"]["code"] == "BAD_PARAM"
+    if tool in authz.AUTH_REQUIRED_TOOLS:
+        assert got["error"]["code"] == "UNAUTHORIZED", got
+    else:
+        assert got["error"]["code"] in ("BAD_PARAM", "BAD_MONTH"), got
+
+
+@pytest.mark.parametrize("tool,call", _bad_param_calls(fake_ctx()))
+def test_invalid_view_or_action_returns_bad_param_when_authed(factory, tool, call):
+    """**已认证**（`factory` 把 actor 固定成 admin）：一律 `BAD_PARAM` + 可选值提示。"""
+    got = call()
+    assert got["ok"] is False
+    assert got["error"]["code"] in ("BAD_PARAM", "BAD_MONTH"), got
     assert got["error"]["hint"], "非法 view/action 必须给出可选值提示"
 
 

@@ -66,10 +66,9 @@ def timeline(db: Session, domain: str, ref_id: int,
             .limit(limit).all())
 
 
-def recent(db: Session, domain: str = "", limit: int = 200,
-           offset: int = 0, kw: str = "", action: str = "",
-           date_from: str = "", date_to: str = "") -> List[BdLog]:
-    """全站最近日志——管理端"发生了什么"入口。
+def _recent_q(db: Session, domain: str = "", kw: str = "", action: str = "",
+              date_from: str = "", date_to: str = ""):
+    """日志列表的**筛选条件**（`recent` 与 `recent_count` 共用，别各写一份）。
 
     筛选（2026-10-06 复盘：生产已 4300+ 条，没有筛选没法用）：
     `domain` 域 / `kw` 关键词（操作人·对象·备注）/ `action` 动作 /
@@ -94,8 +93,24 @@ def recent(db: Session, domain: str = "", limit: int = 200,
         dt = _parse_day(date_to)
         if dt:
             q = q.filter(BdLog.created_at < dt + _DAY - _JST_OFFSET)
-    return (q.order_by(BdLog.created_at.desc(), BdLog.id.desc())
+    return q
+
+
+def recent(db: Session, domain: str = "", limit: int = 200,
+           offset: int = 0, kw: str = "", action: str = "",
+           date_from: str = "", date_to: str = "") -> List[BdLog]:
+    """全站最近日志——管理端"发生了什么"入口。"""
+    return (_recent_q(db, domain=domain, kw=kw, action=action,
+                      date_from=date_from, date_to=date_to)
+            .order_by(BdLog.created_at.desc(), BdLog.id.desc())
             .limit(limit).offset(offset).all())
+
+
+def recent_count(db: Session, domain: str = "", kw: str = "", action: str = "",
+                 date_from: str = "", date_to: str = "") -> int:
+    """同一筛选条件下的**总数**（给分页夹取页码用，2026-10-17 加）。"""
+    return int(_recent_q(db, domain=domain, kw=kw, action=action,
+                         date_from=date_from, date_to=date_to).count())
 
 
 _JST_OFFSET = timedelta(hours=9)

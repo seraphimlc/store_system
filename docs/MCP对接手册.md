@@ -267,6 +267,13 @@ api_tokens(id, user_id, name, token_prefix, token_hash, scopes,
 - 员工可用面用**白名单**（新增工具默认员工不可用 → 安全的失败方向）
 - 越权 → `FORBIDDEN_TOOL`（结构化、`retryable=false`、hint 说明）
 - **顺序**：授权必须在**参数校验之前**（否则未授权者可探测参数）
+  - **实现口径（2026-10-17 修正）**：参数校验写成 `precheck` 闭包交给
+    `scenario_ops._read/_write` 持有，**只有 `authz.dispatch` 放行之后才执行**；
+    工具函数体里**不得**再出现"先 `return _bad_view/_bad_action` 再调 `_read/_write`"的写法。
+  - ⚠️ **这条只对"需要身份"的工具成立**：`authz.enforce` 在 `actor is None` 时只拦
+    `AUTH_REQUIRED_TOOLS`（写 + 导出），**读工具匿名放行是既有设计**（stdio 本地进程；
+    HTTP 模式下 `BearerAuthMiddleware` 在更外层就 401，根本到不了工具层）。
+    因此读工具匿名调用返回参数错误**不算泄露**；写/导出工具匿名必须回 `UNAUTHORIZED`。
 
 ### 5.3 状态联动
 

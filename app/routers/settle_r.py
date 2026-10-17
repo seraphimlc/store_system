@@ -931,7 +931,14 @@ def payroll_settle_export(request: Request,
     from fastapi.responses import StreamingResponse
     import io as _io
     buf = _io.BytesIO(data)
+    # ⚠️ 响应头只能 latin-1：ASCII 名给 `filename=`，真名（可能含中文/日文）走 RFC 5987 的
+    #    `filename*`。这里原是全仓 9 处导出里**唯一**没走 `filename*` 的一处 —— 当前
+    #    `fname` 恰好是纯 ASCII（`payroll_settle_<month>.xlsx`）所以没炸，属于"一改名字
+    #    就 500"的雷（2026-10-17 测试审查发现）。
+    from urllib.parse import quote as _quote
+    ascii_name = "payroll_settle_%s.xlsx" % (month or "all")
+    cd = "attachment; filename=" + ascii_name + "; filename*=UTF-8''" + _quote(fname)
     return StreamingResponse(
         buf, media_type=("application/vnd.openxmlformats-officedocument"
                          ".spreadsheetml.sheet"),
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+        headers={"Content-Disposition": cd})

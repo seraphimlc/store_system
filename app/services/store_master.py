@@ -8,15 +8,6 @@ from app.db import get_engine, Base
 from app.models import RawRecord, ImportFile, StoreEntity, StorePair, StoreMergeLog
 
 
-def earliest_nonempty_name(names) -> str:
-    """建档代表名规则：取按时间顺序里第一个非空店名（用户确认）。"""
-    for n in names:
-        n = (n or "").strip()
-        if n:
-            return n
-    return ""
-
-
 def norm_name(s) -> str:
     s = unicodedata.normalize("NFKC", s or "")
     return re.sub(r"[\s\u3000]+", "", s.casefold())

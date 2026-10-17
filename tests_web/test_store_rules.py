@@ -1,20 +1,11 @@
 # -*- coding: utf-8 -*-
-from app.services.store_master import earliest_nonempty_name, norm_name
+from app.services.store_master import norm_name
 
-
-def test_earliest_nonempty_uses_second_when_first_blank():
-    # 某 Store ID 出现 3 次：第 1 次名空 → 取第 2 次
-    names = ["", "50円焼きとり どん竜", "50円焼きとり どん竜"]
-    assert earliest_nonempty_name(names) == "50円焼きとり どん竜"
-
-
-def test_earliest_nonempty_blank_whitespace_then_third():
-    names = ["   ", None, "炭火焼鳥 塚田農場 赤羽店"]
-    assert earliest_nonempty_name(names) == "炭火焼鳥 塚田農場 赤羽店"
-
-
-def test_all_blank_returns_empty():
-    assert earliest_nonempty_name(["", None, "  "]) == ""
+# ⚠️ 2026-10-17 测试审查：原先这里 3 条用例测的是 `store_master.earliest_nonempty_name`
+#    （"建档代表名 = 时间顺序里第一个非空店名"），但那个独立函数**全仓无人调用** ——
+#    规则实际是内联在 `sync_entities` 里的（`if not ent.name_local and nm: ...`，
+#    注释"店名取最早的非空写法"）。"只有测试在用的函数"会永远绿，删掉函数与这 3 条用例，
+#    规则由 `test_store_auto.py` 的实体归并用例从行为侧守着。
 
 
 def test_norm_name_removes_wide_spaces_case():

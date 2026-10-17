@@ -52,6 +52,29 @@ def _bad_action(action: str, options: list[str]) -> dict[str, Any]:
         "可选 action：" + "、".join(options) + f"（收到 {action!r}）")
 
 
+def _bad_view_precheck(value, options, allow_none: bool = False):
+    """把 `view` 合法性包成**授权通过后才跑**的闭包（见 `_read` 的 `precheck` 说明）。
+
+    ⚠️ 2026-10-17：这些校验原来直接写在工具函数体里、在 `_read`/`_write`（授权）**之前**
+    return → 未授权者拿到 `BAD_VIEW`/`BAD_ACTION` 而不是 `UNAUTHORIZED`，等于一个免费的
+    参数探测器。而 `docs/MCP对接手册.md` §4.6 明写「授权必须在参数校验之前」。
+    """
+    def check():
+        if allow_none and value is None:
+            return None
+        return None if value in options else _bad_view(value, list(options))
+    return check
+
+
+def _bad_action_precheck(value, options, allow_none: bool = False):
+    """`action` 版，同上。"""
+    def check():
+        if allow_none and value is None:
+            return None
+        return None if value in options else _bad_action(value, list(options))
+    return check
+
+
 def _map_error(exc: Exception) -> dict[str, Any]:
     """把各能力层的业务异常统一映射到错误信封（只读路径）。"""
     if isinstance(exc, guards.GuardError):
@@ -74,14 +97,25 @@ def _map_error(exc: Exception) -> dict[str, Any]:
     return _envelope_error("INTERNAL", repr(exc), "系统内部错误，已记录；可重试")
 
 
-def _read(ctx: Context, tool: str, params: dict, fn) -> dict[str, Any]:
-    """只读统一入口：授权拦截 → 两阶段审计 → 能力层 → 错误信封。
+def _read(ctx: Context, tool: str, params: dict, fn,
+          precheck=None) -> dict[str, Any]:
+    """只读统一入口：授权拦截 → 参数校验(precheck) → 两阶段审计 → 能力层 → 错误信封。
 
     fn 签名：fn(db) -> data dict 或完整信封（含 "ok" 键时原样透传，
     否则包 {"ok": True, "data": ...}）。意外异常兜底 INTERNAL；
     业务异常经 _map_error 映射。
+
+    ⚠️ `precheck`（2026-10-17 加）：参数校验**必须在授权之后**（手册 §4.6）。它由
+    `authz.dispatch` 放行之后才执行；返回非 None 时原样当结果（且照记一行审计）。
     """
     from mcp_service import authz
+
+    if precheck is not None:
+        _inner = fn
+
+        def fn(db):                      # noqa: F811  故意遮蔽：包成"授权后才校验"
+            bad = precheck()
+            return bad if bad is not None else _inner(db)
 
     actor = actor_from_ctx(ctx)
     db = SessionLocal()
@@ -101,8 +135,19 @@ def _read(ctx: Context, tool: str, params: dict, fn) -> dict[str, Any]:
         db.close()
 
 
-def _write(ctx: Context, tool: str, params: dict, fn, *, retryable: bool) -> dict[str, Any]:
-    """写统一入口：复用 tools._write_call（授权 → 审计 → 闸门/业务 → 信封）。"""
+def _write(ctx: Context, tool: str, params: dict, fn, *, retryable: bool,
+           precheck=None) -> dict[str, Any]:
+    """写统一入口：复用 tools._write_call（授权 → 参数校验 → 审计 → 闸门/业务 → 信封）。
+
+    `precheck` 同 `_read`：授权通过后才跑（手册 §4.6）。
+    """
+    if precheck is not None:
+        _inner = fn
+
+        def fn(db, actor):               # noqa: F811  故意遮蔽
+            bad = precheck()
+            return bad if bad is not None else _inner(db, actor)
+
     return _write_call(ctx, tool, params, fn, retryable=retryable)
 
 
@@ -173,8 +218,6 @@ def visit_my_perf(ctx: Context, month: str | None = None,
     from mcp_service import my_ops
 
     params = {"month": month, "view": view}
-    if view not in _MY_PERF_VIEWS:
-        return _bad_view(view, list(_MY_PERF_VIEWS))
     actor = actor_from_ctx(ctx)
 
     def run(db):
@@ -195,7 +238,8 @@ def visit_my_perf(ctx: Context, month: str | None = None,
             return {"ok": True, "data": my_ops.my_daily(db, pc, m2)}
         return {"ok": True, "data": my_ops.my_perf(db, pc, month=month)}
 
-    return _read(ctx, "visit_my_perf", params, run)
+    return _read(ctx, "visit_my_perf", params, run,
+                 precheck=_bad_view_precheck(view, _MY_PERF_VIEWS))
 
 
 # ------------------------------ visit_my_pay ------------------------------
@@ -244,9 +288,11 @@ def visit_my_pay(ctx: Context, month: str | None = None) -> dict[str, Any]:
     from mcp_service import my_ops
 
     params = {"month": month}
-    if month is not None and not re.fullmatch(MONTH_PATTERN, str(month).strip() or ""):
-        return _envelope_error("BAD_MONTH", f"月份格式非法：{month!r}，应为 YYYY-MM",
-                               "月份必须是 YYYY-MM，例如 2026-09")
+    def _month_precheck():
+        if month is not None and not re.fullmatch(MONTH_PATTERN, str(month).strip() or ""):
+            return _envelope_error("BAD_MONTH", f"月份格式非法：{month!r}，应为 YYYY-MM",
+                                   "月份必须是 YYYY-MM，例如 2026-09")
+        return None
     actor = actor_from_ctx(ctx)
 
     def run(db):
@@ -262,7 +308,8 @@ def visit_my_pay(ctx: Context, month: str | None = None) -> dict[str, Any]:
             data = _filter_my_pay(data, m)
         return {"ok": True, "data": data}
 
-    return _read(ctx, "visit_my_pay", params, run)
+    return _read(ctx, "visit_my_pay", params, run,
+                 precheck=_month_precheck)
 
 
 # ===========================================================================
@@ -467,9 +514,6 @@ def visit_overview(ctx: Context, month: str | None = None,
     from mcp_service import capability, read_ops
 
     params = {"month": month, "view": view, "limit": limit}
-    if view not in _OVERVIEW_VIEWS:
-        return _bad_view(view, list(_OVERVIEW_VIEWS))
-
     def run(db):
         if view == "months":
             return read_ops.list_months(db)
@@ -481,7 +525,8 @@ def visit_overview(ctx: Context, month: str | None = None,
             return read_ops.perf_ranking(db, m, limit=limit)
         return _overview_summary(db, m)
 
-    return _read(ctx, "visit_overview", params, run)
+    return _read(ctx, "visit_overview", params, run,
+                 precheck=_bad_view_precheck(view, _OVERVIEW_VIEWS))
 
 
 # ------------------------------ visit_person ------------------------------
@@ -557,9 +602,6 @@ def visit_payroll(ctx: Context, month: str,
     from mcp_service import read_ops, recon_ops
 
     params = {"month": month, "view": view}
-    if view not in _PAYROLL_VIEWS:
-        return _bad_view(view, list(_PAYROLL_VIEWS))
-
     def run(db):
         guards.validate_month(month)
         if view == "rows":
@@ -570,7 +612,8 @@ def visit_payroll(ctx: Context, month: str,
             return data
         return recon_ops._settlement_trace(db, month=month)
 
-    return _read(ctx, "visit_payroll", params, run)
+    return _read(ctx, "visit_payroll", params, run,
+                 precheck=_bad_view_precheck(view, list(_PAYROLL_VIEWS)))
 
 
 # ------------------------------ visit_payroll_export ------------------------------
@@ -653,9 +696,6 @@ def visit_recon(ctx: Context, month: str | None = None,
     from mcp_service import recon_ops
 
     params = {"month": month, "task_id": task_id, "view": view}
-    if view not in _RECON_VIEWS:
-        return _bad_view(view, list(_RECON_VIEWS))
-
     def run(db):
         if view == "status":
             return recon_ops._recon_status(db, month)
@@ -676,7 +716,8 @@ def visit_recon(ctx: Context, month: str | None = None,
             tid = t.id
         return _recon_interpret_read(db, tid)
 
-    return _read(ctx, "visit_recon", params, run)
+    return _read(ctx, "visit_recon", params, run,
+                 precheck=_bad_view_precheck(view, list(_RECON_VIEWS)))
 
 
 # ------------------------------ visit_recon_export ------------------------------
@@ -738,9 +779,6 @@ def visit_files(ctx: Context, view: str = "list",
 
     params = {"view": view, "import_id": import_id, "month": month,
               "kind": kind, "status": status}
-    if view not in _FILES_VIEWS:
-        return _bad_view(view, list(_FILES_VIEWS))
-
     def run(db):
         if view == "layout":
             if import_id is None:
@@ -756,7 +794,8 @@ def visit_files(ctx: Context, view: str = "list",
             return read_ops.list_tasks(db, month=month, kind=kind, status=status)
         return read_ops.file_list(db, month=month)
 
-    return _read(ctx, "visit_files", params, run)
+    return _read(ctx, "visit_files", params, run,
+                 precheck=_bad_view_precheck(view, list(_FILES_VIEWS)))
 
 
 # ------------------------------ visit_rebuild ------------------------------
@@ -771,9 +810,6 @@ def visit_rebuild(ctx: Context, month: str, action: str = "preview",
     from mcp_service import write_tools
 
     params = {"month": month, "action": action, "preview_id": preview_id}
-    if action not in _REBUILD_ACTIONS:
-        return _bad_action(action, list(_REBUILD_ACTIONS))
-
     def run(db, actor):
         if action == "preview":
             return write_tools.rebuild_preview(db, actor, month=month)
@@ -782,6 +818,7 @@ def visit_rebuild(ctx: Context, month: str, action: str = "preview",
                                          confirm_text=confirm_text)
 
     return _write(ctx, "visit_rebuild", params, run,
+                  precheck=_bad_action_precheck(action, list(_REBUILD_ACTIONS)),
                   retryable=(action == "preview"))
 
 
@@ -811,20 +848,21 @@ def visit_staff(ctx: Context, view: str | None = None,
               "status": status}
     if view is None and action is None:
         view = "list"
-    if action is not None and action not in _STAFF_ACTIONS:
-        return _bad_action(action, list(_STAFF_ACTIONS))
-
     if action == "set_status":
         def run(db, actor):
             return misc_ops.staff_set_status(
                 db, actor, user_id=_resolve_user_id(db, username),
                 new_status=status, confirm_text=confirm_text)
-        return _write(ctx, "visit_staff", params, run, retryable=True)
+        return _write(ctx, "visit_staff", params, run, retryable=True,
+                      precheck=_bad_action_precheck(action, list(_STAFF_ACTIONS),
+                                                    allow_none=True))
 
     def run(db):
         return read_ops.staff_list(db, status=status)
 
-    return _read(ctx, "visit_staff", params, run)
+    return _read(ctx, "visit_staff", params, run,
+                 precheck=_bad_action_precheck(action, list(_STAFF_ACTIONS),
+                                               allow_none=True))
 
 
 # ------------------------------ visit_config ------------------------------
@@ -847,21 +885,22 @@ def visit_config(ctx: Context, view: str | None = None,
               "staff_visible_from": staff_visible_from}
     if view is None and action is None:
         view = "get"
-    if action is not None and action not in _CONFIG_ACTIONS:
-        return _bad_action(action, list(_CONFIG_ACTIONS))
-
     if action == "set":
         def run(db, actor):
             return payroll_write_ops.config_set(
                 db, actor, per_point=per_point, bonus_group=bonus_group,
                 bonus_amount=bonus_amount, staff_visible_from=staff_visible_from,
                 confirm_text=confirm_text)
-        return _write(ctx, "visit_config", params, run, retryable=True)
+        return _write(ctx, "visit_config", params, run, retryable=True,
+                      precheck=_bad_action_precheck(action, list(_CONFIG_ACTIONS),
+                                                    allow_none=True))
 
     def run(db):
         return read_ops.config_get(db)
 
-    return _read(ctx, "visit_config", params, run)
+    return _read(ctx, "visit_config", params, run,
+                 precheck=_bad_action_precheck(action, list(_CONFIG_ACTIONS),
+                                               allow_none=True))
 
 
 # ------------------------------ visit_store ------------------------------
@@ -924,50 +963,59 @@ def visit_store(ctx: Context, view: str | None = None,
               "kind": kind, "note": note}
     if view is None and action is None:
         view = "search"
-    if view is not None and view not in _STORE_VIEWS:
-        return _bad_view(view, list(_STORE_VIEWS))
-    if action is not None and action not in _STORE_ACTIONS:
-        return _bad_action(action, list(_STORE_ACTIONS))
-
-    if action == "merge":
-        if pair_id is None or keep is None:
+    def _store_precheck():
+        bad = _bad_view_precheck(view, list(_STORE_VIEWS), allow_none=True)()
+        if bad:
+            return bad
+        bad = _bad_action_precheck(action, list(_STORE_ACTIONS), allow_none=True)()
+        if bad:
+            return bad
+        if action == "merge" and (pair_id is None or keep is None):
             return _envelope_error("BAD_PARAM", "merge 需要 pair_id 与 keep",
                                    "pair_id=候选对 id；keep=候选对中要保留的实体 id"
                                    "（可用 view='pairs' 查看）")
+        if action == "split" and entity_id is None:
+            return _envelope_error("BAD_PARAM", "split 需要 entity_id",
+                                   "entity_id=要拆回自己为主档的实体 id")
+        if action == "skip" and pair_id is None:
+            return _envelope_error("BAD_PARAM", "skip 需要 pair_id",
+                                   "pair_id=候选对 id（可用 view='pairs' 查看）")
+        return None
+
+    if action == "merge":
         def run_merge(db, actor):
             return store_write_ops.merge_pair(db, actor, pair_id=pair_id,
                                               keep=keep, kind=kind, note=note)
-        return _write(ctx, "visit_store", params, run_merge, retryable=False)
+        return _write(ctx, "visit_store", params, run_merge, retryable=False,
+                      precheck=_store_precheck)
 
     if action == "split":
-        if entity_id is None:
-            return _envelope_error("BAD_PARAM", "split 需要 entity_id",
-                                   "entity_id=要拆回自己为主档的实体 id")
         def run_split(db, actor):
             return store_write_ops.split_entity(db, actor, entity_id=entity_id,
                                                 confirm_text=confirm_text)
-        return _write(ctx, "visit_store", params, run_split, retryable=False)
+        return _write(ctx, "visit_store", params, run_split, retryable=False,
+                      precheck=_store_precheck)
 
     if action == "apply":
         def run_apply(db, actor):
             return store_write_ops.apply_all(db, actor, confirm_text=confirm_text,
                                              kind=kind)
-        return _write(ctx, "visit_store", params, run_apply, retryable=False)
+        return _write(ctx, "visit_store", params, run_apply, retryable=False,
+                      precheck=_store_precheck)
 
     if action == "skip":
-        if pair_id is None:
-            return _envelope_error("BAD_PARAM", "skip 需要 pair_id",
-                                   "pair_id=候选对 id（可用 view='pairs' 查看）")
         def run_skip(db, actor):
             return store_write_ops.skip_pair(db, actor, pair_id=pair_id, kind=kind)
-        return _write(ctx, "visit_store", params, run_skip, retryable=False)
+        return _write(ctx, "visit_store", params, run_skip, retryable=False,
+                      precheck=_store_precheck)
 
     def run(db):
         if view == "pairs":
             return _store_pairs(db, kind)
         return read_ops.store_search(db, q or "", limit=limit)
 
-    return _read(ctx, "visit_store", params, run)
+    return _read(ctx, "visit_store", params, run,
+                 precheck=_store_precheck)
 
 
 # ------------------------------ visit_verify ------------------------------
@@ -1191,8 +1239,8 @@ def _annotations(name: str):
 # 口径与 Web 端**同一套服务层**（app/services/bd_tasks.py 等），不另写一套。
 # 详见 docs/任务域-全流程.md；MCP 侧能力层在 mcp_service/task_ops.py。
 
-def _task_write(ctx: Context, tool: str, params: dict, fn):
-    """作业域写工具统一入口（提交/回滚在 fn 里做）。"""
+def _task_write(ctx: Context, tool: str, params: dict, fn, precheck=None):
+    """作业域写工具统一入口（提交/回滚在 fn 里做；`precheck` 透传给 `_write`）。"""
     def _mapped(db, actor):
         from mcp_service import task_ops
         try:
@@ -1206,7 +1254,8 @@ def _task_write(ctx: Context, tool: str, params: dict, fn):
                 return _envelope_error("BAD_PARAM", str(exc),
                                        "请检查参数或权限后重试", retryable=False)
             raise
-    return _write(ctx, tool, params, _mapped, retryable=False)
+    return _write(ctx, tool, params, _mapped, retryable=False,
+                  precheck=precheck)
 
 
 def visit_my_tasks(ctx: Context) -> dict[str, Any]:
@@ -1268,8 +1317,6 @@ def visit_day_report(ctx: Context, person: str, date: str | None = None,
       一次保存（同一事务）；**那天没有自报** → 只能补录点数，带 items 会被拒
       （用户 2026-10-10 口径：管理员可以改自报，但补录只能补点数）。
     """
-    if action not in ("view", "save"):
-        return _bad_action(action, ["view", "save"])
     from mcp_service import task_ops
     params = {"person": person, "date": date, "action": action, "area": area,
               "p1_cnt": p1_cnt, "p2_cnt": p2_cnt, "items": items}
@@ -1277,11 +1324,13 @@ def visit_day_report(ctx: Context, person: str, date: str | None = None,
         def run(db):
             return task_ops.day_report(db, None, person=person, on_date=date,
                                        action="view")
-        return _read(ctx, "visit_day_report", params, run)
+        return _read(ctx, "visit_day_report", params, run,
+                     precheck=_bad_action_precheck(action, ["view", "save"]))
     return _task_write(ctx, "visit_day_report", params,
                        lambda db, actor, ops: ops.day_report(
                            db, actor, person=person, on_date=date, action="save",
-                           area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt, items=items))
+                           area=area, p1_cnt=p1_cnt, p2_cnt=p2_cnt, items=items),
+                       precheck=_bad_action_precheck(action, ["view", "save"]))
 
 
 def visit_team_tasks(ctx: Context, tab: str = "", kw: str = "",

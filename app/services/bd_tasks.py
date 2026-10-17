@@ -2136,14 +2136,23 @@ def task_board(db: Session, team_id: Optional[int] = None, state: str = "",
                      BdTask.id.in_(_has_assignee(db)),
                      BdTask.id.notin_(recent))
     total = q.count()
+    # ⚠️ 页码越界必须**在这里夹取**（2026-10-17 修，§5.2 P1 的真 bug）：
+    #    `paging.info_from()` 只夹**显示用的页码**，而行数据用的 offset 是裸页码算出来的
+    #    → `?page=99` 渲染出「共 1 条 / 第 1 / 1 页」+ **空列表**（实测 total=1、rows=0）。
+    #    夹完把真实页码回给调用方（路由用 `d["page"]`，与 pager 显示同一口径）。
+    per = max(1, int(limit or 1))
+    pages = max(1, (total + per - 1) // per)
+    page = max(1, min(int(offset or 0) // per + 1, pages))
+    offset = (page - 1) * per
     tasks = (q.order_by(BdTask.assign_date.desc().nullslast(),
                         BdTask.id.asc())
-             .limit(limit).offset(offset).all())
+             .limit(per).offset(offset).all())
     rows = _rows(db, tasks)
     if stale_only:
         rows = [r for r in rows if r["stale"]]
-    return {"rows": rows, "total": total, "offset": offset, "limit": limit,
-            "stale_days": stale_days, "tab": tab, "line_id": line_id}
+    return {"rows": rows, "total": total, "offset": offset, "limit": per,
+            "page": page, "stale_days": stale_days, "tab": tab,
+            "line_id": line_id}
 
 
 def team_board_summary(db: Session, stale_days: int = 2) -> List[dict]:

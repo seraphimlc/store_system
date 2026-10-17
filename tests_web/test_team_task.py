@@ -4875,10 +4875,12 @@ def test_logs_page_filters(client, seeded):
     # 日期筛选：未来 → 空
     h3 = client.get("/logs?dfrom=2099-01-01").text
     assert "ターゲット駅" not in h3
-    # 筛选表单存在 + 分页带筛选
-    # ⚠️ 原来写的是 `... and "&kw=" in h or True` —— 恒真；而且日志页**根本没有
-    #    分页条**（`bd_logs.html` 无 pager、路由也没传 `pager/page_qs`），
-    #    `&kw=` 那种"分页保参"链接不可能存在。只断言真正成立的那半。
+    # 筛选表单存在
+    # ⚠️ 原来写的是 `assert 'data-testid="log-filter"' in h and "&kw=" in h or True` ——
+    #    恒真（`and` 优先级高于 `or`，整体被 `or True` 吃掉）。只断言真正成立的那半。
+    #    另注：日志页的分页条是**手写的**（`bd_logs.html` 末尾「上一页/下一页」），
+    #    不走 `_pager.html`；且只在 `page > 1 或满 200 行`时才渲染 → 本用例数据太少，
+    #    分页条压根不出现，`&kw=` 那种"分页保参"链接断言不到（但不是"不可能存在"）。
     assert 'data-testid="log-filter"' in h
     assert 'data-testid="log-kw"' in h and 'data-testid="log-from"' in h
 
@@ -5715,3 +5717,73 @@ def test_create_tasks_never_double_creates_a_physical_station(client):
           .filter(BdStation.place_id == p0).count())
     assert n == 1, "同一物理车站出现了 %d 个任务" % n
     db.close()
+
+
+def test_task_board_clamps_out_of_range_page(client, seeded):
+    """`?page=99` 必须夹到最后一页，不能渲染「共 N 条 + 空列表」。
+
+    ⚠️ 回归（2026-10-17 修，`docs/交接-当前状态.md` §5.2 P1 的真 bug）：
+    `paging.info_from()` 只夹**显示用的页码**，而行数据用的 offset 是由裸页码算出来的
+    → `?page=99` 渲染出「共 1 条 / 第 1 页」+ **空列表**（实测 total=1、rows=0）。
+    修法：在 `bd_tasks.task_board` 里按 total 夹 offset，并把真实页码放进 `d["page"]`
+    （路由本来就写了 `d["page"] if "page" in d else page`，所以 pager 也跟着对了）。
+    """
+    db = appdb.SessionLocal()
+    try:
+        d = bd_tasks.task_board(db, tab=bd_tasks.TAB_ASSIGNED, limit=1,
+                                offset=(99 - 1) * 1)
+    finally:
+        db.close()
+    assert d["total"] >= 1
+    assert d["page"] == d["total"]          # limit=1 → 最后一页的页码 == total
+    assert len(d["rows"]) == 1, "越界页夹到最后一页后必须仍有行，不能是空列表"
+
+    _login(client, "admin")
+    h = client.get("/tasks?tab=assigned&page=99").text
+    assert 'data-testid="task-row"' in h, "越界页渲染出了空表"
+
+
+def test_logs_page_clamps_out_of_range_page(client, seeded):
+    """日志页 `?page=99` 也要夹到最后一页（原来 offset=19600 → 永远空列表）。
+
+    日志页的分页条是**手写**的（`bd_logs.html` 末尾），只在 `page > 1 或满 200 行`时
+    渲染，所以这里先造 201 条日志把分页条逼出来，再验页码被夹、列表非空。
+    """
+    from app.services import bd_log
+    db = appdb.SessionLocal()
+    try:
+        for i in range(201):
+            bd_log.log(db, domain="task", action="create", ref_id=0,
+                       ref_label="探针站%03d" % i, actor="admin")
+        db.commit()
+        total = bd_log.recent_count(db)
+    finally:
+        db.close()
+    assert total >= 201, "前提：日志够 201 条才会渲染分页条"
+    pages = (total + 199) // 200
+
+    _login(client, "admin")
+    r = client.get("/logs?page=99")
+    assert r.status_code == 200
+    assert "还没有日志" not in r.text, "越界页渲染出了空列表"
+    assert ("第 %d 页" % pages) in r.text, "页码没有被夹到最后一页"
+    assert "第 99 页" not in r.text
+
+
+def test_exports_carry_latin1_safe_content_disposition(client, seeded):
+    """导出响应的 `Content-Disposition` 必须「ASCII 名 + RFC 5987 `filename*`」。
+
+    ⚠️ AGENTS.md 已知坑：响应头只能 latin-1，中文/日文文件名走裸 `filename=` 会直接
+    500（`UnicodeEncodeError`）。但全仓 9 处导出里：只有 1 处被测过（`kind` 注入，
+    `test_report_robustness.py`），而"带 `filename*`"这条**零断言** —— 于是
+    `/payroll-settle/export` 成了唯一没走 `filename*` 的漏网写法（2026-10-17 审查发现，
+    已修）。这里补一条覆盖多个导出的运行时断言。
+    """
+    _login(client, "admin")
+    for url in ("/tasks/export", "/stations/export",
+                "/payroll-settle/export?month=2026-08"):
+        r = client.get(url)
+        assert r.status_code == 200, (url, r.status_code)
+        cd = r.headers["content-disposition"]
+        assert "filename*=" in cd, "%s 少了 filename*（真名含中文时会 latin-1 崩）" % url
+        cd.encode("latin-1")        # 头本身必须能编出去（这正是会 500 的那一步）

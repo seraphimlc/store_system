@@ -4,7 +4,8 @@
 临时 SQLite（Base.metadata.create_all）造数据，绝不碰真实库。
 - 能力层（merge_pair / skip_pair / split_entity / apply_all）直接传临时 session
   （f(db, actor, ...) 可复用范式）：正常路径 + 权限/确认语/不存在 的拒绝；
-- 工具信封层用 monkeypatch 把 tools.actor_from_ctx 与 app.db.SessionLocal
+- 工具信封层用 monkeypatch 把 **两处** actor 解析（`mcp_service.tools` 与
+  `mcp_service.scenario_ops`，二者是各自模块里的独立绑定！）与 SessionLocal
   重定向到临时库，断言 ok 信封 / UNAUTHORIZED / FORBIDDEN_TOOL / NOT_FOUND /
   CONFIRM_REQUIRED / INTERNAL_WRITE（retryable=False，禁自动重试）。
 """
@@ -71,6 +72,11 @@ def factory(tmp_path, monkeypatch):
     _seed(s)
     s.close()
     monkeypatch.setattr("app.db.SessionLocal", F)
+    # ⚠️ 2026-10-17：`scenario_ops._read` 用的是**它自己模块里**的 `SessionLocal`
+    #    （`from app.db import SessionLocal` 的独立绑定），只 patch `app.db` 不够 ——
+    #    读路径会连到真实库。以前没暴露：`visit_store(action="bogus")` 的参数校验写在
+    #    授权之前就 return 了，根本没走到 `_read`。
+    monkeypatch.setattr(scenario_ops, "SessionLocal", F)
     yield F
     eng.dispose()
 
@@ -248,6 +254,7 @@ def test_envelope_unauthorized_without_token():
 
 def test_envelope_forbidden_for_read_only_token(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: R)
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: R)
     for call in (
         lambda: scenario_ops.visit_store(fake_ctx(), action="merge",
                                          pair_id=1, keep=1),
@@ -264,6 +271,7 @@ def test_envelope_forbidden_for_read_only_token(factory, monkeypatch):
 
 def test_envelope_merge_pair_ok(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
     got = scenario_ops.visit_store(fake_ctx(), action="merge", pair_id=1,
                                    keep=1, note="信封层")
     assert got["ok"] is True
@@ -276,6 +284,7 @@ def test_envelope_merge_pair_ok(factory, monkeypatch):
 
 def test_envelope_not_found(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
     got = scenario_ops.visit_store(fake_ctx(), action="merge",
                                    pair_id=999, keep=1)
     assert got["ok"] is False
@@ -285,6 +294,7 @@ def test_envelope_not_found(factory, monkeypatch):
 
 def test_envelope_confirm_required(factory, monkeypatch):
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
     got = scenario_ops.visit_store(fake_ctx(), action="split", entity_id=2,
                                    confirm_text="拆吧")
     assert got["ok"] is False
@@ -298,6 +308,7 @@ def test_envelope_confirm_required(factory, monkeypatch):
 def test_bad_action_rejected(factory, monkeypatch):
     """非法 action → BAD_PARAM + 可选值提示。"""
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
     got = scenario_ops.visit_store(fake_ctx(), action="bogus")
     assert got["ok"] is False
     assert got["error"]["code"] == "BAD_PARAM"
@@ -307,6 +318,7 @@ def test_bad_action_rejected(factory, monkeypatch):
 def test_envelope_internal_write_on_unexpected(factory, monkeypatch):
     """合并非幂等 → 意外异常必须 INTERNAL_WRITE（禁自动重试），绝不 INTERNAL。"""
     monkeypatch.setattr("mcp_service.tools.actor_from_ctx", lambda ctx: W)
+    monkeypatch.setattr(scenario_ops, "actor_from_ctx", lambda ctx: W)
 
     def boom(*a, **k):
         raise RuntimeError("boom-db-down")

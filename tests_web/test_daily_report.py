@@ -1215,3 +1215,89 @@ def test_employee_selects_have_filter(client):
     assert js.status_code == 200
     assert "emp-cb-panel" in js.text and "emp-cb-search" in js.text
     assert "emp-cb-native" in js.text            # 原 select 保留为值载体（提交/htmx 不变）
+
+
+# --------------------------------------------------------------------------
+# `daily_report._sync_plan_reported` —— "自报 → 计划表写透"（5 个调用点）
+# ⚠️ 2026-10-17 测试审查：这 5 个调用点此前**全仓零覆盖** —— 把 `_sync_plan_reported`
+#    整个删掉、或把 5 个调用点全删掉，测试**全绿**。而它是用户 2026-10-01 的口径：
+#    "如果员工自报了，可以直接改这个计划表里的状态"，管理端矩阵**只读
+#    `staff_date_plans` 一张表**就能显示 □，不做关联查询 → 一旦不同步，矩阵上
+#    出了勤的人还是空白。下面按 4 个写入口逐条钉住。
+# --------------------------------------------------------------------------
+
+def _rep_user(db, code, name="甲"):
+    """建一个绑定了 person_code 的账号（`submit_report`/`update_today` 要传 user）。"""
+    from app.auth import hash_password
+    from app.models import User
+    u = User(username="rep_" + code, display_name=name, role="staff",
+             is_active=True, status="active", person_code=code,
+             password_hash=hash_password("pw123456"),
+             must_change_password=False)
+    db.add(u)
+    if db.get(Person, code) is None:
+        db.add(Person(code=code, display_name=name))
+    db.commit()
+    return u
+
+
+def _plan_reported(db, code, d):
+    from app.models import StaffDatePlan
+    row = (db.query(StaffDatePlan)
+           .filter(StaffDatePlan.person_code == code,
+                   StaffDatePlan.plan_date == d).first())
+    return None if row is None else bool(row.reported)
+
+
+def test_plan_reported_written_on_staff_submit_and_update(client):
+    """写入口 ①（提交）+ ②（当天修改）：两条都必须把计划表的 □ 写透。
+
+    ② 特意先把 `reported` 掰回 False 再调 `update_today` —— 否则①已经把 □ 打上，
+    ② 就算不写也看不出来（这类"被前一步掩盖"正是原来零覆盖没发现问题的原因）。
+    """
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    try:
+        u = _rep_user(db, "P1")
+        today = daily_report.jst_today()
+        assert _plan_reported(db, "P1", today) is None       # 前提：本来没有计划行
+
+        # ① 提交
+        daily_report.submit_report(db, u, p1_cnt=3, p2_cnt=1)
+        assert _plan_reported(db, "P1", today) is True, "提交自报要把计划表 □ 写透"
+
+        # ② 当天修改（先撤掉 □，确保下面的 True 只能来自 update_today）
+        from app.models import StaffDatePlan
+        row = (db.query(StaffDatePlan)
+               .filter(StaffDatePlan.person_code == "P1",
+                       StaffDatePlan.plan_date == today).first())
+        row.reported = False
+        db.commit()
+        assert _plan_reported(db, "P1", today) is False
+
+        daily_report.update_today(db, u, p1_cnt=5)
+        assert _plan_reported(db, "P1", today) is True, "修改自报也要重新写透 □"
+    finally:
+        db.close()
+
+
+def test_plan_reported_written_and_cleared_by_admin(client):
+    """写入口 ③（管理员补录）+ ④（管理员删除）：补录打 □，删除撤 □。
+
+    ④ 传 `force=True` 绕开"已对账不许删"的锁（正常界面路径不走 force）。
+    """
+    from app.services import daily_report
+    db = appdb.SessionLocal()
+    try:
+        _rep_user(db, "P2", "乙")
+        d = date(2026, 10, 8)
+        assert _plan_reported(db, "P2", d) is None
+
+        daily_report.save_by_admin(db, person_code="P2", report_date=d, p1_cnt=2)
+        assert _plan_reported(db, "P2", d) is True, "管理员补录要打 □"
+
+        daily_report.delete_by_admin(db, person_code="P2", report_date=d,
+                                     force=True)
+        assert _plan_reported(db, "P2", d) is False, "删掉自报要把 □ 撤回"
+    finally:
+        db.close()

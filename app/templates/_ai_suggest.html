@@ -46,7 +46,11 @@
             <input type="hidden" name="back"
                    value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
             <button class="btn" type="submit" data-testid="ai-pick">
-              {{ t('派给') }}{{ g.team_name }}（{{ g.stations|length }}）</button>
+              {# ⚠️ 补「：」：`t('派给')` 的日文生效值是 **`割当先`**（名词"受派人"），全仓 3 处
+                 用它，另两处是 `bd_task_import.html:97` 的 `割当先：X` 与 :137 的表头。
+                 这处原来紧贴队名，日文读成 `割当先TeamA` 很别扭（2026-10-17 测试审查发现）。
+                 不新增 i18n 键，避免又多一个死键。 #}
+              {{ t('派给') }}：{{ g.team_name }}（{{ g.stations|length }}）</button>
           </form>
         </td>
       </tr>
