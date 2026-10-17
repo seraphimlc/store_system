@@ -789,22 +789,43 @@ def set_period_values(db: Session, month: str, person_code: str,
 
 
 def carry_map(db: Session, month: str) -> dict:
-    """该月应结转的「上月未扣完余额」→ {code: [余量点(参考), 余额金额]}。
+    """该月要扣/补的**上期找平** → {code: [余量点(参考), 金额]}（负=扣/正=补）。
 
-    **金额一律取账表** `payroll_adjusts.remaining`（正补/负扣），不取上月行的
-    `prev_adjust_amount` —— 那是生成时的快照，会把已经冲销掉的债务再结转一次
-    （实测 2026-09：链子 −1,889,000 vs 账表 −1,296,500）。
+    金额 = **本月发放里已经实扣的找平** + **仍未回收的余额**，两张账表合成：
+    - 已实扣：`payroll_settlement_links`（按**发放月** `month` 归属，含已结清的那些）；
+    - 未回收：`prior_debt_map()` 读 `payroll_adjusts.remaining`。
+
+    ⚠️⚠️ **2026-10-17 生产事故（钱付错）**：这里原来**只**读余量。可欠款一旦被本月的
+    发放回收，`remaining` 就归 0、status 变 `settled` → **"已经扣掉的那部分"从
+    「应该付金额」里凭空消失**，应付虚增回毛额。实测 2026-10：
+    - 9 月偏差合计 −1,386,250 = 已实扣 **−966,750**（34 人，10-16 登记）
+      + 未回收 **−419,500**；
+    - 绩效页/发薪表「应付」合计显示 **5,891,000**，台账（`payroll_payments`）实付
+      **5,069,250** → **虚增 821,750**；王俊岩 毛额 262,750 − 已扣 3,250
+      = **259,500**，页面却显示 262,750（用户报的就是这个）。
+    - 「照此列发薪即可」——所以这是**会直接导致多付**的 bug，不是单纯显示问题。
+
+    ⚠️ **别改成"只读链子"**（`prev_adjust_amount`，生成时快照，会把已冲销的再算一次：
+    实测 2026-09 链子 −1,889,000 vs 账表 −1,296,500），
+    **也别改回"只读余量"**（就是这次的事故）。
+
     点数只作**参考**（账表是金额口径，没有点数），仍取上月行的
     `diff_points − adjust_points`。
     """
+    from app.models import PayrollSettlementLink
+
     if not month:
         return {}
     pm = _prev_month(month)
     pts = {r.person_code: (r.diff_points or 0) - (r.adjust_points or 0)
            for r in db.query(PayrollPeriodRow).filter(
                PayrollPeriodRow.month == pm).all()}
-    out = {}
-    for code_, amt in prior_debt_map(db, month).items():
-        if amt:
-            out[code_] = [pts.get(code_, 0), amt]
-    return out
+    amt: dict = {}
+    # ① 本月已登记的发放里**实际扣掉/补了**多少（含 remaining 已归零的已结清笔）
+    for lk in db.query(PayrollSettlementLink).filter(
+            PayrollSettlementLink.month == month).all():
+        amt[lk.person_code] = amt.get(lk.person_code, 0) + (lk.amount or 0)
+    # ② 还没被任何发放回收的余量（①和②天然不重叠：①的部分已从 remaining 里扣走）
+    for code_, a in prior_debt_map(db, month).items():
+        amt[code_] = amt.get(code_, 0) + a
+    return {c: [pts.get(c, 0), v] for c, v in amt.items() if v}

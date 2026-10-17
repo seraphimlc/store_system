@@ -365,3 +365,102 @@ def test_carry_comes_from_ledger_not_stale_chain(client):
           .filter_by(source_month="2026-09", person_code="222").one())
     assert a9.remaining == 0 and a9.status == "settled"
     db.close()
+
+
+def test_carry_map_keeps_amount_already_recovered_this_month(client):
+    """🐞 2026-10-17 生产事故回归：**已被本月发放实扣的找平，不能从「应付」里消失**。
+
+    场景照抄王俊岩：9 月偏差 −3,250（账表 `payroll_adjusts`，in_progress）；
+    10 月上半月毛额 262,750；10-16 登记发薪（`record_payment` →
+    `allocate_settlement` 把那笔冲成 settled / remaining=0）。
+
+    - 修前：`carry_map("2026-10")` 只读 `remaining` → 该人直接消失 →
+      绩效页/发薪表「找平 ¥0、应付=毛额 262,750」（虚增）。
+    - 修后：已实扣的 −3,250 仍在 → 应付 **259,500**，与台账
+      （`payroll_payments.amount + adjust_applied`）一致。
+
+    生产实测（2026-10 全部 56 人）：修前应付合计 5,891,000 / 修后 5,069,250
+    = 台账实付，**逐人一致 0 人不符**。
+    """
+    CODE = "2188240645887825"
+    db = appdb.SessionLocal()
+    db.add(Person(code=CODE, display_name="王俊岩"))
+    # 9 月对账偏差（要扣 3,250）
+    db.add(PayrollAdjust(source_month="2026-09", person_code=CODE,
+                         adjust_amount=-3250, settled_amount=0, remaining=-3250,
+                         status="in_progress", updated_at=datetime.utcnow()))
+    # 9 月行（carry 的「余量点数」参考取上月行 diff−adjust）
+    db.add(PayrollPeriodRow(month="2026-09", person_code=CODE,
+                            diff_points=13, adjust_points=13,
+                            diff_amount=-3250, adjust_amount=-3250,
+                            half2_amount=40000, updated_at=datetime.utcnow()))
+    # 10 月上半月：986 点 × 250 + 奖金 16,250 = 262,750
+    db.add(PayrollPeriodRow(month="2026-10", person_code=CODE,
+                            half1_points=986, half1_amount=262750,
+                            half1_bonus=16250, updated_at=datetime.utcnow()))
+    db.commit()
+
+    # ① 登记发薪之前：是"仍未回收的余量"
+    assert period.prior_debt_map(db, "2026-10")[CODE] == -3250
+    assert period.carry_map(db, "2026-10")[CODE][1] == -3250
+
+    # ② 登记 10 月上半月发薪 → 实扣 3,250，9 月那笔被冲成 settled
+    assert period.record_payment(db, "2026-10", CODE, seq=1,
+                                 amount=262750, points=986, bonus=16250) is True
+    pay = db.query(PayrollPayment).filter(
+        PayrollPayment.month == "2026-10",
+        PayrollPayment.person_code == CODE).one()
+    assert pay.adjust_applied == -3250
+    assert db.query(PayrollAdjust).filter(
+        PayrollAdjust.source_month == "2026-09").one().status == "settled"
+
+    # ③ 关键：扣完之后"余量"确实是 0，但**这个月仍必须显示 −3,250**
+    assert period.prior_debt_map(db, "2026-10").get(CODE, 0) == 0
+    cm = period.carry_map(db, "2026-10")
+    assert cm.get(CODE) is not None, \
+        "已被本月发放实扣的找平从 carry_map 消失了 → 应付虚增回毛额（本次事故）"
+    assert cm[CODE][1] == -3250, "应显示本月实际扣掉的 3,250，而不是 0"
+    assert cm[CODE][0] == 0                       # 余量点数只作参考
+
+    # ④ 应付 = 毛额 + 找平 = 台账实付（绩效页/发薪表就是 hamt + carry）
+    assert 262750 + cm[CODE][1] == 259500 == pay.amount + pay.adjust_applied
+    db.close()
+
+
+def test_carry_map_does_not_double_count_partial_recovery(client):
+    """部分回收：已实扣 + 未回收余量 = 原始偏差，**不重复计**（文伊琪型）。
+
+    9 月偏差 −294,000；10 月上半月毛额只有 106,500，被整笔划走 → remaining=−187,500。
+    carry 必须是 **−294,000**（= 已扣 106,500 + 余 187,500），
+    这样 106,500 + (−294,000) < 0 → 该期应付 0、下期继续扣 187,500
+    （与台账 adjust_leftover 一致）。
+    """
+    CODE = "P1"
+    db = appdb.SessionLocal()
+    db.add(Person(code=CODE, display_name="文伊琪"))
+    db.add(PayrollAdjust(source_month="2026-09", person_code=CODE,
+                         adjust_amount=-294000, settled_amount=0,
+                         remaining=-294000, status="in_progress",
+                         updated_at=datetime.utcnow()))
+    db.add(PayrollPeriodRow(month="2026-09", person_code=CODE,
+                            diff_points=0, adjust_points=0,
+                            diff_amount=-294000, adjust_amount=-294000,
+                            updated_at=datetime.utcnow()))
+    db.add(PayrollPeriodRow(month="2026-10", person_code=CODE,
+                            half1_points=426, half1_amount=106500,
+                            updated_at=datetime.utcnow()))
+    db.commit()
+
+    assert period.record_payment(db, "2026-10", CODE, seq=1,
+                                 amount=106500, points=426) is True
+    pay = db.query(PayrollPayment).filter(
+        PayrollPayment.month == "2026-10",
+        PayrollPayment.person_code == CODE).one()
+    assert pay.adjust_applied == -106500
+    assert pay.adjust_leftover == -187500          # 递延到下半月
+    assert period.carry_map(db, "2026-10")[CODE][1] == -294000   # 不重复也不漏
+    # 绩效页/发薪表的算法：毛额 + carry → 负数则该期发 0、余数结转
+    p1 = 106500 + (-294000)
+    assert p1 < 0 and 0 == max(p1, 0)
+    assert -p1 == 187500 == -pay.adjust_leftover
+    db.close()

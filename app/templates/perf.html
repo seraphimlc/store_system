@@ -33,7 +33,7 @@
   <div class="stat-card"><div class="k">{{ t('该期工资合计(円)') }}</div>
     <div class="v">¥{% if h1 %}{{ '{:,}'.format(payroll_total.half1_amt) }}{% else %}{{ '{:,}'.format(payroll_total.half2_amt) }}{% endif %}</div></div>
   {% if h1 %}
-  <div class="stat-card"><div class="k">{{ t('找平金额(上月余量×上月单价)') }}</div>
+  <div class="stat-card"><div class="k">{{ t('找平金额(已实扣+未回收)') }}</div>
     <div class="v" style="color:{% if tcarry >= 0 %}#1a7f37{% else %}#b02a37{% endif %}">¥{{ '{:,}'.format(tcarry) }}</div></div>
   {% else %}
   <div class="stat-card"><div class="k">{{ t('总点数(全月)') }}</div><div class="v">{{ '{:,}'.format(summary.total_points) }}</div></div>
@@ -94,7 +94,7 @@
   </table></div>
   <p class="hint" style="margin-top:.4rem">
     「{{ t('奖金') }}」={{ t('该期点数的奖金（每满') }}{{ bonus_g }}{{ t('点奖') }}{{ bonus_a }}，{{ t('整月滚动、不跨月）') }}；「{{ t('总金额') }}」={{ t('该期点数×单价') }}＋{{ t('奖金') }}；
-    「{{ t('找平金额') }}」={{ t('上月未找平余量') }}<b>{{ t('金额') }}</b>（{{ t('正') }}={{ t('补发/负') }}={{ t('扣回，按金额找平、含奖金差异）') }}；
+    「{{ t('找平金额') }}」={{ t('本期已实扣的找平') }}+{{ t('仍未回收的余额') }}<b>{{ t('金额') }}</b>（{{ t('正') }}={{ t('补发/负') }}={{ t('扣回，按金额找平、含奖金差异）') }}；
     「{{ t('应该付金额') }}」={{ t('总金额') }}＋{{ t('找平金额') }}；<b>{{ t('上半月不够扣的部分转到下半月继续扣') }}</b>（{{ t('该行显示') }}"{{ t('下期继续扣') }}"）——{{ t('照此列发薪即可。') }}
   </p>
 </div>
