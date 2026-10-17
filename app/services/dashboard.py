@@ -7,8 +7,9 @@ from collections import defaultdict
 
 
 def _months(db):
-    from app.models import MonthPerfRecord
-    return sorted({r.month for r in db.query(MonthPerfRecord).all()})
+    """有数据的月份（升序）。⚠️ SQL DISTINCT —— 原来拉全表水合，见 `months.py`。"""
+    from app.services import months as _mo
+    return _mo.perf_months(db)
 
 
 def monthly_series(db):

@@ -134,8 +134,8 @@ def check_all(db: Session) -> dict[str, Any]:
 
     fails = [c for c in checks if c["status"] == "fail"]
     infos = [c for c in checks if c["status"] == "info"]
-    months = sorted({str(r.japan_date)[:7] for r in db.query(FormalRecord).all()
-                     if r.japan_date})
+    from app.services import months as _mo
+    months = _mo.formal_months(db)
     return {
         "ok": not fails,
         "checks": checks,

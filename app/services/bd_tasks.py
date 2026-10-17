@@ -653,19 +653,34 @@ def list_unassigned_places(db: Session, page: int = 1, per: Optional[int] = None
     rows = []
     line_names = {l.id: ("%s %s" % (l.operator_short, l.name))
                   for l in db.query(BdLine).all()}
+    # ⚠️ 2026-10-17 提速：原来**每个车站**在循环里各查 1 条 `bd_station` + 1 条
+    #    `bd_task.id`。导出「未分配」走 `all_rows`（线上 1,569 站）→ 实测
+    #    **1,102 条 SQL / 1.6 秒**（铁律 #5：列表 SQL 要常数条）。
+    #    改两条批量查询，取值口径与原来逐站 `.first()` 完全一致
+    #    （先"seq 非空"，再 seq 升序，每站取第一条）。
+    pids = [pl.id for pl in pg["rows"]]
+    st_by_place = {}
+    if pids:
+        sq = db.query(BdStation).filter(BdStation.place_id.in_(pids))
+        if line_id:
+            sq = sq.filter(BdStation.line_id == line_id)
+        for st in sq.order_by(BdStation.place_id.asc(),
+                              BdStation.seq.is_(None),
+                              BdStation.seq.asc()).all():
+            st_by_place.setdefault(st.place_id, st)
+    has_task = set()
+    if pids:
+        has_task = {pid for (pid,) in db.query(BdTask.place_id)
+                    .filter(BdTask.place_id.in_(pids)).distinct().all() if pid}
     for pl in pg["rows"]:
-        st = (db.query(BdStation)
-              .filter(BdStation.place_id == pl.id,
-                      BdStation.line_id == line_id if line_id else True)
-              .order_by(BdStation.seq.is_(None), BdStation.seq.asc()).first())
+        st = st_by_place.get(pl.id)
         rows.append({"place": pl, "name": pl.name,
                      "lines_text": pl.lines_text, "n_line": pl.n_line,
                      "line_label": (line_names.get(st.line_id, st.line or "")
                                     if st else ""),
                      "seq": (st.seq if st else None),
                      "along_km": (st.along_km if st else None),
-                     "has_task": bool(db.query(BdTask.id)
-                                      .filter(BdTask.place_id == pl.id).first())})
+                     "has_task": pl.id in has_task})
     pg["rows"] = rows
     return pg
 

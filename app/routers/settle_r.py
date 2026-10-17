@@ -120,8 +120,8 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
         monthly[-1]["month"] if monthly else "")
     if not monthly or not D.month_has_metrics(db, _want):
         # 物化缺失（首次/新数据）→ 实时回填并写表
-        from app.models import MonthPerfRecord as _MPR
-        for _mo in sorted({r.month for r in db.query(_MPR).all()}):
+        from app.services import months as _months_svc
+        for _mo in _months_svc.perf_months(db):
             if not D.month_has_metrics(db, _mo):
                 D.sync_dash_metrics(db, _mo)
         monthly = D.monthly_series_from_db(db)
@@ -366,9 +366,11 @@ def perf(request: Request,
     if user is None or user.role != "admin":
         return _denied()
     from app.services import perf
-    months = sorted({(str(r.japan_date or ""))[:7]
-                     for r in db.query(FormalRecord).all()
-                     if r.japan_date})
+    # ⚠️ 这里原来把 formal_records **整表**（7 万行）拉进 Python 只为算月份：
+    #    线上实测 1,766ms / 页（真正的业务逻辑只 24ms）→ 改 SQL DISTINCT，
+    #    口径见 `app/services/months.py`。
+    from app.services import months as _months_svc
+    months = _months_svc.formal_months(db)
     if month not in months:
         month = months[-1] if months else ""
     rows = perf.month_perf(db, month)
@@ -479,9 +481,11 @@ def perf_export(request: Request, user: Optional[User] =
     """导出发薪表 Excel（按期：上半月/下半月 + 日明细）。"""
     if user is None or user.role != "admin":
         return _denied()
-    months = sorted({(str(r.japan_date or ""))[:7]
-                     for r in db.query(FormalRecord).all()
-                     if r.japan_date})
+    # ⚠️ 这里原来把 formal_records **整表**（7 万行）拉进 Python 只为算月份：
+    #    线上实测 1,766ms / 页（真正的业务逻辑只 24ms）→ 改 SQL DISTINCT，
+    #    口径见 `app/services/months.py`。
+    from app.services import months as _months_svc
+    months = _months_svc.formal_months(db)
     if month not in months:
         month = months[-1] if months else ""
     from app.services import report
@@ -806,12 +810,8 @@ def payroll_settle_page(request: Request, user: Optional[User] =
     if user is None or user.role != "admin":
         return _denied()
     from app.services import period as _payroll
-    from app.models import PayrollPeriodRow, PersonDailyStat
-    months = sorted(
-        {(str(r.ref_date or ""))[:7] for r in db.query(PersonDailyStat).all()
-         if r.ref_date and (str(r.ref_date))[:7] >= "2026-07"}
-        | {r.month for r in db.query(PayrollPeriodRow).all()
-           if r.month >= "2026-07"})
+    from app.services import months as _months_svc
+    months = _months_svc.settle_months(db, since="2026-07")
     if month not in months:
         month = months[-1] if months else ""
     rows = _payroll.period_rows(db, month) if month else []

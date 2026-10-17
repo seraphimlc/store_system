@@ -470,7 +470,8 @@ def settlement_status(db: Session, month: str) -> dict[str, Any]:
         return f"{y + 1}-01" if mm == 12 else f"{y}-{mm + 1:02d}"
 
     names = {p.code: p.display_name for p in db.query(Person).all()}
-    months = sorted({r.month for r in db.query(PayrollPeriodRow).all()})
+    from app.services import months as _mo
+    months = _mo.payroll_months(db)
     out = []
     for r in db.query(PayrollPeriodRow).filter(
             PayrollPeriodRow.month == month).order_by(

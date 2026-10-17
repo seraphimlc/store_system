@@ -137,6 +137,7 @@ def build_payroll_workbook(db, month, period="half1"):
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
     from app.services import perf
     from app.services import period as _payroll
 
@@ -146,6 +147,22 @@ def build_payroll_workbook(db, month, period="half1"):
     bold = Font(bold=True)
     wb = Workbook()
     ws1 = wb.active
+    # 列宽**随写随统计**：原来最后用 `ws.columns` 把每个单元格再遍历一遍算宽度
+    # （2.2 万行 × 7 列 + 每人一个 sheet），是导出慢的大头之一。结果一致：
+    # 每列取"最长值 + 2"（`ws.columns` 里没写过的格子算 0，这里同样算 0）。
+    widths_of: list = []
+
+    def _w(ws):
+        d = {}
+        widths_of.append((ws, d))
+        return d
+
+    def _add(ws, w, row):
+        ws.append(row)
+        for i, v in enumerate(row, 1):
+            w[i] = max(w.get(i, 0), len(str(v or "")))
+
+    w1 = _w(ws1)
     # 两期发薪：half1=上半月(20日发)，half2=下半月(次月5日发)
     if period not in ("half1", "half2"):
         period = "half1"
@@ -161,9 +178,9 @@ def build_payroll_workbook(db, month, period="half1"):
     is_h1 = period == "half1"
     ws1.title = ("上半月发薪1-15" if is_h1 else "下半月发薪16-月末") + (
         f"·{month}" if month else "")
-    ws1.append(["员工编号", "姓名", "该期点数", "有效店数", "点数(1点/2点)",
-                "2点成功率", "奖金(円)", "总金额(円)",
-                "找平金额(円)", "应该付金额(円)"])
+    _add(ws1, w1, ["员工编号", "姓名", "该期点数", "有效店数", "点数(1点/2点)",
+                   "2点成功率", "奖金(円)", "总金额(円)",
+                   "找平金额(円)", "应该付金额(円)"])
     for c in range(1, 11):
         ws1.cell(1, c).font = bold
     t_pay = 0
@@ -181,15 +198,15 @@ def build_payroll_workbook(db, month, period="half1"):
         hrate = (hp2 / (hp1 + hp2)) if (hp1 + hp2) else 0.0
         carry, pay = plan.get(r["code"], {"h1": (0, 0), "h2": (0, 0)})[key]
         t_pay += pay
-        ws1.append([r["code"], r["name"], hpts, st[0],
-                    f"{hp1} / {hp2}", round(hrate, 4),
-                    hbonus, hamt, carry, pay])
-    ws1.append([])
-    ws1.append(["合计", "", "", summary["records"],
-                f"{summary['p1']} / {summary['p2']}",
-                round(summary["rate37"], 4), "",
-                sum(h[1 if is_h1 else 4] for h in half_map.values()),
-                sum(p[key][0] for p in plan.values()), t_pay])
+        _add(ws1, w1, [r["code"], r["name"], hpts, st[0],
+                       f"{hp1} / {hp2}", round(hrate, 4),
+                       hbonus, hamt, carry, pay])
+    _add(ws1, w1, [])
+    _add(ws1, w1, ["合计", "", "", summary["records"],
+                   f"{summary['p1']} / {summary['p2']}",
+                   round(summary["rate37"], 4), "",
+                   sum(h[1 if is_h1 else 4] for h in half_map.values()),
+                   sum(p[key][0] for p in plan.values()), t_pay])
     for c in range(1, 11):
         ws1.cell(ws1.max_row, c).font = bold
     # 每人一个 sheet：该员工本期内所有有效巡店记录（逐条，便于对账）
@@ -201,29 +218,33 @@ def build_payroll_workbook(db, month, period="half1"):
         lo, hi = _d(y, m0, 16), _d(y + 1, 1, 1) if m0 == 12 else _d(y, m0 + 1, 1)
     _PERS = {p.code: p.display_name for p in db.query(Person).all()}
     by_person = {}
-    for f, rr in (db.query(FormalRecord, RawRecord)
-                  .join(RawRecord, FormalRecord.raw_record_id == RawRecord.id)
-                  .filter(FormalRecord.japan_date >= lo,
-                          FormalRecord.japan_date < hi).all()):
-        by_person.setdefault(f.person_code, []).append(
-            (f.japan_date, rr.store_name_local_raw or "",
-             rr.modified_raw or "", rr.visible_raw or "",
-             rr.deploy_raw or "", f.points or 0))
+    # ⚠️ 2026-10-17：原来 `db.query(FormalRecord, RawRecord)` 把该期 2.2 万行
+    #    （含 RawRecord 的宽列）全水合成 ORM 对象 → 只取用到的 7 列，数据逐字段一致。
+    for code, jd, store, mod, vis, dep, pts in (
+            db.query(FormalRecord.person_code, FormalRecord.japan_date,
+                     RawRecord.store_name_local_raw, RawRecord.modified_raw,
+                     RawRecord.visible_raw, RawRecord.deploy_raw,
+                     FormalRecord.points)
+            .join(RawRecord, FormalRecord.raw_record_id == RawRecord.id)
+            .filter(FormalRecord.japan_date >= lo,
+                    FormalRecord.japan_date < hi).all()):
+        by_person.setdefault(code, []).append(
+            (jd, store or "", mod or "", vis or "", dep or "", pts or 0))
     for code in sorted(by_person):
         nm = _PERS.get(code, code) or code
         sname = f"{nm}({code})"[:31]
         ws = wb.create_sheet(sname)
-        ws.append(["日期", "店铺名", "巡店时间", "S1(审核状态)", "投放",
-                   "点数", "员工编号"])
+        w = _w(ws)
+        _add(ws, w, ["日期", "店铺名", "巡店时间", "S1(审核状态)", "投放",
+                     "点数", "员工编号"])
         for c in range(1, 8):
             ws.cell(1, c).font = bold
         for rec in sorted(by_person[code], key=lambda x: (x[0], x[2])):
-            ws.append([str(rec[0]), rec[1], rec[2], rec[3], rec[4],
-                       rec[5], code])
-    for ws in wb.worksheets:
-        for col in ws.columns:
-            width = max(len(str(c.value or "")) for c in col) + 2
-            ws.column_dimensions[col[0].column_letter].width = width
+            _add(ws, w, [str(rec[0]), rec[1], rec[2], rec[3], rec[4],
+                         rec[5], code])
+    for ws, w in widths_of:
+        for i in range(1, (max(w) if w else 0) + 1):
+            ws.column_dimensions[get_column_letter(i)].width = w.get(i, 0) + 2
 
     import io
     bio = io.BytesIO()

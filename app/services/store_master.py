@@ -532,8 +532,20 @@ def unmerge_cross_city(db) -> int:
 
 
 def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
-    """全部店铺目录：主档行 + 其下已并入的分身（可展开/解绑）。"""
-    ents = db.query(StoreEntity).order_by(StoreEntity.id).all()
+    """全部店铺目录：主档行 + 其下已并入的分身（可展开/解绑）。
+
+    ⚠️ 2026-10-17 提速（用户："很多页面打开非常慢"）：线上 **82,994 行**，原来
+    `db.query(StoreEntity).all()` 把每行都水合成 ORM 对象 —— 实测 **2.6 秒**，
+    而 SQL 本身只 175ms（时间全花在构造 8 万个对象 + 最后再用 `ws` 无关的排序列宽上）。
+    改成：
+      ① 只取模板真正用到的 7 列（`Row` 照旧按属性访问，模板不用改）；
+      ② 先算结构（谁是谁的主档），**只给当前页**建行 dict。
+    `/stores` 实测 4.0s → ~0.5s。口径不变（主档按 id 升序、分身按 id 升序）。
+    """
+    cols = (StoreEntity.id, StoreEntity.master_id, StoreEntity.name_local,
+            StoreEntity.name_norm, StoreEntity.city, StoreEntity.address_local,
+            StoreEntity.store_id_raw)
+    ents = db.query(*cols).order_by(StoreEntity.id).all()
     by_id = {e.id: e for e in ents}
     root = {}
     for e in ents:
@@ -543,30 +555,31 @@ def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
             seen.add(r.id)
             r = by_id.get(r.master_id) or r
         root[e.id] = r.id
-    masters = {}
+    masters = []          # 自己是根的行（按 id 升序 —— 与原实现同序）
+    children = {}         # 根 id → 它的分身
     for e in ents:
         if root[e.id] == e.id:
-            masters.setdefault(e.id, []).append(e)
+            masters.append(e)
         else:
-            masters.setdefault(root[e.id], []).append(e)
-    rows = []
-    for mid, members in masters.items():
-        members.sort(key=lambda x: x.id)
-        m = by_id[mid]
-        rows.append({"master": m, "children": members[1:]})
+            children.setdefault(root[e.id], []).append(e)
+    pairs = [(m, children.get(m.id, [])) for m in masters]
     if q:
         ql = q.lower()
-        rows = [r for r in rows
-                if ql in r["master"].name_local.lower()
-                or ql in r["master"].name_norm.lower()
-                or ql in (r["master"].city or "").lower()
-                or ql in r["master"].store_id_raw.lower()
-                or any(ql in c.store_id_raw.lower() or ql in (c.name_local or "").lower()
-                       for c in r["children"])]
-    total = len(rows)
+
+        def _hit(m, ch):
+            return (ql in (m.name_local or "").lower()
+                    or ql in (m.name_norm or "").lower()
+                    or ql in (m.city or "").lower()
+                    or ql in (m.store_id_raw or "").lower()
+                    or any(ql in (c.store_id_raw or "").lower()
+                           or ql in (c.name_local or "").lower() for c in ch))
+
+        pairs = [(m, ch) for m, ch in pairs if _hit(m, ch)]
+    total = len(pairs)
     start = (page - 1) * per
-    return {"rows": rows[start:start + per], "total": total,
-            "page": page, "pages": (total + per - 1) // per}
+    return {"rows": [{"master": m, "children": ch}
+                     for m, ch in pairs[start:start + per]],
+            "total": total, "page": page, "pages": (total + per - 1) // per}
 
 
 def auto_handle_exact(db) -> dict:
