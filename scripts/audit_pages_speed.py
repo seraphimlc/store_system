@@ -8,7 +8,13 @@ gzip 的干扰 —— 量的是**应用自己的耗时**，和用户体感同源
     容器内 `docker exec -i deploy-web-1 python - < scripts/audit_pages_speed.py`
     本地   `./.venv/bin/python scripts/audit_pages_speed.py --base https://store.visitworld.me`
 可选环境变量：`USER_NAME` / `USER_PW`（默认 admin/demo123）、`RUNS`（默认 2）、
-`TIMEOUT`（默认 60 秒）、`ONLY`（子串过滤，只跑匹配的页面）。
+`TIMEOUT`（默认 60 秒）、`ONLY`（子串过滤，只跑匹配的页面）、`INCLUDE_WRITE=1`（见下）。
+
+⚠️ **`/perf/export` 有写副作用**：这一页叫"登记发薪"——`register_exported_half` 会把该期
+金额快照写进发放台账（`payroll_payments`）。它是**幂等**的（同 (月,人,期) 不覆盖），
+但"某期第一次导出"这件事一旦被测速替你触发，台账快照就**早于你真正发薪的时刻**落库了。
+所以默认**跳过**它，要测必须显式 `INCLUDE_WRITE=1`（2026-10-17 实测那次是无害的：
+2026-10 期1 台账是 10-16 16:52 登记的，测速没动它）。
 
 ⚠️ 每页跑 `RUNS` 次：**第 1 次和第 2 次都报** —— 差值就是"缓存/预热"的效果
 （如公司分析页命中缓存时第 1 次就该快；AI 生成页第 1 次慢、第 2 次快）。
@@ -30,6 +36,7 @@ USER_PW = os.environ.get("USER_PW", "demo123")
 RUNS = int(os.environ.get("RUNS", "2"))
 TIMEOUT = float(os.environ.get("TIMEOUT", "60"))
 ONLY = os.environ.get("ONLY", "")
+INCLUDE_WRITE = os.environ.get("INCLUDE_WRITE") == "1"
 
 #: 页面清单：路径 → 说明。带 {month} 的用最近有数据的月份。
 MONTH = "2026-10"
@@ -116,8 +123,12 @@ print("登录 %s → cookie %s   （BASE=%s，每页 %d 次）"
       % (USER_NAME, [c.name for c in jar], BASE, RUNS))
 
 rows = []
+skipped = []
 for path, label in PAGES:
     if ONLY and ONLY not in path:
+        continue
+    if "会写" in label and not INCLUDE_WRITE:
+        skipped.append(path)
         continue
     times, status, size, err = [], 0, 0, ""
     for _ in range(RUNS):
@@ -141,5 +152,8 @@ for worst, times, status, size, err, path, label in rows:
     print("%-9.0f %-9.0f %-5s %-8s %s%s%s"
           % (worst, times[0], status or "-", ("%.0fKB" % (size / 1024.0)),
              label, ("  " + path) if path not in ("/",) else " /", flag))
+if skipped:
+    print("\n（跳过有写副作用的页面：%s —— 要测请设 INCLUDE_WRITE=1）"
+          % ", ".join(skipped))
 slow = [r for r in rows if r[0] >= 3000]
 print("\n≥3 秒的页面：%d 个 %s" % (len(slow), [r[5] for r in slow] or "无 ✓"))
