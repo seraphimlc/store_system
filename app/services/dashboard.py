@@ -113,18 +113,33 @@ def top_staff(db, month, n=8):
 
 
 def quality_stats(db, month):
-    """该月数据质量：raw 判定分布（过滤原因）+ 每日覆盖。"""
+    """该月数据质量：raw 判定分布（过滤原因）+ 每日覆盖。
+
+    ⚠️ 2026-10-17 **性能修复（看板 26 秒的元凶）**：原来是
+    `for r in db.query(RawRecord).all()` —— 把**整表所有列**（含 `original_row`
+    那个大 JSON）全部水合进 Python 再按月过滤。线上 5 万行实测 **10.9 秒**，
+    而看板一页要调它多次（`fact_text` 里一次 + `month_payloads` 兜底一次）→
+    整页 **26 秒**。改成 SQL 端过滤 + 分组（只取两列）→ 同一份数据 **~20ms**。
+
+    语义与原实现严格一致：`modified_raw[:7] == month`（等价 `LIKE month%`，
+    NULL 两边都排除）、`clean_status` 为 NULL 记作 `"?"`、
+    `valid_days` = 该月 `clean_status == "valid"` 的不同日期数。
+    """
+    from sqlalchemy import func
+
     from app.models import RawRecord
-    from collections import Counter
-    cnt = Counter()
-    days = set()
-    for r in db.query(RawRecord).all():
-        if (r.modified_raw or "")[:7] != month:
-            continue
-        cnt[r.clean_status or "?"] += 1
-        if r.clean_status == "valid":
-            days.add((r.modified_raw or "")[:10])
-    return {"by_status": dict(cnt), "valid_days": len(days),
+    if not month:
+        return {"by_status": {}, "valid_days": 0, "total": 0}
+    like = month + "%"
+    st = func.coalesce(RawRecord.clean_status, "?")
+    rows = db.query(st, func.count()).filter(
+        RawRecord.modified_raw.like(like)).group_by(st).all()
+    cnt = {str(k): int(v) for k, v in rows}
+    days = db.query(func.count(func.distinct(
+        func.substr(RawRecord.modified_raw, 1, 10)))).filter(
+        RawRecord.clean_status == "valid",
+        RawRecord.modified_raw.like(like)).scalar()
+    return {"by_status": cnt, "valid_days": int(days or 0),
             "total": sum(cnt.values())}
 
 
@@ -209,6 +224,38 @@ def fact_text(db, staff_code=None):
     return "\n".join(lines)
 
 
+# ---------------- 总体分析（全公司）：提示词 + 缓存指纹 ----------------
+
+# ⚠️ **提示词/口径一改就把版本号 +1** → 指纹随之变化 → 旧缓存**自动作废**。
+# 否则上一版提示词生成的（可能是垃圾的）内容会被长期展示：
+# 2026-10-17 就是提示词里 `max_tokens=2500` 太小，模型思考吃光预算、`content` 为空、
+# `finish_reason=length`，`ai_chat` 回退把**没写完的思维链**当答案存进
+# `staff_analyses`，又因指纹命中而永久缓存 → 页面长期显示英文推理稿。
+COMPANY_PROMPT_VERSION = "2026-10-17.2"
+
+COMPANY_PROMPT = (
+    "你是巡店结算系统的经营分析师。下面是各月经营事实数据：\n\n"
+    "{facts}\n"
+    "请用中文输出，精炼要点式（不要段落废话，不要'总体来看/综上所述'等套话，"
+    "每条一句话，关键数字用**加粗**）：\n"
+    "1) **一句话结论**：本期经营总体如何；\n"
+    "2) **变好**（最多3条）：指标、幅度、可能原因；\n"
+    "3) **变差**（最多3条）：指标、幅度、可能原因（如新增店多为1点店/重复巡店过多/"
+    "2点率下滑/奖金口径等，明确数据支持哪个判断）；\n"
+    "4) **建议**（最多3条）：指名到具体指标或人群，说清做什么。\n"
+    "只依据数据判断，原因类表述区分'数据显示'与推断。\n"
+    "⚠️ 只输出上面这四部分结论，**不要输出任何思考过程、推理步骤或英文草稿**。"
+)
+
+
+def company_fingerprint(facts: str) -> str:
+    """总体分析缓存指纹 = **提示词版本 + 事实数据**（任一变化都要重新生成）。"""
+    import hashlib
+    return hashlib.md5(
+        (COMPANY_PROMPT_VERSION + "\n" + (facts or "")).encode("utf-8")
+    ).hexdigest()
+
+
 # ---------------- 员工月度分析（存库） ----------------
 
 def staff_sample_ok(db, code, month) -> bool:
@@ -275,9 +322,14 @@ def ensure_staff_analysis(db, code, month, force=False) -> str:
         "3) **归因判断**：结合数据明确判断主因——是市场/任务量、还是**重复巡店太多**（重复率）、"
         "还是投放质量（2点率）等，一句定论；\n"
         "4) **建议**（最多2条）。\n"
-        "只依据数据判断，不得臆测。")
+        "只依据数据判断，不得臆测。\n"
+        "⚠️ 只输出上面这几部分结论，**不要输出任何思考过程、推理步骤或英文草稿**。")
     try:
-        content = chat(prompt, max_tokens=1800, timeout=240)
+        # ⚠️ 别传 max_tokens=1800：推理模型的思考同样占输出预算，给小了会
+        #    「思考吃满 → content 为空 → finish_reason=length」，旧代码就会回退
+        #    把没写完的思维链当分析存库（2026-10-17 报的"分析是垃圾"）。
+        #    用配置的 AI_MAX_TOKENS，截断由 ai_chat 自动加倍重试 / 抛错。
+        content = chat(prompt, timeout=240)
     except Exception as e:  # noqa: BLE001
         return ""
     if row is None:

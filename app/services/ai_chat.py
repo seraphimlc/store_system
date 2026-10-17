@@ -45,35 +45,58 @@ def chat(prompt: str, timeout: int = 600, retries: int = 1,
          max_tokens: int = None, return_usage: bool = False):
     """调用模型，返回文本；失败自动重试（共 retries+1 次），仍失败抛异常。
 
-    兼容推理型模型：思考很长 → max_tokens 取配置（默认 380000）；
-    思考在 reasoning_content、content 可能为空 → 返回 reasoning_content
-    让调用方用 extract_json 提取。
+    兼容推理型模型：思考可能很长、`content` 可能为空 → 回退取 `reasoning_content`
+    让调用方用 `extract_json` 提取。
+
+    ⚠️ **2026-10-17 修复：截断的输出绝不能被当成答案。**
+    看板「总体分析」原来硬编码 `max_tokens=2500`，而 `deepseek-v4.1-flash`
+    这类推理模型的思考同样占输出预算 → 思考把预算吃光、`content` 为空、
+    `finish_reason="length"`；旧代码见 `content` 为空就回退 `reasoning_content`
+    → **把没写完的思维链当分析返回**，调用方落库并长期缓存，页面上就是
+    半句英文推理稿（用户 2026-10-17 报的"分析的是什么垃圾"）。
+    现在：`finish_reason == "length"` 一律视为**失败** —— 先把预算翻倍重试
+    （上限 4 倍 / 至少 16000），仍截断就抛异常，由调用方显示"生成失败"。
+    只有模型**正常收尾**（`finish_reason == "stop"`）却把答案写在
+    `reasoning_content` 时才回退取它（JSON 提取类调用方依赖这个行为）。
     """
     c = _cfg()
-    if max_tokens is None:
-        max_tokens = c.get("max_tokens") or 8000
+    budget = int(max_tokens or c.get("max_tokens") or 8000)
+    ceiling = max(budget * 4, 16000)
     last = None
-    for i in range(retries + 1):
-        try:
-            with httpx.Client(timeout=timeout, **_client_kwargs()) as _c:
-                r = _c.post(c["base"] + "/chat/completions",
-                            headers={"Authorization": "Bearer " + c["key"]},
-                            json={"model": c["model"],
-                                  "messages": [{"role": "user",
-                                                "content": prompt}],
-                                  "max_tokens": max_tokens})
-            r.raise_for_status()
-            data = r.json()
-            msg = data["choices"][0].get("message", {})
-            content = (msg.get("content") or "").strip()
-            if not content:
-                content = (msg.get("reasoning_content") or "").strip()
-            if return_usage:      # 可选：一并回传 usage（token 留痕用）
-                return content, (data.get("usage") or {})
-            return content
-        except Exception as e:  # noqa: BLE001
-            last = e
-    raise last
+    while True:
+        truncated = False
+        for _ in range(retries + 1):
+            try:
+                with httpx.Client(timeout=timeout, **_client_kwargs()) as _c:
+                    r = _c.post(c["base"] + "/chat/completions",
+                                headers={"Authorization": "Bearer " + c["key"]},
+                                json={"model": c["model"],
+                                      "messages": [{"role": "user",
+                                                    "content": prompt}],
+                                      "max_tokens": budget})
+                r.raise_for_status()
+                data = r.json()
+                ch = (data.get("choices") or [{}])[0]
+                msg = ch.get("message") or {}
+                finish = ch.get("finish_reason")
+                if finish == "length":
+                    truncated = True
+                    last = RuntimeError(
+                        f"AI 输出被截断（max_tokens={budget}）："
+                        f"思考占满预算、答案未产出")
+                    continue
+                content = (msg.get("content") or "").strip()
+                if not content:
+                    content = (msg.get("reasoning_content") or "").strip()
+                if return_usage:      # 可选：一并回传 usage（token 留痕用）
+                    return content, (data.get("usage") or {})
+                return content
+            except Exception as e:  # noqa: BLE001
+                last = e
+        if truncated and budget < ceiling:
+            budget = min(budget * 2, ceiling)
+            continue                   # 放大预算重来
+        raise last if last else RuntimeError("AI 调用失败")
 
 
 def extract_json(text: str):

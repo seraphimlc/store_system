@@ -190,10 +190,11 @@ def dashboard(request: Request, user: Optional[User] = Depends(require_login),
                   }}
     company_analysis_html = ""
     try:
-        import hashlib as _hb
         from app.models import StaffAnalysis as _SA
         _facts = D.fact_text(db, None)
-        _fp = _hb.md5(_facts.encode("utf-8")).hexdigest()
+        # 指纹含**提示词版本**：口径一改旧缓存自动作废
+        # （否则上一版生成的垃圾会被指纹命中、永久展示）
+        _fp = D.company_fingerprint(_facts)
         _row = db.query(_SA).filter(_SA.person_code == "COMPANY",
                                     _SA.month == "ALL").first()
         if _row and _row.fingerprint == _fp and _row.content:
@@ -261,10 +262,9 @@ def dashboard_analysis(request: Request,
         return HTMLResponse(_render_analysis(
             D.ensure_staff_analysis(db, staff,
                                     (D.staff_series(db, staff) or [{}])[-1].get("month", ""))))
-    import hashlib
     from app.models import StaffAnalysis
     facts = D.fact_text(db, None)
-    fp = hashlib.md5(facts.encode("utf-8")).hexdigest()
+    fp = D.company_fingerprint(facts)
     row = db.query(StaffAnalysis).filter(
         StaffAnalysis.person_code == "COMPANY",
         StaffAnalysis.month == "ALL").first()
@@ -272,17 +272,11 @@ def dashboard_analysis(request: Request,
         return HTMLResponse(_render_analysis(row.content, cached=True))
     if not configured():
         return HTMLResponse("<p class='hint'>未配置 AI（.env 的 AI_API_KEY）</p>")
-    prompt = (
-        "你是巡店结算系统的经营分析师。下面是各月经营事实数据：\n\n"
-        + facts +
-        "\n请用中文输出，精炼要点式（不要段落废话，不要'总体来看/综上所述'等套话，每条一句话，关键数字用**加粗**）：\n"
-        "1) **一句话结论**：本期经营总体如何；\n"
-        "2) **变好**（最多3条）：指标、幅度、可能原因；\n"
-        "3) **变差**（最多3条）：指标、幅度、可能原因（如新增店多为1点店/重复巡店过多/2点率下滑/奖金口径等，明确数据支持哪个判断）；\n"
-        "4) **建议**（最多3条）：指名到具体指标或人群，说清做什么。\n"
-        "只依据数据判断，原因类表述区分'数据显示'与推断。")
+    # ⚠️ 别在这里传 max_tokens：推理模型的思考也占输出预算，给小了会
+    #    「思考吃满 → content 为空 → finish_reason=length」→ 拿不到答案。
+    #    用配置的 AI_MAX_TOKENS，并由 ai_chat 自动加倍重试 / 报错。
     try:
-        text = chat(prompt, max_tokens=2500, timeout=240)
+        text = chat(D.COMPANY_PROMPT.format(facts=facts), timeout=240)
     except Exception as e:  # noqa: BLE001
         return HTMLResponse(f"<p class='hint'>AI 分析失败：{type(e).__name__}</p>")
     if row is None:
