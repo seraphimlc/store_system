@@ -87,8 +87,12 @@ class RawRecord(Base):
     submitter_raw = Column(Text, nullable=False, default="")
     submitter_code = Column(String(32), ForeignKey("persons.code"), nullable=True)
     record_id_raw = Column(Text, nullable=False, default="")
-    visible_raw = Column(String(8), nullable=True)      # YES/NO/空
-    deploy_raw = Column(String(8), nullable=True)
+    # ⚠️ 不要改回 String(8)：Visible 列真实值有 "AUDIT_SUCCESS"（13 字符，线上 7.4 万行）
+    # 与 AUDIT_FAILED / NOT_REQUEST。线上 PG 这两列**本来就是 text**（历史库不是按迁移建的）
+    # 所以一直没暴露；但按迁移新建的库会得到 varchar(8) → 一导入就整批失败/截断
+    # （2026-10-17 修，迁移 e4f5a6b7c8d9）。deploy 同列宽风险，一并 Text。
+    visible_raw = Column(Text, nullable=True)           # YES/NO/空/AUDIT_SUCCESS/…
+    deploy_raw = Column(Text, nullable=True)            # YES/NO/空
     original_row = Column(JSON, nullable=False, default=list)
     # 追溯主锚（由全局去重回填）：判定状态 + 被哪条有效记录挤掉
     clean_status = Column(String(16), nullable=True)

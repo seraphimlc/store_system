@@ -137,6 +137,45 @@ def test_alembic_has_single_head():
     assert len(heads) == 1, "存在多个 head：%s" % heads
 
 
+def test_raw_visible_columns_accept_audit_success(tmp_path):
+    """`raw_records.visible_raw`/`deploy_raw` 必须装得下 `AUDIT_SUCCESS`（13 字符）。
+
+    为什么单独守：**线上这两列本来就是 `text`**（历史库不是按迁移建的），所以
+    ORM 里写 `String(8)` 一直没暴露；可**按迁移新建的库**会得到 `varchar(8)` →
+    一导入就整批失败（PG 报 value too long，MySQL 严格模式报 Data too long，
+    或被静默截断）。本地 MySQL、灾难重建、新机都会踩。2026-10-17 修：统一 `Text`。
+    """
+    from sqlalchemy import create_engine, inspect
+
+    from app.db import Base
+    import app.models  # noqa: F401
+
+    cols = ("visible_raw", "deploy_raw")
+    # ① ORM 侧：不能带长度上限（SQLite 不强制长度，所以这条查的是类型声明本身）
+    for c in cols:
+        ty = Base.metadata.tables["raw_records"].columns[c].type
+        assert getattr(ty, "length", None) is None, \
+            "%s 在 ORM 里有长度上限 %s：Visible 真实值有 13 字符的 AUDIT_SUCCESS" % (c, ty)
+    # ② 迁移侧：真建一遍库，读出来的列类型必须不带长度
+    db = str(tmp_path / "rawlen.db")
+    r = _alembic(db, "upgrade", "head")
+    assert r.returncode == 0, r.stderr[-2000:]
+    insp = inspect(create_engine("sqlite:///%s" % db))
+    got = {x["name"]: str(x["type"]).upper() for x in insp.get_columns("raw_records")}
+    for c in cols:
+        assert "(" not in got[c], "迁移建的 %s 还带长度上限：%s" % (c, got[c])
+        assert got[c] == "TEXT", (c, got[c])
+    # ③ 真插一行 13 字符（挡"列被改名/删掉"这类事故）
+    con = sqlite3.connect(db)
+    con.execute("insert into raw_records (import_id, sheet_name, excel_row, store_id_raw,"
+                " store_name_local_raw, store_name_en_raw, modified_raw, submitter_raw,"
+                " record_id_raw, visible_raw, deploy_raw, original_row, created_at)"
+                " values (1,'s',1,'1','n','','2026-09-01 10:00:00','p','','AUDIT_SUCCESS',"
+                " 'NO','[]','2026-09-01 10:00:00')")
+    con.commit()
+    con.close()
+
+
 def test_migration_schema_matches_orm(tmp_path):
     """迁移建出的表结构必须与 ORM 一致：表集 / 列名 / 可空性 / 唯一性 / 索引覆盖。
 

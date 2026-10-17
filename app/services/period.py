@@ -27,9 +27,19 @@ def _prev_month(month: str) -> str:
 def prior_debt_map(db: Session, month: str) -> dict:
     """`month` **之前各月仍未结清**的找平余额 → {person_code: 金额(负=欠/正=补)}。
 
-    **"该扣多少"的唯一权威来源**：找平表 `payroll_adjusts.remaining`，由
-    `allocate_settlement` 按 FIFO 逐笔冲销维护（`sync_adjusts` 只重写
-    adjust_amount/settled/remaining，不会被结转链污染）。
+    ⚠️ **这是「还欠多少」，不是「这个月要扣多少」**（两个数，混了就是钱付错）：
+
+    - **「还欠多少」= 本函数**（唯一权威）：找平表 `payroll_adjusts.remaining`，由
+      `allocate_settlement` 按 FIFO 逐笔冲销维护（`sync_adjusts` 只重写
+      adjust_amount/settled/remaining，不会被结转链污染）。**登记发薪扣钱用它**
+      （`record_payment`）—— 欠款可能在某人某月没有工资行，只读"上月找平行"会丢债务。
+    - **「该月要扣/补多少」= `carry_map()`** = `payroll_settlement_links`（本月**已实扣**）
+      **+** 本函数（仍未回收）。**绩效页 / 发薪表导出用它**。
+      ⚠️ 这两处若只读本函数，就会漏掉"本月已经扣掉的那部分"：欠款一旦被本月发放回收，
+      `remaining` 就归 0/settled → 已扣部分从「应付」里消失、应付虚增回毛额。
+      实测（2026-10-17 生产）：9 月偏差 −1,386,250 = 已实扣 −966,750 + 未回收 −419,500；
+      只读本函数时页面/导出应付显示 5,891,000，台账实付 5,069,250 → **虚增 821,750**
+      （王俊岩 262,750 应显 259,500）。
 
     ⚠️ **别拿 `payroll_period_rows.prev_adjust_amount`（下称"链子"）当权威**：
     链子是**生成那一刻的快照**，只算"当月 diff + 未发薪期的可吸收额度"，

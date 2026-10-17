@@ -1412,14 +1412,20 @@ def review_label(status: Optional[str]) -> str:
 def settled_reviews(db: Session, *, date_from: Optional[date] = None,
                     date_to: Optional[date] = None,
                     team_id: Optional[int] = None,
-                    limit: int = 500) -> dict:
+                    page: int = 1, per: int = 100) -> dict:
     """**队长已确认/调整过的进展**清单（管理员批量驳回用，用户 2026-10-07）。
 
     行 = 一条 `bd_task_progress`（队长处理过的），**不是任务** —— 管理员要驳回的对象是
     "这个队长确认了这条进展"，不是"这个任务"。
 
+    **分页**（用户 2026-10-17："进展复核页面你不能做个分页查询吗"）：原来 `limit(500)`
+    硬砍，`more=True` 时页面只说"请缩小日期范围" —— 超过 500 条的老进展**根本看不到、
+    也没法驳回**。现在走全站唯一分页实现 `paging.paginate()`（SQL 层 limit/offset +
+    一次 COUNT），能一直翻到最早一条；`more` 保留为新语义（还有下一页）。
+
     列表 SQL **常数条**（铁律 5）：任务/队/站点名/人名各一次批量查询，循环里不查库。
     """
+    from app.services import paging
     q = (db.query(BdTaskProgress, BdTask)
          .join(BdTask, BdTask.id == BdTaskProgress.task_id)
          .filter(BdTaskProgress.review_status.in_(REVIEW_SETTLED)))
@@ -1429,13 +1435,15 @@ def settled_reviews(db: Session, *, date_from: Optional[date] = None,
         q = q.filter(BdTaskProgress.progress_date <= date_to)
     if team_id:
         q = q.filter(BdTask.team_id == int(team_id))
-    rows = (q.order_by(BdTaskProgress.progress_date.desc(),
-                       BdTaskProgress.id.desc()).limit(limit + 1).all())
-    more = len(rows) > limit
-    rows = rows[:limit]
+    pg = paging.paginate(q.order_by(BdTaskProgress.progress_date.desc(),
+                                    BdTaskProgress.id.desc()),
+                         page=page, per=per)
+    rows = pg["rows"]
+    pg["more"] = pg["has_next"]
     if not rows:
-        return {"rows": [], "more": False, "limit": limit,
-                "n_confirmed": 0, "n_adjusted": 0, "n_no_origin": 0}
+        pg["rows"] = []
+        pg.update({"n_confirmed": 0, "n_adjusted": 0, "n_no_origin": 0})
+        return pg
 
     pids = [t.place_id for _pr, t in rows if t.place_id]
     sids = [t.station_id for _pr, t in rows if t.station_id]
@@ -1476,8 +1484,9 @@ def settled_reviews(db: Session, *, date_from: Optional[date] = None,
             "reviewer": disp.get((pr.reviewed_by or "").strip(), pr.reviewed_by or ""),
             "task_pct": t.pct, "task_state": t.state,
         })
-    return {"rows": out, "more": more, "limit": limit,
-            "n_confirmed": n_conf, "n_adjusted": n_adj, "n_no_origin": n_no}
+    pg["rows"] = out
+    pg.update({"n_confirmed": n_conf, "n_adjusted": n_adj, "n_no_origin": n_no})
+    return pg
 
 
 def reject_reviews_many(db: Session, progress_ids: Sequence[int], *, by: str = "",

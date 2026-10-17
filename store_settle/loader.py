@@ -49,20 +49,6 @@ _OPTIONAL_MAP = {
 }
 
 
-def _norm_visible(v: str, vm: Optional[dict] = None):
-    """Visible 值规范化（布局 value_map 驱动，不写死业务口径）：
-    - 有 vm：candidate→保留 YES/NO 原样（其它候选值归 YES），blank→""；
-      不在 vm 的值→""（空白，不猜测）并可在页面纠正；
-    - 无 vm（规则兜底）：非空→YES、空→""（最小假设：非空白即候选）。
-    """
-    if vm is None:
-        return "YES" if v else ""
-    tag = vm.get(v)
-    if tag == "candidate":
-        return v if v in ("YES", "NO") else "YES"
-    return ""          # blank / 未知值 → 空白
-
-
 def _norm_deploy(v: str, vm: Optional[dict] = None):
     """Deploy 值规范化（value_map 驱动）：点>=2→YES(2点)、==1→NO(1点)、0/未知→""(1点)。"""
     if vm is None:
@@ -215,7 +201,6 @@ def _parse_sheet(ws, filename: str, import_id: int, res: LoadResult,
     _ol = override_layout or (None, {}, {})
     hr_override, col_override = _ol[0], _ol[1]
     _vm = _ol[2] if len(_ol) > 2 else {}
-    vm_visible = _vm.get("visible") if isinstance(_vm, dict) else None
     vm_deploy = _vm.get("deploy") if isinstance(_vm, dict) else None
     # 找表头行：AI 给了就用 AI 的；否则规则前 3 行找 'Store ID'
     if hr_override is not None:

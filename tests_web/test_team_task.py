@@ -5402,6 +5402,50 @@ def test_reviews_page_lists_and_filters(client, seeded):
     assert 'data-testid="reviews-empty"' in h3
 
 
+def test_settled_reviews_paginates_and_sees_every_row(seeded):
+    """分页：不再「只给最近 500 条」—— 翻页能翻到最早一条（用户 2026-10-17 要求）。"""
+    import datetime as _dt
+    db = appdb.SessionLocal()
+    tid = seeded["task"]
+    day = bd_tasks._today()
+    ids = [_mk_review(db, tid, day - _dt.timedelta(days=i), 10 * i, 10 * i,
+                      "confirmed").id for i in range(5)]
+    v1 = bd_tasks.settled_reviews(db, page=1, per=2)
+    assert (v1["total"], v1["pages"], v1["page"]) == (5, 3, 1)
+    assert len(v1["rows"]) == 2 and v1["has_next"] is True and v1["more"] is True
+    # 三页合起来 = 全部 5 条且不重不漏（"翻不到某条"这种 bug 就靠这个抓）
+    got = []
+    for p in (1, 2, 3):
+        got += [r["progress_id"] for r in
+                bd_tasks.settled_reviews(db, page=p, per=2)["rows"]]
+    assert sorted(got) == sorted(ids), (got, ids)
+    # 越界夹到最后一页（不是空白页）
+    v9 = bd_tasks.settled_reviews(db, page=99, per=2)
+    assert v9["page"] == 3 and len(v9["rows"]) == 1 and v9["has_next"] is False
+    # 单页时也能拿到总数（页面文案「共 N 条」不再等于当页行数）
+    v0 = bd_tasks.settled_reviews(db, per=100)
+    assert v0["total"] == 5 and len(v0["rows"]) == 5
+    db.close()
+
+
+def test_reviews_page_count_is_total_and_has_pager(client, seeded):
+    """页面「共 N 条」= 库里的总数（不是当页行数），并渲染统一分页条。"""
+    import datetime as _dt
+    db = appdb.SessionLocal()
+    day = bd_tasks._today()
+    for i in range(3):
+        _mk_review(db, seeded["task"], day - _dt.timedelta(days=i), 5 * i, 5 * i,
+                   "confirmed")
+    db.close()
+    _login(client, "admin")
+    h = client.get("/tasks/reviews?date_from=%s&date_to=%s"
+                   % (day.isoformat(), day.isoformat())).text
+    assert 'data-testid="reviews-count">1<' in h, "默认窗口内只有 1 条"
+    h2 = client.get("/tasks/reviews?date_from=2020-01-01&date_to=2099-12-31").text
+    assert 'data-testid="reviews-count">3<' in h2, "总数来自 COUNT，不是当页行数"
+    assert 'data-testid="pager-total"' in h2 or 'data-testid="pager"' in h2
+
+
 def test_reviews_reject_post_requires_admin_and_csrf(client, seeded):
     """批量驳回是管理员的动作（队长不行），且要 CSRF。"""
     db = appdb.SessionLocal()

@@ -26,12 +26,12 @@
 </form>
 
 <p class="hint" style="margin:.5rem 0">
-  {{ t('共') }} <b data-testid="reviews-count">{{ v.rows|length }}</b> {{ t('条') }}
+  {{ t('共') }} <b data-testid="reviews-count">{{ v.total }}</b> {{ t('条') }}
   （{{ t('已确认') }} {{ v.n_confirmed }} ｜ {{ t('已调整') }} {{ v.n_adjusted }}
   {% if v.n_no_origin %}｜ <span class="warnk">{{ t('其中') }} {{ v.n_no_origin }}
   {{ t('条没有队员原值（队长直接填），请填「没有队员原值的退回 X%」') }}</span>{% endif %}）
-  {% if v.more %}<span class="warnk">（{{ t('只显示最近') }} {{ v.limit }} {{ t('条') }}{{ t('，请缩小日期范围') }}）</span>{% endif %}
 </p>
+{% include "_pager.html" %}
 
 {% if v.rows %}
 <form method="post" action="/tasks/reviews/reject" id="bulk-reject-form" data-testid="bulk-reject-form">
@@ -40,6 +40,7 @@
   <input type="hidden" name="date_from" value="{{ date_from.isoformat() }}">
   <input type="hidden" name="date_to" value="{{ date_to.isoformat() }}">
   <input type="hidden" name="team_id" value="{{ team_id or '' }}">
+  <input type="hidden" name="page" value="{{ v.page }}">
 
   <div class="card" style="padding:.6rem 1rem;margin-bottom:.6rem;display:flex;gap:1rem;align-items:end;flex-wrap:wrap">
     <label class="f" style="max-width:12rem">{{ t('统一退回到') }} %

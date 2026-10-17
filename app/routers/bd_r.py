@@ -1007,27 +1007,32 @@ def _parse_date(v: str):
 @router.get("/tasks/reviews", response_class=HTMLResponse)
 def task_reviews_page(request: Request, user: Optional[User] = Depends(require_login),
                       db: Session = Depends(get_db), date_from: str = "",
-                      date_to: str = "", team_id: str = "",
+                      date_to: str = "", team_id: str = "", page: str = "",
                       msg: str = "", err: str = ""):
     """**进展复核**（管理员）：队长已确认/调整过的进展 → 可批量驳回。
 
     用户 2026-10-07："管理员批量驳回队长确认过的任务进展。"
     驳回 = 退回**员工上报的原值** + 状态回到**待确认**（队长重新看）。
+    用户 2026-10-17："这个页面不能做个分页查询吗" → `page` 翻页
+    （`settled_reviews` 里 `COUNT` 出总数 + `OFFSET/LIMIT` 取当页，不再只给最近 500 条）。
     """
     g = _admin_guard(user)
     if g:
         return g
     from datetime import timedelta
 
-    from app.services import bd_tasks, bd_teams
+    from app.services import bd_tasks, bd_teams, paging
     today = bd_tasks._today()
     d_to = _parse_date(date_to) or today
     d_from = _parse_date(date_from) or (d_to - timedelta(days=2))
     tid = int(team_id) if str(team_id).strip().isdigit() else None
-    v = bd_tasks.settled_reviews(db, date_from=d_from, date_to=d_to, team_id=tid)
+    pg = int(page) if str(page).strip().isdigit() else 1
+    v = bd_tasks.settled_reviews(db, date_from=d_from, date_to=d_to,
+                                 team_id=tid, page=pg)
     return templates.TemplateResponse("bd_reviews.html", {
         "request": request, "current_user": user, "v": v, "today": today,
         "date_from": d_from, "date_to": d_to, "team_id": tid,
+        "pager": v, "page_qs": paging.qs(request.query_params),
         "teams": bd_teams.team_options(db), "msg": msg, "err": err,
     })
 
@@ -1038,13 +1043,15 @@ def task_reviews_reject(request: Request,
                         force_pct: str = Form(""), no_origin_pct: str = Form(""),
                         note: str = Form(""),
                         date_from: str = Form(""), date_to: str = Form(""),
-                        team_id: str = Form(""), csrf_token: str = Form(""),
+                        team_id: str = Form(""), page: str = Form(""),
+                        csrf_token: str = Form(""),
                         user: Optional[User] = Depends(require_login),
                         db: Session = Depends(get_db)):
     """**批量驳回**队长已确认/调整过的进展（管理员）。
 
     `force_pct` 对所有行生效；`no_origin_pct` **只**对"队长直接填、没有队员原值"的行生效
     （两种行混一批时互不覆盖 —— 用户 2026-10-07）。
+    回跳带上 `page`，否则在第 3 页驳回后会跳回第 1 页（用户 2026-10-17 加分页时一并处理）。
     """
     g = _admin_guard(user)
     if g:
@@ -1055,7 +1062,8 @@ def task_reviews_reject(request: Request,
     qs = "&".join(x for x in (
         "date_from=%s" % (_parse_date(date_from) or "") if date_from else "",
         "date_to=%s" % (_parse_date(date_to) or "") if date_to else "",
-        "team_id=%s" % team_id if team_id else "") if x)
+        "team_id=%s" % team_id if team_id else "",
+        "page=%s" % page if page and page != "1" else "") if x)
     if qs:
         back += "?" + qs
     ids = [int(x) for x in (progress_id or [])]
