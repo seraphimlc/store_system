@@ -14,11 +14,15 @@
               `APPLY=1 python scripts/bd_recount_line_stations.py`（写）
 """
 import os
+import sys
 
-from sqlalchemy import text
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)          # 容器内 `python scripts/x.py` 时 sys.path[0] 是 scripts/
 
-from app.db import SessionLocal
-from app.services import bd_lines
+from sqlalchemy import text       # noqa: E402
+
+from app.db import SessionLocal       # noqa: E402
+from app.services import bd_lines     # noqa: E402
 
 APPLY = os.environ.get("APPLY") == "1"
 DRIFT = """SELECT l.id, l.operator_short, l.name, l.n_station,
