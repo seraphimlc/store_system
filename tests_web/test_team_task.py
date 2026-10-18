@@ -6022,3 +6022,105 @@ def test_service_layer_denies_cross_team_reject(seeded):
         assert r["pct"] == 50
     finally:
         db.close()
+
+
+# ---------------- 发消息：收件人只含在职（用户 2026-10-18） ----------------
+
+def test_msg_candidates_exclude_resigned_and_no_account(client, seeded):
+    """发消息的候选池**只列在职**：离职 / 停用 / 没账号的一律不出现。
+
+    用户 2026-10-18："发给指定的人，把离职的过滤掉"。
+    原来管理员这条路是 `db.query(Person)`（**全部人**）—— 离职的、连账号都没有的都列进
+    表格，勾上还真能发出去（`recipients_for` 当时对管理员 pick 不做校验）。
+    """
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    try:
+        # 造一个离职的人（有账号）+ 一个连账号都没有的人
+        db.add(Person(code="P_GONE", display_name="离职的"))
+        db.add(User(username="gone", password_hash=hash_password(ADMIN_PW),
+                    display_name="离职的", role="staff", person_code="P_GONE",
+                    is_active=False, status="resigned"))
+        db.add(Person(code="P_NOACC", display_name="没账号的"))
+        db.commit()
+        admin = db.query(User).filter(User.username == "admin").first()
+        codes = {c["code"] for c in bd_msg.candidates(db, admin)}
+        assert "P_GONE" not in codes, "离职的人还出现在候选池里"
+        assert "P_NOACC" not in codes, "没有账号的人不该出现在候选池里（收不到站内信）"
+        assert "P1" in codes and "P2" in codes, "在职的人被误删了：%s" % codes
+    finally:
+        db.close()
+
+
+def test_msg_pick_rejects_resigned(seeded):
+    """就算绕过页面直接 POST 离职人员的编号，服务层也必须拒收（不只靠界面过滤）。"""
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    try:
+        db.add(Person(code="P_GONE2", display_name="又一个人"))
+        db.add(User(username="gone2", password_hash=hash_password(ADMIN_PW),
+                    display_name="又一个人", role="staff", person_code="P_GONE2",
+                    is_active=False, status="resigned"))
+        db.commit()
+        admin = db.query(User).filter(User.username == "admin").first()
+        with pytest.raises(bd_msg.MsgError) as e:
+            bd_msg.recipients_for(db, admin, mode="pick", codes=["P_GONE2"])
+        assert "不在职" in str(e.value), str(e.value)
+        # 在职的人照常
+        assert bd_msg.recipients_for(db, admin, mode="pick", codes=["P1"]) == ["P1"]
+    finally:
+        db.close()
+
+
+def test_msg_pick_all_equals_mode_all(client, seeded):
+    """「表格里全选」与「发给全体在岗员工」必须是**完全同一批人**。
+
+    用户 2026-10-18 问："如果发给全部在职，是不是下边的表格里把人都全选就行了" —— 是，
+    所以两条路在服务层共用 `receivable_map()`，不许各自一套 SQL（否则早晚分叉：
+    比如某天给 `all` 加了过滤却忘了给候选池加，全选就会多发/少发）。
+    """
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    try:
+        db.add(Person(code="P_GONE3", display_name="第三个"))
+        db.add(User(username="gone3", password_hash=hash_password(ADMIN_PW),
+                    display_name="第三个", role="staff", person_code="P_GONE3",
+                    is_active=False, status="resigned"))
+        # ⚠️ 必须同时有**请假**的人：`RECIPIENT_STATUSES = (active, leave)`，
+        # 若只造 active，则"只查 active"的错误实现也能通过 → 这条守门测试就白写了
+        # （变异验证时真踩到过：③「all 只查 active」没被抓到）。
+        db.add(Person(code="P_LEAVE3", display_name="请假的"))
+        db.add(User(username="leave3", password_hash=hash_password(ADMIN_PW),
+                    display_name="请假的", role="staff", person_code="P_LEAVE3",
+                    is_active=True, status="leave"))
+        db.commit()
+        admin = db.query(User).filter(User.username == "admin").first()
+        cand = {c["code"] for c in bd_msg.candidates(db, admin)}
+        as_pick = set(bd_msg.recipients_for(db, admin, mode="pick",
+                                            codes=sorted(cand)))
+        as_all = set(bd_msg.recipients_for(db, admin, mode="all"))
+        assert cand == as_pick == as_all, (len(cand), len(as_pick), len(as_all))
+        assert "P_GONE3" not in as_all
+        assert "P_LEAVE3" in as_all, "请假的仍是在职，必须能收到消息"
+    finally:
+        db.close()
+
+
+def test_msg_page_has_pick_all(client, seeded):
+    """页面要有「全选 / 清空 / 已选 N 人」控件，且候选行只出现在职的人。"""
+    _login(client, "admin")
+    db = appdb.SessionLocal()
+    try:
+        db.add(Person(code="P_GONE4", display_name="第四个"))
+        db.add(User(username="gone4", password_hash=hash_password(ADMIN_PW),
+                    display_name="第四个", role="staff", person_code="P_GONE4",
+                    is_active=False, status="resigned"))
+        db.commit()
+    finally:
+        db.close()
+    h = client.get("/messages?tab=new").text
+    assert 'data-testid="msg-pick-all"' in h, "没有全选按钮"
+    assert 'data-testid="msg-pick-none"' in h, "没有清空按钮"
+    assert 'data-testid="msg-pick-count"' in h, "没有已选计数"
+    assert 'data-testid="msg-person-P_GONE4"' not in h, "离职的人还渲染在收件人表格里"
+    assert 'data-testid="msg-person-P1"' in h, "在职的人没渲染出来"

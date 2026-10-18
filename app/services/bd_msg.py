@@ -29,6 +29,26 @@ class MsgError(Exception):
 
 # ---------------- 收件人范围（数据隔离唯一入口） ----------------
 
+#: **能收到消息的人 = 在职（在岗 / 请假）**（用户 2026-10-18："发给指定的人，
+#: 把离职的过滤掉"）。`disabled`（停用）账号不能登录，发过去也没人看 → 一并排除。
+#: ⚠️ 这是「发消息」的收件范围，**不是**删除员工：人还在、历史与核算数据都在，
+#: 只是不再出现在收件人候选里。唯一实现，别在模板/路由里再写一遍。
+RECIPIENT_STATUSES = ("active", "leave")
+
+
+def receivable_map(db: Session, codes: Optional[Sequence[str]] = None) -> dict:
+    """`{person_code: status}` —— 只回「在职」的人（`RECIPIENT_STATUSES`）。
+
+    没建账号的人**不在信使系统里**（收不到站内消息），这里也不回。
+    """
+    q = (db.query(User.person_code, User.status)
+         .filter(User.person_code.isnot(None),
+                 User.status.in_(RECIPIENT_STATUSES)))
+    if codes:
+        q = q.filter(User.person_code.in_(list(codes)))
+    return {c: (s or "active") for c, s in q.all() if c}
+
+
 def recipients_for(db: Session, user, mode: str = "pick",
                    codes: Optional[Sequence[str]] = None,
                    team_id: Optional[int] = None) -> List[str]:
@@ -51,10 +71,10 @@ def recipients_for(db: Session, user, mode: str = "pick",
             if not codes:
                 raise MsgError("你不是任何队的队长，没有可发送的队员")
             return codes[:MAX_RECIPIENTS]
-        rows = (db.query(User.person_code)
-                .filter(User.person_code.isnot(None),
-                        User.status.in_(("active", "leave"))).all())
-        out = sorted({c for (c,) in rows if c})
+        # 与 `candidates()` / `pick` 分支**同一个集合**（`receivable_map`）——
+        # 用户 2026-10-18 问："发给全部在职，是不是把表格里的人都全选就行了" →
+        # 是，所以两条路必须严格等价（这里若各写一套查询，早晚分叉）。
+        out = sorted(receivable_map(db))
         if not out:
             raise MsgError("没有可发送的员工")
         return out[:MAX_RECIPIENTS]
@@ -62,6 +82,16 @@ def recipients_for(db: Session, user, mode: str = "pick",
     if not wanted:
         raise MsgError("请选择收件人")
     if role == "admin":
+        # ⚠️ 2026-10-18：原来这里**不做任何校验**（页面能勾谁就发谁）——
+        #    现在收件范围与会话口径统一为「在职」，离职/停用/没账号的编号一律拒收。
+        ok = receivable_map(db, wanted)
+        bad = [c for c in wanted if c not in ok]
+        if bad:
+            names = [n or c for c, n in
+                     db.query(Person.code, Person.display_name)
+                     .filter(Person.code.in_(bad)).all()]
+            raise MsgError("这些人不在职（已离职/停用或没有账号），不能发消息：%s"
+                           % "、".join(names or bad))
         return wanted[:MAX_RECIPIENTS]
     allowed = set(_my_team_codes(db, user))
     bad = [c for c in wanted if c not in allowed]
@@ -91,19 +121,25 @@ def candidates(db: Session, user) -> List[dict]:
     for code, st in (db.query(User.person_code, User.status)
                      .filter(User.person_code.isnot(None)).all()):
         status[code] = st or "active"
+    # ⚠️ 2026-10-18（用户："发给指定的人，把离职的过滤掉"）：候选池**只列在职**。
+    #    原来管理员这儿是「全部 Person」—— 离职的、没账号的都列进来，勾上还能发出去
+    #    （`recipients_for` 当时对管理员不做校验）。现在两条路同一个口径：
+    #    ① 没账号 → 不在信使系统里，根本收不到；② 离职/停用 → 排除。
+    ok = receivable_map(db)
     if role == "admin":
-        people = (db.query(Person).order_by(Person.code.asc()).all())
+        people = (db.query(Person).filter(Person.code.in_(list(ok)))
+                  .order_by(Person.code.asc()).all())
         return [{"code": p.code, "display_name": p.display_name or p.code,
-                 "status": status.get(p.code, ""),
-                 "can_work": status.get(p.code) in ("active", "leave", None)}
+                 "status": ok.get(p.code, ""),
+                 "can_work": True}
                 for p in people]
     if role == "leader":
         names = {p.code: (p.display_name or p.code)
                  for p in db.query(Person).all()}
         return [{"code": c, "display_name": names.get(c, c),
-                 "status": status.get(c, ""),
-                 "can_work": status.get(c) in ("active", "leave")}
-                for c in _my_team_codes(db, user)]
+                 "status": ok.get(c, "active"),
+                 "can_work": True}
+                for c in _my_team_codes(db, user) if c in ok]
     return []
 
 

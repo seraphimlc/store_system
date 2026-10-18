@@ -105,15 +105,27 @@
       </label>
     </div>
 
+    {# ⚠️ 2026-10-18：候选池**已只含在职**（离职/停用/没账号的不再列出来）。
+       「全选」按钮只是勾选便利：勾满 = 与「发给全体在岗员工」**完全同一批人**
+       （服务层 `bd_msg.candidates()` 与 `recipients_for(mode='all')` 共用
+       `receivable_map()`，实测 84 = 84 = 84）。 #}
+    <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem">
+      <button class="btn ghost" type="button" style="padding:.2rem .7rem"
+              data-testid="msg-pick-all" onclick="msgPickAll(true)">{{ t('全选') }}</button>
+      <button class="btn ghost" type="button" style="padding:.2rem .7rem"
+              data-testid="msg-pick-none" onclick="msgPickAll(false)">{{ t('清空') }}</button>
+      <span class="hint" data-testid="msg-pick-count">{{ t('已选') }} <b id="msg-pick-n">0</b> {{ t('人') }}</span>
+    </div>
     <div style="max-height:260px;overflow:auto;border:1px solid #e5e5e5;border-radius:6px;
-                padding:.4rem .6rem;margin-top:.5rem" data-testid="msg-people">
+                padding:.4rem .6rem;margin-top:.5rem" data-testid="msg-people"
+         id="msg-people">
       {% for c in candidates %}
       <label class="pick" style="display:block">
         <input type="checkbox" name="person" value="{{ c.code }}"
-               data-testid="msg-person-{{ c.code }}">
+               data-testid="msg-person-{{ c.code }}"
+               onchange="msgCountPicked()">
         {{ c.display_name }} <span class="hint">{{ c.code }}</span>
         {% if c.status == 'leave' %}<span class="pill warnk">{{ t('请假') }}</span>{% endif %}
-        {% if c.status in ('resigned', 'disabled') %}<span class="pill">{{ t('已离职/停用') }}</span>{% endif %}
       </label>
       {% else %}
       <p class="empty">{{ t('没有可发送的对象') }}</p>
@@ -129,5 +141,19 @@
     </div>
   </div>
 </form>
+<script>
+/* 全选 / 清空 / 已选计数（原生 JS，零依赖）。勾满 = 全体在岗员工（同一批人）。 */
+function msgPickAll(on) {
+  document.querySelectorAll('#msg-people input[name="person"]')
+    .forEach(function (c) { c.checked = !!on; });
+  msgCountPicked();
+}
+function msgCountPicked() {
+  var n = document.querySelectorAll('#msg-people input[name="person"]:checked').length;
+  var el = document.getElementById('msg-pick-n');
+  if (el) el.textContent = n;
+}
+document.addEventListener('DOMContentLoaded', msgCountPicked);
+</script>
 {% endif %}
 {% endblock %}
