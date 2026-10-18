@@ -97,7 +97,11 @@ def accounts_xlsx(db, *, only_active: bool = False, base_url: str = ""):
     q = db.query(User).filter(User.role.in_(("staff", "leader")))
     if only_active:
         q = q.filter(User.status == "active", User.is_active.is_(True))
-    rows = q.order_by(User.status, User.person_code).all()
+    # ⚠️ 排序 = **在职在前、离职在后**（用户 2026-10-18）。原来直接 `order_by(User.status)`
+    #    是按状态码字母序 → disabled/resigned 会插到 leave 前面，"离职在最后"不成立。
+    #    口径与页面共用 `accounts_r.staff_order()`（唯一实现，别在这里再写一遍）。
+    from app.routers.accounts_r import staff_order
+    rows = staff_order(q).all()
     settings = get_settings()
     default_pw = settings.default_staff_password
     # 公开地址优先取配置（应用在 nginx 后面看不到 https，request.base_url 会是 http://）

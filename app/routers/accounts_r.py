@@ -22,10 +22,27 @@ STATUS_LABELS = {"active": "在岗", "leave": "请假", "disabled": "停用",
                  "resigned": "离职"}
 STATUS_ALLOW = {"active", "leave", "disabled", "resigned"}
 
+#: 员工列表排序：**在职的在前、离职的在后**（用户 2026-10-18："员工账号排序按状态，
+#: 在职的在前面，离职在后面"）。离职只有 `resigned`；「停用」是账号层面（仍算在职序列）。
+#: ⚠️ 排序规则**只此一处**（页面分页 + 导出都用它），别在别处再手写一遍 `order_by`。
+STATUS_RANK = {"active": 0, "leave": 1, "disabled": 2, "resigned": 9}
+
 
 def _status_pill(status: str) -> str:
     return {"active": "pill ok", "leave": "pill run", "disabled": "pill err",
             "resigned": "pill err"}.get(status, "pill")
+
+
+def staff_order(q):
+    """员工列表统一排序：**在职在前、离职在后**，同档内按编号（空编号排后）、再按 id。
+
+    用户 2026-10-18 口径。用 `case` 排序而不是把状态码直接排（`disabled`/`resigned`
+    按字母序会插到 `leave` 前面），否则"离职在后面"就不成立。
+    """
+    from sqlalchemy import case
+    rank = case(STATUS_RANK, value=User.status, else_=5)
+    return q.order_by(rank, User.status, User.person_code.is_(None),
+                      User.person_code, User.id)
 
 
 def _denied():
@@ -95,8 +112,7 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
     if status in STATUS_ALLOW:
         q = q.filter(User.status == status)
     from app.services import paging
-    pager = paging.paginate(q.order_by(User.id.asc()), page,
-                            per or paging.PER_DEFAULT)
+    pager = paging.paginate(staff_order(q), page, per or paging.PER_DEFAULT)
     # MCP Token 列表**不再展示**（用户 2026-10-02："这块没有用，隐藏掉"）；
     # `/staff-admin/{uid}/tokens/*` 端点保留（脚本/测试仍可用）。
     return templates.TemplateResponse("staff_admin.html", {

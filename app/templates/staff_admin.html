@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t('员工管理') }}{% endblock %}
 {% block content %}
-<div class="page-title"><h1>{{ t('员工管理') }}</h1>
-  <span class="sub">{{ t('员工账号随数据导入自动开通：文件里出现新的人员编号即自动开户（登录名按姓名自动生成）。点每行的「编辑」在弹窗里改姓名/登录名/状态/界面语言/重置口令（人员编号是身份键，只读）；员工永不删除——离职也只改状态，历史与核算数据完整保留。') }}</span></div>
+<div class="page-title"><h1>{{ t('员工管理') }}</h1></div>
 {% if msg %}<div class="msg ok">{{ t(msg) }}</div>{% endif %}
 {% if new_token %}
 <div class="card" style="border-color:var(--ok)">

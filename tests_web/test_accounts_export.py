@@ -256,3 +256,75 @@ def test_export_includes_leaders(client):
     text = " ".join(str(c) for row in vals for c in row if c)
     assert "陈嘉溢" in text, "队长必须出现在账号表里：%s" % vals[:3]
     assert "普通员工" in text
+
+
+# ---------- 排序：在职在前、离职在后（用户 2026-10-18 口径） ----------
+
+def test_staff_list_puts_resigned_last(client):
+    """员工管理页 + 导出：**在职的在前、离职的在后**。
+
+    用户 2026-10-18："员工账号排序按状态，在职的在前面，离职在后面"。
+
+    真实缺陷在**页面**：原来按 `User.id` 排 —— 老员工的 id 小，**离职的人插在最前面**。
+    这里刻意把离职的人建得 **id 最小**（最先建），确保不是"碰巧 id 顺序对了"。
+    ⚠️ 导出原来按 `User.status` **字母序**排，`resigned` 恰好还是最后一个字母
+    （所以它本来没违反这条），但 `disabled` 会跑到 `leave` 前面 —— 现统一用
+    `accounts_r.staff_order()` 的 `CASE` 状态序，两条路同口径。
+    """
+    _mk(client, "admin", "管理员", None, role="admin")
+    _mk(client, "empGone", "离职甲", "PA0", status="resigned", active=False)
+    _mk(client, "empStop", "停用乙", "PB0", status="disabled", active=False)
+    _mk(client, "empLive", "在岗丙", "PC0")
+    _mk(client, "empLeave", "请假丁", "PD0", status="leave")
+    _login(client, "admin")
+
+    # ① 页面顺序（data-testid="edit-<uid>" 的出现顺序 = 行顺序）
+    import re as _re
+    html = client.get("/staff-admin").text
+    uids = [int(x) for x in _re.findall(r'data-testid="edit-(\d+)"', html)]
+    db = appdb.SessionLocal()
+    try:
+        uname = {u.id: u.username for u in db.query(User).filter(
+            User.username.like("emp%")).all()}
+    finally:
+        db.close()
+    order = [uname[u] for u in uids]
+    assert order.index("empLive") < order.index("empLeave"), order
+    assert order.index("empStop") < order.index("empGone"), order
+    assert order[-1] == "empGone", "离职的必须排最后：%s" % order
+
+    # ② 导出顺序（同一口径）
+    rows = list(_read_xlsx(client.get("/staff-admin/accounts-export")
+                           .content)["员工登录名"].values)[1:]
+    names = [r[0] for r in rows if r[0] and str(r[0]).startswith("emp")]
+    assert names[-1] == "empGone", names
+    assert names.index("empLive") < names.index("empLeave"), names
+
+
+def test_staff_order_is_one_implementation(client):
+    """排序只有 `accounts_r.staff_order()` 一处实现（导出直接复用它，防各写一套）。
+
+    断言方式：抓真实 SQL —— 页面与导出都必须带上同一个 `CASE` 排序表达式，
+    而不是各自 `order_by(User.id)` / `order_by(User.status)`。
+    """
+    from sqlalchemy import event
+
+    from tests_web.test_page_perf import _sqls          # 复用抓 SQL 的小工具
+    from app.services import staff_accounts
+    _mk(client, "admin", "管理员", None, role="admin")
+    _mk(client, "empLive", "在岗丙", "PZ1")
+    _mk(client, "empGone", "离职甲", "PZ2", status="resigned", active=False)
+    _login(client, "admin")
+    db = appdb.SessionLocal()
+    try:
+        # `_sqls` 返回 (结果, SQL 列表)；导出返回的是 (xlsx_bytes, 文件名)
+        (_out, exp_stmts) = _sqls(
+            db, lambda: staff_accounts.accounts_xlsx(db, base_url="http://t"))
+        _cat, page_stmts = _sqls(db, lambda: client.get("/staff-admin").text)
+    finally:
+        db.close()
+    assert exp_stmts, "没抓到导出的 SQL"
+    for label, stmts in (("导出", exp_stmts), ("页面", page_stmts)):
+        sql = " ".join(str(s).upper() for s in stmts)
+        assert "CASE" in sql, "%s没用统一排序（应带 CASE 状态序）" % label
+        assert "ORDER BY" in sql, label
