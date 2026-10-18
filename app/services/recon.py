@@ -416,15 +416,20 @@ def compare_daily(db, parsed: dict, month: str):
     问题行：仅一侧有记录，或两侧点数不一致。返回 dict 列表。
     """
     local = {}
-    for f in db.query(FormalRecord).all():
-        d = f.japan_date
-        if d is None or (str(d))[:7] != month:
-            continue
-        ds = str(d)
-        m = local.setdefault(f.person_code or "", {}).setdefault(
-            ds, {"cnt": 0, "pts": 0})
-        m["cnt"] += 1
-        m["pts"] += f.points or 0
+    # ⚠️ 2026-10-17：原来是 `db.query(FormalRecord).all()`（整表 7 万行水合，只为按
+    #    月份前缀筛一部分）→ 改成 SQL 里过滤 + 分组，只回传「人 × 日 → 店数/点数」。
+    #    口径与原 Python 循环逐字段一致：空 `person_code` 归并到 ""、`points or 0`。
+    from sqlalchemy import func as _f
+    from app.services import months as _months
+    q = (db.query(FormalRecord.person_code, FormalRecord.japan_date,
+                  _f.count(), _f.sum(_f.coalesce(FormalRecord.points, 0)))
+         .filter(_months._ym(FormalRecord.japan_date) == month)
+         .group_by(FormalRecord.person_code, FormalRecord.japan_date))
+    for code, d, cnt, pts in q:
+        m = local.setdefault(code or "", {}).setdefault(
+            str(d), {"cnt": 0, "pts": 0})
+        m["cnt"] += cnt
+        m["pts"] += pts or 0
     names = {p.code: p.display_name for p in db.query(Person).all()}
     rows = []
     for code in sorted(set(local) | set(parsed)):
@@ -777,30 +782,39 @@ def attribute_daily(db, path: str, month: str):
         return (store, mod) if has_ts else (store,)
 
     local = set()
-    for f in db.query(FormalRecord).all():
-        if str(f.japan_date or "")[:7] != month:
-            continue
-        rr = db.get(RawRecord, f.raw_record_id)
-        if rr is not None:
-            local.add(key(rr.store_id_raw, rr.modified_raw))
+    # ⚠️ 2026-10-17：这里原来是「整表 7 万行水合 + **每条正式记录一次 `db.get(RawRecord)`**
+    #    （N+1）+ 整表 15 万行 RawRecord 全列水合（含 original_row 大字段）」。
+    #    对账任务每跑一次就全套走一遍 → 现在全部下沉 SQL，只取 3 个窄列：
+    #    `store_id_raw` / `modified_raw` / `clean_status`（铁律 #2：能少读就少读）。
+    from app.services import months as _months
+    _q = (db.query(RawRecord.store_id_raw, RawRecord.modified_raw)
+          .join(FormalRecord, FormalRecord.raw_record_id == RawRecord.id)
+          .filter(_months._ym(FormalRecord.japan_date) == month))
+    for sid, mod in _q:
+        local.add(key(sid, mod))
     rawmap = {}
-    for rr in db.query(RawRecord).all():
-        if rr.clean_status != "visible_blank":
-            rawmap.setdefault(key(rr.store_id_raw, rr.modified_raw), rr)
+    # 归并同键时「先出现的」胜出：显式按 id 排序 —— 老的 `.all()` 在 SQLite 上就是
+    # rowid 序（测试一直这么跑的），在 PG 上顺序未定义；显式排序把两边统一成"最早一条"。
+    _q2 = (db.query(RawRecord.store_id_raw, RawRecord.modified_raw,
+                    RawRecord.clean_status)
+           .filter(RawRecord.clean_status != "visible_blank")
+           .order_by(RawRecord.id))
+    for sid, mod, st in _q2:
+        rawmap.setdefault(key(sid, mod), st)
     sheet_set = {key(s, m) for s, m in sheet_keys2}
     consistent = sum(1 for k in local if k in sheet_set)
     only_system = len(local) - consistent
     by_reason = {"from_sub": 0, "master_late": 0, "cross_file_dup": 0,
                  "no_ref": 0, "not_found": 0}
     for k in sheet_set - local:
-        rr = rawmap.get(k)
-        if rr is None:
+        st = rawmap.get(k)
+        if st is None:
             by_reason["not_found"] += 1
-        elif rr.clean_status in by_reason:
-            by_reason[rr.clean_status] += 1
+        elif st in by_reason:
+            by_reason[st] += 1
         else:
-            by_reason.setdefault(rr.clean_status, 0)
-            by_reason[rr.clean_status] += 1
+            by_reason.setdefault(st, 0)
+            by_reason[st] += 1
     only_report = sum(by_reason.values())
     return {"consistent": consistent, "only_system": only_system,
             "only_report": only_report,

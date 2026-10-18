@@ -5790,6 +5790,50 @@ def test_task_board_clamps_out_of_range_page(client, seeded):
     assert 'data-testid="task-row"' in h, "越界页渲染出了空表"
 
 
+def test_my_tasks_leader_list_paginates(client, seeded):
+    """队长任务列表**分页**（P1 backlog「队长列表无分页」）。
+
+    原来一个队几百条任务一屏全渲染（连带逐行权限/可用性都在全量上算）。
+    现在当前 tab 的列表按 50 条/页翻页，**tab 上的计数仍是全量**
+    （计数取自 all_rows，不能被分页影响）。
+    """
+    team_id = seeded["team"]          # fixture 给的是 id（不是对象）
+    db = appdb.SessionLocal()
+    try:
+        ids = [bd_tasks.create_station(db, "分页站%02d" % i, line="分页線").id
+               for i in range(55)]
+        bd_tasks.create_tasks(db, ids, by="admin", team_id=team_id,
+                              assign_date=date(2026, 10, 3))
+        db.commit()
+        # 本队未分配 tab 的全量（含 seeded 自带的 1 条）
+        all_ids = [r["task"].id for r in bd_tasks.team_tasks(
+            db, [team_id], tab="unassigned")]
+    finally:
+        db.close()
+    assert len(all_ids) == 56, len(all_ids)
+
+    _login(client, "ogawa")
+
+    def page_ids(url):
+        h = client.get(url).text
+        return h, [int(x) for x in re.findall(r'href="/tasks/(\d+)"', h)]
+    h1, ids1 = page_ids("/my/tasks?tab=unassigned")
+    h2, ids2 = page_ids("/my/tasks?tab=unassigned&page=2")
+    assert len(ids1) == 50, len(ids1)
+    assert len(ids2) == len(all_ids) - 50, len(ids2)
+    assert not (set(ids1) & set(ids2)), "两页出现同一条任务"
+    assert set(ids1) | set(ids2) == set(all_ids), "两页合起来 ≠ 全量"
+    assert 'data-testid="pager"' in h1, "没有渲染分页条"
+    # 分页条上的总数是**全量 56**，不是本页 50
+    m = re.search(r'data-testid="pager-info"[^>]*>(.*?)</span>', h1, re.S)
+    nums = [int(x) for x in re.findall(r"\d+", m.group(1) if m else "")]
+    assert m and 56 in nums and max(nums) == 56, (
+        "分页条应显示全量 56 条（不是本页 50）：%r" % (m and m.group(1)))
+    # 页码越界夹到最后一页（不能渲染成空列表）
+    href, ids99 = page_ids("/my/tasks?tab=unassigned&page=99")
+    assert ids99 == ids2, "?page=99 没夹到最后一页"
+
+
 def test_logs_page_clamps_out_of_range_page(client, seeded):
     """日志页 `?page=99` 也要夹到最后一页（原来 offset=19600 → 永远空列表）。
 

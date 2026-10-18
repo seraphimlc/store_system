@@ -531,6 +531,76 @@ def unmerge_cross_city(db) -> int:
     return fixed
 
 
+_CATALOG_COLS = None      # 延迟构造（避免 import 期就抓模型属性）
+
+
+def _catalog_cols():
+    global _CATALOG_COLS
+    if _CATALOG_COLS is None:
+        _CATALOG_COLS = (StoreEntity.id, StoreEntity.master_id,
+                         StoreEntity.name_local, StoreEntity.name_norm,
+                         StoreEntity.city, StoreEntity.address_local,
+                         StoreEntity.store_id_raw)
+    return _CATALOG_COLS
+
+
+def _is_root_q():
+    """「自己就是主档」的条件：`master_id == id`、为空、或父行**不存在**。
+
+    与老 Python 走路等价（`by_id.get(...) or r` 把悬挂父键兜成自根；
+    本地生产副本实测 0 条悬挂、0 条环）。
+    """
+    from sqlalchemy import or_, select
+    t = StoreEntity.__table__
+    p = t.alias("p")
+    return or_(t.c.master_id.is_(None), t.c.master_id == t.c.id,
+               ~select(p.c.id).where(p.c.id == t.c.master_id).exists())
+
+
+def _catalog_page_sql(db, page: int, per: int) -> dict:
+    """无搜索词时的**纯 SQL** 分页：只把当前页那 50 组行取回 Python。
+
+    ⚠️ 2026-10-17 第二批：老实现即使不搜索也要 `db.query(7 列).all()` 把**全表 8 万行**
+    拉回来再在 Python 里解根/分组（本地生产副本实测 439ms，线上 `/stores` 剩下的
+    ~1.5 秒基本都在这）。现在四步全在库里：
+      ① 主档总数 = 「自根行」计数（一条 anti-join，**不递归**）；
+      ② 当前页主档 = 自根行 `ORDER BY id LIMIT/OFFSET`；
+      ③ 这些主档的分身 = 递归 CTE **从当前页往下走**（只碰几十行，不是全表）；
+      ④ 只把这 50 组行取回 Python。
+    主档 / 分身都按 id 升序 —— 与老实现同序。
+    口径边界：链深上限 10（本地生产副本实测 0/1/2 层）、成环时与老 `seen` 保护不同（实测 0 环）。
+    """
+    from sqlalchemy import func, literal, select
+    t = StoreEntity.__table__
+    total = db.query(func.count(StoreEntity.id)).filter(
+        _is_root_q()).scalar() or 0
+    start = max(0, (max(1, int(page)) - 1) * per)
+    ids = [r[0] for r in db.query(StoreEntity.id).filter(_is_root_q())
+           .order_by(StoreEntity.id).limit(per).offset(start).all()]
+    cols = _catalog_cols()
+    rows = ({r.id: r for r in db.query(*cols).filter(
+        StoreEntity.id.in_(ids)).order_by(StoreEntity.id)} if ids else {})
+    kids = {}
+    if ids:
+        sub = select(t.c.id, t.c.id.label("root_id"),
+                     literal(0).label("depth")).where(t.c.id.in_(ids))
+        sub = sub.cte("sub_tree", recursive=True)
+        step = select(t.c.id, sub.c.root_id,
+                      (sub.c.depth + 1).label("depth")).where(
+            t.c.master_id == sub.c.id, t.c.master_id != t.c.id, sub.c.depth < 10)
+        sub = sub.union_all(step)
+        kid_q = (db.query(*cols, sub.c.root_id)
+                 .join(sub, sub.c.id == StoreEntity.id)
+                 .filter(sub.c.id != sub.c.root_id)
+                 .order_by(StoreEntity.id))
+        for r in kid_q:
+            kids.setdefault(r.root_id, []).append(r)
+    return {"rows": [{"master": rows[i], "children": kids.get(i, [])}
+                     for i in ids],
+            "total": total, "page": max(1, int(page)),
+            "pages": (total + per - 1) // per}
+
+
 def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
     """全部店铺目录：主档行 + 其下已并入的分身（可展开/解绑）。
 
@@ -541,10 +611,16 @@ def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
       ① 只取模板真正用到的 7 列（`Row` 照旧按属性访问，模板不用改）；
       ② 先算结构（谁是谁的主档），**只给当前页**建行 dict。
     `/stores` 实测 4.0s → ~0.5s。口径不变（主档按 id 升序、分身按 id 升序）。
+
+    ⚠️ 2026-10-17 第二批：**不搜索时改成纯 SQL**（`_catalog_page_sql`）—— 老实现不搜索
+    也要把全表 8 万行拉回 Python（本地生产副本实测 439ms / 线上约 1.5s）。
+    **搜索仍走原来的 Python 逐字段判定**：`ql in (字段 or "").lower()` 与数据库
+    `lower()`/`LIKE` 对**全角字符**未必逐字一致（AGENTS 记的 backlog 就是这条），
+    下沉 SQL 会悄悄改变搜索结果 → 未拍板前不动（本地实测搜索 516ms）。
     """
-    cols = (StoreEntity.id, StoreEntity.master_id, StoreEntity.name_local,
-            StoreEntity.name_norm, StoreEntity.city, StoreEntity.address_local,
-            StoreEntity.store_id_raw)
+    if not q:
+        return _catalog_page_sql(db, page, per)
+    cols = _catalog_cols()
     ents = db.query(*cols).order_by(StoreEntity.id).all()
     by_id = {e.id: e for e in ents}
     root = {}
@@ -576,6 +652,7 @@ def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
 
         pairs = [(m, ch) for m, ch in pairs if _hit(m, ch)]
     total = len(pairs)
+    page = max(1, int(page))
     start = (page - 1) * per
     return {"rows": [{"master": m, "children": ch}
                      for m, ch in pairs[start:start + per]],

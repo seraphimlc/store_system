@@ -73,3 +73,15 @@ def info_from(total: int, page: int = 1, per: int = PER_DEFAULT) -> Pager:
         "start": (p - 1) * per + 1 if total else 0,
         "end": min(p * per, total),
     })
+
+
+def slice_list(rows, page: int = 1, per: int = PER_DEFAULT) -> Pager:
+    """对**已经在内存里的列表**分页（页码夹取与字段沿用 `info_from`，与 SQL 分页一致）。
+
+    给"先过滤、后分页"的页面用（过滤/计数在 Python 里算，如队长任务列表按 tab 过滤）。
+    ⚠️ 页码越界会夹到最后一页（`?page=99` 不能渲染成空列表 —— 2026-10-17 修过一次同类 bug）。
+    """
+    items = list(rows or [])
+    pg = info_from(len(items), page, per)
+    pg["rows"] = items[pg["start"] - 1:pg["end"]] if items else []
+    return pg

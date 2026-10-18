@@ -146,10 +146,39 @@ def bonus_params(month: str = None) -> tuple:
     return _bonus_cfg(month)
 
 
-def _fetch(db):
-    rows = db.query(FormalRecord).all()
-    person_names = {p.code: p.display_name for p in db.query(Person).all()}
-    return rows, person_names
+def _point_agg(db, month: str = "", by_day: bool = False):
+    """正式表按 SQL 聚合「店数 / 2点 / 1点」（**不再把整表拉进 Python**）。
+
+    ⚠️ 2026-10-17：原来这里是 `db.query(FormalRecord).all()` —— 为了算当月
+    （或全量）点数把 **7 万行整表**水合成 ORM 对象，每次月度重算/导入白花 1~2 秒。
+    现在过滤（月份前缀）与分组都在库里做，只回传聚合结果。
+
+    返回列：`(person_code, japan_date?, records, n2, n1)`，
+    其中 `n1 = points==1 的行数`、`n2 = points==2 的行数`、`records = COUNT(*)`。
+    ⚠️ **两个调用方对"0 点/NULL 点"的口径不同，所以这里把 n1 与"非 2 的全部"分开给**：
+      - `sync_month_perf`：p1 = n1（**0 点行只计店数、不计点**，见那里的注释）；
+      - `daily_perf`：p1 = records - n2（**非 2 点都算 1 点** —— 老代码 `else` 分支如此，
+        虽然看起来与上面矛盾，但这是线上口径，改动必须另开一次评审）。
+    """
+    from sqlalchemy import case as _case, func as _f
+    from app.services import months as _months
+    _n2 = _f.sum(_case((FormalRecord.points == 2, 1), else_=0))
+    _n1 = _f.sum(_case((FormalRecord.points == 1, 1), else_=0))
+    if by_day:
+        q = db.query(FormalRecord.person_code, FormalRecord.japan_date,
+                     _f.count(), _n2, _n1)
+        q = q.group_by(FormalRecord.person_code, FormalRecord.japan_date)
+    else:
+        q = db.query(FormalRecord.person_code, _f.count(), _n2, _n1)
+        q = q.group_by(FormalRecord.person_code)
+    if month:
+        q = q.filter(_months._ym(FormalRecord.japan_date) == month)
+    return q.all()
+
+
+def person_names(db):
+    """{员工编号: 显示名}（小表，直接取）。"""
+    return {p.code: p.display_name for p in db.query(Person).all()}
 
 
 def adjust_map(db, month: str = ""):
@@ -221,20 +250,13 @@ def sync_month_perf(db, month: str) -> int:
     from app.models import MonthPerfRecord
     if not month or len(month) != 7:
         return 0
-    rows, names = _fetch(db)
     agg = defaultdict(lambda: {"records": 0, "p1": 0, "p2": 0})
-    for r in rows:
-        m = (str(r.japan_date or ""))[:7]
-        if m != month:
-            continue
-        d = agg[r.person_code]
-        d["records"] += 1
-        _p = r.points or 0
-        if _p == 2:
-            d["p2"] += 1
-        elif _p == 1:
-            d["p1"] += 1
+    for code, cnt, n2, n1 in _point_agg(db, month):
+        d = agg[code]
+        d["records"] += cnt
+        d["p2"] += n2
         # 0 点（规则判定"不计成绩"，如 AUDIT_FAILED 且非 YES）→ 只计店数、不计点
+        d["p1"] += n1
     existing = {r.person_code: r for r in db.query(MonthPerfRecord).filter(
         MonthPerfRecord.month == month).all()}
     # 该月单价：已有行锁存的优先（设置过单价后重物化不冲掉），否则全局默认
@@ -296,24 +318,15 @@ def daily_perf_person(db, month: str, person_code: str) -> list:
 
 def daily_perf(db, month: str = ""):
     """日绩效：每人每天 {date, records, p1, p2, points}，按日期排序。"""
-    rows, names = _fetch(db)
-    agg = defaultdict(lambda: {"records": 0, "p1": 0, "p2": 0})
-    for r in rows:
-        if month and (str(r.japan_date or ""))[:7] != month:
-            continue
-        k = (r.person_code, r.japan_date)
-        d = agg[k]
-        d["records"] += 1
-        if r.points == 2:
-            d["p2"] += 1
-        else:
-            d["p1"] += 1
+    names = person_names(db)
     out = []
-    for (code, dt), d in agg.items():
+    for code, dt, cnt, n2, _n1 in _point_agg(db, month, by_day=True):
+        # ⚠️ 这里沿用老口径：非 2 点都算 1 点（p1 = records - n2）——见 `_point_agg` 注释
+        p1 = cnt - n2
         out.append({"code": code, "name": names.get(code, code),
-                    "date": dt, "records": d["records"],
-                    "p1": d["p1"], "p2": d["p2"],
-                    "points": d["p1"] + d["p2"] * 2})
+                    "date": dt, "records": cnt,
+                    "p1": p1, "p2": n2,
+                    "points": p1 + n2 * 2})
     out.sort(key=lambda x: (str(x["date"]), x["code"]))
     return out
 

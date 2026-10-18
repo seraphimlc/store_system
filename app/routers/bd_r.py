@@ -1103,8 +1103,14 @@ def task_reviews_reject(request: Request,
 def my_tasks_page(request: Request,
                   user: Optional[User] = Depends(require_login),
                   db: Session = Depends(get_db), tab: str = "",
-                  kw: str = "", line: str = "", msg: str = "", err: str = ""):
+                  kw: str = "", line: str = "", msg: str = "", err: str = "",
+                  page: int = 1):
     """员工端任务页（**队长与队员同一页**，队长多出"任务管理"）。
+
+    ⚠️ 2026-10-17 第二批：**加分页**（P1 backlog「队长列表无分页」）—— 一个队几百条任务
+    时原来一屏全渲染（连带逐行权限/可用性都在全量上算）。现在当前 tab 的列表按
+    `paging.slice_list` 分页（默认 50 条/页，页码越界夹到最后一页），
+    **tab 上的计数仍是全量**（计数取自 `all_rows`，不受分页影响）。
 
     - **队员（staff）**：只看"我的任务"（自己担当的），**每行可上报进展**（滑动条）
       —— 用户 2026-10-03 口径：员工自己先上报，队长做调整
@@ -1189,6 +1195,20 @@ def my_tasks_page(request: Request,
             tab = TAB_MINE
         counts = {TAB_MINE: len(open_rows), "done": len(done_rows)}
         rows = done_rows if tab == "done" else open_rows
+    # ⚠️ 2026-10-17 第二批：**先分页再算权限/可用性**（原来一屏几百行全套算一遍）。
+    #    计数已在上面按 all_rows 算完 → 分页不影响 tab 上的数字。
+    #    ⚠️ **只给队长分页**：队员那页是「一屏一次提交」的自报表单（点数 + 本页任务进度
+    #    同一事务），把人自己的活拆到第二页会让「所有任务一起保存」的口径变形
+    #    —— 队员自己的活数量有界，不分页。
+    from app.services import paging as _paging
+    if is_leader:
+        pager = _paging.slice_list(rows, page)
+        rows = pager["rows"]
+    else:
+        pager = {"rows": rows, "total": len(rows), "page": 1,
+                 "per": len(rows) or 1, "pages": 1,
+                 "has_prev": False, "has_next": False,
+                 "start": 1 if rows else 0, "end": len(rows)}
     # ⚠️ 权限**一次算完**（逐条 can_* 会让 76 行变成 180+ 条 SQL → 页面慢）
     perms = bd_tasks.can_reject_maps(db, user, [r["task"] for r in rows],
                                     lead_team_ids=team_ids, rows=rows)
@@ -1208,6 +1228,7 @@ def my_tasks_page(request: Request,
                             if t["id"] not in set(team_ids or [])]
                            if is_leader else []),
         "counts": counts, "tab": tab, "kw": kw, "members": members,
+        "pager": pager, "page_qs": _paging.qs(request.query_params),
 
         # ⚠️ 用 `my_rows`（两个角色分支都有）：只统计"分给我自己的"任务，
         #    队长的队列表不该算进"我的"小计

@@ -502,6 +502,10 @@ document.addEventListener('DOMContentLoaded', function () {
 </p></div>
 {% endfor %}
 
+{# ⚠️ 2026-10-17 第二批：队长/队员任务列表分页（P1「队长列表无分页」）。
+   tab 上的计数仍是全量，这里只翻「当前 tab 的列表」。 #}
+{% include "_pager.html" %}
+
 {% if self_report %}
   <div class="card" style="position:sticky;bottom:0;padding:.7rem 1rem">
     <button class="btn" type="submit" data-testid="sr-submit" style="width:100%">
