@@ -37,16 +37,31 @@ RECIPIENT_STATUSES = ("active", "leave")
 
 
 def receivable_map(db: Session, codes: Optional[Sequence[str]] = None) -> dict:
-    """`{person_code: status}` —— 只回「在职」的人（`RECIPIENT_STATUSES`）。
+    """`{person_code: status}` —— 只回「在职」的人（`RECIPIENT_STATUSES`），**按人**。
 
     没建账号的人**不在信使系统里**（收不到站内消息），这里也不回。
+
+    ⚠️ **按 `person_code` 去重，不是按账号行**（2026-10-18 线上实测踩到）：
+    线上有 **6 个人各有 2 个账号**（`ogawa` / `ogawa-itsuru`、
+    `luozijie`(disabled) / `luo-zijie`(active) 等）→ `users` 里在职**账号 54 个、
+    人只有 49 个**。消息收件人是 **`person_code`**（`bd_message_recipient` 就是按人存），
+    所以这里必须一人一条；否则同一个人会出现两遍、或按账号行数算错总数。
+    `dict` 天然按 key 去重，这里取**最宽松**的状态（同编号只要有一个在职账号就算在职）。
     """
     q = (db.query(User.person_code, User.status)
          .filter(User.person_code.isnot(None),
                  User.status.in_(RECIPIENT_STATUSES)))
     if codes:
         q = q.filter(User.person_code.in_(list(codes)))
-    return {c: (s or "active") for c, s in q.all() if c}
+    out: dict = {}
+    for code, status in q.all():
+        if not code:
+            continue
+        st = status or "active"
+        # 同一编号多个账号：在岗 > 请假（报到人的状态更"实"）
+        if out.get(code) != "active":
+            out[code] = "active" if st == "active" else st
+    return out
 
 
 def recipients_for(db: Session, user, mode: str = "pick",

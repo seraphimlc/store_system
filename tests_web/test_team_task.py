@@ -6124,3 +6124,31 @@ def test_msg_page_has_pick_all(client, seeded):
     assert 'data-testid="msg-pick-count"' in h, "没有已选计数"
     assert 'data-testid="msg-person-P_GONE4"' not in h, "离职的人还渲染在收件人表格里"
     assert 'data-testid="msg-person-P1"' in h, "在职的人没渲染出来"
+
+
+def test_msg_one_person_with_two_accounts_counts_once(seeded):
+    """**同一编号有 2 个账号**时，收件人只算 1 个人（线上真实数据：6 人有双账号）。
+
+    线上实测（2026-10-18）：`users` 里在职**账号 54 个、人只有 49 个** ——
+    `ogawa`/`ogawa-itsuru`、`luozijie`(disabled)/`luo-zijie`(active) 等。
+    消息收件人存的是 **`person_code`**（`bd_message_recipient` 按人一行），
+    所以 `receivable_map()` 必须**按人去重**，否则一个人会被发两遍、或总数算错。
+    ⚠️ 这里顺带锁住"取最宽松状态"：同编号一个 `active` 一个 `leave` → 算在职。
+    """
+    from app.services import bd_msg
+    db = appdb.SessionLocal()
+    try:
+        # P1（小川逸）再挂第二个账号：一个 active，一个 leave
+        db.add(User(username="p1-second", password_hash=hash_password(ADMIN_PW),
+                    display_name="小川逸（第二个账号）", role="leader",
+                    person_code="P1", is_active=True, status="leave"))
+        db.commit()
+        admin = db.query(User).filter(User.username == "admin").first()
+        ok = bd_msg.receivable_map(db)
+        assert "P1" in ok and ok["P1"] == "active", ok.get("P1")
+        cand = bd_msg.candidates(db, admin)
+        assert [c["code"] for c in cand].count("P1") == 1, (
+            "同一个编号出现多行：%s" % [c["code"] for c in cand])
+        assert len(bd_msg.recipients_for(db, admin, mode="all")) == len(ok)
+    finally:
+        db.close()
