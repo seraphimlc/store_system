@@ -15,7 +15,11 @@
 {% if err %}<div class="card" style="border-left:4px solid #b02a37">{{ t(err) }}</div>{% endif %}
 
 {% if cur %}
-<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+{# 用户 2026-10-18："前两个模块的布局太难看了。每行三个块。"
+   三个块组（指标 / 图表 / 新增·未出现·排行）统一 `.dash-grid` = **固定每行 3 块**
+   （原来 `repeat(auto-fit,minmax(170|200px,1fr))` 在 1180px 容器里自动排成 6 列 / 5 列，
+   末行剩下的块被拉宽 → 宽窄不一、每行块数随窗口乱变）。 #}
+<div class="dash-grid">
   <div class="stat-card"><div class="k">{{ t('最新月份') }}</div><div class="v">{{ cur.month }}</div></div>
   <div class="stat-card"><div class="k">{{ t('总点数') }}</div><div class="v">{{ '{:,}'.format(cur.points) }}</div></div>
   <div class="stat-card"><div class="k">{{ t('工资总额(円)') }}</div><div class="v">¥{{ '{:,}'.format(cur.amount) }}</div></div>
@@ -37,20 +41,20 @@
 </div>
 {% endif %}
 
-<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('总点数（月度）') }}</div>
+<div class="dash-grid">
+  <div class="card chart-card"><div class="ttl">{{ t('总点数（月度）') }}</div>
     <canvas id="cPoints" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('工资总额（円，月度）') }}</div>
+  <div class="card chart-card"><div class="ttl">{{ t('工资总额（円，月度）') }}</div>
     <canvas id="cAmount" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('有效店数（月度）') }}</div>
+  <div class="card chart-card"><div class="ttl">{{ t('有效店数（月度）') }}</div>
     <canvas id="cRecords" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('店铺结构演变（1点/2点堆叠）') }}</div>
+  <div class="card chart-card"><div class="ttl">{{ t('店铺结构演变（1点/2点堆叠）') }}</div>
     <canvas id="cStack" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('人员变化（员工数 + 新增/流失）') }}</div>
+  <div class="card chart-card"><div class="ttl">{{ t('人员变化（员工数 + 新增/流失）') }}</div>
     <canvas id="cHead" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('最新月店铺结构（1点/2点）') }}</div>
+  <div class="card chart-card"><div class="ttl">{{ t('最新月店铺结构（1点/2点）') }}</div>
     <canvas id="cDonut" height="150"></canvas></div>
-  <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.4rem">{{ t('环比对比（上两月') }}→ {{ t('最新月）') }}</div>
+  <div class="card chart-card"><div class="ttl">{{ t('环比对比（上两月') }}→ {{ t('最新月）') }}</div>
     <canvas id="cCompare" height="150"></canvas></div>
 </div>
 
@@ -76,7 +80,7 @@
   </table></div>
 </div>
 
-<div class="stat-grid grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+<div class="dash-grid">
   <div class="card"><div style="font-weight:600;font-size:.9rem;margin-bottom:.3rem">{{ t('本期新增人员（') }}{{ cur.month }}）<span class="hint">{{ t('共') }}{{ new_staff|length }}{{ t('人') }}</span></div>
     {% if new_staff %}
     <div class="tbl-wrap" style="border:0;box-shadow:none"><table class="grid-tbl">

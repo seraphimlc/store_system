@@ -505,3 +505,43 @@ table.plan-matrix th .hint { font-weight: 400; }
   position: absolute; top: -2px; right: -4px; min-width: 1rem;
   padding: 0 .25rem; font-size: .68rem; line-height: 1.15rem;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   数据看板：顶部「指标块」与「图表块」固定**每行三个**（用户 2026-10-18：
+   "前两个模块的布局太难看了。每行三个块。"）
+   ⚠️ 原来用的是 `repeat(auto-fit, minmax(170px|200px, 1fr))`：
+   1180px 容器里第一组自动排成 6 列、第二组 5 列，最后一行剩 2 个块被拉宽
+   → 每行块数随窗口乱变、末行宽窄不一，看着很乱。改成固定 3 列后：
+   第一组 8 块 = 3 + 3 + 2（末行两块各占 1 列，**不再被拉成整行**，
+   用 :nth-child 让它们保持 1 列宽），第二组 7 块 = 3 + 3 + 1。
+   ───────────────────────────────────────────────────────────── */
+.dash-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem; margin-bottom: 1.2rem; }
+/* 末行不满 3 个时：最后剩下的块**保持一个列宽**，不再被拉成整行 */
+.dash-grid > * { min-width: 0; }
+.dash-grid.cols-3 > :last-child:nth-child(3n + 1) { grid-column: span 1; }
+/* 指标块（8 个统计卡）：数字大、标签小，三列宽度下更易读 */
+.dash-grid .stat-card { padding: 1rem 1.15rem; }
+/* 图表块：标题 + 图，三列时高度一致（图表按容器宽度自适应） */
+.dash-grid .chart-card { padding: .9rem 1rem; }
+.dash-grid .chart-card > .ttl { font-weight: 600; font-size: .9rem;
+  margin-bottom: .5rem; line-height: 1.35; }
+.dash-grid .chart-card canvas { width: 100% !important; height: 150px !important; }
+/* ⚠️ 断点按**容器**算，不按窗口：`main.wrap` 只有 1180px 宽（两侧各 1.5rem padding）
+   → 窗口 1280 时容器内宽约 1,180，三列每块约 360px 足够；
+   直到窗口 < 900（容器 < 850）才降两列，< 620 降一列。 */
+@media (max-width: 899px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 619px) { .dash-grid { grid-template-columns: 1fr; } }
+/* 三列在窄笔记本上每块只有 ~200px：数字必须缩，否则「22,124 / 22,124」这类
+   长值会折成两行（实测 900px 窗口下 8 个指标块里有 2 个折行）。 */
+@media (max-width: 1099px) {
+  .dash-grid .stat-card { padding: .85rem .95rem; }
+  .dash-grid .stat-card .v { font-size: 1.2rem; }
+}
+@media (max-width: 899px) {
+  .dash-grid .stat-card .v { font-size: 1.08rem; }
+  .dash-grid .stat-card .k { font-size: .76rem; }
+}
+@media (max-width: 619px) {
+  .dash-grid .stat-card .v { font-size: 1.35rem; }   /* 单列又变宽，字号回来 */
+}

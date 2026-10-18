@@ -239,3 +239,40 @@ def test_base_strips_msg_from_url():
     assert "searchParams.delete('msg')" in html
     assert "searchParams.delete('err')" in html
     assert "+ u.hash" in html, "不能把 #hash 弄丢"
+
+
+# ---------- 数据看板布局：每行三个块（用户 2026-10-18） ----------
+
+def test_dashboard_blocks_use_three_column_grid():
+    """看板三个块组都必须是 `dash-grid`（固定每行 3 块），不许再退回 `auto-fit`。
+
+    用户 2026-10-18："数据看板 前两个模块的布局太难看了。每行三个块。"
+    原来 `repeat(auto-fit,minmax(170px|200px,1fr))` 在 1180px 容器里自动排成 6 / 5 列，
+    末行剩下的块被拉宽 → 每行块数随窗口变、宽窄不一。守门点三件事：
+      ① 三个块组都用 `.dash-grid`（没有残留 `stat-grid` + auto-fit）；
+      ② CSS 里 `.dash-grid` 是 `repeat(3, ...)`，且断点不再在常见笔记本宽度降列；
+      ③ 末行不满 3 个时**保持 1 列宽**（不被拉成整行）。
+    """
+    import io
+    import re
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    html = io.open(root / "app/templates/dashboard.html", encoding="utf-8").read()
+    # 只查 class 属性里的内联 grid（注释里提到 auto-fit 是解释"为什么改"，不算违规）
+    inline = re.findall(r'class="[^"]*"[^>]*style="[^"]*auto-fit', html)
+    assert not inline, "还有内联 auto-fit 块组（每行块数会随窗口乱变）：%s" % inline
+    n = len(re.findall(r'<div class="dash-grid">', html))
+    assert n == 3, "三个块组都要用 dash-grid，实际 %d 个" % n
+    assert "stat-grid" not in html
+
+    css = io.open(root / "app/static/app.css", encoding="utf-8").read()
+    m = re.search(r"\.dash-grid\s*\{[^}]*\}", css)
+    assert m, "CSS 里没有 .dash-grid"
+    assert "repeat(3," in m.group(0).replace(" ", ""), m.group(0)
+    # 常见笔记本（1280/1180）必须仍是三列：**降列**断点（改 grid-template-columns 的那个）
+    # 要 ≤ 899px。⚠️ 只挑「块里真有 grid-template-columns」的媒体查询 —— 同宽度的
+    # 字号断点（1099px 缩字号）不是降列，别一起判。
+    for bp, body in re.findall(
+            r"@media \(max-width: (\d+)px\) \{\s*\.dash-grid\s*\{([^}]*)\}", css):
+        if "grid-template-columns" in body:
+            assert int(bp) <= 899, "降列断点 %spx 太宽，1280 笔记本会掉成两列" % bp
