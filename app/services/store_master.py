@@ -601,6 +601,73 @@ def _catalog_page_sql(db, page: int, per: int) -> dict:
             "pages": (total + per - 1) // per}
 
 
+def _catalog_search(db, q: str, page: int, per: int) -> dict:
+    """带搜索词的目录分页：**结构走 SQL / 匹配仍在 Python（口径一个字不改）**。
+
+    ⚠️ 2026-10-17 第二批（线上实测）。搜索路径原来 2.0~2.2 秒，拆开是：
+    SQL 取 7 列全表 **673ms** + by_id **55ms** + 解根 **209ms** + 分组 **479ms** + 匹配 **268ms**。
+    其中「解根 / 分组」是**纯结构**、与匹配口径无关 → 可以安全下沉；这里：
+      ① 只取匹配真正要用的 6 列（**去掉 `address_local`**，它只是展示列）；
+      ② `root` / `children` 用 int 字典算（不再构造 8 万个 ORM `Row` 再走属性链）；
+      ③ **一趟遍历**判定命中根（主档看 4 列、分身看 2 列 —— 与老 `_hit` 逐字相同）；
+      ④ 只给当前页的 50 组行补取展示列。
+    线上预期：2.0s → ~0.9s（剩下的都是「必须把 8 万行读进来做全角敏感的子串匹配」）。
+
+    ⚠️ **为什么匹配不一起下沉 SQL**：老口径是 `ql in (字段 or "").lower()`。
+    PG 的 `lower()/LIKE` 对**全角字符**（如 `Ａ` → `ａ`）与 Python 的 `str.lower()` 未必逐字一致，
+    下沉会**悄悄少命中**（用户看不出为什么搜不到）—— 未拍板前不动，这是记在
+    `docs/交接-当前状态.md` §5.11 / §5.15 的 backlog。
+    """
+    from sqlalchemy import select
+    t = StoreEntity.__table__
+    #: 匹配必需的列（`address_local` 只在展示当前页时才要）
+    rows = db.execute(select(t.c.id, t.c.master_id, t.c.name_local,
+                             t.c.name_norm, t.c.city, t.c.store_id_raw)
+                      .order_by(t.c.id)).all()
+    parent = {r[0]: r[1] for r in rows}
+    root = {}
+    for r in rows:
+        i, seen = r[0], set()
+        cur = i
+        while True:                      # 与老 `while r.master_id != r.id` 同口径（含 `or r` 兜底）
+            nxt = parent.get(cur)
+            if nxt is None or nxt == cur or cur in seen:
+                break
+            seen.add(cur)
+            cur = nxt
+        root[i] = cur
+    ql = q.lower()
+    hit = set()
+    children = {}
+    for r in rows:                       # ③ 一趟判定（老实现是 8 万组 pairs 再逐组比）
+        i, _mid, nloc, nnorm, city, sid = r
+        rt = root[i]
+        if rt == i:                      # 主档：4 列
+            if (ql in (nloc or "").lower() or ql in (nnorm or "").lower()
+                    or ql in (city or "").lower() or ql in (sid or "").lower()):
+                hit.add(i)
+        else:                            # 分身：2 列（命中的算到它的主档头上）
+            children.setdefault(rt, []).append(i)
+            if rt not in hit and (ql in (sid or "").lower()
+                                  or ql in (nloc or "").lower()):
+                hit.add(rt)
+    picked = sorted(hit)                 # 主档按 id 升序 —— 与老实现同序
+    total = len(picked)
+    page = max(1, int(page))
+    start = (page - 1) * per
+    master_ids = picked[start:start + per]
+    cols = _catalog_cols()
+    want = list(master_ids)
+    for m in master_ids:
+        want.extend(children.get(m, ()))
+    show = ({r.id: r for r in db.query(*cols).filter(
+        StoreEntity.id.in_(want)).order_by(StoreEntity.id)} if want else {})
+    return {"rows": [{"master": show[m],
+                      "children": [show[c] for c in children.get(m, ())]}
+                     for m in master_ids],
+            "total": total, "page": page, "pages": (total + per - 1) // per}
+
+
 def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
     """全部店铺目录：主档行 + 其下已并入的分身（可展开/解绑）。
 
@@ -612,51 +679,15 @@ def store_catalog(db, q: str = "", page: int = 1, per: int = 50) -> dict:
       ② 先算结构（谁是谁的主档），**只给当前页**建行 dict。
     `/stores` 实测 4.0s → ~0.5s。口径不变（主档按 id 升序、分身按 id 升序）。
 
-    ⚠️ 2026-10-17 第二批：**不搜索时改成纯 SQL**（`_catalog_page_sql`）—— 老实现不搜索
-    也要把全表 8 万行拉回 Python（本地生产副本实测 439ms / 线上约 1.5s）。
-    **搜索仍走原来的 Python 逐字段判定**：`ql in (字段 or "").lower()` 与数据库
-    `lower()`/`LIKE` 对**全角字符**未必逐字一致（AGENTS 记的 backlog 就是这条），
-    下沉 SQL 会悄悄改变搜索结果 → 未拍板前不动（本地实测搜索 516ms）。
+    ⚠️ 2026-10-17 第二批：分成两条路（两者**口径完全一致**，已逐页逐词对拍）：
+      · 不搜索 → `_catalog_page_sql`：计数/翻页/取分身**全在库里**（线上 1.7s → 0.28~0.45s）；
+      · 带搜索 → `_catalog_search`：结构（解根/分组）下沉、**匹配口径原样保留在 Python**。
+    为什么不把匹配也塞进 SQL：`ql in (字段 or "").lower()` 与 PG 的 `lower()/LIKE` 对
+    **全角字符**未必逐字一致，下沉会**悄悄少命中**（用户看不出为什么搜不到）→ 未拍板前不动。
     """
     if not q:
         return _catalog_page_sql(db, page, per)
-    cols = _catalog_cols()
-    ents = db.query(*cols).order_by(StoreEntity.id).all()
-    by_id = {e.id: e for e in ents}
-    root = {}
-    for e in ents:
-        r = e
-        seen = set()
-        while r.master_id != r.id and r.id not in seen:
-            seen.add(r.id)
-            r = by_id.get(r.master_id) or r
-        root[e.id] = r.id
-    masters = []          # 自己是根的行（按 id 升序 —— 与原实现同序）
-    children = {}         # 根 id → 它的分身
-    for e in ents:
-        if root[e.id] == e.id:
-            masters.append(e)
-        else:
-            children.setdefault(root[e.id], []).append(e)
-    pairs = [(m, children.get(m.id, [])) for m in masters]
-    if q:
-        ql = q.lower()
-
-        def _hit(m, ch):
-            return (ql in (m.name_local or "").lower()
-                    or ql in (m.name_norm or "").lower()
-                    or ql in (m.city or "").lower()
-                    or ql in (m.store_id_raw or "").lower()
-                    or any(ql in (c.store_id_raw or "").lower()
-                           or ql in (c.name_local or "").lower() for c in ch))
-
-        pairs = [(m, ch) for m, ch in pairs if _hit(m, ch)]
-    total = len(pairs)
-    page = max(1, int(page))
-    start = (page - 1) * per
-    return {"rows": [{"master": m, "children": ch}
-                     for m, ch in pairs[start:start + per]],
-            "total": total, "page": page, "pages": (total + per - 1) // per}
+    return _catalog_search(db, q, page, per)
 
 
 def auto_handle_exact(db) -> dict:
