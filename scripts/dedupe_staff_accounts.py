@@ -61,11 +61,24 @@ def main() -> int:
 
         dup = {k: v for k, v in groups.items() if len(v) > 1}
         print(f"重复编号 {len(dup)} 个（库: {url}）")
+
+        def keep_key(u):
+            """保留优先级：**在岗(active)** > 已改过密码(本人真在用) > 创建最早。
+
+            ⚠️ 只按"创建最早"会踩坑：实测 `luozijie`(disabled, 已改密) 比
+            `luo-zijie`(active, 未首登) 更早 → 保了停用的、删了在用的，队长直接登不上。
+            """
+            uid, uname, role, code, must, created, status = u
+            return (0 if status == "active" else 1,
+                    0 if not must else 1,
+                    str(created or ""), uid)
+
         to_delete = []
         for code, users in sorted(dup.items()):
-            users = sorted(users, key=lambda u: (str(u[5] or ""), u[0]))
+            users = sorted(users, key=keep_key)
             keep, others = users[0], users[1:]
-            print(f"\n[{code}] 保留 id={keep[0]} {keep[1]} ({keep[2]})")
+            print(f"\n[{code}] 保留 id={keep[0]} {keep[1]} "
+                  f"({keep[2]}, {keep[6]}, must={keep[4]})")
             for u in others:
                 uid, uname, role, _, must, created, status = u
                 reasons = []
