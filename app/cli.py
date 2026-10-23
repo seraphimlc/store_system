@@ -57,7 +57,7 @@ def create_employee(username: str, person_code: str, password: str = "demo123"):
             print(f"人员编号不存在: {person_code}", file=sys.stderr)
             sys.exit(1)
         by_code = (db.query(User)
-                   .filter(User.role == "staff", User.person_code == person_code)
+                   .filter(User.person_code == person_code)
                    .first())
         if by_code is not None:
             print(f"该编号已有员工账号 {by_code.username}（{person_code}），"

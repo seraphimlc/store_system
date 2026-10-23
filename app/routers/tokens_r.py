@@ -45,7 +45,8 @@ def staff_admin_tokens_issue(uid: int, request: Request, name: str = Form(""),
     if not csrf_ok(request, csrf_token):
         return HTMLResponse("CSRF 校验失败", status_code=400)
     target = db.get(User, uid)
-    if target is None or target.role != "staff":
+    # 队长也是员工（与 staff-admin 编辑/状态/重置口令同口径），别只放 staff
+    if target is None or target.role not in ("staff", "leader"):
         raise HTTPException(404, "员工不存在")
     if scope not in SCOPES_ALLOW:
         raise HTTPException(400, "权限只能是只读或读写")

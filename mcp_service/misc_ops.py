@@ -178,7 +178,8 @@ def staff_set_status(db, actor, *, user_id: int, new_status: str,
 
     guards.require_write(actor)
     target = db.get(User, user_id)
-    if target is None or target.role != "staff":
+    # 队长也是员工（与网页 /staff-admin/{uid}/status 的 role in (staff, leader) 同口径）
+    if target is None or target.role not in ("staff", "leader"):
         raise guards.GuardError("NOT_FOUND", f"员工不存在：user_id={user_id}",
                                 "请先用 visit_staff(view='list') 确认正确的员工用户名")
     if new_status not in _STATUS_ALLOW:

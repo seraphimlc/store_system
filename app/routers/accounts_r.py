@@ -89,7 +89,13 @@ def my_password_submit(request: Request, old_password: str = Form(...),
     db.commit()
     # 员工改完密码直接进「每日填报」（员工每天真正要用的页面）；
     # 原来跳「我的绩效」，但员工可见起始月收紧后那里常常是空的。
-    dest = "/my/report" if user.role == "staff" else "/perf"
+    # ⚠️ 队长不能落到 `/perf`（那是**管理员页**，会被 _denied 弹回登录）→ 去 /my/tasks。
+    if user.role == "staff":
+        dest = "/my/report"
+    elif user.role == "leader":
+        dest = "/my/tasks"
+    else:
+        dest = "/perf"
     return RedirectResponse(dest + "?msg=密码已修改，可正常使用", status_code=303)
 
 
@@ -318,7 +324,8 @@ def staff_reset_all(request: Request, password: str = Form("demo123"),
         return HTMLResponse("CSRF 校验失败", status_code=400)
     if len(password) < 6:
         raise HTTPException(400, "口令至少 6 位")
-    staff = db.query(User).filter(User.role == "staff").all()
+    staff = db.query(User).filter(
+        User.role.in_(("staff", "leader"))).all()   # 队长也是员工，别再漏
     n = 0
     for u in staff:
         u.password_hash = hash_password(password)

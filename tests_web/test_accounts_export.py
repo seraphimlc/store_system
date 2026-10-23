@@ -150,6 +150,50 @@ def test_reset_all_sets_default_and_must_change(client):
     assert r2.status_code == 302 and r2.headers["location"].startswith("/my/password")
 
 
+def test_reset_all_includes_leaders(client):
+    """批量重置**必须包含队长**（队长也是员工；原来只查 role='staff' 漏掉）。"""
+    _mk(client, "admin", "管理员", None, role="admin", password="adminpw")
+    _mk(client, "boss1", "队长甲", "PL", role="leader", password="ownpass")
+    _login(client, "admin", "adminpw")
+    r = client.post("/staff-admin/reset-all",
+                    data={"csrf_token": _csrf(client), "_ft": form_token(client),
+                          "password": "demo123"}, follow_redirects=False)
+    assert r.status_code == 303
+    db = appdb.SessionLocal()
+    u = db.query(User).filter(User.username == "boss1").one()
+    assert u.must_change_password is True, "队长的口令也要被重置"
+    db.close()
+
+
+def test_leader_token_issue_allowed(client):
+    """管理员可以给**队长**发 MCP Token（原来 role != 'staff' → 404）。"""
+    _mk(client, "admin", "管理员", None, role="admin", password="adminpw")
+    _mk(client, "boss1", "队长甲", "PL", role="leader")
+    _login(client, "admin", "adminpw")
+    db = appdb.SessionLocal()
+    uid = db.query(User).filter(User.username == "boss1").one().id
+    db.close()
+    r = client.post(f"/staff-admin/{uid}/tokens/issue",
+                    data={"csrf_token": _csrf(client), "_ft": form_token(client),
+                          "name": "队长token", "scope": "read", "days": "90"},
+                    follow_redirects=False)
+    assert r.status_code == 303, r.status_code
+    assert "new_token=" in r.headers["location"]
+
+
+def test_leader_password_change_lands_on_tasks_not_perf(client):
+    """队长改完密码不能落到 `/perf`（管理员页 → 会被弹回登录），应去 `/my/tasks`。"""
+    _mk(client, "boss1", "队长甲", "PL", role="leader", password="ownpass")
+    _login(client, "boss1", "ownpass")
+    r = client.post("/my/password",
+                    data={"_ft": form_token(client),
+                          "old_password": "ownpass", "new_password": "newpass123",
+                          "csrf_token": _csrf(client)},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/my/tasks"), r.headers["location"]
+
+
 def test_export_login_url_prefers_public_issuer(client, monkeypatch):
     """登录地址要用公开地址（应用在 nginx 后面，request.base_url 会给出 http://）。"""
     from types import SimpleNamespace
@@ -179,6 +223,18 @@ def test_cli_create_employee_is_idempotent_by_code(client):
          .filter(User.person_code == "2188240606634082").count())
     assert n == 1, "同一编号出现了 %d 条账号" % n
     assert u.username == "xiaochuanyi"                   # 复用了已有账号
+    db.close()
+
+
+def test_cli_create_employee_reuses_leader_account(client):
+    """已有**队长**账号时，CLI 同样不能再建第二个（判重只看 person_code）。"""
+    from app.cli import create_employee
+    _mk(client, "ogawa", "小川逸", "2188240606634082", role="leader")
+    u = create_employee("ogawa-itsuru", "2188240606634082")
+    db = appdb.SessionLocal()
+    n = db.query(User).filter(User.person_code == "2188240606634082").count()
+    assert n == 1, "同一编号出现了 %d 条账号" % n
+    assert u.username == "ogawa"
     db.close()
 
 

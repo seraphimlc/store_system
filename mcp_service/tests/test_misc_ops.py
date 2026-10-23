@@ -271,11 +271,22 @@ def test_staff_set_status_not_found(db):
         misc_ops.staff_set_status(db, W, user_id=999, new_status="leave",
                                   confirm_text="确认改状态 x leave")
     assert e.value.code == "NOT_FOUND"
-    # admin 账号不可改（与网页路由 role!=staff → 404 同口径）
+    # admin 账号不可改（与网页路由 role in (staff,leader) → 404 同口径）
     with pytest.raises(guards.GuardError) as e:
         misc_ops.staff_set_status(db, W, user_id=1, new_status="leave",
                                   confirm_text="确认改状态 admin leave")
     assert e.value.code == "NOT_FOUND"
+
+
+def test_staff_set_status_allows_leader(db):
+    """队长也是员工：MCP 改状态不能只放 `staff`（网页路由已是 staff+leader）。"""
+    db.add(User(id=4, username="boss1", password_hash="h4", display_name="队长甲",
+                role="leader", status="active", is_active=True, person_code="P003"))
+    db.commit()
+    res = misc_ops.staff_set_status(db, W, user_id=4, new_status="leave",
+                                    confirm_text="确认改状态 boss1 leave")
+    assert res["ok"] is True
+    assert db.get(User, 4).status == "leave"
 
 
 def test_staff_set_status_requires_write(db):

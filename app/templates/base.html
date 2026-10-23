@@ -158,8 +158,9 @@
   </a>
 </nav>
 {% endif %}
-{# 员工端：本期出勤计划还没登记 → 弹窗提示（不是硬拦截，「稍后再说」可关掉） #}
-{% if current_user and current_user.role == 'staff' and _pp and _p != '/my/plan' %}
+{# 员工端：本期出勤计划还没登记 → 弹窗提示（不是硬拦截，「稍后再说」可关掉）
+   ⚠️ 队长也要登记出勤（ATTEND_ROLES = staff+leader），别只提示 staff。 #}
+{% if current_user and current_user.role in ('staff', 'leader') and _pp and _p != '/my/plan' %}
 <div class="modal-mask" x-data="{open: true}" x-show="open" x-cloak
      data-testid="plan-prompt" data-period="{{ _pp.key }}">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="plan-prompt-t">

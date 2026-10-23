@@ -885,6 +885,24 @@ def test_plan_prompt_popup_shown_until_submitted(client, frozen):
     assert 'class="dot"' not in after.text
 
 
+def test_plan_prompt_shown_for_leader_too(client, frozen):
+    """队长也要登记出勤（ATTEND_ROLES = staff+leader）→ 待填报时同样弹窗。"""
+    db = appdb.SessionLocal()
+    _person(db, "PL", "队长甲")
+    if db.query(User).filter(User.username == "boss1").first() is None:
+        db.add(User(username="boss1", display_name="队长甲", role="leader",
+                    person_code="PL", password_hash=hash_password("pw123456"),
+                    is_active=True, status="active", must_change_password=False,
+                    created_at=ROSTER))
+        db.commit()
+    db.close()
+    client.post("/login", data={"username": "boss1", "password": "pw123456"},
+                follow_redirects=False)
+    r = client.get("/my/report")
+    assert r.status_code == 200
+    assert 'data-testid="plan-prompt"' in r.text
+
+
 def test_plan_prompt_not_shown_to_admin(client):
     _admin(client)
     r = client.get("/staff-plans")
