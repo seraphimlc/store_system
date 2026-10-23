@@ -45,11 +45,15 @@ def ensure_staff_user(db, person_code: str, display_name: str) -> User:
     登录名由姓名自动生成（模型优先：中文→拼音 / 日文→罗马字 / 英文→原名；
     模型不可用时回退规则拼音/编号）；口令为系统默认初始口令，首登须改密。
     已存在该 person_code 的账号（含早期手工账号）则不重复创建。
+
+    ⚠️ 判重**不按角色过滤**（2026-01 修）：原来只查 `role == "staff"`，
+    队长（`leader`）的账号判不到 → 每次导入都给同一编号再建一个队员号
+    （实测 6 位队长各多 1 个罗马字账号，如 `ogawa` + `ogawa-itsuru`）。
     """
     from app.auth import hash_password
     from app.services.login_names import login_name_for
     existing = (db.query(User)
-                .filter(User.role == "staff", User.person_code == person_code)
+                .filter(User.person_code == person_code)
                 .first())
     if existing is not None:
         return existing

@@ -180,6 +180,29 @@ def test_auto_create_employee_person_code_unique(client):
     db.close()
 
 
+def test_auto_create_skips_existing_leader_account(client):
+    """队长账号已存在时，导入自动开户**不能再建一个队员号**。
+
+    回归 2026-01：原来判重只查 `role == "staff"`，6 位队长的 leader 账号被判不到，
+    每次导入都给同一编号再开一个罗马字账号（`ogawa` + `ogawa-itsuru`）。
+    """
+    from app.services.importer import ensure_staff_user
+    _seed()
+    db = _db()
+    db.add(Person(code="333", display_name="小川逸"))
+    db.add(User(username="ogawa", password_hash=hash_password("pw123456"),
+                display_name="小川逸", role="leader", person_code="333",
+                is_active=True, status="active"))
+    db.commit()
+    u = ensure_staff_user(db, "333", "小川逸")
+    db.commit()
+    assert u.username == "ogawa", "已存在队长账号时必须复用，不能新建"
+    db.close()
+    db = _db()
+    assert db.query(User).filter(User.person_code == "333").count() == 1
+    db.close()
+
+
 def test_no_delete_endpoint(client):
     _seed()
     _login(client, "admin", "pw123456")
