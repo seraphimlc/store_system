@@ -233,6 +233,7 @@ location /mcp {
 > **授权矩阵**（`mcp_service/authz.py`）：员工 6 / **队长 10** / 管理员 27。
 > （2026-10-10 加 `visit_day_report` → 管理员档 25 → 26；
 > 2026-10-16 加 `visit_task_import` → 26 → 27。）
+> ⚠️ **`visit_staff` 的 `action=set_status` 对 staff 和 leader 都放行**（队长也是员工，与网页 `/staff-admin/{uid}/status` 同口径）。判「是不是这个员工」按**用户名/id**，别按 `role=='staff'` —— 2026-10-24 前 MCP 只认 staff，队长改不了状态。
 > 队长档 = 员工档 + 4 个本队任务工具。作业域工具与 Web 端**走同一套服务层**
 > （`app/services/bd_tasks.py` 等），口径不会漂移；能力层在 `mcp_service/task_ops.py`。
 

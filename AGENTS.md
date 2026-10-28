@@ -58,6 +58,12 @@ scripts/mcp_restart.sh                                     # 改完 mcp_service 
    `bd_tasks.can_reject_maps`。
 6. 新增 POST 表单必须 `{{ form_token() }}` + `csrf_token`；表格 `class="grid-tbl"` + 外层 `.tbl-wrap`；
    文案 `t('中文')`（i18n 键**不能含双引号**，引用词用「」）。
+7. **`users.role` 只用于「能不能进哪个端」（授权/落点），不用来判断"是不是员工/有没有账号"**。
+   判重/建号一律按 **`person_code`**（一个编号只能一个账号）；要"所有员工"就用
+   `role in ("staff", "leader")`。⚠️ 原来只查 `role == "staff"` 造成的线上事故：**队长每次导入
+   多一个账号**（2026-10-24 清掉 6 个）、批量重置口令漏队长、队长领不到 Token、改完密码被弹回
+   登录 —— 清单见 `docs/交接-当前状态.md` §5.10。另注：`bd_team_member.role`（leader/member）
+   是**团队角色**，与 `users.role` 是两个概念，别混。
 
 ## 关键基准（系统实测，非手工文件）
 
