@@ -523,10 +523,29 @@ table.plan-matrix th .hint { font-weight: 400; }
 /* 指标块（8 个统计卡）：数字大、标签小，三列宽度下更易读 */
 .dash-grid .stat-card { padding: 1rem 1.15rem; }
 /* 图表块：标题 + 图，三列时高度一致（图表按容器宽度自适应） */
-.dash-grid .chart-card { padding: .9rem 1rem; }
+/* 图表块 = **正方形**（用户 2026-10-18："图表块，能不能是方的，或者饼图就变成椭圆了"）。
+   ⚠️ 上一版我写了 `canvas { width:100% !important; height:150px !important }` ——
+   那是**压扁饼图的元凶**：Chart.js 给 donut 画的是 **177×177 的方形缓冲**
+   （圆），CSS 却把它显示成 332.7×150（横缩放 0.53 / 纵缩放 1.18）→ 圆被横向拉长
+   1.88 倍变椭圆（实测证据见本次提交说明）。**永远别用 !important 覆写 canvas 的
+   显示尺寸**：Chart.js 需要 CSS 尺寸与绘制缓冲同比例，否则图像被拉伸变形。
+   现在：卡片用 `aspect-ratio: 1/1` 变正方，canvas 撑满卡片、`height:100%`，
+   比例由 Chart.js 自己算 → 饼图是正圆，柱图和卡片同高。 */
+/* ⚠️ `align-self: start` 不能省：网格默认 `align-items: stretch` 会**覆盖
+   `aspect-ratio`**，高度退回内容高度（= canvas 的默认 150px），于是变成
+   「卡片高 ← 内容 ← canvas ← 父盒子高」的循环依赖 —— 实测 1440px 偶然收敛成正方形，
+   900px 就散成 203×208 / 203×228 / 203×378 三种高度（饼图那张 378）。
+   不拉伸后：宽已知（列宽）→ `aspect-ratio` 定出**确定的高度** → 盒子高确定 →
+   Chart.js 按真实像素画。整条链没有循环。 */
+.dash-grid .chart-card { padding: .9rem 1rem; aspect-ratio: 1 / 1;
+  align-self: start; display: flex; flex-direction: column; }
 .dash-grid .chart-card > .ttl { font-weight: 600; font-size: .9rem;
-  margin-bottom: .5rem; line-height: 1.35; }
-.dash-grid .chart-card canvas { width: 100% !important; height: 150px !important; }
+  margin-bottom: .5rem; line-height: 1.35; flex: 0 0 auto; }
+/* canvas 的**盒子**单独一层：Chart.js 量的是 canvas 的父节点尺寸，所以必须给它
+   一个「已知宽高、且不含标题」的父盒子，否则它会按整张卡片算 → 溢出/被压。
+   ⚠️ 这里**一个 `!important` 都不许加**（那是上一版把圆饼压成椭圆的直接原因）。 */
+.dash-grid .chart-card > .chart-box { flex: 1 1 auto; min-height: 0; position: relative; }
+.dash-grid .chart-card > .chart-box > canvas { display: block; }
 /* ⚠️ 断点按**容器**算，不按窗口：`main.wrap` 只有 1180px 宽（两侧各 1.5rem padding）
    → 窗口 1280 时容器内宽约 1,180，三列每块约 360px 足够；
    直到窗口 < 900（容器 < 850）才降两列，< 620 降一列。 */

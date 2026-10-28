@@ -43,19 +43,19 @@
 
 <div class="dash-grid">
   <div class="card chart-card"><div class="ttl">{{ t('总点数（月度）') }}</div>
-    <canvas id="cPoints" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cPoints"></canvas></div></div>
   <div class="card chart-card"><div class="ttl">{{ t('工资总额（円，月度）') }}</div>
-    <canvas id="cAmount" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cAmount"></canvas></div></div>
   <div class="card chart-card"><div class="ttl">{{ t('有效店数（月度）') }}</div>
-    <canvas id="cRecords" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cRecords"></canvas></div></div>
   <div class="card chart-card"><div class="ttl">{{ t('店铺结构演变（1点/2点堆叠）') }}</div>
-    <canvas id="cStack" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cStack"></canvas></div></div>
   <div class="card chart-card"><div class="ttl">{{ t('人员变化（员工数 + 新增/流失）') }}</div>
-    <canvas id="cHead" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cHead"></canvas></div></div>
   <div class="card chart-card"><div class="ttl">{{ t('最新月店铺结构（1点/2点）') }}</div>
-    <canvas id="cDonut" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cDonut"></canvas></div></div>
   <div class="card chart-card"><div class="ttl">{{ t('环比对比（上两月') }}→ {{ t('最新月）') }}</div>
-    <canvas id="cCompare" height="150"></canvas></div>
+    <div class="chart-box"><canvas id="cCompare"></canvas></div></div>
 </div>
 
 <div class="card">
@@ -145,7 +145,14 @@
 (function(){
   function boot(){
   var C=(window.__PAGE_STATE__||{}).chart||{};
-  function axis(){return {responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}};}
+  // 看板里的图：`maintainAspectRatio:false` = 按 chart-box 的**真实像素**画。
+  // 这样缓冲尺寸 == 显示尺寸，饼图半径取 min(宽,高)/2 → 正圆，绝不会被拉成椭圆。
+  function axis(){return {responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}};}
+  // 员工维度那张图（staff_module.html）在普通卡片里，没有固定高度的父盒子 →
+  // 保持 Chart.js 默认的 2:1 比，别跟着关。
+  function axisStaff(){return {responsive:true,plugins:{legend:{display:false}},
+    scales:{y:{beginAtZero:true,ticks:{precision:0}}}};}
   function bar(id,label,data,color){var el=document.getElementById(id);if(!el||!(C.labels||[]).length)return;
     new Chart(el,{type:'bar',data:{labels:C.labels,datasets:[{label:label,data:data,backgroundColor:color,borderRadius:4}]},options:axis()});}
   bar('cPoints','总点数',C.points,'rgba(47,111,237,.78)');
@@ -156,7 +163,7 @@
     data:{labels:C.labels,datasets:[
       {label:'1点店',data:C.p1,backgroundColor:'rgba(120,150,200,.7)',stack:'s'},
       {label:'2点店',data:C.p2,backgroundColor:'rgba(124,58,237,.75)',stack:'s'}]},
-    options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
       scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});}
   var hd=document.getElementById('cHead');
   if(hd&&C.labels.length){var HC=(C.hc||[]);
@@ -164,25 +171,25 @@
       {type:'bar',label:'员工数',data:C.employees,backgroundColor:'rgba(47,111,237,.5)',borderRadius:3},
       {type:'line',label:'新增',data:HC.map(function(x){return x.new;}),borderColor:'#1a7f37',backgroundColor:'#1a7f37',tension:.3},
       {type:'line',label:'流失',data:HC.map(function(x){return x.gone;}),borderColor:'#b02a37',backgroundColor:'#b02a37',tension:.3}]},
-      options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
         scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});}
   var d=document.getElementById('cDonut');
   if(d&&C.labels.length){new Chart(d,{type:'doughnut',data:{labels:['2点店','1点店'],
     datasets:[{data:[C.cur_p2||0,C.cur_p1||0],backgroundColor:['#7c3aed','#e5e7eb'],borderWidth:0}]},
-    options:{responsive:true,cutout:'62%',plugins:{legend:{position:'bottom',labels:{boxWidth:12}}}}});}
+    options:{responsive:true,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'bottom',labels:{boxWidth:12}}}}});}
   var cm=document.getElementById('cCompare');
   if(cm&&C.compare&&C.compare.cur&&C.compare.cur.length){var CP=C.compare;
     new Chart(cm,{type:'bar',data:{labels:CP.labels,datasets:[
       {label:'上月',data:CP.prev,backgroundColor:'rgba(160,170,190,.65)',borderRadius:3},
       {label:'最新月',data:CP.cur,backgroundColor:'rgba(47,111,237,.8)',borderRadius:3}]},
-      options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},
         scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});}
   window.pg=function(k){var rows=document.querySelectorAll('.pg-'+k);
     rows.forEach(function(r){r.style.display='';});};
   var se=document.getElementById('cStaff');
   if(se&&C.staff_labels&&C.staff_labels.length){new Chart(se,{type:'bar',
     data:{labels:C.staff_labels,datasets:[{label:'点数',data:C.staff_points,backgroundColor:'rgba(47,111,237,.78)',borderRadius:4}]},
-    options:axis()});}
+    options:axisStaff()});}
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
