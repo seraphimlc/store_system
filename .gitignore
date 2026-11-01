@@ -15,6 +15,8 @@ data/uploads/
 # 本地临时件（配色候选图等，不入库）
 data/*_swatch.html
 data/real/
+# 地图网格原始/生成数据体积大，存放在仓库外，不提交
+data/grid/
 *.xlsx
 !tests/fixtures/**/*.xlsx
 

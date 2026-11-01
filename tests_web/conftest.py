@@ -16,6 +16,21 @@ from app.main import create_app  # noqa: E402
 
 
 @pytest.fixture
+def db():
+    """独立服务层测试会话。"""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool, future=True)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+    session = Session()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(engine)
+
+
+@pytest.fixture
 def client():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                            poolclass=StaticPool, future=True)
