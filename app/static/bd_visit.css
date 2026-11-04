@@ -1,0 +1,135 @@
+/* 巡店页：导航56px → 地图 → 商户列表；筛选同一行，改动即搜索。 */
+.visit-workspace {grid-template-rows:minmax(0,34fr) minmax(0,66fr)}
+.visit-list {background:var(--surface,#fff)}
+.visit-page .visit-nav-none {color:#9aa7b8;font-size:.78rem}
+/* 图例配色与 bd_work.js 的商户点一致（已巡店=绿 / 未巡店=蓝） */
+.visit-page .dispatch-map-legend i.visited {background:#2c7751}
+.visit-page .dispatch-map-legend i.unvisited {background:#225fa2}
+
+/* 作业进展：只读展示（按巡店留痕自动统计，不再手填） */
+.visit-progress {display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:0 0 auto;padding:6px 16px;border-bottom:1px solid #e2e8f0;background:#f7f9fc;font-size:.78rem;color:#52647b}
+.visit-progress-title {font-weight:650;color:#20334b}
+.visit-progress-state {font-weight:650}
+.visit-progress-state.visited {color:#176448}
+.visit-progress-state.visiting {color:#245caa}
+.visit-progress-count {font-variant-numeric:tabular-nums;white-space:nowrap}
+.visit-progress-bar {flex:1 1 120px;min-width:90px;height:8px;border-radius:99px;background:#dde5ef;overflow:hidden}
+.visit-progress-bar i {display:block;height:100%;background:#2c7751;border-radius:99px}
+.visit-progress-pct {font-variant-numeric:tabular-nums;font-weight:600;color:#20334b}
+.visit-progress-hint {color:#8b98a9;font-size:.72rem;white-space:nowrap}
+
+/* 商户列表：四列固定宽度，窄屏也不横滑；宽屏收紧不摊满 */
+.visit-tbl-wrap {overflow:visible;border:0;border-radius:0;box-shadow:none;background:transparent}
+.visit-tbl {table-layout:fixed;width:100%;max-width:760px;font-size:.84rem}
+.visit-tbl th,.visit-tbl td {padding:.5rem .55rem;white-space:normal}
+.visit-tbl th:first-child {width:46%}
+.visit-tbl th:nth-child(2) {width:16%}
+.visit-tbl th:nth-child(3) {width:22%}
+.visit-tbl th:nth-child(4) {width:16%}
+.visit-tbl td {border-bottom:1px solid #edf0f6;overflow-wrap:anywhere}
+.visit-tbl tbody tr.visit-row {cursor:pointer}
+.visit-tbl tbody tr.visit-row:hover {background:#f2f6fc}
+.visit-tbl tbody tr.visit-row[aria-expanded=true] {background:#eaf1ff}
+.visit-name {font-weight:600;color:#20334b}
+.visit-status,.visit-state {font-size:.78rem;color:#52647b}
+.visit-state.visited {color:#176448;font-weight:600}
+.visit-nav {color:#245caa;text-decoration:none;white-space:nowrap;font-size:.78rem;font-weight:600}
+.visit-nav:hover {text-decoration:underline}
+.visit-row:focus-visible {outline:2px solid #3877df;outline-offset:-2px}
+
+/* 行详情：展开后可编辑商户信息 */
+.visit-detail-row td {background:#f7f9fc;padding:12px}
+.visit-detail-row[hidden] {display:none}
+.visit-detail-meta {margin:0 0 10px;color:#52647b;font-size:.78rem;overflow-wrap:anywhere}
+.visit-store-id {font-variant-numeric:tabular-nums}
+.visit-form {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
+.visit-form label {display:grid;gap:5px;font-size:.78rem;color:#52647b}
+.visit-form input,.visit-form select,.visit-form textarea {box-sizing:border-box;width:100%;min-height:42px;padding:8px 10px;border:1px solid #b9c7d9;border-radius:6px;font-size:16px;background:var(--surface,#fff);color:#20334b}
+.visit-form textarea {min-height:60px;resize:vertical}
+.visit-form .work-coordinates {display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.visit-form .btn {grid-column:1/-1;min-height:42px;margin:0;justify-self:start}
+
+.visit-pages {display:flex;gap:12px;padding:10px 16px}
+.visit-pages:empty {display:none}
+.visit-extra {margin:0 16px 16px;padding:0 4px}
+.visit-extra summary {min-height:42px;cursor:pointer;padding:8px 0;color:#20334b;font-size:.84rem}
+.visit-hint {margin:0 0 10px;color:#52647b;font-size:.78rem}
+.visit-log {margin:0 0 6px;color:#52647b;font-size:.78rem;overflow-wrap:anywhere}
+.visit-empty {padding:20px 16px;color:#52647b;font-size:.9rem}
+
+@media(max-width:760px) {
+  .visit-progress {padding-left:12px;padding-right:12px}
+  .visit-form {grid-template-columns:1fr}
+  .visit-form .work-coordinates {grid-template-columns:1fr}
+}
+
+/* 无可见标签的三等分筛选，手机保持同一行。 */
+.visit-page .visit-equal-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.visit-page .visit-equal-filters label{display:block;min-width:0;margin:0}
+.visit-page .visit-equal-filters select,.visit-page .visit-equal-filters input{height:42px;width:100%;min-width:0;box-sizing:border-box;margin:0;padding:8px;font-size:13px}
+.visit-page .bd-filter-label[hidden]{display:none}
+.visit-row.is-selected td{background:#e8f1fb}
+.visit-edit{display:block;background:none;border:0;padding:2px 0;color:#245caa;font:inherit;font-size:.74rem;cursor:pointer}
+.visit-page .visit-equal-filters~.dispatch-scroll .visit-tbl{max-width:none}
+@media(min-width:1100px){.visit-workspace{grid-template-columns:minmax(0,1fr) minmax(420px,.8fr);grid-template-rows:1fr}}
+
+.visit-page .visit-equal-filters select,.visit-page .visit-equal-filters input{max-width:none}
+
+/* 新店是商户列表中的可展开表单，不再覆盖地图或员工底栏。 */
+.visit-new-store {position:static;width:auto;max-height:none;margin:0;border:0;border-bottom:1px solid #e5eaf2;border-radius:0;background:#fff;box-shadow:none;overflow:visible}
+.visit-new-store>summary {display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:40px;padding:8px 12px;box-sizing:border-box;cursor:pointer;list-style:none;color:#315fe9;font-size:13px;font-weight:600;background:#f8faff}
+.visit-new-store>summary::-webkit-details-marker {display:none}
+.visit-new-store>summary>span {display:flex;align-items:center;gap:7px}
+.visit-new-store svg {width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.visit-new-store[open] .visit-new-chevron {transform:rotate(180deg)}
+.visit-new-store .task-form {gap:14px;padding:16px;background:#fff}
+.visit-new-store .task-form label {display:grid;gap:6px;font-size:12px;color:#52647b}
+.visit-new-store .task-form input {height:42px;padding:9px 11px;border:1px solid #dce3ed;border-radius:7px;background:#fff;color:#24344d;font:inherit;font-size:14px;width:100%;min-width:0;box-sizing:border-box}
+.visit-new-store input[type=file] {height:auto;min-height:44px;padding:8px;background:#f8fafc;font-size:12px}
+.visit-new-store input::file-selector-button {border:0;border-radius:5px;background:#e9effc;color:#3159b8;padding:6px 10px;margin-right:8px;font:inherit;cursor:pointer}
+.visit-new-store .task-form>.task-filters {display:grid;grid-template-columns:1fr 1fr;margin:0;gap:10px}
+.visit-new-store .task-form>.task-filters input {width:100%;height:42px}
+.visit-new-store .task-form p {margin:0;color:#64728a;font-size:12px;line-height:1.6}
+.visit-new-store .task-form .btn {min-height:42px;display:flex;align-items:center;justify-content:center;font-size:13px;border-radius:7px}
+.visit-new-store .task-form>a {text-align:center;font-size:13px;padding:5px}
+.visit-new-store #new-store-photo-preview {max-width:100%;max-height:180px;object-fit:contain;border-radius:7px}
+.visit-new-store #new-store-photo-preview[hidden] {display:none}
+.visit-page .visit-progress {background:#fff;border-bottom:1px solid #edf0f5;padding:10px 16px;color:#52647b;font-size:12px;gap:8px}
+.visit-page .visit-progress-bar {height:5px;background:#edf1f7}
+.visit-page .visit-progress-bar i {background:#315fe9}
+.visit-page .visit-progress-hint {color:#64728a;font-size:10px}
+.visit-page .visit-equal-filters {padding:12px 16px;background:#fff;border-bottom:1px solid #edf0f5}
+.visit-page .visit-equal-filters input,.visit-page .visit-equal-filters select {border:1px solid #dce3ed;border-radius:6px;color:#40516a;background:#fff;box-shadow:none}
+.visit-page .visit-tbl th {background:#f7f9fc;color:#64738a;font-weight:500;font-size:11px}
+.visit-page .visit-tbl td {font-size:13px;padding:12px 10px}
+.visit-page .visit-tbl th:first-child {width:44%}
+.visit-page .visit-tbl th:nth-child(2) {width:18%}
+.visit-page .visit-tbl th:nth-child(3) {width:22%}
+.visit-page .visit-tbl th:nth-child(4) {width:16%}
+.visit-page .visit-detail-row td {background:#f8faff}
+.visit-page .visit-form {display:grid;gap:12px}
+.visit-page .visit-form select,.visit-page .visit-form textarea {min-width:0;width:100%;box-sizing:border-box;border:1px solid #dce3ed;border-radius:6px;padding:9px;color:#293b54;background:#fff;font:inherit}
+.visit-page .visit-form .btn {min-height:40px}
+@media(max-width:760px) {
+  .visit-page:has(#new-store[open]) .visit-workspace {grid-template-rows:minmax(90px,23fr) minmax(0,77fr)}
+  .visit-new-store .task-form input {font-size:16px;min-height:44px}
+  .visit-new-store .task-form .btn {min-height:44px;font-size:14px}
+  .visit-new-store>summary {min-height:44px;font-size:12px}
+  .visit-page .visit-equal-filters {padding:10px 12px;gap:6px}
+  .visit-page .visit-equal-filters select,.visit-page .visit-equal-filters input {padding:7px 5px;font-size:12px}
+  .visit-page .visit-form {grid-template-columns:1fr}
+  .visit-page .visit-tbl td {padding:11px 8px;font-size:12px}
+  .visit-page .visit-progress {padding:8px 12px}
+}
+
+/* 菜单与筛选控件共用定位容器，滚动时保持锚定。 */
+.visit-filter-picker {position:relative;min-width:0}
+.visit-page .visit-equal-filters select[hidden] {display:none}
+.visit-filter-trigger {display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%;height:42px;min-width:0;margin:0;padding:8px;border:1px solid #dce3ed;border-radius:6px;background:#fff;color:#40516a;font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.visit-filter-trigger::after {content:"";flex:0 0 6px;width:6px;height:6px;margin:0 2px 3px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg)}
+.visit-filter-menu {position:absolute;top:calc(100% + 4px);left:0;z-index:50;min-width:100%;width:max-content;max-width:calc(100vw - 24px);max-height:240px;overflow:auto;box-sizing:border-box;padding:4px;border:1px solid #dce3ed;border-radius:6px;background:#fff;box-shadow:0 6px 18px rgba(16,32,63,.16)}
+.visit-filter-menu[hidden] {display:none}
+.visit-filter-menu [role=option] {display:block;width:100%;min-height:44px;margin:0;padding:8px 10px;border:0;border-radius:4px;background:#fff;color:#40516a;font:inherit;font-size:13px;text-align:left;white-space:nowrap;cursor:pointer}
+.visit-filter-menu [aria-selected=true] {background:#edf2ff;color:#315fe9;font-weight:600}
+.visit-filter-menu [role=option]:focus-visible,.visit-filter-trigger:focus-visible {outline:2px solid #3877df;outline-offset:-2px}
+@media(max-width:760px) {.visit-filter-trigger {padding:7px 5px;font-size:12px}}

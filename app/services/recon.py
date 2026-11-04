@@ -642,6 +642,12 @@ def run_task(db, task_id: int):
             wb.save(fp)
             params["result_path"] = fp
         t.params = params
+        # 对账文件若有明确地址列，同样按 Store ID 给店铺实体补空。
+        # 地址回写不影响点数/差异口径；冲突、非法地址和已有地址均跳过。
+        from app.services import store_address as _store_address
+        params["address_backfill"] = _store_address.backfill_from_workbook(
+            db, path, commit=False)
+        t.params = params
         t.status = "done"
         t.finished_at = _dt.datetime.utcnow()
         db.commit()

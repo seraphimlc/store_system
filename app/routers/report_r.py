@@ -67,9 +67,7 @@ def my_report_page(request: Request,
     chart = {"series": series,
              "geo": report_chart.chart_geometry(series) if series["show"] else {}}
 
-    # ⚠️ 用户 2026-10-06："对于分给我的任务，我也是可以设置进度的" —— 每日填报
-    #    不只是点数：**分给我的任务进度也在这页**，和点数**一次提交**（同一事务）。
-    #    走作业域的跨域编排层 `self_report`（点数 + 进度），队长同样适用。
+    # 旧车站任务进度与点数沿用原有单次提交编排；批次任务仍走独立页面。
     from app.services import self_report as _sr
     sr = _sr.view(db, user)
     return templates.TemplateResponse("my_report.html", {
@@ -294,8 +292,7 @@ def staff_reports_page(request: Request,
     # MCP/脚本仍可调用。
     rep_sum = report_compare.reports_summary(db, start=s, end=e,
                                              person_code=person_code)
-    # 「改」进来时还要给出**那天的任务进展**（管理员改自报 = 点数 + 当天进展，
-    # 用户 2026-10-10）。跨域取数一律走编排层 `self_report`（铁律 1 的唯一例外）。
+    # 管理员改自报时同时显示并保存当天车站任务进展。
     edit_row = _edit_row(db, person_code, edit_date)
     day_view = {"rows": [], "is_backfill": False}
     if edit_row:

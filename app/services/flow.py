@@ -365,6 +365,9 @@ def process_import(db, import_id: int) -> dict:
     if imp is None:
         raise ValueError("文件不存在")
     cache, seen = sync_store_for_import(db, imp)
+    # 明确地址列按 Store ID 补空；不扫描整行猜地址，不覆盖已有值。
+    from app.services import store_address
+    address_stats = store_address.backfill_from_workbook(db, imp.stored_path)
     rel = promote_or_link_entities(db, cache, imp)
     update_earliest_anchor(db, imp)
     judge = judge_import(db, imp)
@@ -372,7 +375,8 @@ def process_import(db, import_id: int) -> dict:
     appealable = db.query(RawRecord).filter(
         RawRecord.import_id == imp.id,
         RawRecord.clean_status == "master_late").count()
-    return {"judge": judge, "appealable": appealable, "entities": len(rel)}
+    return {"judge": judge, "appealable": appealable, "entities": len(rel),
+            "addresses": address_stats}
 
 
 # ---------------- 判定定稿 → 入正式表 ----------------

@@ -1,0 +1,228 @@
+/* 巡店任务共用视觉：限定作用域，桌面重比较，手机重执行。 */
+.tasks-page,.task-detail-page,.visit-page {--work-line:#e3e8f0;--work-muted:#63728a;--work-blue:#315fe9}
+.work-surface {max-width:1240px;margin:0 auto;padding:2px 0 28px}
+.task-heading {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 22px}
+.task-heading h1 {margin:0;font-size:26px;line-height:1.3;font-weight:700;letter-spacing:-.4px;color:#24314a}
+.task-heading p {margin:7px 0 0;color:#63728a;font-size:13px;line-height:1.6}
+.task-heading>span {font-size:13px;color:#63728a;font-variant-numeric:tabular-nums}
+.work-back {display:inline-flex;align-items:center;color:#63728a;font-size:12px;margin-bottom:14px;gap:6px}
+.work-back:hover {color:#315fe9}
+.work-panel,.work-batch-list {background:#fff;border:1px solid #e3e8f0;border-radius:10px;overflow:hidden}
+.task-table {width:100%;font-variant-numeric:tabular-nums}
+.task-table th {text-align:left;color:#64738a;background:#f7f9fc;font-size:11px;font-weight:500}
+.task-table td {color:#40516a;font-size:13px}
+.task-table td,.task-table th {padding:13px 16px}
+.task-table td small {display:block;color:#63728a;font-size:11px;margin-top:4px}
+.task-table a {font-weight:500;text-underline-offset:4px}
+.task-table tr:hover td {background:#f8faff}
+.task-table progress,.work-batch-progress progress {appearance:none;border:0;border-radius:3px;background:#edf1f7;height:5px;width:90px;vertical-align:middle}
+.task-table progress::-webkit-progress-bar,.work-batch-progress progress::-webkit-progress-bar {background:#edf1f7;border-radius:3px}
+.task-table progress::-webkit-progress-value,.work-batch-progress progress::-webkit-progress-value {background:#315fe9;border-radius:3px}
+.task-table progress::-moz-progress-bar,.work-batch-progress progress::-moz-progress-bar {background:#315fe9;border-radius:3px}
+.tasks-page .tbl-wrap {border-color:#e3e8f0;box-shadow:none;border-radius:10px}
+.task-filters {display:flex;gap:10px;margin:16px 0}
+.task-filters>select,.task-filters>input {flex:1;width:0;min-width:0;height:38px;box-sizing:border-box;margin:0;border:1px solid #dce3ed;border-radius:6px;padding:8px 11px;background:#fff;color:#40516a;font:inherit;font-size:13px}
+.task-filters input::placeholder {color:#63728a;opacity:1}
+.tasks-page .btn {display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;font-size:13px;padding:8px 12px;border-radius:6px;white-space:nowrap}
+.tasks-page .btn.ghost {border-color:#dce3ed;color:#40516a}
+.tasks-page :is(input,select,textarea):focus-visible {outline:2px solid #dce6ff;outline-offset:1px;border-color:#7290e8}
+.work-batch-row {display:grid;grid-template-columns:minmax(130px,1.5fr) 90px minmax(130px,.8fr) minmax(130px,.8fr) 16px;align-items:center;gap:24px;padding:20px;color:#40516a;border-bottom:1px solid #edf0f5;font-variant-numeric:tabular-nums}
+.work-batch-row:last-child {border-bottom:0}
+.work-batch-row:hover {background:#f8faff;text-decoration:none}
+.work-batch-name h2 {font-size:15px;font-weight:600;margin:0 0 4px;color:#28426c;line-height:1.5;overflow-wrap:anywhere}
+.work-batch-name>span {font-size:11px;color:#63728a}
+.work-status {justify-self:start;display:inline-flex;align-items:center;padding:3px 8px;border:1px solid #dce5ff;border-radius:5px;background:#edf2ff;color:#355ec4;font-size:11px;white-space:nowrap}
+.work-status.is-complete {color:#28735b;background:#eef7f2;border-color:#d6e9dd}
+.work-batch-count>span {display:block;font-size:11px;color:#63728a;margin-bottom:4px}
+.work-batch-count strong {font-size:17px;font-weight:600;color:#273951}
+.work-batch-count small {font-size:13px;font-weight:400;color:#63728a}
+.work-batch-progress {display:flex;align-items:center;gap:12px}
+.work-batch-progress strong {font-size:13px;min-width:32px;font-weight:500;color:#40516a}
+.work-row-arrow {width:16px;height:16px;fill:none;stroke:#8996a9;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.work-empty {margin:0;padding:36px 20px;text-align:center;color:#63728a;font-size:13px}
+.task-map-stage {position:relative;height:360px;min-height:220px;border:1px solid #e3e8f0;border-radius:10px;overflow:hidden;margin-bottom:16px;background:#f4f7fb}
+.task-map-stage #work-map {height:100%;width:100%}
+.task-map-stage #work-map-status {position:absolute;left:12px;bottom:10px;margin:0;padding:8px 10px;border-radius:6px;background:#fff8e9;color:#7a602c;font-size:12px}
+.task-map-stage #work-map-status:empty {display:none}
+.region-grid-panel>.task-filters {padding:14px 16px;margin:0;max-width:560px}
+.region-grid-panel>.task-filters select {height:36px}
+.region-grid-panel .tbl-wrap,.work-review-panel .tbl-wrap {border:0;border-radius:0;box-shadow:none}
+.task-actionbar {position:sticky;top:54px;z-index:6;display:flex;gap:10px;align-items:center;padding:12px 16px;background:#f8faff;border-top:1px solid #edf0f5;border-bottom:1px solid #edf0f5;margin:0;color:#40516a;font-size:12px}
+.task-actionbar select,.task-actionbar>input {flex:1;min-width:0;height:36px;border:1px solid #dce3ed;border-radius:6px;background:#fff;color:#40516a;padding:7px 10px;font:inherit}
+.task-actionbar output {white-space:nowrap;color:#63728a;font-size:12px;font-variant-numeric:tabular-nums}
+.task-actionbar .btn:disabled {opacity:.45;cursor:not-allowed}
+.task-actionbar label {display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.tasks-page input[type=checkbox] {width:16px;height:16px;accent-color:#315fe9;cursor:pointer;vertical-align:middle}
+.task-table tr.is-selected td {background:#edf3ff}
+.task-table tr.is-focused td {box-shadow:inset 0 1px #7290e8,inset 0 -1px #7290e8;background:#f4f7ff}
+.work-mobile-select-label {display:none}
+.task-create {margin:22px 0;padding:18px;border:1px solid #e3e8f0;border-radius:10px;background:#fff}
+.task-create summary {cursor:pointer;font-weight:600;font-size:14px;color:#40516a}
+.task-create form {margin-top:16px}
+.task-create fieldset {max-height:280px;overflow:auto;margin:16px 0;border:1px solid #e3e8f0;border-radius:7px}
+.task-create fieldset label {display:block;padding:6px;font-size:13px}
+.task-create label>input:not([type=checkbox]) {min-height:38px;border:1px solid #dce3ed;border-radius:6px;padding:8px 10px;font:inherit;margin:0 10px}
+.work-notice {font-size:12px;line-height:1.7;padding:12px 16px;background:#edf3fc;border:1px solid #e1e9f7;border-radius:8px;color:#4f6380;margin:0 0 16px}
+.work-review-panel>form.task-filters {padding:14px 16px;margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.work-review-panel>form.task-filters select {width:100%;font-size:12px}
+.work-review-panel>nav {padding:12px 16px;margin:0;border-top:1px solid #edf0f5;font-size:13px}
+.proposal-photo {width:100px;max-width:100px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #e3e8f0;background:#f7f9fc}
+.proposal-table td:nth-child(4),.proposal-table td:last-child {white-space:normal;min-width:140px;max-width:260px;overflow-wrap:anywhere}
+.proposal-table td:nth-child(6) a {font-size:11px}
+.task-form {display:grid;gap:12px;padding:16px}
+.task-form label {display:grid;gap:4px}
+.task-form input,.task-form textarea {width:100%;box-sizing:border-box}
+button:focus-visible,a:focus-visible,summary:focus-visible {outline:2px solid #315fe9;outline-offset:3px}
+/* 详情页的角色专属列表仍沿用同一套间距与颜色。 */
+.task-region {border:1px solid #e3e8f0;border-radius:10px;margin:14px 0;overflow:hidden;background:#fff}
+.task-region summary,.task-region-link {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;cursor:pointer}
+.task-region summary:before {content:'›'}
+.task-region[open] summary:before {transform:rotate(90deg)}
+.task-region-body {padding:0 16px 16px}
+.task-region-columns {display:grid;grid-template-columns:1.3fr 1fr .8fr 1.2fr .5fr;gap:16px;padding:0 18px 0 44px;color:#63728a;font-size:12px}
+.task-region summary {display:grid;grid-template-columns:10px 1.3fr 1fr .8fr 1.2fr .5fr}
+.batch-detail .task-region-link {display:grid;grid-template-columns:minmax(80px,1fr) minmax(120px,1.6fr) auto;gap:16px;color:#40516a;text-decoration:none}
+.batch-detail .task-region-link>strong:first-child {color:#294b7a}
+.batch-detail .task-region-link>span {color:#63728a;font-size:12px;font-weight:400}
+.batch-detail .task-region-link>strong:last-child {font-size:12px;color:#315fe9;font-weight:500}
+.batch-detail .task-region-link:hover {background:#f8faff}
+@media(max-width:760px) {
+  .task-heading {margin-bottom:16px;align-items:flex-start;gap:12px}
+  .task-heading h1 {font-size:23px}
+  .task-heading p {font-size:12px;max-width:26em}
+  .task-heading>span {font-size:11px;max-width:48%;text-align:right;line-height:1.7}
+  .tasks-page .btn {min-height:42px;font-size:13px}
+  .work-batch-row {grid-template-columns:minmax(0,1fr) auto;gap:14px 20px;padding:17px 16px}
+  .work-batch-name {grid-column:1;grid-row:1}
+  .work-batch-name h2 {font-size:15px}
+  .work-batch-name>span {display:none}
+  .work-batch-row>.work-status {grid-column:2;grid-row:1;justify-self:end}
+  .work-batch-count {grid-column:1;grid-row:2}
+  .work-batch-count>span {font-size:10px}
+  .work-batch-count strong {font-size:18px}
+  .work-batch-progress {grid-column:2;grid-row:2;gap:8px}
+  .work-batch-progress progress {width:68px}
+  .work-row-arrow {display:none}
+  .task-map-stage {height:28vh;min-height:190px;border-radius:8px;margin-bottom:12px}
+  .region-grid-panel>.task-filters {padding:12px;gap:8px}
+  .region-grid-panel>.task-filters select {height:40px;font-size:12px;padding:7px}
+  .task-actionbar {position:static;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:12px;gap:10px}
+  .task-actionbar output {text-align:right;font-size:11px;white-space:normal}
+  .task-actionbar select,.task-actionbar>input {height:42px;width:100%;box-sizing:border-box}
+  .task-actionbar>input[name=reason] {grid-column:1/-1}
+  .tasks-page .task-table td,.tasks-page .task-table th {padding:11px 12px}
+  .work-mobile-select-label {display:inline;margin-left:8px;color:#63728a;font-size:11px;font-weight:400}
+  #grid-assignment .task-table,#grid-assignment .task-table tbody,#grid-assignment .task-table thead {display:block;width:100%;min-width:0}
+  #grid-assignment .task-table thead tr {display:block;background:#f7f9fc}
+  #grid-assignment .task-table thead th:not(:first-child) {display:none}
+  #grid-assignment .task-table thead th:first-child {display:flex;align-items:center;border:0;min-height:40px}
+  #grid-assignment .task-table tr[data-grid-id] {display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:5px 10px;padding:12px;border-bottom:1px solid #edf0f5;align-items:center}
+  #grid-assignment .task-table tr[data-grid-id] td {display:block;padding:0;border:0;white-space:normal;box-shadow:none!important;font-size:12px;min-width:0}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(1) {grid-column:1;grid-row:1/4;align-self:start;padding-top:4px}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(2) {grid-column:2;grid-row:1;font-weight:600;color:#294b7a;font-size:14px}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(3) {grid-column:2;grid-row:2;color:#63728a}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(4) {grid-column:2;grid-row:3;color:#63728a;font-size:11px}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(5) {grid-column:3;grid-row:2;text-align:right;color:#63728a;font-size:11px}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(6) {grid-column:3;grid-row:1;text-align:right;font-size:14px;font-weight:600}
+  #grid-assignment .task-table tr[data-grid-id] td:nth-child(7) {grid-column:3;grid-row:3;text-align:right;font-size:12px}
+  #grid-assignment .task-table td[data-label]:before {content:attr(data-label)' ';color:#63728a;font-size:11px;font-weight:400}
+  #grid-assignment .task-table tr.is-selected {background:#edf3ff}
+  #grid-assignment .task-table tr.is-selected td {background:transparent}
+  #grid-assignment .task-table tr.is-focused {outline:1px solid #9eb4ef;outline-offset:-1px}
+  .work-review-panel>form.task-filters {grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:8px}
+  .work-review-panel>form.task-filters select {height:40px;padding:7px}
+  .proposal-table,.proposal-table tbody {display:block;width:100%;min-width:0}
+  .proposal-table thead {display:none}
+  .proposal-table tr.proposal-row {display:grid;grid-template-columns:18px minmax(0,1fr) 86px;gap:7px 10px;padding:14px 12px;border-bottom:1px solid #edf0f5}
+  .proposal-table tr.proposal-row td {padding:0;border:0;min-width:0;max-width:none;white-space:normal;overflow-wrap:anywhere;font-size:12px;align-self:start}
+  .proposal-table tr.proposal-row td:nth-child(1) {grid-column:1;grid-row:1/6}
+  .proposal-table tr.proposal-row td:nth-child(2) {grid-column:2;grid-row:1;font-weight:600;color:#294b7a}
+  .proposal-table tr.proposal-row td:nth-child(3) {grid-column:2;grid-row:2;color:#63728a;font-size:11px}
+  .proposal-table tr.proposal-row td:nth-child(4) {grid-column:2;grid-row:3;color:#63728a;font-size:11px}
+  .proposal-table tr.proposal-row td:nth-child(5) {grid-column:3;grid-row:1/4}
+  .proposal-table tr.proposal-row td:nth-child(6) {grid-column:2;grid-row:4}
+  .proposal-table tr.proposal-row td:nth-child(7) {grid-column:3;grid-row:4;font-size:11px;text-align:center}
+  .proposal-table tr.proposal-row td:nth-child(8) {grid-column:2/4;grid-row:5;color:#8a5d43;font-size:11px}
+  .proposal-photo {width:86px;max-width:86px;height:78px}
+  .proposal-table td[data-label]:before {content:attr(data-label)' ';font-size:10px;color:#63728a}
+  .batch-detail .task-region-link {grid-template-columns:minmax(0,1fr) auto;gap:8px 12px}
+  .batch-detail .task-region-link>strong:first-child {grid-column:1;grid-row:1;font-size:14px}
+  .batch-detail .task-region-link>span {grid-column:1;grid-row:2;font-size:11px}
+  .batch-detail .task-region-link>strong:last-child {grid-column:2;grid-row:1/3;font-size:11px;white-space:nowrap}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .task-table {display:block;min-width:0}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .task-table thead {display:none}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .task-table tbody {display:block}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row {display:grid;grid-template-columns:1fr auto;gap:7px 12px;padding:14px 16px;border-top:1px solid #edf0f5}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td {display:block;padding:0;border:0;white-space:normal;font-size:12px}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td:nth-child(1) {grid-column:1;grid-row:1;font-weight:600;color:#294b7a;font-size:14px}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td:nth-child(2) {grid-column:1;grid-row:2;color:#63728a}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td:nth-child(3) {grid-column:1;grid-row:3;color:#63728a;font-size:11px}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td:nth-child(4) {grid-column:2;grid-row:2;font-size:11px;color:#63728a;text-align:right}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td:nth-child(5) {grid-column:2;grid-row:1;text-align:right}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td:nth-child(6) {grid-column:2;grid-row:3;text-align:right}
+  .task-detail-page:not(.has-sidenav) .task-region:not(details) .work-grid-row td[data-label]:before {content:attr(data-label)' ';font-size:11px}
+}
+@media(prefers-reduced-motion:reduce) {.tasks-page *,.task-detail-page *,.visit-page * {scroll-behavior:auto!important}}
+
+/* 员工/队长窄屏：巡店页标题和返回进入顶栏；管理端保留系统品牌。 */
+.mobile-navigation-title {display:none;min-width:0;align-items:center;gap:8px;overflow:hidden}
+.mobile-navigation-title .work-nav-title {margin:0;font-size:17px;font-weight:600;line-height:1.4;color:#eef4ff;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mobile-navigation-title .work-nav-back {display:flex;align-items:center;justify-content:center;width:36px;height:40px;flex:0 0 36px;border-radius:6px;color:#eef4ff}
+.mobile-navigation-title .work-nav-back svg {width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.mobile-navigation-title .work-nav-back:hover {background:#253e66;color:#fff}
+.mobile-navigation-title .dispatch-title {font-size:1.05rem;line-height:1.3;font-weight:650;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eef4ff}
+.mobile-navigation-title .dispatch-back {width:36px;height:40px;display:flex;align-items:center;justify-content:center;color:#eef4ff;flex-shrink:0;border-radius:6px}
+.mobile-navigation-title .dispatch-back svg {width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.work-nav-back {display:flex;align-items:center;justify-content:center;width:36px;height:40px;flex:0 0 36px;border-radius:6px;color:#eef4ff}
+.work-nav-back svg {width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.work-nav-back:hover {background:#253e66;color:#fff}
+.work-page-context {margin:0 0 16px;color:#63728a;font-size:13px;line-height:1.6;font-weight:400}
+.task-heading .work-page-context {margin:0}
+/* 创建批次是顶层原生弹窗：焦点约束、Escape与背景遮罩由浏览器处理。 */
+.batch-create-dialog {width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;padding:0;border:1px solid #dfe5ef;border-radius:12px;background:#fff;color:#26364e;box-shadow:0 20px 70px rgba(15,30,55,.22);overflow:hidden}
+.batch-create-dialog::backdrop {background:rgba(12,26,48,.42)}
+.batch-dialog-heading {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 20px;border-bottom:1px solid #e8edf4}
+.batch-dialog-heading h2 {margin:0;font-size:17px;font-weight:600}
+.batch-dialog-close {display:flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;border:0;border-radius:6px;background:#f4f6fa;color:#63728a;cursor:pointer}
+.batch-dialog-close:hover {background:#eaf0fa;color:#315fe9}
+.batch-dialog-close svg {width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+.batch-create-dialog form {display:flex;flex-direction:column;gap:18px;margin:0;padding:20px;max-height:calc(100dvh - 116px);overflow:auto}
+.batch-create-dialog form>label {display:grid;gap:8px;font-size:13px;font-weight:500}
+.batch-create-dialog input[name=title] {width:100%;height:42px;box-sizing:border-box;padding:9px 11px;border:1px solid #dce3ed;border-radius:7px;background:#fff;color:#26364e;font:inherit;font-size:14px}
+.batch-create-dialog fieldset {margin:0;padding:6px 12px 10px;border:1px solid #e1e7f0;border-radius:7px;max-height:min(38dvh,300px);overflow:auto;min-height:80px;flex-shrink:1}
+.batch-create-dialog legend {padding:0 5px;font-size:12px;color:#63728a}
+.batch-create-dialog fieldset label {display:flex;align-items:flex-start;gap:10px;padding:10px 0;font-size:13px;line-height:1.7;border-bottom:1px solid #edf0f5;overflow-wrap:anywhere}
+.batch-create-dialog fieldset label:last-child {border-bottom:0}
+.batch-create-dialog fieldset input {flex:0 0 16px;margin:3px 0 0;width:16px;height:16px;accent-color:#315fe9}
+.batch-create-dialog form>.btn {align-self:flex-end;min-height:40px;padding:9px 20px;font-size:13px}
+/* 恢复地图+四列列表；派发操作只在单个网格的展开区内。 */
+.batch-region-page .dispatch-workspace {grid-template-rows:minmax(0,48fr) minmax(0,52fr)}
+.batch-region-progress {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px;font-size:12px;color:#63728a;border-bottom:1px solid #edf0f5;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.batch-region-progress>span {font-weight:600;color:#40516a}
+.batch-region-page .batch-region-filters {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));height:auto;min-height:0;padding:10px 12px;gap:8px;flex:0 0 auto;border-bottom:1px solid #e5eaf2;background:#fff}
+.batch-region-page .batch-region-filters select {width:100%;max-width:none;min-width:0;height:40px;padding:8px 10px;border:1px solid #dce3ed;border-radius:6px;background:#fff;color:#40516a;font:inherit;font-size:13px}
+.batch-region-page .dispatch-columns,.batch-region-page .dispatch-row {grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr) minmax(0,.6fr) minmax(0,1.4fr)}
+.batch-region-page .dispatch-columns {font-size:11px}
+.batch-region-page .dispatch-row {font-size:13px;min-height:58px}
+.batch-region-page .dispatch-row.is-focused {background:#eaf1ff;color:#173b78}
+.batch-region-page .dispatch-row[aria-expanded=true] {box-shadow:inset 0 -1px #dce6fa}
+.batch-region-page .dispatch-detail {background:#f8faff}
+.batch-region-page .dispatch-assignment select {height:42px;font-size:14px}
+.batch-region-page .dispatch-actions .btn {min-height:42px;font-size:13px}
+.batch-region-page .batch-region-message {margin:0;padding:8px 12px;border-radius:0;font-size:12px;flex:0 0 auto}
+@media(min-width:1100px) {
+  .batch-region-page .dispatch-workspace {grid-template-columns:minmax(0,1.15fr) minmax(400px,1fr);grid-template-rows:1fr}
+  .batch-region-page .dispatch-map-stage {border-right:1px solid #e3e8f0;border-bottom:0}
+}
+@media(max-width:760px) {
+  .mobile-navigation-title {display:flex}
+  .mobile-navigation-title .work-nav-title {font-size:16px}
+  .work-page-context {font-size:12px}
+  .batch-create-dialog form {padding:16px;gap:16px}
+  .batch-dialog-heading {padding:12px 16px}
+  .batch-create-dialog input[name=title] {font-size:16px;height:44px}
+  .batch-create-dialog form>.btn {align-self:stretch;min-height:44px}
+  .batch-region-page .dispatch-columns,.batch-region-page .dispatch-row {gap:8px;padding-left:12px;padding-right:12px}
+  .batch-region-page .dispatch-owner {font-size:11px}
+  .batch-region-page .dispatch-state {font-size:11px}
+}

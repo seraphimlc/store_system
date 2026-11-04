@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('批次日志') }} · {{ task.title }}{% endblock %}
+{% block body_class %}task-events-page{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="/static/bd_task_events.css?v={{ static_ver('bd_task_events.css') }}">{% endblock %}
+{% block content %}
+<section class="task-events-head">
+  <a class="btn ghost" href="/my/work/batches/{{ task.id }}">{{ t('返回批次') }}</a>
+  <h1>{{ t('批次日志') }}</h1><strong>{{ task.title }}</strong>
+</section>
+
+<form method="get" action="/my/work/batches/{{ task.id }}/logs" class="task-event-filters">
+  <label>{{ t('关键词') }}<input type="search" name="kw" value="{{ filters.keyword }}" placeholder="{{ t('商户、网格、队员') }}"></label>
+  <label>{{ t('操作人') }}<select name="actor_id"><option value="">{{ t('全部') }}</option>{% for id,label in actors %}<option value="{{ id }}" {{ 'selected' if filters.actor_id|string==id|string else '' }}>{{ label }}</option>{% endfor %}</select></label>
+  <label>{{ t('历史团队') }}<select name="team_id"><option value="">{{ t('全部') }}</option>{% for id,label in teams %}<option value="{{ id }}" {{ 'selected' if filters.team_id|string==id|string else '' }}>{{ label }}</option>{% endfor %}</select></label>
+  <label>{{ t('片区') }}<select name="region_task_id"><option value="">{{ t('全部') }}</option>{% for r in regions %}<option value="{{ r.id }}" {{ 'selected' if filters.region_task_id|string==r.id|string else '' }}>{{ r.snapshot.get('name','') }}</option>{% endfor %}</select></label>
+  <label>{{ t('网格') }}<select name="grid_task_id"><option value="">{{ t('全部') }}</option>{% for g in grids %}<option value="{{ g.id }}" {{ 'selected' if filters.grid_task_id|string==g.id|string else '' }}>{{ t('网格') }} #{{ g.grid_id }}</option>{% endfor %}</select></label>
+  <label>{{ t('事件类型') }}<select name="event_type"><option value="">{{ t('全部') }}</option>{% for key in event_types %}<option value="{{ key }}" {{ 'selected' if filters.event_type==key else '' }}>{{ t({'create_batch':'批次创建','assign_region_task':'片区派发','assign_grid_task':'网格派发','complete_store_task':'商户首次完成','update_store_result':'商户结果修订','grid_status_changed':'网格状态变化','region_status_changed':'片区状态变化','batch_status_changed':'批次状态变化','grid_auto_completed_empty':'空网格自动完成','region_auto_completed_empty':'空片区自动完成','batch_auto_completed_empty':'空批次自动完成'}.get(key,key)) }}</option>{% endfor %}</select></label>
+  <label>{{ t('从') }}<input type="date" name="dfrom" value="{{ filters.dfrom }}"></label>
+  <label>{{ t('到') }}<input type="date" name="dto" value="{{ filters.dto }}"></label>
+  <div class="task-event-actions"><button class="btn" type="submit">{{ t('筛选日志') }}</button><a class="btn ghost" href="/my/work/batches/{{ task.id }}/logs">{{ t('重置') }}</a></div>
+</form>
+
+<p class="task-event-note">{{ t('当前完成状态按片区、网格、队员和当前团队筛选，不按日期回溯；期间完成统计按操作人、历史团队、片区、网格和日期筛选。事件类型只筛选下方明细。') }}</p>
+<section class="task-event-metrics" aria-label="{{ t('完成情况') }}">
+  <div><span>{{ t('当前已完成商户任务') }} / {{ t('总商户任务') }}</span><strong>{{ metrics.current_done }} / {{ metrics.current_total }}</strong></div>
+  <div><span>{{ t('期间首次完成商户数') }}</span><strong>{{ metrics.first_completed }}</strong></div>
+  <div><span>{{ t('期间完成事件数') }}</span><strong>{{ metrics.completion_events }}</strong></div>
+</section>
+
+<section class="task-event-performers">
+  <h2>{{ t('按实际操作人汇总完成') }}</h2>
+  <div class="tbl-wrap"><table class="grid-tbl">
+    <thead><tr><th>{{ t('队员或队长') }}</th><th>{{ t('操作时角色') }}</th><th>{{ t('操作时团队') }}</th><th>{{ t('完成事件数') }}</th></tr></thead>
+    <tbody>{% for actor_id,actor_label,role,team_label,count in metrics.performers %}<tr><td>{{ actor_label or '—' }}</td><td>{{ t({'member':'队员','staff':'队员','leader':'队长','admin':'管理员'}.get(role,role or '—')) }}</td><td>{{ team_label or '—' }}</td><td>{{ count }}</td></tr>{% else %}<tr><td colspan="4">{{ t('当前筛选范围内没有完成事件') }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="task-event-history">
+  <h2>{{ t('事件明细') }} <span>{{ total }} {{ t('条') }}</span></h2>
+  <div class="tbl-wrap"><table class="grid-tbl task-event-table">
+    <thead><tr><th>{{ t('发生时间') }}</th><th>{{ t('事件') }}</th><th>{{ t('操作人') }}</th><th>{{ t('操作时团队') }}</th><th>{{ t('批次 / 片区 / 网格 / 商户') }}</th><th>{{ t('变更前后') }}</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr data-testid="task-event-row">
+        <td>{{ jst(row.created_at) }}</td><td>{% if row.event_type=='create_batch' %}{{ t('批次创建') }}{% elif row.event_type=='assign_region_task' %}{{ t('片区派发') }}{% elif row.event_type=='assign_grid_task' %}{{ t('网格派发') }}{% elif row.event_type=='complete_store_task' %}{{ t('商户首次完成') }}{% elif row.event_type=='update_store_result' %}{{ t('商户结果修订') }}{% elif row.event_type=='grid_status_changed' %}{{ t('网格状态变化') }}{% elif row.event_type=='region_status_changed' %}{{ t('片区状态变化') }}{% elif row.event_type=='batch_status_changed' %}{{ t('批次状态变化') }}{% elif row.event_type=='grid_auto_completed_empty' %}{{ t('空网格自动完成') }}{% elif row.event_type=='region_auto_completed_empty' %}{{ t('空片区自动完成') }}{% elif row.event_type=='batch_auto_completed_empty' %}{{ t('空批次自动完成') }}{% else %}{{ row.event_type }}{% endif %}</td><td>{{ row.actor_label or '—' }}<small>{% if row.actor_role in ('member','staff') %}{{ t('队员') }}{% elif row.actor_role=='leader' %}{{ t('队长') }}{% elif row.actor_role=='admin' %}{{ t('管理员') }}{% endif %}</small></td><td>{{ row.team_label or '—' }}</td>
+        <td class="task-event-path"><span>{{ row.main_label or task.title }}</span>{% if row.region_label %}<span>{{ row.region_label }}</span>{% endif %}{% if row.grid_label %}<span>{{ t('网格') }} #{{ row.grid_label }}</span>{% endif %}{% if row.store_label or row.store_source_id %}<span>{{ row.store_label or row.store_source_id }}{% if row.store_label and row.store_source_id %}<small>{{ row.store_source_id }}</small>{% endif %}</span>{% endif %}</td>
+        <td class="task-event-change"><code>{{ row.old_value|tojson }}</code><span>→</span><code>{{ row.new_value|tojson }}</code></td>
+      </tr>
+    {% else %}<tr><td colspan="6">{{ t('暂无记录') }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+<nav class="pagination" aria-label="{{ t('分页') }}">
+  {% if page > 1 %}<a class="btn ghost" href="{{ request.url.include_query_params(page=page-1) }}">{{ t('上一页') }}</a>{% endif %}
+  <span>{{ page }} / {{ [1,((total+limit-1)//limit)]|max }}</span>
+  {% if page*limit < total %}<a class="btn ghost" href="{{ request.url.include_query_params(page=page+1) }}">{{ t('下一页') }}</a>{% endif %}
+</nav>
+{% endblock %}

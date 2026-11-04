@@ -10,15 +10,9 @@ _TASK_DETAIL_RE = _re.compile(r"^/tasks/\d+/?$")
 
 
 def _staff_path_ok(path: str, method: str, allowed) -> bool:
-    """员工/队长能不能访问这个路径。
-
-    特例：`/tasks/<id>` **只有 GET** 放行（任务详情页，路由内还有 can_report 数据隔离）；
-    同前缀的写端点一律走管理端守卫。
-    """
+    """员工/队长可读自己的任务；管理端任务写操作仍由管理端守卫保护。"""
     if path.startswith("/tasks/"):
-        if method != "GET":
-            return False
-        return bool(_TASK_DETAIL_RE.match(path))
+        return method == "GET" and bool(_TASK_DETAIL_RE.match(path))
     return path.startswith(allowed)
 
 
@@ -42,6 +36,13 @@ def create_app() -> FastAPI:
     app.include_router(plan_r.router)
     from app.routers import bd_r
     app.include_router(bd_r.router)
+    from app.routers.bd_legacy_r import include_current_routes
+    from app.routers import bd_zones_r
+    app.include_router(bd_zones_r.router)
+    from app.routers import bd_zone_ops_r
+    include_current_routes(app, bd_zone_ops_r.router)
+    from app.routers import bd_batch_review_r
+    app.include_router(bd_batch_review_r.router)
     from app.routers import msg_r
     app.include_router(msg_r.router)
 
@@ -59,15 +60,8 @@ def create_app() -> FastAPI:
                      "/my/leave",
                      # 站内消息（员工只读收件箱；队长/管理员可发）
                      "/messages",
-                     # 车站任务：队员看"分给我的车站"，队长在**同一页**分派 + 提交每日进展
-                     # （两处写端点 `/my/tasks/assign`、`/my/tasks/progress` 由路由内做角色校验）
-                     "/my/tasks",
-                     # 员工每日自报（点数 + 任务进度**一次提交**）——用户 2026-10-06 口径
-                     "/my/self-report",
-                     # 任务详情页（进展历史 + 变更日志）——**驳回原因/谁改的只有这里能看**。
-                     # ⚠️ 白名单是**前缀匹配且不看方法**，所以这里只放行 `GET /tasks/<id>`；
-                     # 同前缀下的写端点（/tasks/<id>/progress、/tasks/assign、/tasks/new）
-                     # 仍归管理端，由路由守卫拒绝（放行整段会让它们先撞令牌校验 → 400）
+                     # 旧车站任务与新批次任务并列，数据和操作互相独立。
+                     "/my/tasks", "/my/self-report", "/my/work",
                      "/tasks/",
                      # MCP OAuth：授权确认页（浏览器）+ token/register（机器端）都是公开端点
                      "/oauth/", "/.well-known/")

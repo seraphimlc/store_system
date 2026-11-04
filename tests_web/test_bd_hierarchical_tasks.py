@@ -1,0 +1,206 @@
+"""批次四级任务：隔离、权限、快照及店铺完成后的逐级汇总。"""
+import uuid
+import pytest
+from app.models import (User,BdRegion,BdWorkGrid,BdMainTask,BdRegionTask,BdGridTask,BdStoreTask,BdWorkStore)
+import app.db as appdb
+from app.services import bd_hierarchical_tasks as tasks,bd_zone_operations as ops
+from tests_web.test_bd_zone_operations import seed,login,csrf
+from tests.helpers import form_token
+
+
+def batch(db,seed,title='巡店批次'):
+    admin=db.get(User,seed['users']['ops-admin'])
+    task=tasks.create_main_task(db,admin,title,[seed['zone']]);db.flush()
+    rt=db.query(BdRegionTask).filter_by(main_task_id=task.id).one()
+    tasks.assign_region_task(db,admin,rt.id,seed['team'],rt.revision)
+    gt=db.query(BdGridTask).filter_by(region_task_id=rt.id).one()
+    tasks.assign_grid_task(db,db.get(User,seed['users']['captain']),gt.id,seed['users']['worker'],gt.revision)
+    db.flush()
+    st=db.query(BdStoreTask).filter_by(grid_task_id=gt.id).order_by(BdStoreTask.id).first()
+    return task,rt,gt,st
+
+
+def test_batch_isolated_results_rollup_immutable_snapshots_and_retry(seed):
+    with appdb.SessionLocal() as db:
+        first,rt,gt,st=batch(db,seed,'第一轮')
+        second,rt2,gt2,st2=batch(db,seed,'第二轮')
+        region=db.get(BdRegion,seed['zone']);region.name='基础片区改名'
+        db.get(BdWorkStore,'shop-synthetic').name='基础门店改名';db.flush()
+        assert rt.snapshot['name']=='synthetic' and st.snapshot['name']=='synthetic-shop'
+        worker=db.get(User,seed['users']['worker'])
+        request=str(uuid.uuid4())
+        tasks.complete_store(db,worker,st.id,0,request,'abnormal','第一轮结果');db.flush()
+        assert st.status==gt.status==rt.status==first.status=='completed'
+        assert gt.progress==rt.progress==first.progress==100 and first.completed_at is not None
+        assert second.status=='active' and gt2.progress==0 and st2.result=={}
+        assert db.get(BdWorkGrid,seed['grid']).progress==0
+        assert db.get(BdWorkStore,'shop-synthetic').status=='normal'
+        assert tasks.complete_store(db,worker,st.id,0,request,'abnormal','第一轮结果')==gt.id
+        with pytest.raises(ops.OperationError,match='冲突'):
+            tasks.complete_store(db,worker,st.id,0,request,'normal','different')
+
+
+def test_tree_and_store_tasks_deny_other_users_and_stale_assignments(seed):
+    with appdb.SessionLocal() as db:
+        main,rt,gt,st=batch(db,seed)
+        outsider=db.get(User,seed['users']['outsider'])
+        assert tasks.my_tasks(db,outsider)==[]
+        with pytest.raises(ops.OperationError):tasks.task_tree(db,outsider,main.id)
+        with pytest.raises(ops.OperationError):tasks.store_page(db,outsider,gt.id)
+        with pytest.raises(ops.OperationError):tasks.complete_store(db,outsider,st.id,0,str(uuid.uuid4()),'normal','')
+        with pytest.raises(ops.OperationError,match='已变更'):
+            tasks.assign_grid_task(db,db.get(User,seed['users']['captain']),gt.id,seed['users']['next-worker'],0)
+        with pytest.raises(ops.OperationError):
+            tasks.assign_grid_task(db,db.get(User,seed['users']['captain']),gt.id,seed['users']['outsider'],gt.revision)
+        assert tasks.my_tasks(db,db.get(User,seed['users']['worker']))[0].id==main.id
+        assert tasks.my_tasks(db,db.get(User,seed['users']['captain']))[0].id==main.id
+
+
+def test_creation_missing_store_fails_before_any_task_write(seed):
+    from app.models import BdGridStore
+    with appdb.SessionLocal() as db:
+        admin=db.get(User,seed['users']['ops-admin'])
+        source=db.query(BdGridStore).one();source.source_id='source-does-not-exist';db.flush()
+        with pytest.raises(ops.OperationError,match='缺失'):
+            tasks.create_main_task(db,admin,'missing',[seed['zone']])
+        assert db.query(BdMainTask).count()==0
+
+
+def test_http_admin_create_leader_dispatch_worker_complete(client,seed):
+    login(client,'ops-admin')
+    page=client.get('/zone-tasks')
+    assert page.status_code==200 and 'name="region_ids"' in page.text
+    created=client.post('/zone-tasks',data={'_ft':form_token(client),'csrf_token':csrf(page.text),
+        'title':'HTTP批次','region_ids':[seed['zone']]},follow_redirects=False)
+    assert created.status_code==303,created.text
+    with appdb.SessionLocal() as db:
+        task=db.query(BdMainTask).one();identity=task.id
+        rt=db.query(BdRegionTask).one();rid=rt.id
+    page=client.get(f'/zone-tasks/{identity}')
+    assigned=client.post(f'/zone-tasks/regions/{rid}/assign',data={'_ft':form_token(client),
+        'csrf_token':csrf(page.text),'revision':0,'team_id':seed['team']},follow_redirects=False)
+    assert assigned.status_code==303
+    login(client,'captain')
+    page=client.get(f'/my/work/batches/{identity}')
+    assert page.status_code==200 and f'/regions/{rid}' in page.text
+    region_page=client.get(f'/my/work/batches/{identity}/regions/{rid}')
+    assert region_page.status_code==200 and 'name="target_id"' in region_page.text
+    with appdb.SessionLocal() as db:
+        grid_task=db.query(BdGridTask).one();gid=grid_task.id;grid_revision=grid_task.revision
+    dispatched=client.post(f'/my/work/batch-grids/{gid}/assign',data={'_ft':form_token(client),
+        'csrf_token':csrf(page.text),'revision':grid_revision,'target_id':seed['users']['worker']},follow_redirects=False)
+    assert dispatched.status_code==303,dispatched.text
+    login(client,'worker')
+    assert 'HTTP批次' in client.get('/my/work').text
+    page=client.get(f'/my/work/batch-grids/{gid}')
+    assert page.status_code==200 and 'synthetic-shop' in page.text
+    with appdb.SessionLocal() as db:sid=db.query(BdStoreTask).one().id
+    done=client.post(f'/my/work/batch-stores/{sid}/complete',data={'_ft':form_token(client),
+        'csrf_token':csrf(page.text),'revision':0,'request_id':str(uuid.uuid4()),'status':'normal','note':'done'},follow_redirects=False)
+    assert done.status_code==303,done.text
+    with appdb.SessionLocal() as db:assert db.get(BdMainTask,identity).status=='completed'
+    login(client,'outsider')
+    assert client.get(f'/my/work/batches/{identity}').status_code==403
+    assert client.get(f'/my/work/batch-grids/{gid}').status_code==403
+
+
+def test_revoked_membership_hides_batch_and_blocks_execution(seed):
+    from app.models import BdTeamMember
+    from datetime import date
+    with appdb.SessionLocal() as db:
+        main,rt,gt,st=batch(db,seed)
+        worker=db.get(User,seed['users']['worker'])
+        membership=db.query(BdTeamMember).filter_by(person_code=worker.person_code,role='member',end_date=None).one()
+        membership.end_date=date.today();db.flush()
+        assert tasks.my_tasks(db,worker)==[]
+        with pytest.raises(ops.OperationError):tasks.task_tree(db,worker,main.id)
+        with pytest.raises(ops.OperationError):tasks.complete_store(db,worker,st.id,0,str(uuid.uuid4()),'normal','')
+
+
+def test_disabled_team_cannot_execute_by_direct_task_url(seed):
+    from app.models import BdTeam
+    with appdb.SessionLocal() as db:
+        main,rt,gt,st=batch(db,seed)
+        db.get(BdTeam,seed['team']).status='disabled';db.flush()
+        worker=db.get(User,seed['users']['worker'])
+        assert tasks.my_tasks(db,worker)==[]
+        with pytest.raises(ops.OperationError,match='停用'):
+            tasks.complete_store(db,worker,st.id,0,str(uuid.uuid4()),'normal','')
+
+
+def test_task_tree_excludes_other_workers_grids_and_store_results(seed):
+    from app.models import BdGridStore
+    from shapely.geometry import box
+    from app.services import bd_zones as z
+    with appdb.SessionLocal() as db:
+        other=BdWorkGrid(release_id=db.get(BdRegion,seed['zone']).release_id,zone_id=seed['zone'],
+                         source_id='other-grid',geometry=z.geographic(box(3000,0,4000,1000)),
+                         area_km2=1,store_count=0)
+        db.add(other);db.flush()
+        admin=db.get(User,seed['users']['ops-admin'])
+        main=tasks.create_main_task(db,admin,'multiple',[seed['zone']]);db.flush()
+        rt=db.query(BdRegionTask).filter_by(main_task_id=main.id).one()
+        tasks.assign_region_task(db,admin,rt.id,seed['team'],rt.revision)
+        assigned=db.query(BdGridTask).filter_by(region_task_id=rt.id,grid_id=seed['grid']).one()
+        tasks.assign_grid_task(db,db.get(User,seed['users']['captain']),assigned.id,seed['users']['worker'],assigned.revision)
+        _,tree=tasks.task_tree(db,db.get(User,seed['users']['worker']),main.id)
+        assert len(tree)==1 and [g['grid'].id for g in tree[0]['grids']]==[seed['grid']]
+        other_task=db.query(BdGridTask).filter_by(region_task_id=rt.id,grid_id=other.id).one()
+        assert other_task.progress==100 and other_task.status=='completed'
+        with pytest.raises(ops.OperationError):tasks.store_page(db,db.get(User,seed['users']['worker']),other_task.id)
+
+
+def test_task_tree_query_count_does_not_grow_with_region_rows(seed):
+    from sqlalchemy import event
+    with appdb.SessionLocal() as db:
+        main,rt,gt,st=batch(db,seed)
+        admin=db.get(User,seed['users']['ops-admin'])
+        statements=[]
+        def count(*args):statements.append(args[2])
+        event.listen(db.bind,'before_cursor_execute',count)
+        try:
+            tasks.task_tree(db,admin,main.id)
+        finally:event.remove(db.bind,'before_cursor_execute',count)
+        assert len(statements)<=4
+
+
+def test_batch_history_prevents_grid_regeneration(seed):
+    from app.services.bd_grid_geometry import repair_grids
+    from app.services import bd_zones as z
+    from shapely.geometry import box
+    with appdb.SessionLocal() as db:
+        main,rt,gt,st=batch(db,seed)
+        base=db.get(BdWorkGrid,gt.grid_id);base.zone_id=None
+        outer=BdWorkGrid(release_id=base.release_id,zone_id=None,source_id='history-outer',
+            geometry=z.geographic(box(-100,-100,2100,1100).difference(box(0,0,2000,1000))),
+            area_km2=.64,store_count=0)
+        db.add(outer);db.flush()
+        with pytest.raises(ops.OperationError,match='批次任务引用'):
+            repair_grids(db,db.get(User,seed['users']['ops-admin']),apply=True)
+        with pytest.raises(ops.OperationError,match='批次历史'):
+            ops.replace_unused_zone_release(db,db.get(User,seed['users']['ops-admin']),{}, {})
+        assert db.get(BdWorkGrid,gt.grid_id) is not None
+
+
+def test_hierarchy_migration_matches_model_schema_and_reverts():
+    import importlib.util
+    from sqlalchemy import create_engine,inspect
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from app.db import Base
+    spec=importlib.util.spec_from_file_location('hierarchy_migration','migrations/versions/e0a1b2c3d4e5_bd_hierarchical_tasks.py')
+    migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
+    engine=create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    tables=['bd_store_task','bd_grid_task','bd_region_task','bd_main_task']
+    with engine.begin() as connection:
+        for table in tables:Base.metadata.tables[table].drop(connection)
+        migration.op=Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+        for table in tables:
+            columns={col['name'] for col in inspect(connection).get_columns(table)}
+            assert columns==set(Base.metadata.tables[table].columns.keys())
+            assert {idx['name'] for idx in inspect(connection).get_indexes(table)}=={
+                index.name for index in Base.metadata.tables[table].indexes}
+        migration.downgrade()
+        assert not set(tables)&set(inspect(connection).get_table_names())

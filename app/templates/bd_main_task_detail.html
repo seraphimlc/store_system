@@ -1,0 +1,63 @@
+{% extends 'base.html' %}{% block title %}{{ task.title }}{% endblock %}
+{% block body_class %}task-detail-page work-nav-page{% endblock %}
+{% macro tokens(revision) %}<input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><input type="hidden" name="revision" value="{{ revision }}">{% endmacro %}
+{% macro grids(item) %}<div class="tbl-wrap"><table class="grid-tbl task-table"><thead><tr><th>{{ t('网格') }}</th><th>{{ t('负责人') }}</th><th>{{ t('商户数') }}</th><th>{{ t('已巡店') }}</th><th>{{ t('进度') }}</th><th>{{ t('操作') }}</th></tr></thead><tbody>{% for child in item.grids %}<tr class="work-grid-row"><td>#{{ child.grid.id }}</td><td>{{ names.get(child.task.assignee_id,t('未指派')) }}</td><td data-label="{{ t('商户数') }}">{{ child.store_count }}</td><td data-label="{{ t('已巡店') }}">{{ child.done }}</td><td><progress max="100" value="{{ child.done*100//child.store_count if child.store_count else 0 }}"></progress> {{ child.done*100//child.store_count if child.store_count else 0 }}%</td><td><a href="/my/work/batch-grids/{{ child.task.id }}">{{ t('查看网格') }}</a></td></tr>{% else %}<tr><td colspan="6">{{ t('没有匹配网格') }}</td></tr>{% endfor %}</tbody></table></div>{% endmacro %}
+{% block navigation_title %}<a class="work-nav-back" href="{{ '/zone-tasks' if current_user.role=='admin' else '/my/work' }}" aria-label="{{ t('返回') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></a><h1 class="work-nav-title">{{ task.title }}</h1>{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/bd_tasks.css?v={{ static_ver('bd_tasks.css') }}">
+<link rel="stylesheet" href="/static/bd_batch_detail.css?v={{ static_ver('bd_batch_detail.css') }}">
+<div class="batch-detail">
+  <header class="batch-header">
+    <div class="batch-title-line"><span class="batch-status {{ 'is-complete' if task.status=='completed' else '' }}"><i aria-hidden="true"></i>{{ t('已完成') if task.status=='completed' else t('进行中') }}</span><span class="batch-id">#{{ task.id }}</span></div>
+    <a class="btn ghost batch-review" href="/my/work/batches/{{ task.id }}/new-stores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v13H4zM7 2v4m6-4v4M7 10l2 2 4-4"/></svg>{{ t('新店核实') }}</a>
+  </header>
+  {% if request.query_params.get('msg') %}<div class="msg ok">{{ request.query_params.get('msg') }}</div>{% endif %}
+  <section class="batch-overview" aria-label="{{ t('作业进展') }}">
+    <div class="batch-overview-progress"><span class="batch-label">{{ t('作业进展') }}</span><div class="batch-progress-line"><strong>{{ stats.pct }}<small>%</small></strong><span class="batch-progress" role="progressbar" aria-label="{{ t('进度') }}" aria-valuenow="{{ stats.pct }}" aria-valuemin="0" aria-valuemax="100"><i style="width:{{ stats.pct }}%"></i></span></div></div>
+    <div class="batch-overview-count"><span class="batch-label">{{ t('已巡 / 总商户') }}</span><div><strong>{{ stats.done }}</strong><span class="batch-count-divider">/</span><span class="batch-count-total">{{ stats.total }}</span></div></div>
+    <div class="batch-overview-regions"><span class="batch-label">{{ t('片区') }}</span><strong>{{ tree|length }}</strong></div>
+  </section>
+  {% if current_user.role=='admin' %}
+  <section class="batch-rankings">
+    {% for title,ranking in [('团队完成数量排名',count_rank),('团队完成进度排名',rate_rank)] %}
+    <div class="batch-ranking {{ 'batch-ranking-rate' if loop.index==2 else '' }}">
+      <header><h2>{{ t(title) }}</h2><span class="batch-team-count">{{ ranking|length }} {{ t('团队') }}</span></header>
+      <ol>{% for r in ranking %}<li><span class="batch-rank-index">{{ loop.index }}</span><span class="batch-rank-name">{{ r.name }}</span><span class="batch-rank-numbers"><strong>{{ r.done }}</strong><span>/ {{ r.total }}</span></span><span class="batch-rank-rate">{{ r.pct }}%</span></li>{% else %}<li class="batch-rank-empty">{{ t('暂无负责团队') }}</li>{% endfor %}</ol>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+  <section class="batch-regions" aria-label="{{ t('片区') }}">
+    <header class="batch-regions-header"><div class="batch-section-title"><h2>{{ t('片区') }}</h2><span>{{ tree|length }}</span></div>
+      <form class="task-filters batch-filters" method="get" data-testid="batch-filters" data-autosubmit="1"><select name="state" aria-label="{{ t('作业状态') }}" data-testid="filter-state"><option value="">{{ t('全部网格状态') }}</option>{% for key,label in [('unassigned','未指派'),('assigned','已指派'),('in_progress','进行中'),('completed','已完成')] %}<option value="{{ key }}" {{ 'selected' if state==key else '' }}>{{ t(label) }}</option>{% endfor %}</select><div class="batch-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input name="kw" type="search" value="{{ kw }}" placeholder="{{ t('搜索网格编号') }}" aria-label="{{ t('搜索') }}" data-testid="filter-kw"></div></form>
+    </header>
+    {% if current_user.role=='admin' %}<div class="task-region-columns" aria-hidden="true"><span>{{ t('片区名称') }}</span><span>{{ t('负责团队') }}</span><span>{{ t('面积') }}</span><span>{{ t('已巡 / 总商户') }}</span><span>{{ t('进度') }}</span></div>{% endif %}
+{% for item in tree %}
+{% if current_user.role=='admin' %}
+<article class="batch-admin-region">
+  <div class="batch-admin-row">
+    <button class="batch-region-toggle" type="button" aria-expanded="false" aria-controls="batch-region-content-{{ item.task.id }}" data-region-toggle>
+      <span class="batch-region-chevron" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m7 4 6 6-6 6"/></svg></span>
+      <span class="batch-region-name">{{ item.region.name }}</span>
+    </button>
+    {% if task.status!='completed' %}
+    <form method="post" action="/zone-tasks/regions/{{ item.task.id }}/assign" class="batch-region-handover" data-current-team="{{ item.task.team_id or '' }}" data-current-team-name="{{ item.team_name or '' }}" data-confirm-message="{{ t('更换团队将清除该片区所有网格的现有队员分配。确认将「{old}」更换为「{new}」吗？') }}" data-transfer-label="{{ t('确认交接') }}">
+      {{ tokens(item.task.revision) }}
+      <select name="team_id" required aria-label="{{ t('负责团队') }}"><option value="">{{ t('选择团队') }}</option>{% for tm in teams %}<option value="{{ tm.id }}" {{ 'selected' if tm.id==item.task.team_id else '' }}>{{ tm.name }}</option>{% endfor %}</select>
+      <button class="btn ghost" type="submit">{{ t('更新团队') if item.task.team_id else t('分配团队') }}</button>
+    </form>
+    {% else %}<span class="batch-region-team">{{ item.team_name or t('未指派') }}</span>{% endif %}
+    <span class="batch-region-area">{{ '%.2f'|format(item.region.area_km2) }} <small>km²</small></span>
+    <span class="batch-region-count">{{ item.done }} <small>/ {{ item.total }}</small></span>
+    <span class="batch-region-progress"><span class="batch-progress" aria-hidden="true"><i style="width:{{ item.pct }}%"></i></span><strong>{{ item.pct }}%</strong></span>
+  </div>
+  <div class="batch-region-content" id="batch-region-content-{{ item.task.id }}" hidden>{{ grids(item) }}<a href="/my/work/batches/{{ task.id }}/regions/{{ item.task.id }}">{{ t('查看片区') }}</a></div>
+</article>
+{% elif current_user.id==item.task.leader_id %}<section class="task-region"><a class="task-region-link" href="/my/work/batches/{{ task.id }}/regions/{{ item.task.id }}"><strong>{{ item.region.name }}</strong><span>{{ item.grids|length }} {{ t('网格') }} · {{ item.done }} / {{ item.total }} {{ t('家商户') }}</span><strong>{{ item.pct }}% · {{ t('查看片区') }}</strong></a></section>
+{% else %}<section class="task-region"><h2>{{ item.region.name }}</h2>{{ grids(item) }}</section>{% endif %}
+{% else %}<p class="batch-empty">{{ t('没有匹配网格') }}</p>{% endfor %}
+  </section>
+</div>
+<script src="/static/bd_region_handover.js?v={{ static_ver('bd_region_handover.js') }}" defer></script>
+<script>(()=>{const key='visit-batch:'+location.pathname+location.search;try{const saved=JSON.parse(sessionStorage.getItem(key)||'null');if(saved){document.querySelectorAll('.task-region').forEach((d,i)=>{if(d.tagName==='DETAILS')d.open=saved.open.includes(i)});requestAnimationFrame(()=>scrollTo(0,saved.y));}addEventListener('pagehide',()=>sessionStorage.setItem(key,JSON.stringify({y:scrollY,open:[...document.querySelectorAll('.task-region')].flatMap((d,i)=>d.open?[i]:[])})));}catch(e){}})();</script>
+<script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>{% endblock %}

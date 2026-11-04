@@ -57,8 +57,8 @@ def test_new_staff_must_change_first_login(client):
         "csrf_token": _csrf(client), "old_password": "demo123",
         "new_password": "mynewpass1"}, follow_redirects=False)
     assert r.status_code == 303
-    # 改完密码直达「每日填报」（员工每天用的页面；跳绩效在可见月收紧后会看到空页）
-    assert r.headers["location"].startswith("/my/report")
+    # 改完密码直达「巡店任务」（员工每天用的页面；跳绩效在可见月收紧后会看到空页）
+    assert r.headers["location"].startswith("/my/work")
     db = _db()
     u = db.query(User).filter(User.person_code == "222").one()
     assert u.must_change_password is False

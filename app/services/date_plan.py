@@ -555,13 +555,13 @@ def staff_home(db, user) -> str:
     """**员工登录后的第一个页面**（单一来源）：
 
     - 本期出勤计划**没登记** → `/my/plan`（先去填计划）；
-    - 否则 → `/my/report`（每日自报）；
-    - 没有绑定员工编号（用不了这两个页面）→ `/my/perf`（保持历史行为）。
+    - 否则 → `/my/tasks`（旧车站任务）；
+    - 没有绑定员工编号（无需登记出勤计划）→ `/my/tasks`。
     """
     code = getattr(user, "person_code", None)
     if not code:
-        return "/my/perf"
-    return "/my/plan" if needs_plan(db, code) else "/my/report"
+        return "/my/tasks"
+    return "/my/plan" if needs_plan(db, code) else "/my/tasks"
 
 
 # ---------------- 员工端视图与提交 ----------------

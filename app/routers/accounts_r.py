@@ -55,9 +55,9 @@ def my_password_page(request: Request, user: Optional[User] = Depends(require_lo
     if user is None:
         return _denied()
     if must == "1" and not user.must_change_password:
-        # 落点按角色：队长在员工端（/my/tasks），员工 /my/perf，管理员 /perf
+        # 落点按角色：队长在员工端（/my/work），员工 /my/perf，管理员 /perf
         if user.role == "leader":
-            return RedirectResponse("/my/tasks", status_code=302)
+            return RedirectResponse("/my/work", status_code=302)
         return RedirectResponse("/my/perf" if user.role == "staff"
                                 else "/perf", status_code=302)
     return templates.TemplateResponse("my_password.html", {
@@ -87,13 +87,13 @@ def my_password_submit(request: Request, old_password: str = Form(...),
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     db.commit()
-    # 员工改完密码直接进「每日填报」（员工每天真正要用的页面）；
+    # 员工改完密码直接进「巡店任务」（员工每天真正要用的页面）；
     # 原来跳「我的绩效」，但员工可见起始月收紧后那里常常是空的。
-    # ⚠️ 队长不能落到 `/perf`（那是**管理员页**，会被 _denied 弹回登录）→ 去 /my/tasks。
+    # ⚠️ 队长不能落到 `/perf`（那是**管理员页**，会被 _denied 弹回登录）→ 去 /my/work。
     if user.role == "staff":
-        dest = "/my/report"
+        dest = "/my/work"
     elif user.role == "leader":
-        dest = "/my/tasks"
+        dest = "/my/work"
     else:
         dest = "/perf"
     return RedirectResponse(dest + "?msg=密码已修改，可正常使用", status_code=303)
@@ -109,7 +109,7 @@ def staff_admin_page(request: Request, user: Optional[User] = Depends(require_lo
     if user is None:
         return _denied()
     if user.role != "admin":
-        # 队长 → /login（按角色落到 /my/tasks）；员工 → 员工首页
+        # 队长 → /login（按角色落到 /my/work）；员工 → 员工首页
         if user.role == "leader":
             return RedirectResponse("/login", status_code=302)
         return RedirectResponse("/my/perf", status_code=302)

@@ -1,0 +1,42 @@
+.task-events-page main.wrap {width:100%;max-width:none;margin:0;padding:20px 24px 32px}
+.task-events-head {display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.task-events-head h1 {margin:0;font-size:20px}
+.task-events-head strong {color:var(--muted,#66758b);font-size:14px;font-weight:500}
+.task-event-filters {display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(140px,1fr));gap:10px 12px;align-items:end;padding:14px 16px;margin:0 0 8px;border:1px solid var(--line,#e2e7ef);border-radius:8px;background:var(--surface,#fff)}
+.task-event-filters label {display:grid;gap:5px;min-width:0;color:var(--muted,#66758b);font-size:12px}
+.task-event-filters input,.task-event-filters select {width:100%;min-width:0;height:38px;margin:0;padding:7px 9px;border:1px solid var(--line,#dce3ed);border-radius:6px;background:#fff;color:inherit;font:inherit;font-size:13px}
+.task-event-actions {display:flex;gap:8px;align-items:center;grid-column:1/-1}
+.task-event-actions .btn {min-height:36px}
+.task-event-note {margin:7px 2px 14px;color:var(--muted,#66758b);font-size:12px;line-height:1.5}
+.task-event-metrics {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 20px;border-top:1px solid var(--line,#e2e7ef);border-bottom:1px solid var(--line,#e2e7ef);background:#fff}
+.task-event-metrics>div {display:grid;gap:5px;padding:14px 16px;border-right:1px solid var(--line,#e2e7ef)}
+.task-event-metrics>div:last-child {border-right:0}
+.task-event-metrics span {color:var(--muted,#66758b);font-size:12px}
+.task-event-metrics strong {font-size:18px;font-variant-numeric:tabular-nums;color:#243247}
+.task-event-performers,.task-event-history {margin-top:18px}
+.task-event-performers h2,.task-event-history h2 {display:flex;align-items:baseline;gap:10px;margin:0 0 9px;font-size:15px}
+.task-event-history h2 span {color:var(--muted,#66758b);font-size:12px;font-weight:400}
+.task-event-table {width:100%;table-layout:fixed}
+.task-event-table th:nth-child(1) {width:145px}
+.task-event-table th:nth-child(2) {width:145px}
+.task-event-table th:nth-child(3) {width:120px}
+.task-event-table th:nth-child(4) {width:120px}
+.task-event-table th:nth-child(5) {width:30%}
+.task-event-table td {vertical-align:top;overflow-wrap:anywhere}
+.task-event-table td small {display:block;color:var(--muted,#66758b);font-size:11px;margin-top:2px}
+.task-event-path {display:grid;gap:3px;line-height:1.45}
+.task-event-path>span:not(:last-child) {color:var(--muted,#66758b)}
+.task-event-change {display:flex;align-items:flex-start;gap:6px;font-size:12px}
+.task-event-change code {white-space:pre-wrap;overflow-wrap:anywhere}
+.task-event-change>span {flex:none;color:var(--muted,#66758b)}
+@media(max-width:1050px) {
+  .task-event-filters {grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:700px) {
+  .task-events-page main.wrap {padding:14px 12px 24px}
+  .task-event-filters {grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:9px}
+  .task-event-filters label:first-child {grid-column:1/-1}
+  .task-event-metrics>div {padding:11px 9px}
+  .task-event-metrics strong {font-size:16px}
+  .task-event-history .tbl-wrap table {min-width:980px;table-layout:fixed}
+}

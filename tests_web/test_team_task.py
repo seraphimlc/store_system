@@ -175,7 +175,7 @@ def test_members_save_via_page(client, seeded):
 # ---------------- 队长权限（第 2 项） ----------------
 
 def test_leader_landing_has_no_redirect_loop(client, seeded):
-    """队长从 `/` 出发必须落到 /my/tasks，且不反复重定向。"""
+    """队长从 `/` 出发回到车站任务页，且不反复重定向。"""
     _login(client, "ogawa")
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/my/tasks"
@@ -222,7 +222,9 @@ def test_leader_nav_gate_and_tabbar(client, seeded):
         assert bad not in html, "队长不该看到 %s" % bad
     assert "has-tabbar" in html
     assert 'data-testid="tab-tasks"' in html
+    assert 'data-testid="tab-work"' in html
     assert "任务分派" in html
+    assert "巡店任务" in html
 
 
 def test_staff_login_landing_unchanged(client, seeded):
@@ -230,8 +232,7 @@ def test_staff_login_landing_unchanged(client, seeded):
     _login(client, "tangjing")
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"].startswith(("/my/plan", "/my/report",
-                                            "/my/perf"))
+    assert r.headers["location"].startswith(("/my/plan", "/my/tasks"))
 
 
 # ---------------- 车站 / 任务（第 5 项） ----------------
@@ -4886,6 +4887,20 @@ def test_logs_page_filters(client, seeded):
     #    分页条压根不出现，`&kw=` 那种"分页保参"链接断言不到（但不是"不可能存在"）。
     assert 'data-testid="log-filter"' in h
     assert 'data-testid="log-kw"' in h and 'data-testid="log-from"' in h
+    assert h.count('data-testid="log-tab-') == 8
+    assert h.count('class="filters log-filters"') == 1
+
+
+def test_log_enum_values_are_localized_for_display():
+    from app.services.bd_log import display_value
+    assert display_value('leader', 'role', 'member') == '队长'
+    assert display_value('done', 'state', 'task') == '已完成'
+    assert display_value('{"status":"completed","result":{"business_status":"abnormal"}}',
+                         'operations', 'task') == \
+        '{"status":"已完成","result":{"business_status":"异常"}}'
+    assert display_value('{"review_status":"rejected"}', 'operations', 'task') == \
+        '{"review_status":"已驳回"}'
+    assert display_value('future-code', 'status', 'task') == 'future-code'
 
 
 def test_mobile_menu_shows_unread_badge(client, seeded):

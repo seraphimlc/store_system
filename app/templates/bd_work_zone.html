@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}{{ zone.name }}{% endblock %}
+{% block body_class %}dispatch-page{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="/static/bd_dispatch.css?v={{ static_ver('bd_dispatch.css') }}">{% endblock %}
+{% block navigation_title %}
+<a class="dispatch-back" href="{{ '/zones' if current_user.role=='admin' else '/my/work' }}" aria-label="{{ t('返回') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></a>
+<h1 class="dispatch-title">{{ zone.name }}</h1>
+{% endblock %}
+{% block content %}
+<section class="dispatch-workspace" aria-label="{{ t('网格任务') }}">
+  <div class="dispatch-map-stage"><div id="work-map" aria-label="{{ t('作业地图') }}"></div><p id="work-map-status" role="status" aria-live="polite"></p><div class="dispatch-map-legend"><span><i class="assigned"></i>{{ t('已指派') }}</span><span><i class="unassigned"></i>{{ t('未指派') }}</span></div></div>
+  <section class="dispatch-list" aria-label="{{ t('网格任务') }}">
+    {# 筛选栏：两个控件同一行，改动即搜索（作业状态 + 搜索） #}
+    <form class="bd-filters" method="get" data-testid="grid-filters" data-autosubmit="1">
+      <label><span class="bd-filter-label">{{ t('作业状态') }}</span>
+        <select name="state" data-testid="filter-state" aria-label="{{ t('作业状态') }}" title="{{ t('作业状态') }}">
+          <option value="">{{ t('全部') }}</option>
+          <option value="unassigned" {{ 'selected' if state=='unassigned' else '' }}>{{ t('未指派') }}</option>
+          <option value="assigned" {{ 'selected' if state=='assigned' else '' }}>{{ t('已指派') }}</option>
+          <option value="visiting" {{ 'selected' if state=='visiting' else '' }}>{{ t('进行中') }}</option>
+          <option value="visited" {{ 'selected' if state=='visited' else '' }}>{{ t('已完成') }}</option>
+        </select>
+      </label>
+      <label><span class="bd-filter-label">{{ t('搜索') }}</span>
+        <input type="search" name="kw" value="{{ kw }}" maxlength="100" placeholder="{{ t('网格') }}" data-testid="filter-kw" aria-label="{{ t('搜索') }}" title="{{ t('搜索') }}">
+      </label>
+    </form>
+    <div class="dispatch-columns" aria-hidden="true"><span>{{ t('名称') }}</span><span>{{ t('状态') }}</span><span>{{ t('进度') }}</span><span>{{ t('负责人') }}</span></div>
+    <div class="dispatch-scroll">
+    {% for g in grids %}
+      {% set gp = progress.get(g.id, {'pct':0,'state':'unvisited','visited':0,'total':0}) %}
+      <article class="dispatch-grid" id="grid-{{ g.id }}">
+        <button type="button" class="dispatch-row" data-grid-id="{{ g.id }}" aria-expanded="false" aria-controls="grid-detail-{{ g.id }}">
+          <span class="dispatch-grid-name">{{ t('网格') }} #{{ g.id }}</span>
+          <span class="dispatch-state {{ gp.state }}">{{ t('已完成') if gp.state=='visited' else t('进行中') if gp.state=='visiting' else t('已指派') if g.assignee_id else t('未指派') }}</span>
+          <span class="dispatch-progress">{{ gp.pct }}%</span><span class="dispatch-owner">{{ names.get(g.assignee_id,t('未指派')) }}</span>
+        </button>
+        <div class="dispatch-detail" id="grid-detail-{{ g.id }}" role="region" aria-label="{{ t('网格') }} #{{ g.id }}" hidden>
+          <p class="dispatch-facts">{{ '%.3f'|format(g.area_km2) }} km² <span>·</span> {{ g.store_count }} {{ t('店铺数') }}</p>
+          {% if leader %}
+          <form id="dispatch-assign-{{ g.id }}" method="post" action="/my/work/grids/{{ g.id }}/assign" class="dispatch-assignment">
+            <input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><input type="hidden" name="revision" value="{{ g.revision }}">
+            <select name="target_id" required aria-label="{{ t('选择队员') }}" {% if not members %}disabled{% endif %}><option value="" disabled {% if not g.assignee_id %}selected{% endif %}>{{ t('选择队员') }}</option>{% for m in members %}<option value="{{ m.id }}" {{ 'selected' if m.id==g.assignee_id else '' }}>{{ m.display_name or m.username }}</option>{% endfor %}</select>
+          </form>
+          {% if g.assignee_id %}<form id="dispatch-recall-{{ g.id }}" method="post" action="/my/work/grids/{{ g.id }}/assign"><input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><input type="hidden" name="revision" value="{{ g.revision }}"></form>{% endif %}
+          {% endif %}
+          <div class="dispatch-actions">
+            {% if leader %}<button type="submit" form="dispatch-assign-{{ g.id }}" class="btn" {% if not members %}disabled{% endif %}>{{ t('派发网格') }}</button>{% if g.assignee_id %}<button type="submit" form="dispatch-recall-{{ g.id }}" class="btn ghost">{{ t('召回网格') }}</button>{% endif %}{% endif %}
+            {% if current_user.id==g.assignee_id %}<a class="btn" href="/my/work/grids/{{ g.id }}">{{ t('进入作业') }}</a>{% endif %}
+          </div>
+        </div>
+      </article>
+    {% else %}<p class="dispatch-empty">{{ t('暂无网格') }}</p>{% endfor %}
+    </div>
+  </section>
+</section>
+<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'dispatch':true,'selectPrefix':'grid-','language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
+<script src="/static/bd_dispatch.js?v={{ static_ver('bd_dispatch.js') }}" defer></script>
+<script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
+<script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
+{% endblock %}

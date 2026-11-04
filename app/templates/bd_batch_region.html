@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}{{ item.region.name }}{% endblock %}
+{% block body_class %}dispatch-page batch-region-page{% endblock %}
+{% block page_head %}
+<link rel="stylesheet" href="/static/bd_dispatch.css?v={{ static_ver('bd_dispatch.css') }}">
+<link rel="stylesheet" href="/static/bd_tasks.css?v={{ static_ver('bd_tasks.css') }}">
+{% endblock %}
+{% block navigation_title %}
+<a class="dispatch-back" href="/my/work/batches/{{ task.id }}" aria-label="{{ t('返回') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></a>
+<h1 class="dispatch-title">{{ item.region.name }}</h1>
+<a class="btn ghost" href="/my/work/batches/{{ task.id }}/logs">{{ t('批次日志') }}</a>
+{% endblock %}
+{% macro tokens(revision) %}<input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><input type="hidden" name="revision" value="{{ revision }}">{% endmacro %}
+{% block content %}
+<section class="dispatch-workspace" aria-label="{{ t('网格任务') }}">
+  <div class="dispatch-map-stage"><div id="work-map" aria-label="{{ t('片区地图') }}"></div><p id="work-map-status" role="status" aria-live="polite"></p><div class="dispatch-map-legend"><span><i class="assigned"></i>{{ t('已指派') }}</span><span><i class="unassigned"></i>{{ t('未指派') }}</span></div></div>
+  <section class="dispatch-list" aria-label="{{ t('网格任务') }}" id="grid-assignment">
+    {% if request.query_params.get('msg') %}<div class="msg ok batch-region-message">{{ request.query_params.get('msg') }}</div>{% endif %}
+    <div class="batch-region-progress">{{ stats.done }} / {{ stats.total }} {{ t('家商户') }}<span>{{ stats.pct }}%</span></div>
+    <form class="bd-filters batch-region-filters" method="get" data-autosubmit="1">
+      <select name="state" aria-label="{{ t('网格状态') }}"><option value="">{{ t('全部网格状态') }}</option>{% for key,label in [('unassigned','未指派'),('assigned','已指派'),('in_progress','进行中'),('completed','已完成')] %}<option value="{{ key }}" {{ 'selected' if state==key else '' }}>{{ t(label) }}</option>{% endfor %}</select>
+      <select name="owner" aria-label="{{ t('负责人') }}"><option value="">{{ t('全部负责人') }}</option><option value="unassigned" {{ 'selected' if owner=='unassigned' else '' }}>{{ t('未指派') }}</option>{% for m in members %}<option value="{{ m.id }}" {{ 'selected' if owner==m.id|string else '' }}>{{ m.display_name or m.username }}</option>{% endfor %}</select>
+    </form>
+    <div class="dispatch-columns" aria-hidden="true"><span>{{ t('名称') }}</span><span>{{ t('状态') }}</span><span>{{ t('进度') }}</span><span>{{ t('负责人') }}</span></div>
+    <div class="dispatch-scroll">
+      {% for g in children %}
+      <article class="dispatch-grid" id="grid-{{ g.task.id }}">
+        <button class="dispatch-row" type="button" data-grid-id="{{ g.task.id }}" aria-expanded="false" aria-controls="grid-detail-{{ g.task.id }}">
+          <span class="dispatch-grid-name">{{ t('网格') }} #{{ g.grid.id }}</span>
+          <span class="dispatch-state">{{ t({'completed':'已完成','in_progress':'进行中','assigned':'已指派'}.get(g.task.status,'未指派')) }}</span>
+          <span class="dispatch-progress">{{ g.done*100//g.store_count if g.store_count else 0 }}%</span>
+          <span class="dispatch-owner" title="{{ names.get(g.task.assignee_id,t('未指派')) }}">{{ names.get(g.task.assignee_id,t('未指派')) }}</span>
+        </button>
+        <div class="dispatch-detail" id="grid-detail-{{ g.task.id }}" hidden>
+          <p class="dispatch-facts">{{ g.done }} / {{ g.store_count }} {{ t('家商户') }}<span>·</span>{{ '%.2f'|format(g.grid.area_km2) }} km²</p>
+          {% if current_user.id==item.task.leader_id and task.status!='completed' and g.task.status!='completed' %}
+          <form method="post" action="/my/work/batch-grids/{{ g.task.id }}/assign" class="dispatch-assignment">
+            {{ tokens(g.task.revision) }}<input type="hidden" name="region_back" value="1"><input type="hidden" name="state_filter" value="{{ state }}"><input type="hidden" name="owner_filter" value="{{ owner }}">
+            <select name="target_id" required aria-label="{{ t('选择队员') }}"><option value="">{{ t('选择队员') }}</option>{% for m in members %}<option value="{{ m.id }}" {{ 'selected' if m.id==g.task.assignee_id else '' }}>{{ m.display_name or m.username }}</option>{% endfor %}</select>
+            <div class="dispatch-actions"><button class="btn" type="submit">{{ t('派发网格') }}</button><a class="btn ghost" href="/my/work/batch-grids/{{ g.task.id }}">{{ t('查看网格') }}</a></div>
+          </form>
+          {% else %}<div class="dispatch-actions"><a class="btn ghost" href="/my/work/batch-grids/{{ g.task.id }}">{{ t('查看网格') }}</a></div>{% endif %}
+        </div>
+      </article>
+      {% else %}<p class="dispatch-empty">{{ t('没有匹配网格') }}</p>{% endfor %}
+    </div>
+  </section>
+</section>
+<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':[],'dispatch':true,'language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
+<script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
+<script src="/static/bd_task_region.js?v={{ static_ver('bd_task_region.js') }}" defer></script>
+<script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
+{% endblock %}

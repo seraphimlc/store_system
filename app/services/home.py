@@ -12,7 +12,7 @@
 所以：**登录后与越权后的落点一律走这里**，不要在各处再写死 `/my/perf`、`/dashboard`。
 
 - `admin`  → `/dashboard`
-- `leader` → `/my/tasks`（队长端在**员工端**里，见规格 §6.2）
+- `leader` → `/my/tasks`（旧车站任务入口；新巡店批次可从独立入口进入）
 - `staff`  → `date_plan.staff_home()`（**不复制**它的逻辑，直接调用）
 - 其他/未登录 → `/login`
 """
@@ -21,7 +21,7 @@ from typing import Optional
 __all__ = ["landing_home", "LEADER_HOME"]
 
 
-#: 队长端落点（员工端任务页）
+#: 队长端落点（旧车站任务页）
 LEADER_HOME = "/my/tasks"
 
 
@@ -42,5 +42,5 @@ def landing_home(db, user) -> str:
         try:
             return date_plan.staff_home(db, user)
         except Exception:       # 落点绝不能因为异常把人卡住
-            return "/my/perf"
+            return "/my/work"
     return "/login"

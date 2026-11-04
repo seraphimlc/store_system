@@ -826,7 +826,7 @@ def test_needs_plan_and_staff_home(client, frozen):
     assert date_plan.staff_home(db, u) == "/my/plan"        # 未登记 → 先填计划
     date_plan.save_plan(db, u, "2026-10-H1", [], today=today)
     assert date_plan.needs_plan(db, "P1", today=today) == {}
-    assert date_plan.staff_home(db, u) == "/my/report"      # 已登记 → 每日自报
+    assert date_plan.staff_home(db, u) == "/my/tasks"     # 已登记 → 车站任务
 
 
 def test_needs_plan_edge_cases(client):
@@ -835,7 +835,7 @@ def test_needs_plan_edge_cases(client):
     # 没绑定编号：既不提示也回不到这两个页面 → 保持历史落点
     assert date_plan.needs_plan(db, None) == {}
     assert date_plan.needs_plan(db, "") == {}
-    assert date_plan.staff_home(db, _U(code=None)) == "/my/perf"
+    assert date_plan.staff_home(db, _U(code=None)) == "/my/tasks"
     # 窗口开着、没登记 → 需要填报
     assert date_plan.needs_plan(db, "P1", today=date(2026, 10, 10))["key"] == "2026-10-H2"
     # 窗口间隙（10-05 / 10-20 既没有开着的期）→ 不需要填报，也就不会弹窗催办
@@ -845,22 +845,22 @@ def test_needs_plan_edge_cases(client):
 
 
 def test_staff_login_landing_plan_then_report(client, frozen):
-    """登录后第一个页面：待填报 → /my/plan；登记完 → /my/report。"""
+    """登录后第一个页面：待填报 → /my/plan；登记完 → /my/tasks。"""
     _mk_staff(client)
     r, csrf = _login_raw(client)
     assert r.headers["location"] == "/my/plan"
     _submit_current(client, csrf)
     client.post("/logout", data={"csrf_token": csrf}, follow_redirects=False)
     r2, _ = _login_raw(client)
-    assert r2.headers["location"] == "/my/report"
+    assert r2.headers["location"] == "/my/tasks"
 
 
 def test_staff_login_lands_on_report_when_no_window(client, frozen, monkeypatch):
-    """窗口间隙（没有可填报的期）→ 登录直接进每日自报页。"""
+    """窗口间隙（没有可填报的期）→ 登录直接进车站任务页。"""
     monkeypatch.setattr(date_plan, "jst_today", lambda: date(2026, 10, 20))
     _mk_staff(client)
     r, _ = _login_raw(client)
-    assert r.headers["location"] == "/my/report"
+    assert r.headers["location"] == "/my/tasks"
 
 
 def test_staff_root_redirect_uses_staff_home(client, frozen):
@@ -1023,12 +1023,11 @@ def test_my_plan_rejects_other_period_dates(client, frozen):
 # ---------------- 路由：管理端 ----------------
 
 def test_staff_blocked_from_admin_plan_page(client):
-    """员工访问管理端矩阵 → 拦回**员工首页**（待填报时 = /my/plan，否则 /my/report）。"""
+    """员工访问管理端矩阵 → 拦回员工首页（待填报时计划页，否则车站任务页）。"""
     _staff(client)
     r = client.get("/staff-plans", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"].startswith(("/my/plan", "/my/report",
-                                             "/my/perf", "/login"))
+    assert r.headers["location"].startswith(("/my/plan", "/my/tasks", "/login"))
 
 
 def test_admin_plan_other_period_does_not_show_zero_for_today(client, monkeypatch):

@@ -72,7 +72,7 @@
         <tbody>
           {% for p in day_progress %}
           <tr data-testid="day-progress-{{ p.task_id }}">
-            <td><a href="/tasks/{{ p.task_id }}">{{ p.station or p.task_id }}</a></td>
+            <td>{{ p.station or p.task_id }}</td>
             <td class="hint">{{ p.line or '—' }}</td>
             <td>{% if p.reported_pct is not none %}{{ p.reported_pct }}%{% else %}—{% endif %}</td>
             <td><b>{{ p.pct }}%</b></td>
