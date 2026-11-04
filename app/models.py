@@ -1237,7 +1237,8 @@ class BdLog(Base):
     domain = Column(String(16), nullable=False)
     ref_id = Column(Integer, nullable=True)
     ref_label = Column(String(128), nullable=False, default="", server_default="")
-    action = Column(String(24), nullable=False)
+    # 与 bd_task_event.event_type 同宽：空批次自动完成、密度重划等操作名超过 24。
+    action = Column(String(40), nullable=False)
     field = Column(String(32), nullable=False, default="", server_default="")
     old_value = Column(Text, nullable=False, default="", server_default="")
     new_value = Column(Text, nullable=False, default="", server_default="")

@@ -1,10 +1,45 @@
+import ast
 import uuid
+from pathlib import Path
 
 import app.db as appdb
 from app.models import BdTaskEvent, BdStoreTask, User
 from app.services import bd_hierarchical_tasks as tasks
 from tests_web.test_bd_visit_page import multi_batch, complete
 from tests_web.test_bd_zone_operations import login, seed
+
+
+def _action_literals(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.IfExp):
+        return _action_literals(node.body) + _action_literals(node.orelse)
+    return []
+
+
+def test_bd_log_action_holds_audit_names():
+    """bd_log.action 必须装下 audit_log / log_op 的操作名。SQLite 不截 VARCHAR。"""
+    from app.models import BdLog
+    limit = BdLog.__table__.c.action.type.length
+    found = []
+    for path in Path("app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            attr = func.attr if isinstance(func, ast.Attribute) else None
+            ident = func.id if isinstance(func, ast.Name) else None
+            if attr not in {"audit_log", "log_op"} and ident not in {"audit_log", "log_op"}:
+                continue
+            action = node.args[3] if len(node.args) >= 4 else None
+            for kw in node.keywords:
+                if kw.arg == "action":
+                    action = kw.value
+            found.extend(_action_literals(action) if action is not None else [])
+    assert "region_auto_completed_empty" in found
+    too_long = sorted({name for name in found if len(name) > limit})
+    assert too_long == []
 
 
 def test_batch_events_capture_store_and_parent_completion(client, seed):
