@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('巡店任务') }}{% endblock %}
+{% block body_class %}tasks-page work-nav-page{% endblock %}
+{% block navigation_title %}<h1 class="work-nav-title">{{ t('巡店任务') }}</h1>{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/bd_tasks.css?v={{ static_ver('bd_tasks.css') }}">
+<div class="work-surface">
+<p class="work-page-context">{{ t('选择批次，查看负责的片区与网格。') }}</p>
+<p><a href="/my/tasks">{{ t('车站任务') }}</a></p>
+<section class="work-batch-list" aria-label="{{ t('巡店批次') }}">
+{% for batch in batches %}{% set s=summaries.get(batch.id,{'total':0,'done':0,'pct':0}) %}
+<a class="work-batch-row" href="/my/work/batches/{{ batch.id }}">
+  <div class="work-batch-name"><h2>{{ batch.title }}</h2><span>#{{ batch.id }}</span></div>
+  <span class="work-status {{ 'is-complete' if batch.status=='completed' else '' }}">{{ t('已完成') if batch.status=='completed' else t('进行中') }}</span>
+  <div class="work-batch-count"><span>{{ t('已巡 / 总商户') }}</span><strong>{{ s.done }} <small>/ {{ s.total }}</small></strong></div>
+  <div class="work-batch-progress"><progress max="100" value="{{ s.pct }}" aria-label="{{ t('进度') }}"></progress><strong>{{ s.pct }}%</strong></div>
+  <svg class="work-row-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+</a>
+{% else %}<p class="work-empty">{{ t('暂无巡店批次') }}</p>{% endfor %}
+</section></div>
+{% endblock %}

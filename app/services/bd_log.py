@@ -8,6 +8,7 @@
 （`bd_task_progress` 是一天一条的快照，会被覆盖，看不到改了几次、谁改的）。
 """
 from datetime import datetime, timedelta
+import json
 from typing import Dict, List, Optional
 
 import sqlalchemy as sa
@@ -15,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.models import BdLog, User
 
-DOMAINS = ("task", "team", "member", "station")
+DOMAINS = ("task", "team", "member", "station", "zone", "grid",
+           "grid_density", "message")
 
 
 def actor_of(db: Session, user) -> Dict[str, str]:
@@ -132,18 +134,135 @@ def ACTION_LABELS(lang: str = "zh") -> Dict[str, str]:
           "assign": "分派担当", "unassign": "取消担当", "role": "改角色",
           "state": "状态变化", "progress": "进展上报", "remove": "移出",
           "status": "状态", "rename": "改名",
-          "wipe": "清空重建", "merge": "合并"}
+          "wipe": "清空重建", "merge": "合并", "reject": "驳回",
+          "return_pool": "退回任务池", "generate": "生成片区与网格",
+          "recall": "收回派发", "carry_assignment": "承接原派发",
+          "replace_release": "替换版本", "import_natural_grids": "导入自然网格",
+          "regroup": "调整片区分组", "merge_grids": "合并网格",
+          "absorb_enclosed": "归并内部网格",
+          "regroup_by_merchant_density": "按商户密度重组",
+          "refresh": "刷新网格密度", "create_batch": "创建巡店批次",
+          "assign_region_task": "分配片区任务", "assign_grid_task": "分配网格任务",
+          "complete_store_task": "完成门店任务", "update_store_result": "修改巡店结果",
+          "grid_status_changed": "网格状态更新", "region_status_changed": "片区状态更新",
+          "batch_status_changed": "批次状态更新",
+          "grid_auto_completed_empty": "空网格自动完成",
+          "region_auto_completed_empty": "空片区自动完成",
+          "batch_auto_completed_empty": "空批次自动完成",
+          "submit_store_proposal": "提交新店核实",
+          "review_store_proposal": "审核新店核实"}
     ja = {"create": "作成", "update": "変更", "dispatch": "チーム割当",
           "transfer": "他チームへ移送",
           "assign": "担当割当", "unassign": "担当解除", "role": "役割変更",
           "state": "状態変更", "progress": "進捗提出", "remove": "退出",
           "status": "状態", "rename": "名称変更",
-          "wipe": "クリア再構築", "merge": "統合"}
+          "wipe": "クリア再構築", "merge": "統合", "reject": "差戻し",
+          "return_pool": "タスクプールへ戻す", "generate": "エリアと区画を生成",
+          "recall": "割当を回収", "carry_assignment": "既存割当を引継ぎ",
+          "replace_release": "バージョンを置換", "import_natural_grids": "自然区画を取込",
+          "regroup": "エリアを再編", "merge_grids": "区画を統合",
+          "absorb_enclosed": "内側区画を統合",
+          "regroup_by_merchant_density": "店舗密度で再編",
+          "refresh": "区画密度を更新", "create_batch": "巡店バッチを作成",
+          "assign_region_task": "エリアタスクを割当", "assign_grid_task": "区画タスクを割当",
+          "complete_store_task": "店舗タスクを完了", "update_store_result": "巡店結果を変更",
+          "grid_status_changed": "区画状態を更新", "region_status_changed": "エリア状態を更新",
+          "batch_status_changed": "バッチ状態を更新",
+          "grid_auto_completed_empty": "空の区画を自動完了",
+          "region_auto_completed_empty": "空のエリアを自動完了",
+          "batch_auto_completed_empty": "空のバッチを自動完了",
+          "submit_store_proposal": "新店舗確認を申請",
+          "review_store_proposal": "新店舗確認を審査"}
     return ja if lang == "ja" else zh
 
 
 def DOMAIN_LABELS(lang: str = "zh") -> Dict[str, str]:
-    zh = {"task": "任务", "team": "团队", "member": "成员", "station": "车站"}
+    zh = {"task": "任务", "team": "团队", "member": "成员", "station": "车站",
+          "zone": "片区", "grid": "网格", "grid_density": "网格密度", "message": "站内消息"}
     ja = {"task": "タスク", "team": "チーム", "member": "メンバー",
-          "station": "駅"}
+          "station": "駅", "zone": "担当エリア", "grid": "作業区画",
+          "grid_density": "区画密度", "message": "メッセージ"}
     return ja if lang == "ja" else zh
+
+
+_ENUM_LABELS = {
+    "zh": {
+        "role": {"leader": "队长", "member": "队员", "admin": "管理员",
+                 "staff": "员工"},
+        "state": {"unassigned": "未分派", "doing": "进行中", "done": "已完成"},
+        "task_status": {"active": "进行中", "completed": "已完成",
+                         "pending": "待开始", "assigned": "已分派",
+                         "in_progress": "进行中"},
+        "review_status": {"pending": "待确认", "confirmed": "已确认",
+                           "adjusted": "已调整", "rejected": "已驳回"},
+        "team_status": {"active": "启用", "closed": "停用"},
+        "member_status": {"active": "在岗", "leave": "休假",
+                           "resigned": "离职", "disabled": "停用"},
+        "station_status": {"active": "启用", "inactive": "停用"},
+        "business_status": {"normal": "正常", "abnormal": "异常",
+                             "uncertain": "存疑", "closed": "关店"},
+    },
+    "ja": {
+        "role": {"leader": "リーダー", "member": "メンバー", "admin": "管理者",
+                 "staff": "スタッフ"},
+        "state": {"unassigned": "未割当", "doing": "進行中", "done": "完了"},
+        "task_status": {"active": "進行中", "completed": "完了",
+                         "pending": "未開始", "assigned": "割当済み",
+                         "in_progress": "進行中"},
+        "review_status": {"pending": "確認待ち", "confirmed": "確認済み",
+                           "adjusted": "調整済み", "rejected": "差戻し済み"},
+        "team_status": {"active": "有効", "closed": "停止"},
+        "member_status": {"active": "在職", "leave": "休暇",
+                           "resigned": "退職", "disabled": "停止"},
+        "station_status": {"active": "有効", "inactive": "無効"},
+        "business_status": {"normal": "正常", "abnormal": "異常",
+                             "uncertain": "要確認", "closed": "閉店"},
+    },
+}
+
+
+def display_value(value, field: str = "", domain: str = "", lang: str = "zh") -> str:
+    """把日志值中的已知枚举转为界面文案；未知值和持久化值保持不变。"""
+    if value is None or value == "":
+        return ""
+    labels = _ENUM_LABELS["ja" if lang == "ja" else "zh"]
+    field_key = (field or "").strip().lower()
+    domain_key = (domain or "").strip().lower()
+
+    def enum_label(key, raw):
+        if not isinstance(raw, str):
+            return raw
+        key = str(key or "").strip().lower()
+        group = {
+            "role": "role",
+            "state": "state",
+            "status": {"team": "team_status", "member": "member_status",
+                       "station": "station_status", "task": "task_status",
+                       "zone": "task_status", "grid": "task_status"}.get(domain_key),
+            "business_status": "business_status",
+            "review_status": "review_status",
+        }.get(key)
+        return labels.get(group, {}).get(raw, raw) if group else raw
+
+    text = str(value)
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        group = {"role": "role", "state": "state", "status": {
+            "team": "team_status", "member": "member_status",
+            "station": "station_status", "task": "task_status",
+            "zone": "task_status", "grid": "task_status",
+        }.get(domain_key), "business_status": "business_status",
+            "review_status": "review_status"}.get(field_key)
+        return labels.get(group, {}).get(text, text) if group else text
+
+    def translate(item):
+        if isinstance(item, dict):
+            return {key: translate(enum_label(key, nested))
+                    if isinstance(nested, str) else translate(nested)
+                    for key, nested in item.items()}
+        if isinstance(item, list):
+            return [translate(nested) for nested in item]
+        return item
+
+    return json.dumps(translate(parsed), ensure_ascii=False, separators=(",", ":"))

@@ -4,6 +4,7 @@
 各路由从本模块取 templates，保证模板能按当前请求语言翻译界面文案。
 """
 from functools import lru_cache
+from urllib.parse import urlencode
 
 from fastapi.templating import Jinja2Templates
 
@@ -32,6 +33,8 @@ def register_globals(env, *, form_token=None) -> None:
     env.globals["jst"] = jst_str
     # ② `<html lang>` 跟随当前语言（原来恒 zh-CN，日文界面也是 zh-CN）
     env.globals["html_lang"] = html_lang
+    # ③ 商户定位：打开谷歌地图商户位置，不进入路线导航
+    env.globals["gmaps_url"] = gmaps_url
 
     def _lang_url(request, lang: str) -> str:
         """构造语言切换链接：保留当前 query 参数，仅替换 lang。"""
@@ -75,6 +78,31 @@ def html_lang() -> str:
     """`<html lang="...">` 的值（跟随当前界面语言）。"""
     from app.i18n import CURRENT_LANG
     return {"ja": "ja", "zh": "zh-CN"}.get(CURRENT_LANG.get() or "zh", "zh-CN")
+
+
+def gmaps_url(lat, lon, place_id=None, name="") -> str:
+    """打开商户位置；优先 Place ID，坐标用于搜索回退。"""
+    place_id = str(place_id or "").strip()
+    # 新店申请通过后生成的是本系统 ID，不是 Google Place ID。
+    if place_id.startswith("new-"):
+        place_id = ""
+    query = ""
+    try:
+        lat, lon = float(lat), float(lon)
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            query = f"{lat:.6f},{lon:.6f}"
+    except (TypeError, ValueError):
+        pass
+    if not query:
+        if not place_id:
+            return ""
+        query = str(name or "").strip()
+        if not query:
+            return ""
+    params = {"api": 1, "query": query}
+    if place_id:
+        params["query_place_id"] = place_id
+    return "https://www.google.com/maps/search/?" + urlencode(params)
 
 
 def static_ver(name: str) -> str:

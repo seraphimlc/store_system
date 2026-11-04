@@ -182,7 +182,7 @@ def test_leader_token_issue_allowed(client):
 
 
 def test_leader_password_change_lands_on_tasks_not_perf(client):
-    """队长改完密码不能落到 `/perf`（管理员页 → 会被弹回登录），应去 `/my/tasks`。"""
+    """队长改完密码不能落到 `/perf`（管理员页 → 会被弹回登录），应去 `/my/work`。"""
     _mk(client, "boss1", "队长甲", "PL", role="leader", password="ownpass")
     _login(client, "boss1", "ownpass")
     r = client.post("/my/password",
@@ -191,7 +191,7 @@ def test_leader_password_change_lands_on_tasks_not_perf(client):
                           "csrf_token": _csrf(client)},
                     follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"].startswith("/my/tasks"), r.headers["location"]
+    assert r.headers["location"].startswith("/my/work"), r.headers["location"]
 
 
 def test_export_login_url_prefers_public_issuer(client, monkeypatch):

@@ -1572,6 +1572,8 @@ def logs_page(request: Request, user: Optional[User] = Depends(require_login),
         "domains": bd_log.DOMAINS,
         "domain_labels": bd_log.DOMAIN_LABELS(CURRENT_LANG.get()),
         "action_labels": bd_log.ACTION_LABELS(CURRENT_LANG.get()),
+        "display_log_value": lambda value, field, row_domain: bd_log.display_value(
+            value, field, row_domain, CURRENT_LANG.get()),
         # 🔍 筛选值的回显 + 动作下拉清单（2026-10-06）
         "kw": kw, "action": action, "dfrom": dfrom, "dto": dto,
         "actions": sorted(bd_log.ACTION_LABELS(CURRENT_LANG.get()).keys()),

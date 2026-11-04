@@ -1,0 +1,173 @@
+/* 批次详情：紧凑的概览、团队排名、可展开的数据列表。作用域仅本页。 */
+.batch-detail {
+  --batch-border: #e4e8ef;
+  --batch-muted: #5f6c80;
+  --batch-accent: #315fe9;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 2px 0 36px;
+  color: #202b3c;
+  font-variant-numeric: tabular-nums;
+}
+.batch-detail svg {width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0}
+.batch-back {display: inline-flex; align-items: center; gap: 4px; color: var(--batch-muted); font-size: 13px; margin-bottom: 14px}
+.batch-back:hover {color: var(--batch-accent)}
+.batch-header {display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px}
+.batch-title-line {display: flex; align-items: center; gap: 12px; min-width: 0}
+.batch-detail h1 {font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -.5px; margin: 0; overflow-wrap: anywhere}
+.batch-status {display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid #dce5ff; border-radius: 5px; color: #355ec4; background: #edf2ff; font-size: 12px; font-weight: 500; white-space: nowrap}
+.batch-status i {width: 5px; height: 5px; border-radius: 50%; background: currentColor}
+.batch-status.is-complete {color: #28735b; background: #eef7f2; border-color: #d6e9dd}
+.batch-id {font-size: 13px; color: var(--batch-muted); white-space: nowrap}
+.batch-review.btn {display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-size: 13px; padding: 8px 12px; border-color: #d7dee9; color: #3c4c63; height: 36px; white-space: nowrap}
+.batch-review svg {width: 16px; height: 16px}
+.batch-overview {display: grid; grid-template-columns: 1.3fr 1fr .65fr; align-items: center; background: #fff; border: 1px solid var(--batch-border); border-radius: 10px; padding: 22px 24px; margin-bottom: 16px}
+.batch-overview>div {min-width: 0}
+.batch-overview-count,.batch-overview-regions {border-left: 1px solid #edf0f5; padding-left: 28px; margin-left: 28px}
+.batch-label {display: block; color: var(--batch-muted); font-size: 12px; margin-bottom: 8px; line-height: 1.4}
+.batch-overview strong {font-size: 25px; line-height: 1.2; font-weight: 650; color: #24314a}
+.batch-overview strong small {font-size: 14px; font-weight: 500; margin-left: 2px; color: var(--batch-muted)}
+.batch-progress-line {display: flex; align-items: center; gap: 20px}
+.batch-progress {display: block; height: 5px; background: #edf0f7; border-radius: 3px; overflow: hidden; width: 100%; max-width: 260px}
+.batch-progress i {display: block; height: 100%; border-radius: inherit; background: var(--batch-accent)}
+.batch-count-divider {margin: 0 9px; color: #a8b1c0; font-size: 20px}
+.batch-count-total {font-size: 20px; color: var(--batch-muted)}
+.batch-rankings {display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px}
+.batch-ranking {min-width: 0; background: #fff; border: 1px solid var(--batch-border); border-radius: 10px; overflow: hidden}
+.batch-ranking header {display: flex; justify-content: space-between; align-items: center; padding: 15px 18px 12px; gap: 8px}
+.batch-detail h2 {font-size: 14px; line-height: 1.5; font-weight: 600; margin: 0; color: #28364c}
+.batch-team-count {font-size: 11px; color: var(--batch-muted); white-space: nowrap}
+.batch-ranking ol {list-style: none; padding: 0 18px 10px; margin: 0; max-height: 264px; overflow-y: auto}
+.batch-ranking li {display: flex; align-items: center; gap: 10px; min-height: 44px; border-top: 1px solid #f0f2f6; font-size: 13px}
+.batch-rank-index {display: flex; justify-content: center; align-items: center; width: 22px; height: 22px; flex: 0 0 22px; background: #f0f3fa; border-radius: 5px; color: #556984; font-size: 11px; font-weight: 600}
+.batch-rank-name {flex: 1; min-width: 0; overflow-wrap: anywhere}
+.batch-rank-numbers {display: flex; align-items: baseline; gap: 5px; white-space: nowrap}
+.batch-rank-numbers strong {font-size: 15px; font-weight: 600}
+.batch-rank-numbers>span {color: var(--batch-muted); font-size: 12px}
+.batch-rank-rate {width: 42px; text-align: right; font-size: 12px; color: var(--batch-muted)}
+.batch-rank-empty {color: var(--batch-muted)}
+.batch-regions {background: #fff; border: 1px solid var(--batch-border); border-radius: 10px; overflow: hidden}
+.batch-regions-header {display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 18px}
+.batch-section-title {display: flex; align-items: center; gap: 8px; flex-shrink: 0}
+.batch-section-title>span {font-size: 11px; line-height: 20px; padding: 0 6px; color: #62718a; background: #f0f3f8; border-radius: 4px}
+.batch-detail .batch-filters {margin: 0; gap: 8px; align-items: center}
+.batch-detail .batch-filters>select {width: 152px; flex: 0 0 152px; height: 34px; padding: 5px 10px; font: inherit; font-size: 12px; border: 1px solid #dce2ec; border-radius: 6px; color: #4e5e75; background-color: #fff}
+.batch-search {display: flex; align-items: center; width: 212px; height: 34px; gap: 6px; border: 1px solid #dce2ec; border-radius: 6px; padding: 0 9px; color: #8390a4}
+.batch-search svg {width: 15px; height: 15px}
+.batch-search input[type=search] {width: 100%; min-width: 0; height: 30px; padding: 0; background: transparent; border: 0; border-radius: 0; outline: none; box-shadow: none; color: #293b54; font: inherit; font-size: 12px}
+.batch-search input::placeholder {color: #66748a; opacity: 1}
+.batch-search:focus-within {border-color: #6587ed; outline: 2px solid #e4ebff}
+.batch-detail .task-region-columns {display: grid; grid-template-columns: minmax(100px,1.15fr) minmax(120px,1.25fr) minmax(80px,.8fr) minmax(100px,1fr) minmax(100px,1fr); gap: 16px; padding: 10px 20px 10px 46px; background: #f8fafc; border-top: 1px solid #eef1f6; border-bottom: 1px solid #eef1f6; font-size: 11px; color: #65748b}
+.batch-detail .task-region-columns>span:last-child {text-align: right}
+.batch-detail .task-region {margin: 0; border: 0; border-bottom: 1px solid #edf0f5; border-radius: 0; box-shadow: none}
+.batch-detail .task-region:last-child {border-bottom: 0}
+.batch-detail .task-region summary {grid-template-columns: 10px minmax(100px,1.15fr) minmax(120px,1.25fr) minmax(80px,.8fr) minmax(100px,1fr) minmax(100px,1fr); gap: 16px; padding: 17px 20px; font-size: 13px; line-height: 1.5; min-height: 60px; color: #42536b}
+.batch-detail .task-region summary::before {content: ''; width: 6px; height: 6px; margin-left: 1px; border-right: 1.5px solid #8795aa; border-top: 1.5px solid #8795aa; transform: rotate(45deg)}
+.batch-detail .task-region[open] summary::before {transform: rotate(135deg)}
+.batch-detail .task-region summary:hover {background: #f8faff}
+.batch-detail .task-region[open] summary {background: #f4f7fe; border-bottom: 1px solid #e7edf8}
+.batch-region-name {font-weight: 600; color: #2e4b7a}
+.batch-region-area small,.batch-region-count small {font-size: 11px; color: var(--batch-muted); font-weight: 400}
+.batch-region-progress {display: flex; align-items: center; justify-content: flex-end; gap: 10px}
+.batch-region-progress .batch-progress {width: 64px; flex-shrink: 1; height: 4px}
+.batch-region-progress strong {min-width: 30px; font-size: 12px; font-weight: 500; text-align: right}
+.batch-detail .task-region-body {padding: 14px 20px 18px 46px; background: #fafbfd}
+.batch-detail .task-region-body>.task-filters {margin: 0 0 14px; max-width: 440px; gap: 8px}
+.batch-detail .task-region-body>.task-filters select {height: 34px; font-size: 12px; border: 1px solid #dce2ec; border-radius: 6px}
+.batch-detail .task-region-body .btn {font-size: 12px; padding: 7px 11px; white-space: nowrap}
+.batch-detail .task-region-body>.tbl-wrap {border: 1px solid var(--batch-border); border-radius: 6px; box-shadow: none; margin-bottom: 12px}
+.batch-detail .task-table th,.batch-detail .task-table td {padding: 11px 12px; font-size: 12px}
+.batch-detail .task-table th {font-size: 11px; font-weight: 500; color: #66768d; background: #f5f7fb}
+.batch-detail .task-table td {color: #42536b}
+.batch-detail .task-table a,.batch-detail .task-region-body>a {font-size: 12px; font-weight: 500; color: #315fe9}
+.batch-detail .task-table progress {appearance: none; border: 0; border-radius: 3px; background: #e8edf5; width: 64px; height: 4px; margin-right: 6px}
+.batch-detail progress::-webkit-progress-bar {background: #e8edf5; border-radius: 3px}
+.batch-detail progress::-webkit-progress-value {background: #315fe9; border-radius: 3px}
+.batch-detail progress::-moz-progress-bar {background: #315fe9; border-radius: 3px}
+.batch-detail .task-region-link {padding: 17px 20px; font-size: 13px}
+.batch-detail .task-region>h2 {padding: 16px 20px; margin: 0}
+.batch-empty {margin: 0; padding: 32px 18px; text-align: center; color: var(--batch-muted); font-size: 13px}
+@media(min-width:861px) and (max-width:1100px) {
+  .batch-detail .task-region-columns {grid-template-columns: 1fr 1.2fr .7fr 1fr .8fr; gap: 10px}
+  .batch-detail .task-region summary {grid-template-columns: 10px 1fr 1.2fr .7fr 1fr .8fr; gap: 10px}
+  .batch-region-progress .batch-progress {display: none}
+}
+@media(max-width:760px) {
+  .batch-detail {padding-top: 0}
+  .batch-back {font-size: 12px; margin-bottom: 12px}
+  .batch-header {gap: 10px; margin-bottom: 16px}
+  .batch-detail h1 {font-size: 24px}
+  .batch-title-line {gap: 8px; flex-wrap: wrap}
+  .batch-status {font-size: 11px; padding: 2px 6px}
+  .batch-id {font-size: 11px}
+  .batch-review.btn {font-size: 12px; padding: 7px 10px}
+  .batch-review svg {display: none}
+  .batch-overview {grid-template-columns: 1.05fr 1fr .45fr; padding: 16px 14px; margin-bottom: 12px}
+  .batch-overview-count,.batch-overview-regions {padding-left: 12px; margin-left: 12px}
+  .batch-overview strong {font-size: 22px}
+  .batch-count-total {font-size: 16px}
+  .batch-count-divider {font-size: 16px; margin: 0 4px}
+  .batch-label {font-size: 10px; margin-bottom: 9px}
+  .batch-progress-line {gap: 10px}
+  .batch-overview-progress .batch-progress {max-width: 45px; height: 4px}
+  .batch-rankings {grid-template-columns: 1fr; gap: 12px; margin-bottom: 16px}
+  .batch-ranking header {padding: 12px 14px 8px}
+  .batch-detail h2 {font-size: 13px}
+  .batch-ranking ol {padding: 0 14px 6px}
+  .batch-ranking li {font-size: 12px; min-height: 40px}
+  .batch-regions-header {padding: 14px; flex-wrap: wrap; gap: 12px}
+  .batch-detail .batch-filters {width: 100%}
+  .batch-detail .batch-filters>select {width: 0; flex: 1; height: 36px}
+  .batch-search {flex: 1.15; min-width: 0; width: 0; height: 36px}
+  .batch-detail .task-region-columns {display: none}
+  .batch-detail .task-region summary {display: grid; grid-template-columns: 10px minmax(0,1fr) auto; gap: 8px 12px; padding: 14px; min-height: 82px}
+  .batch-region-name {grid-column: 2; grid-row: 1}
+  .batch-region-team {grid-column: 2; grid-row: 2; color: var(--batch-muted); font-size: 11px}
+  .batch-region-area {grid-column: 3; grid-row: 2; font-size: 11px; text-align: right}
+  .batch-region-count {grid-column: 2; grid-row: 3; font-size: 11px}
+  .batch-region-progress {grid-column: 3; grid-row: 1; margin-left: 0!important}
+  .batch-region-progress .batch-progress {width: 40px}
+  .batch-detail .task-region-body {padding: 12px 14px}
+  .batch-detail .task-table {min-width: 540px}
+  .batch-detail .task-region-link {padding: 14px; font-size: 12px; flex-wrap: wrap}
+}
+
+.batch-ranking-rate .batch-rank-rate {font-size:15px;font-weight:600;color:#315fe9}
+.batch-ranking-rate .batch-rank-numbers strong {font-size:12px;font-weight:400;color:var(--batch-muted)}
+
+/* Admin region row: team handover sits beside the disclosure, not inside it. */
+.batch-admin-region {background:#fff;border-bottom:1px solid #edf0f5}
+.batch-admin-region:last-child {border-bottom:0}
+.batch-admin-row {display:grid;grid-template-columns:minmax(120px,1.15fr) minmax(230px,1.25fr) minmax(80px,.8fr) minmax(100px,1fr) minmax(120px,1fr);gap:14px;align-items:center;min-height:68px;padding:10px 20px}
+.batch-region-toggle {display:flex;align-items:center;gap:9px;min-width:0;padding:10px 0;border:0;background:transparent;color:#294b7a;text-align:left;font:inherit;cursor:pointer}
+.batch-region-toggle:hover .batch-region-name {color:#315fe9}
+.batch-region-toggle:focus-visible {outline:2px solid #315fe9;outline-offset:2px;border-radius:4px}
+.batch-region-chevron {display:flex;width:14px;height:14px;flex:0 0 14px;color:#8290a4;transition:transform .15s ease}
+.batch-region-chevron svg {width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.batch-region-toggle[aria-expanded="true"] .batch-region-chevron {transform:rotate(90deg)}
+.batch-region-name {overflow-wrap:anywhere;font-weight:600}
+.batch-region-handover {display:flex;align-items:center;gap:7px;min-width:0;margin:0}
+.batch-region-handover select {flex:1;min-width:0;width:0;height:34px;margin:0;padding:5px 8px;border:1px solid #dce3ed;border-radius:6px;background:#fff;color:#40516a;font:inherit;font-size:12px}
+.batch-region-handover .btn {height:34px;min-height:34px;padding:6px 9px;font-size:11px;white-space:nowrap}
+.batch-region-handover .btn:disabled {opacity:.55;cursor:wait}
+.batch-region-content {padding:0 20px 16px 48px;background:#fafbfd}
+.batch-region-content[hidden] {display:none}
+.batch-region-content>.tbl-wrap {border:1px solid #e3e8f0;border-radius:7px;box-shadow:none;margin-bottom:11px}
+.batch-region-content>.batch-region-map-link {display:inline-flex;min-height:32px;align-items:center;font-size:12px;font-weight:500}
+.batch-region-area,.batch-region-count {font-variant-numeric:tabular-nums;color:#50617b;font-size:12px}
+@media(min-width:861px) and (max-width:1100px) {
+ .batch-admin-row {grid-template-columns:minmax(100px,1fr) minmax(200px,1.5fr) minmax(65px,.65fr) minmax(82px,.85fr) minmax(100px,.9fr);gap:9px;padding:9px 14px}
+ .batch-region-handover .btn {padding:6px 7px}
+}
+@media(max-width:760px) {
+ .batch-admin-row {grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;padding:12px 14px;min-height:0}
+ .batch-region-toggle {grid-column:1;grid-row:1;min-height:34px;padding:3px 0}
+ .batch-region-progress {grid-column:2;grid-row:1}
+ .batch-region-handover {grid-column:1/-1;grid-row:2;gap:8px}
+ .batch-region-handover select {height:40px;font-size:13px}
+ .batch-region-handover .btn {height:40px;min-height:40px;padding:7px 12px;font-size:12px}
+ .batch-region-area {grid-column:1;grid-row:3;font-size:11px}
+ .batch-region-count {grid-column:2;grid-row:3;text-align:right;font-size:11px}
+ .batch-region-content {padding:0 12px 14px;background:#fafbfd}
+ .batch-region-content .task-table {min-width:540px}
+}

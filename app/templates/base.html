@@ -9,10 +9,11 @@
 <script src="/static/htmx.min.js?v={{ static_ver('htmx.min.js') }}"></script>
 <script src="/static/alpine.min.js?v={{ static_ver('alpine.min.js') }}" defer></script>
 <link rel="stylesheet" href="/static/app.css?v={{ static_ver('app.css') }}">
+{% block page_head %}{% endblock %}
 </head>
 {% set _p = (request.url.path if request.url is defined else "") %}
 {% set _is_admin = current_user and current_user.role == 'admin' %}
-<body class="{% if current_user and current_user.role in ('staff', 'leader') %}has-tabbar{% endif %}{% if _is_admin %} has-sidenav{% endif %}">
+<body class="{% if current_user and current_user.role in ('staff', 'leader') %}has-tabbar{% endif %}{% if _is_admin %} has-sidenav{% endif %} {% block body_class %}{% endblock %}">
 {% if current_user %}
 {# 管理端导航 = **左侧分组菜单**（用户 2026-10-03："顶部内容太多了，放不下了"）：
    顶部只留品牌 + 账号 + 汉堡；菜单、账号操作都在左侧。
@@ -22,7 +23,10 @@
                   if request.state.unread_messages is defined else 0) %}
 <div class="shell">
 <header class="topbar">
-  <span class="brand">{{ t('巡店结算系统') }}</span>
+  <span class="brand topbar-brand">{{ t('巡店结算系统') }}</span>
+  {% if current_user and current_user.role in ('staff', 'leader') %}
+  <div class="mobile-navigation-title">{% block navigation_title %}{% endblock %}</div>
+  {% endif %}
   {% if _is_admin %}
   {# 未读消息：手机上底栏看不到角标（它只在菜单里的「消息」项上）→ 汉堡按钮上点一个红点 #}
   <button type="button" class="menu-btn" onclick="bdMenuToggle(this)" aria-label="菜单"
@@ -92,14 +96,18 @@
     <div class="side-title">{{ t('作业') }}</div>
     <a class="side-item {% if _p.startswith('/teams') %}on{% endif %}"
        href="/teams">{{ t('团队') }}</a>
+    <a class="side-item {% if _p.startswith('/zones') %}on{% endif %}"
+       href="/zones">{{ t('片区管理') }}</a>
+    <a class="side-item {% if _p.startswith('/zone-tasks') %}on{% endif %}" href="/zone-tasks">{{ t('巡店批次') }}</a>
+    <a class="side-item {% if _p.startswith('/logs') %}on{% endif %}"
+       href="/logs">{{ t('日志') }}</a>
+    <div class="side-title">{{ t('旧版作业') }}</div>
     <a class="side-item {% if _p.startswith('/stations') %}on{% endif %}"
        href="/stations">{{ t('车站') }}</a>
     <a class="side-item {% if _p.startswith('/tasks') and not _p.startswith('/tasks/reviews') %}on{% endif %}"
        href="/tasks">{{ t('任务') }}</a>
     <a class="side-item {% if _p.startswith('/tasks/reviews') %}on{% endif %}"
        href="/tasks/reviews">{{ t('进展复核') }}</a>
-    <a class="side-item {% if _p.startswith('/logs') %}on{% endif %}"
-       href="/logs">{{ t('日志') }}</a>
   </div>
   <div class="side-group">
     <div class="side-title">{{ t('系统') }}</div>
@@ -139,6 +147,9 @@
      href="/my/tasks" data-testid="tab-tasks">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
     <span>{% if current_user.role == 'leader' %}{{ t('任务分派') }}{% else %}{{ t('我的任务') }}{% endif %}</span>
+  </a>
+  <a class="tab {% if _p.startswith('/my/work') %}on{% endif %}" href="/my/work" data-testid="tab-work">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg><span>{{ t('巡店任务') }}</span>
   </a>
   <a class="tab {% if _p.startswith('/my/perf') %}on{% endif %}" href="/my/perf"
      data-testid="tab-perf">

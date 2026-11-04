@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('网格') }} #{{ grid.grid_id }}{% endblock %}
+{% block body_class %}dispatch-page visit-page{% endblock %}
+{% block page_head %}
+<link rel="stylesheet" href="/static/bd_dispatch.css?v={{ static_ver('bd_dispatch.css') }}">
+<link rel="stylesheet" href="/static/bd_tasks.css?v={{ static_ver('bd_tasks.css') }}">
+<link rel="stylesheet" href="/static/bd_visit.css?v={{ static_ver('bd_visit.css') }}">
+{% endblock %}
+{% block navigation_title %}
+<a class="dispatch-back" href="/my/work/batches/{{ task.id }}" aria-label="{{ t('返回') }}" data-testid="batch-grid-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></a>
+<h1 class="dispatch-title" data-testid="batch-grid-title">{{ t('网格') }} #{{ grid.grid_id }}</h1>
+<a class="btn ghost" href="/my/work/batches/{{ task.id }}/logs">{{ t('批次日志') }}</a>
+{% endblock %}
+{% macro tokens() %}<input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">{% endmacro %}
+{# 提交后回跳要保留列表筛选：表单字段名用 status_filter 避开门店状态的 status #}
+{% macro filters_hidden() %}<input type="hidden" name="kw" value="{{ kw }}"><input type="hidden" name="task_state" value="{{ task_state }}"><input type="hidden" name="status_filter" value="{{ status }}"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}"><input type="hidden" name="page" value="{{ page }}">{% endmacro %}
+{% block content %}
+<section class="dispatch-workspace visit-workspace" aria-label="{{ t('商户列表') }}">
+  <div class="dispatch-map-stage">
+    <div id="work-map" aria-label="{{ t('作业地图') }}"></div>
+    <p id="work-map-status" role="status" aria-live="polite"></p>
+    <div class="dispatch-map-legend"><span><i class="visited"></i>{{ t('已巡店') }}</span><span><i class="unvisited"></i>{{ t('未巡店') }}</span></div>
+  </div>
+  <section class="dispatch-list visit-list" aria-label="{{ t('商户列表') }}">
+    {# 作业进展：按店铺任务自动统计（不再让队员手填百分比/状态） #}
+    <section class="visit-progress" data-testid="visit-progress" aria-label="{{ t('作业进展') }}">
+      <span class="visit-progress-title">{{ t('作业进展') }}</span>
+      <span class="visit-progress-state visit-state-{{ stats.state }}" data-testid="visit-progress-state">{{ t('巡店完成') if stats.state=='completed' else t('巡店中') if stats.state=='in_progress' else t('未巡店') }}</span>
+      <span class="visit-progress-count" data-testid="visit-progress-count">{{ stats.done }} / {{ stats.total }} {{ t('家') }}</span>
+      <span class="visit-progress-bar" role="progressbar" aria-valuenow="{{ stats.pct }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t('进度') }}"><i style="width:{{ stats.pct }}%"></i></span>
+      <span class="visit-progress-pct">{{ stats.pct }}%</span>
+      <span class="visit-progress-hint">{{ t('按店铺任务自动统计') }}</span>
+    </section>
+    {# 筛选栏：三个控件**同一行**排列，改动即搜索（不用点按钮） #}
+    <form class="bd-filters visit-equal-filters" method="get" data-testid="visit-filters" data-autosubmit="1"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}">
+      <label><span class="bd-filter-label" hidden>{{ t('作业状态') }}</span>
+        <select name="task_state" data-testid="filter-task-state" aria-label="{{ t('作业状态') }}" title="{{ t('作业状态') }}">
+          <option value="">{{ t('全部巡店状态') }}</option>
+          <option value="pending" {{ 'selected' if task_state=='pending' else '' }}>{{ t('未巡店') }}</option>
+          <option value="completed" {{ 'selected' if task_state=='completed' else '' }}>{{ t('已巡店') }}</option>
+        </select>
+      </label>
+      <label><span class="bd-filter-label" hidden>{{ t('门店状态') }}</span>
+        <select name="status" data-testid="filter-status" aria-label="{{ t('门店状态') }}" title="{{ t('门店状态') }}">
+          <option value="">{{ t('全部门店状态') }}</option>
+          {% for key,label in [('normal','正常'),('abnormal','异常'),('uncertain','存疑'),('closed','关店')] %}
+          <option value="{{ key }}" {{ 'selected' if status==key else '' }}>{{ t(label) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label><span class="bd-filter-label" hidden>{{ t('搜索') }}</span>
+        <input type="search" name="kw" value="{{ kw }}" maxlength="100" placeholder="{{ t('商户名称') }}" data-testid="filter-kw" aria-label="{{ t('搜索') }}" title="{{ t('搜索') }}">
+      </label>
+    </form>
+    <div class="dispatch-scroll">
+{% if can_execute %}<details id="new-store" class="visit-new-store"><summary><span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>{{ t('新增店铺') }}</span><svg class="visit-new-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary><form method="post" enctype="multipart/form-data" action="/my/work/batch-grids/{{ grid.id }}/new-store" class="task-form">
+{{ tokens() }}<input type="hidden" name="request_id" value="{{ nonce_for() }}">{% if resubmit_proposal %}<input type="hidden" name="proposal_id" value="{{ resubmit_proposal.id }}">{% endif %}
+<label>{{ t('商户名称') }}<input name="name" maxlength="255" value="{{ resubmit_proposal.payload.name if resubmit_proposal else '' }}" required></label><label>{{ t('地址') }}<input name="address" maxlength="1000" value="{{ resubmit_proposal.payload.address if resubmit_proposal else '' }}" required></label>
+<button type="button" class="btn ghost" id="locate-new-store">{{ t('获取当前位置') }}</button><p id="new-location-status" role="status" data-error="{{ t('无法获取定位，请在地图上选点或填写坐标。') }}" data-ready="{{ t('已获取定位，可在地图上调整。') }}"></p>
+<div class="task-filters"><input name="lat" type="number" step="any" min="-90" max="90" placeholder="{{ t('纬度') }}" aria-label="{{ t('纬度') }}" value="{{ resubmit_proposal.payload.lat if resubmit_proposal else '' }}" required><input name="lon" type="number" step="any" min="-180" max="180" placeholder="{{ t('经度') }}" aria-label="{{ t('经度') }}" value="{{ resubmit_proposal.payload.lon if resubmit_proposal else '' }}" required></div>
+<p>{{ t('展开新增店铺后，可点击地图调整门店定位。') }}</p><label>{{ t('门店照片') }}<input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required></label><img id="new-store-photo-preview" alt="{{ t('门店照片') }}" hidden><button class="btn">{{ t('提交队长核实') }}</button><a href="/my/work/batches/{{ task.id }}/new-stores">{{ t('查看新店申请') }}</a></form></details>{% endif %}
+
+      <div class="tbl-wrap visit-tbl-wrap">
+        <table class="grid-tbl visit-tbl">
+          <thead><tr><th>{{ t('商户名称') }}</th><th aria-sort="{{ ('descending' if direction=='desc' else 'ascending') if sort=='status' else 'none' }}"><a href="{{ request.url.include_query_params(sort='status',direction='desc' if sort=='status' and direction=='asc' else 'asc',page=1) }}">{{ t('状态') }} {{ '↓' if sort=='status' and direction=='desc' else '↑' if sort=='status' else '↕' }}</a></th><th aria-sort="{{ ('descending' if direction=='desc' else 'ascending') if sort=='visit' else 'none' }}"><a href="{{ request.url.include_query_params(sort='visit',direction='desc' if sort=='visit' and direction=='asc' else 'asc',page=1) }}">{{ t('巡店状态') }} {{ '↓' if sort=='visit' and direction=='desc' else '↑' if sort=='visit' else '↕' }}</a></th><th>{{ t('定位') }}</th></tr></thead>
+          <tbody>
+          {% for s in stores %}
+            <tr class="visit-row" id="store-{{ s.id }}" data-store-id="{{ s.id }}" tabindex="0" aria-expanded="false">
+              <td class="visit-name">{{ s.snapshot.get('name') }} <button type="button" class="visit-edit" data-edit-store="{{ s.id }}" aria-label="{{ t('查看详情') }}">{{ t('详情') }}</button></td>
+              <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
+              <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}</td>
+              <td class="visit-nav-cell">{% set nav=gmaps_url(s.snapshot.get('lat'),s.snapshot.get('lon'),s.store_id,s.snapshot.get('name')) %}{% if nav %}<a class="visit-nav" href="{{ nav }}" target="_blank" rel="noopener" data-testid="visit-nav">{{ t('定位') }}↗</a>{% else %}<span class="visit-nav-none">—</span>{% endif %}</td>
+            </tr>
+            <tr class="visit-detail-row" id="store-detail-{{ s.id }}" data-detail-for="{{ s.id }}" hidden>
+              <td colspan="4">
+                <div class="visit-detail">
+                  <p class="visit-detail-meta">{{ t('商户编号') }}: <span class="visit-store-id">{{ s.store_id }}</span>{% if s.snapshot.get('address') %} · {{ s.snapshot.get('address') }}{% endif %}</p>
+                  {% if can_execute %}<form method="post" action="/my/work/batch-stores/{{ s.id }}/complete" class="visit-form">
+                    {{ tokens() }}{{ filters_hidden() }}
+                    <input type="hidden" name="request_id" value="{{ nonce_for() }}">
+                    <input type="hidden" name="revision" value="{{ s.revision }}">
+                    <label>{{ t('门店状态') }}<select name="status">{% for key,label in [('normal','正常'),('abnormal','异常'),('uncertain','存疑'),('closed','关店')] %}<option value="{{ key }}" {{ 'selected' if s.result.get('business_status')==key else '' }}>{{ t(label) }}</option>{% endfor %}</select></label>
+                    <label>{{ t('本次作业结果') }}<textarea name="note" maxlength="2000" rows="2">{{ s.result.get('note','') }}</textarea></label>
+                    <button class="btn" type="submit">{{ t('完成店铺任务') }}</button>
+                  </form>{% else %}<p>{{ t('只读预览') }}</p>{% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="visit-empty">{{ t('没有匹配门店') }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <nav class="visit-pages" aria-label="{{ t('分页') }}">
+        {% if page>1 %}<a class="btn ghost" href="{{ request.url.include_query_params(page=page-1) }}" data-testid="visit-prev">{{ t('上一页') }}</a>{% endif %}
+        {% if more %}<a class="btn ghost" href="{{ request.url.include_query_params(page=page+1) }}" data-testid="visit-next">{{ t('下一页') }}</a>{% endif %}
+      </nav>
+      <p class="visit-hint visit-batch-meta">{{ t('巡店批次') }} #{{ task.id }} · {{ task.title }} · {{ t('片区') }} #{{ region_task.id }} · {{ region_task.snapshot.get('name') }}</p>
+    </div>
+  </section>
+</section>
+
+<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
+<script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
+<script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
+<script src="/static/bd_visit.js?v={{ static_ver('bd_visit.js') }}" defer></script>
+{% endblock %}

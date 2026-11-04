@@ -69,7 +69,7 @@ def test_base_mobile_hamburger_menu():
     # 分组标题 + 全部菜单项仍在 DOM（窄屏是抽屉，不是删掉）
     for key in ("概览", "结算", "员工", "作业", "系统",
                 "数据看板", "绩效工资", "月度对账", "薪资找平",
-                "团队", "车站", "任务", "日志", "消息", "系统配置"):
+                "团队", "片区管理", "巡店批次", "日志", "消息", "系统配置"):
         assert key in admin, key
     # 账号操作也在左侧（顶栏只留品牌+账号+汉堡）
     assert "修改密码" in admin and "退出" in admin
@@ -92,7 +92,7 @@ def test_base_staff_bottom_tabs():
         current_user=SimpleNamespace(display_name="甲", role="staff"), request=_req())
     assert 'class="tabbar"' in staff and 'has-tabbar' in staff
     # ⚠️ 2026-10-06 用户："消息不要放到底部了，底部没有位置了。核对结果也放到右上方的菜单里。"
-    for tid in ("tab-tasks", "tab-perf", "tab-report", "tab-plan"):
+    for tid in ("tab-work", "tab-perf", "tab-report", "tab-plan"):
         assert 'data-testid="%s"' % tid in staff
     for gone in ("tab-messages", "tab-feedback"):
         assert 'data-testid="%s"' % gone not in staff, "底栏不该再有 %s" % gone
@@ -115,7 +115,7 @@ def test_base_staff_tab_marks_active():
             self.path = path
     # ⚠️ 2026-10-06：核对结果不在底栏了（挪到右上角菜单）→ 只验底栏这三个
     for path, on_testid in (("/my/perf", "tab-perf"), ("/my/report", "tab-report"),
-                            ("/my/tasks", "tab-tasks"), ("/my/plan", "tab-plan")):
+                            ("/my/work", "tab-work"), ("/my/plan", "tab-plan")):
         req = _req()
         req.url = _URL(path)
         html = _env().get_template("base.html").render(
