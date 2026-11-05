@@ -441,19 +441,32 @@ def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',
         store.location_accuracy=current.get('location_accuracy') or 'pending'
         store.nav_lat=current.get('lat',store.snapshot.get('lat'))
         store.nav_lon=current.get('lon',store.snapshot.get('lon'))
+        store.photo_urls=current.get('photo_urls',[])
+        store.google_place_id=current.get('google_place_id')
+        store.place_lookup_state=current.get('place_lookup_state','pending')
     stats=grid_progress_stats(db,grid.id);stats['page']=page
     return main,rt,grid,stores[:30],len(stores)>30,stats
 
 
 def merchant_location_map(db,store_ids):
+    from app.services import bd_merchant_media as media
     ids=list(dict.fromkeys(str(value) for value in store_ids if value))
-    if not ids or db.bind.dialect.name!='postgresql':return {}
-    query=text('''SELECT place_id,lat,lon,location_accuracy
-        FROM public.kanto_merchants_v20261029 WHERE place_id IN :ids''').bindparams(
-            bindparam('ids',expanding=True))
-    return {row['place_id']:{'lat':row['lat'],'lon':row['lon'],
-                             'location_accuracy':row['location_accuracy']}
-            for row in db.execute(query,{'ids':ids}).mappings()}
+    if not ids:return {}
+    result={}
+    if db.bind.dialect.name=='postgresql':
+        query=text('''SELECT place_id,lat,lon,location_accuracy
+            FROM public.kanto_merchants_v20261029 WHERE place_id IN :ids''').bindparams(
+                bindparam('ids',expanding=True))
+        result={row['place_id']:{'lat':row['lat'],'lon':row['lon'],
+                                 'location_accuracy':row['location_accuracy']}
+                for row in db.execute(query,{'ids':ids}).mappings()}
+    for identity,profile in media.detail_map(db,ids).items():
+        item=result.setdefault(identity,{})
+        if profile.lat is not None and profile.lon is not None:
+            item.update(lat=profile.lat,lon=profile.lon)
+        item.update(photo_urls=list(profile.photo_urls or []),google_place_id=profile.google_place_id,
+                    place_lookup_state=profile.place_lookup_state)
+    return result
 
 
 def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
@@ -472,7 +485,18 @@ def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
         accuracy='accurate'
     if main.status=='completed':raise ops.OperationError('该批次已完成，不能修改定位')
 
+    from app.services import bd_merchant_media as media
+    profile=media.locked_detail(db,store.store_id)
     snapshot=deepcopy(store.snapshot or {})
+    lookup=None
+    current=merchant_location_map(db,[store.store_id]).get(store.store_id,{})
+    changed=lat is not None and (lat!=current.get('lat',snapshot.get('lat')) or lon!=current.get('lon',snapshot.get('lon')))
+    if changed:
+        lookup=media.lookup_place_id(snapshot.get('name',''),lat,lon)
+        profile.lat,profile.lon=lat,lon
+        profile.google_place_id=lookup['google_place_id']
+        profile.place_lookup_state=lookup['place_lookup_state']
+        profile.revision+=1;profile.updated_at=datetime.utcnow()
     old={'location_accuracy':snapshot.get('location_accuracy','pending'),
          'lat':snapshot.get('lat'),'lon':snapshot.get('lon')}
     if db.bind.dialect.name=='postgresql':
@@ -495,10 +519,11 @@ def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
                   {'location_accuracy':accuracy,'lat':lat if lat is not None else old['lat'],
                    'lon':lon if lon is not None else old['lon']})
     return {'location_accuracy':accuracy,'lat':lat if lat is not None else old['lat'],
-            'lon':lon if lon is not None else old['lon']}
+            'lon':lon if lon is not None else old['lon'],
+            'google_place_id':profile.google_place_id,'place_lookup_state':profile.place_lookup_state}
 
 
-def complete_store(db,user,identity,revision,request_id,status,note):
+def complete_store(db,user,identity,revision,request_id,status,note,*,outcome=None,photo_urls=None):
     initial=db.get(BdStoreTask,identity)
     if not initial: raise ops.OperationError('店铺任务不存在')
     main,rt,grid=context(db,user,initial.grid_task_id,lock=True,execute=True)
@@ -508,6 +533,11 @@ def complete_store(db,user,identity,revision,request_id,status,note):
     try:uuid.UUID(request_id)
     except (ValueError,TypeError):raise ops.OperationError('提交标识无效')
     result={'business_status':status,'note':note.strip()}
+    if outcome is not None:
+        from app.services.bd_merchant_media import OUTCOMES
+        if outcome not in OUTCOMES:raise ops.OperationError('作业结果无效')
+        result['outcome']=outcome
+    if photo_urls is not None:result['photo_urls']=list(photo_urls)
     if store.request_id==request_id:
         if store.actor_id!=user.id or store.result!=result:raise ops.OperationError('提交标识冲突')
         return grid.id

@@ -1,5 +1,6 @@
 """巡店批次片区派工与新店核实。"""
 import base64
+import uuid
 from types import SimpleNamespace
 from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Request, Form, File, UploadFile
@@ -83,18 +84,48 @@ async def auto_assign_apply(region_id:int,request:Request,user:User=Depends(work
         return JSONResponse({'error':str(exc) or '自动分配失败'},status_code=409)
 
 
+def _new_store_back(grid_id, values):
+    # Construct a local path from known filters; never accept an arbitrary back URL.
+    keys=('kw','task_state','status','sort','direction','page')
+    pairs=[(key,str(values.get(key,''))[:100]) for key in keys if values.get(key,'') not in ('',None)]
+    return f'/my/work/batch-grids/{grid_id}'+('?' + urlencode(pairs) if pairs else '')
+
+
+@router.get('/my/work/batch-grids/{grid_id}/new-store')
+def new_store_page(grid_id:int,request:Request,resubmit:int|None=None,user:User=Depends(work_login),db:Session=Depends(get_db)):
+    try:
+        main,rt,grid=tasks.context(db,user,grid_id,execute=True)
+        if main.status=='completed':raise ops.OperationError('该批次已完成')
+        proposal=None
+        if resubmit is not None:
+            proposal=db.query(BdStoreProposal).filter_by(id=resubmit,grid_task_id=grid.id,
+                submitted_by=user.id,state='rejected').first()
+            if proposal is None:raise ops.OperationError('仅可重新提交自己被驳回的申请')
+        back_fields={key:request.query_params.get(key,'')[:100]
+                     for key in ('kw','task_state','status','sort','direction','page')}
+        return_url=_new_store_back(grid.id,back_fields)
+        back_fields['status_filter']=back_fields.pop('status')
+        geometry={'type':'FeatureCollection','features':[{'type':'Feature','geometry':grid.snapshot.get('geometry'),
+            'properties':{'id':grid.grid_id}}]}
+        return render(request,user,'bd_new_store.html',task=main,grid=grid,geometry=geometry,
+            resubmit_proposal=proposal,return_url=return_url,back_fields=back_fields,nonce_for=lambda:str(uuid.uuid4()))
+    except ops.OperationError as exc:return error(exc)
+
+
 @router.post('/my/work/batch-grids/{grid_id}/new-store')
 async def new_store(grid_id:int,request:Request,name:str=Form(...),address:str=Form(...),lat:float=Form(...),lon:float=Form(...),
-    request_id:str=Form(...),proposal_id:int|None=Form(None),photo:UploadFile=File(...),csrf_token:str=Form(''),
+    request_id:str=Form(...),proposal_id:int|None=Form(None),photo:UploadFile=File(...),kw:str=Form(''),task_state:str=Form(''),status_filter:str=Form(''),
+    sort:str=Form(''),direction:str=Form('asc'),page:str=Form(''),csrf_token:str=Form(''),
     user:User=Depends(work_login),db:Session=Depends(get_db)):
     try:
         post_guard(request,user,csrf_token)
         data=await photo.read(proposals.MAX_PHOTO+1)
         p=proposals.submit(db,user,grid_id,name,address,lat,lon,data,request_id,proposal_id)
-        main,_,_=tasks.context(db,user,grid_id);task_id=main.id;db.commit()
+        db.commit()
     except ops.OperationError as exc:db.rollback();return error(exc,409)
     finally:await photo.close()
-    return RedirectResponse(f'/my/work/batches/{task_id}/new-stores?'+urlencode({'msg':'新店已提交，等待队长核实'}),303)
+    back=_new_store_back(grid_id,{'kw':kw,'task_state':task_state,'status':status_filter,'sort':sort,'direction':direction,'page':page})
+    return RedirectResponse(back+('&' if '?' in back else '?')+urlencode({'msg':'新店已提交，等待队长核实'}),303)
 
 
 @router.get('/my/work/batches/{task_id}/new-stores')

@@ -152,3 +152,62 @@
 .visit-filter-menu [aria-selected=true] {background:#edf2ff;color:#315fe9;font-weight:600}
 .visit-filter-menu [role=option]:focus-visible,.visit-filter-trigger:focus-visible {outline:2px solid #3877df;outline-offset:-2px}
 @media(max-width:760px) {.visit-filter-trigger {padding:7px 5px;font-size:12px}}
+
+.visit-progress .visit-add-store {flex:0 0 auto;margin-left:auto;padding:5px 10px;min-height:32px;box-sizing:border-box;font-size:12px;line-height:20px;white-space:nowrap}
+
+/* Compact, wrapping merchant detail; do not inherit sticky first-column table sizing. */
+.visit-tbl tr.visit-detail-row>td {position:static!important;min-width:0!important;max-width:none;padding:0!important;white-space:normal;overflow-wrap:anywhere}
+.visit-tbl .visit-detail {min-width:0;max-width:100%;box-sizing:border-box;padding:12px}
+.visit-detail-address {margin:0 0 10px!important;color:#40516a;font-size:13px;line-height:1.65;white-space:normal;overflow-wrap:anywhere}
+.visit-location-info {position:relative;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#52647b}
+.visit-location-heading {display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:32px;padding-right:82px}
+.visit-coordinates {font-variant-numeric:tabular-nums;overflow-wrap:anywhere;color:#30445a}
+.visit-location-editor summary {position:absolute;right:0;top:0;cursor:pointer;width:fit-content;padding:6px 0;color:#245caa;font-weight:600;min-height:32px;box-sizing:border-box}
+.visit-coordinate-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:6px 0 8px}
+.visit-coordinate-fields label {display:grid;gap:4px;min-width:0}
+.visit-coordinate-fields input {width:100%;min-width:0;box-sizing:border-box;height:40px;border:1px solid #ccd7e5;border-radius:5px;padding:7px;font-size:16px}
+.visit-place-link {display:inline-block;color:#245caa;overflow-wrap:anywhere}
+.visit-detail .visit-form {display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0;margin:0}
+.visit-form .visit-field-row {display:grid;grid-template-columns:88px minmax(0,1fr);align-items:center;gap:10px;margin:0;min-width:0;font-size:13px;color:#40516a}
+.visit-form .visit-field-row select,.visit-form .visit-field-row textarea {width:100%;min-width:0;max-width:100%;box-sizing:border-box;border:1px solid #ccd7e5;border-radius:6px;padding:9px 10px;font:inherit;font-size:16px;line-height:1.4}
+.visit-form .visit-field-row select {min-height:42px;height:42px;appearance:auto}
+.visit-form .visit-field-row textarea {min-height:64px;resize:vertical}
+.visit-form .visit-outcome-row>span {font-weight:400;line-height:1.45}
+.visit-outcome-options {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;max-width:360px;min-width:0;gap:0;padding:3px;box-sizing:border-box;border:1px solid #ccd7e5;border-radius:7px;background:#edf1f7}
+.visit-form .visit-outcome-options>label {display:block;position:relative;min-width:0;margin:0;cursor:pointer}
+.visit-form .visit-outcome-options input {position:absolute;opacity:0;width:1px;height:1px;min-height:0;padding:0;border:0;overflow:hidden}
+.visit-outcome-options span {display:flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:36px;padding:7px 6px;border:1px solid transparent;border-radius:4px;font-size:13px;color:#52647b;line-height:20px;white-space:nowrap;word-break:normal;overflow-wrap:normal}
+.visit-outcome-options input:checked+span {background:#fff;border-color:#b9cbe7;color:#174f9e;font-weight:650;box-shadow:0 1px 3px rgba(30,55,90,.08)}
+.visit-outcome-options input:focus-visible+span {outline:2px solid #3877df;outline-offset:1px}
+.visit-photo-section {min-width:0}
+.visit-photo-heading {display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:13px;color:#40516a;margin-bottom:8px}
+.visit-photo-heading small {font-size:11px;color:#52647b}
+.visit-photo-previews {display:flex;flex-wrap:wrap;gap:8px}
+.visit-photo-item {width:calc((100% - 16px)/3);max-width:130px;min-width:0;position:relative}
+.visit-photo-previews img {display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:5px}
+.visit-photo-previews>a {width:calc((100% - 16px)/3)}
+.visit-photo-item button {width:100%;border:1px solid #dce3ed;background:#fff;color:#40516a;font-size:12px;padding:5px;cursor:pointer}
+.visit-photo-actions {display:flex;justify-content:flex-start;margin-top:8px}
+.visit-photo-actions>.btn {display:inline-flex;align-items:center;justify-content:center;width:auto;min-width:88px;min-height:38px;box-sizing:border-box;font-size:13px;margin:0;padding:7px 18px}
+.visit-photo-actions [hidden] {display:none!important}
+.visit-save-row {display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #e2e8f0;padding-top:12px}
+.visit-save-row small {font-size:11px;line-height:1.5;color:#52647b;min-width:0;max-width:230px}
+.visit-save-row>.btn {flex:0 0 auto;min-height:42px;font-size:14px;margin:0}
+.visit-form [role=status],.visit-location-editor [role=status] {margin:6px 0 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere;color:#9b2929}
+.visit-form [role=status]:empty,.visit-location-editor [role=status]:empty {display:none}
+.visit-form button:disabled {opacity:.55;cursor:wait}
+@media(max-width:760px) {.visit-tbl th:first-child {min-width:0!important}.visit-tbl .visit-detail {padding:12px 10px}.visit-form .visit-field-row {grid-template-columns:78px minmax(0,1fr);gap:8px}}
+
+/* Headers sit above all merchant rows inside the actual list scroller. */
+.visit-tbl thead th {position:sticky;top:0;z-index:5;background:#f4f7fb;box-shadow:inset 0 -1px #dce3ed}
+.visit-tbl thead th:first-child {z-index:6}
+.visit-tbl tbody>tr.visit-row>td:first-child {position:static!important;min-width:0!important}
+.visit-tbl tbody>tr.visit-row {scroll-margin-top:44px}
+.visit-nav-cell .visit-location-status {display:block;width:fit-content;margin:0 0 3px;max-width:100%;box-sizing:border-box}
+.visit-nav-cell .visit-nav {display:inline-block}
+.visit-photo-picker {position:fixed;inset:auto 0 0;margin:0 auto;padding:18px 20px max(20px,env(safe-area-inset-bottom));width:min(420px,100%);max-width:100%;box-sizing:border-box;border:0;border-radius:12px 12px 0 0;background:#fff;color:#20334b;box-shadow:0 -8px 28px rgba(16,32,63,.18)}
+.visit-photo-picker::backdrop {background:rgba(18,29,44,.36)}
+.visit-photo-picker-heading {display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+.visit-photo-picker-heading h2 {margin:0;font-size:16px;line-height:1.4}
+.visit-photo-picker-heading>.btn {min-height:36px;font-size:13px}
+.visit-photo-picker>button {display:block;width:100%;min-height:46px;margin:10px 0 0;font-size:14px}

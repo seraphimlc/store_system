@@ -1558,3 +1558,16 @@ class BdStoreTask(Base):
     updated_at = Column(DateTime, nullable=False, default=_now)
     revision = Column(Integer, nullable=False, default=0)
     request_id = Column(String(64), unique=True)
+
+
+class BdMerchantDetail(Base):
+    """Current ops-only merchant enrichment. Source identity and batch snapshots stay intact."""
+    __tablename__ = 'bd_merchant_detail'
+    store_id = Column(String(128), primary_key=True)
+    lat = Column(Float, nullable=True)
+    lon = Column(Float, nullable=True)
+    google_place_id = Column(String(255), nullable=True)
+    place_lookup_state = Column(String(24), nullable=False, default='pending')
+    photo_urls = Column(JSON, nullable=False, default=list)
+    revision = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, nullable=False, default=_now)

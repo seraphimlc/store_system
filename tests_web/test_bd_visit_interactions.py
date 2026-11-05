@@ -1,0 +1,80 @@
+"""Real rendered page, real CSS/JS, no server/provider or native file picker."""
+import html
+import json
+import re
+import subprocess
+from pathlib import Path
+import pytest
+import app.db as appdb
+from tests_web.test_bd_zone_operations import seed,login
+from tests_web.test_bd_visit_page import multi_batch
+
+
+def test_visit_rows_photo_cancel_and_scroll_header(client,seed,tmp_path):
+    chrome=Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+    if not chrome.exists():pytest.skip('Chrome is required for actual browser layout checks')
+    with appdb.SessionLocal() as db:
+        _,_,grid,_=multi_batch(db,seed);gid=grid.id;db.commit()
+    login(client,'worker');response=client.get(f'/my/work/batch-grids/{gid}')
+    assert response.status_code==200
+    page=re.sub(r'<script\b[^>]*\bsrc="[^"]*"[^>]*>\s*</script>','',response.text)
+    page=re.sub(r'<link\b[^>]*rel="stylesheet"[^>]*>','',page)
+    styles='\n'.join(Path(p).read_text() for p in (
+        'app/static/app.css','app/static/bd_dispatch.css','app/static/bd_tasks.css','app/static/bd_visit.css'))
+    page=page.replace('</head>','<style>'+styles+'</style></head>')
+    harness=r'''
+window.addEventListener('load',()=>{try{
+ const q=s=>document.querySelector(s),qa=s=>[...document.querySelectorAll(s)];
+ const rows=qa('tr.visit-row'),form=rows[0].nextElementSibling.querySelector('.visit-form');
+ if(q('[data-edit-store]'))throw Error('small details trigger still exists');
+ rows[0].click();
+ if(rows[0].getAttribute('aria-expanded')!=='true'||window.lastFocused!==rows[0].dataset.storeId)throw Error('row did not open/focus');
+ const note=form.querySelector('[name=note]');note.value='keep my unsaved text';
+ const input=form.querySelector('[data-photo-files]');
+ input.dispatchEvent(new Event('cancel'));
+ if(new FormData(form).getAll('photos').length)throw Error('cancel produced an upload field');
+ const trigger=form.querySelector('[data-open-photo-picker]'),picker=q('#visit-photo-picker');
+ trigger.click();if(!picker.open)throw Error('picker did not open');
+ picker.querySelector('[data-photo-choice=cancel]').click();if(picker.open)throw Error('cancel did not close');
+ let cameraOpened=false;form.querySelector('[data-photo-camera]').click=()=>{cameraOpened=true};
+ trigger.click();picker.querySelector('[data-photo-choice=camera]').click();
+ if(!cameraOpened||picker.open)throw Error('camera action failed');
+ const transfer=new DataTransfer();transfer.items.add(new File(['photo'],'shop.jpg',{type:'image/jpeg'}));
+ input.files=transfer.files;input.dispatchEvent(new Event('change'));
+ rows[1].click();
+ if(rows[0].getAttribute('aria-expanded')!=='false'||rows[1].getAttribute('aria-expanded')!=='true')throw Error('exclusive expansion failed');
+ rows[0].click();
+ if(note.value!=='keep my unsaved text'||input.files.length!==1)throw Error('collapse lost form data');
+ const location=q('.visit-location-info').getBoundingClientRect(),summary=q('.visit-location-editor summary').getBoundingClientRect();
+ if(Math.abs(location.right-summary.right)>3)throw Error('update location not right aligned');
+ const button=form.querySelector('button[type=submit]'),label=button.textContent;
+ form.addEventListener('submit',e=>e.preventDefault());
+ form.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));
+ if(!button.disabled)throw Error('submit did not lock');
+ window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
+ if(button.disabled||button.textContent!==label)throw Error('restored page left save button stuck');
+ const scroll=q('.visit-list .dispatch-scroll');scroll.scrollTop=80;
+ requestAnimationFrame(()=>{try{
+  const header=q('.visit-tbl thead th'),bounds=header.getBoundingClientRect(),box=scroll.getBoundingClientRect();
+  if(Math.abs(bounds.top-box.top)>2)throw Error('header not sticky');
+  const hit=document.elementFromPoint(bounds.left+Math.min(20,bounds.width/2),bounds.top+bounds.height/2);
+  if(hit?.closest('th')!==header)throw Error('header covered by body row');
+  if(scroll.scrollWidth>scroll.clientWidth+1)throw Error('horizontal overflow');
+  parent.postMessage({qa:true,width:innerWidth,persistentForm:true,cancelWithoutUpload:true,photoDrawer:true,
+    backButtonReset:true,headerOnTop:true,locationRight:true},'*');
+ }catch(error){parent.postMessage({qa:true,width:innerWidth,error:String(error)},'*');}});
+}catch(error){parent.postMessage({qa:true,width:innerWidth,error:String(error)},'*');}});
+'''
+    scripts='<script>window.focusVisitStore=id=>{window.lastFocused=id};</script>'
+    scripts+=''.join('<script>'+Path(p).read_text()+'</script>' for p in (
+        'app/static/bd_visit_editor.js','app/static/bd_visit.js'))
+    fixture=page.replace('</body>',scripts+'<script>'+harness+'</script></body>')
+    parent='<meta charset="utf-8"><pre id="qa">waiting</pre><script>let r=[];addEventListener("message",e=>{if(e.data.qa){r.push(e.data);document.getElementById("qa").textContent=JSON.stringify(r)}})</script>'
+    for w,h in [(393,852),(1100,900)]:parent+=f'<iframe style="width:{w}px;height:{h}px;border:0" srcdoc="{html.escape(fixture,quote=True)}"></iframe>'
+    file=tmp_path/'visit.html';file.write_text(parent)
+    result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-first-run','--disable-background-networking',
+        f'--user-data-dir={tmp_path}/chrome','--dump-dom','--virtual-time-budget=2500',file.as_uri()],capture_output=True,text=True,timeout=35)
+    match=re.search(r'<pre id="qa">(.*?)</pre>',result.stdout,re.S)
+    assert match,result.stderr[-400:]
+    data=json.loads(html.unescape(match.group(1)))
+    assert len(data)==2 and not any('error' in item for item in data),data

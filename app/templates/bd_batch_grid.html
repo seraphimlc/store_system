@@ -21,6 +21,7 @@
     <div class="dispatch-map-legend"><span><i class="visited"></i>{{ t('已巡店') }}</span><span><i class="unvisited"></i>{{ t('未巡店') }}</span></div>
   </div>
   <section class="dispatch-list visit-list" aria-label="{{ t('商户列表') }}">
+    {% if request.query_params.get('msg') %}<div class="msg ok">{{ request.query_params.get('msg') }}</div>{% endif %}
     {# 作业进展：按店铺任务自动统计（不再让队员手填百分比/状态） #}
     <section class="visit-progress" data-testid="visit-progress" aria-label="{{ t('作业进展') }}">
       <span class="visit-progress-title">{{ t('作业进展') }}</span>
@@ -28,7 +29,7 @@
       <span class="visit-progress-count" data-testid="visit-progress-count">{{ stats.done }} / {{ stats.total }} {{ t('家') }}</span>
       <span class="visit-progress-bar" role="progressbar" aria-valuenow="{{ stats.pct }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t('进度') }}"><i style="width:{{ stats.pct }}%"></i></span>
       <span class="visit-progress-pct">{{ stats.pct }}%</span>
-      <span class="visit-progress-hint">{{ t('按店铺任务自动统计') }}</span>
+      {% if can_execute %}<a class="btn ghost visit-add-store" href="{{ request.url.replace(path='/my/work/batch-grids/' ~ grid.id ~ '/new-store').remove_query_params(['focus','msg','resubmit']) }}">{{ t('新增店铺') }}</a>{% endif %}
     </section>
     {# 筛选栏：三个控件**同一行**排列，改动即搜索（不用点按钮） #}
     <form class="bd-filters visit-equal-filters" method="get" data-testid="visit-filters" data-autosubmit="1"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}">
@@ -52,40 +53,56 @@
       </label>
     </form>
     <div class="dispatch-scroll">
-{% if can_execute %}<details id="new-store" class="visit-new-store"><summary><span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>{{ t('新增店铺') }}</span><svg class="visit-new-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary><form method="post" enctype="multipart/form-data" action="/my/work/batch-grids/{{ grid.id }}/new-store" class="task-form">
-{{ tokens() }}<input type="hidden" name="request_id" value="{{ nonce_for() }}">{% if resubmit_proposal %}<input type="hidden" name="proposal_id" value="{{ resubmit_proposal.id }}">{% endif %}
-<label>{{ t('商户名称') }}<input name="name" maxlength="255" value="{{ resubmit_proposal.payload.name if resubmit_proposal else '' }}" required></label><label>{{ t('地址') }}<input name="address" maxlength="1000" value="{{ resubmit_proposal.payload.address if resubmit_proposal else '' }}" required></label>
-<button type="button" class="btn ghost" id="locate-new-store">{{ t('获取当前位置') }}</button><p id="new-location-status" role="status" data-error="{{ t('无法获取定位，请在地图上选点或填写坐标。') }}" data-ready="{{ t('已获取定位，可在地图上调整。') }}"></p>
-<div class="task-filters"><input name="lat" type="number" step="any" min="-90" max="90" placeholder="{{ t('纬度') }}" aria-label="{{ t('纬度') }}" value="{{ resubmit_proposal.payload.lat if resubmit_proposal else '' }}" required><input name="lon" type="number" step="any" min="-180" max="180" placeholder="{{ t('经度') }}" aria-label="{{ t('经度') }}" value="{{ resubmit_proposal.payload.lon if resubmit_proposal else '' }}" required></div>
-<p>{{ t('展开新增店铺后，可点击地图调整门店定位。') }}</p><label>{{ t('门店照片') }}<input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required></label><img id="new-store-photo-preview" alt="{{ t('门店照片') }}" hidden><button class="btn">{{ t('提交队长核实') }}</button><a href="/my/work/batches/{{ task.id }}/new-stores">{{ t('查看新店申请') }}</a></form></details>{% endif %}
+
 
       <div class="tbl-wrap visit-tbl-wrap">
         <table class="grid-tbl visit-tbl">
           <thead><tr><th>{{ t('商户名称') }}</th><th aria-sort="{{ ('descending' if direction=='desc' else 'ascending') if sort=='status' else 'none' }}"><a href="{{ request.url.include_query_params(sort='status',direction='desc' if sort=='status' and direction=='asc' else 'asc',page=1) }}">{{ t('状态') }} {{ '↓' if sort=='status' and direction=='desc' else '↑' if sort=='status' else '↕' }}</a></th><th aria-sort="{{ ('descending' if direction=='desc' else 'ascending') if sort=='visit' else 'none' }}"><a href="{{ request.url.include_query_params(sort='visit',direction='desc' if sort=='visit' and direction=='asc' else 'asc',page=1) }}">{{ t('巡店状态') }} {{ '↓' if sort=='visit' and direction=='desc' else '↑' if sort=='visit' else '↕' }}</a></th><th>{{ t('定位') }}</th></tr></thead>
           <tbody>
           {% for s in stores %}
-            <tr class="visit-row" id="store-{{ s.id }}" data-store-id="{{ s.id }}" tabindex="0" aria-expanded="false">
-              <td class="visit-name">{{ s.snapshot.get('name') }} <button type="button" class="visit-edit" data-edit-store="{{ s.id }}" aria-label="{{ t('查看详情') }}">{{ t('详情') }}</button></td>
+            <tr class="visit-row" id="store-{{ s.id }}" data-store-id="{{ s.id }}" tabindex="0" aria-expanded="false" aria-controls="store-detail-{{ s.id }}">
+              <td class="visit-name">{{ s.snapshot.get('name') }}</td>
               <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
               <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}</td>
               <td class="visit-nav-cell">
                 <span class="visit-location-status location-{{ s.location_accuracy }}" data-location-status>{{ t({'accurate':'准确','nonexistent':'不存在','doubtful':'存疑','pending':'待核实'}.get(s.location_accuracy,'待核实')) }}</span>
                 {% set nav=gmaps_url(s.nav_lat,s.nav_lon) %}
-                {% if nav %}<a class="visit-nav" href="{{ nav }}" data-location-url="{{ nav }}" data-store-task-id="{{ s.id }}" data-testid="visit-nav">{{ t('定位') }}↗</a>{% else %}<span class="visit-nav-none">—</span>{% endif %}
+                {% if nav and can_execute %}<a class="visit-nav" href="{{ nav }}" data-location-url="{{ nav }}" data-store-task-id="{{ s.id }}" data-testid="visit-nav">{{ t('定位') }}↗</a>
+                {% elif nav %}<a class="visit-nav" href="{{ nav }}" target="_blank" rel="noopener" data-testid="visit-nav">{{ t('定位') }}↗</a>
+                {% else %}<span class="visit-nav-none">—</span>{% endif %}
               </td>
             </tr>
             <tr class="visit-detail-row" id="store-detail-{{ s.id }}" data-detail-for="{{ s.id }}" hidden>
               <td colspan="4">
                 <div class="visit-detail">
-                  <p class="visit-detail-meta">{{ t('商户编号') }}: <span class="visit-store-id">{{ s.store_id }}</span>{% if s.snapshot.get('address') %} · {{ s.snapshot.get('address') }}{% endif %}</p>
-                  {% if can_execute %}<form method="post" action="/my/work/batch-stores/{{ s.id }}/complete" class="visit-form">
+                  {% if s.snapshot.get('address') %}<p class="visit-detail-address">{{ s.snapshot.get('address') }}</p>{% endif %}
+                  <section class="visit-location-info" aria-label="{{ t('店铺位置') }}">
+                    <div class="visit-location-heading"><span>{{ t('店铺位置') }}</span><span class="visit-coordinates">{% if s.nav_lat is not none and s.nav_lon is not none %}{{ '%.6f'|format(s.nav_lat) }}, {{ '%.6f'|format(s.nav_lon) }}{% else %}{{ t('暂无坐标') }}{% endif %}</span></div>
+                    {% if can_execute %}<details class="visit-location-editor"><summary>{{ t('更新位置') }}</summary>
+                      <form method="post" action="/my/work/batch-stores/{{ s.id }}/location" data-location-editor>
+                        {{ tokens() }}<input type="hidden" name="location_accuracy" value="accurate">
+                        <div class="visit-coordinate-fields"><label>{{ t('纬度') }}<input name="lat" type="number" min="-90" max="90" step="0.000001" value="{{ '%.6f'|format(s.nav_lat) if s.nav_lat is not none else '' }}" required></label><label>{{ t('经度') }}<input name="lon" type="number" min="-180" max="180" step="0.000001" value="{{ '%.6f'|format(s.nav_lon) if s.nav_lon is not none else '' }}" required></label></div>
+                        <button type="submit" class="btn ghost">{{ t('保存位置并查询Google地点') }}</button>
+                        <p role="status" aria-live="polite" data-coordinate-message></p>
+                      </form>
+                    </details>{% endif %}
+                    {% if s.google_place_id %}<a class="visit-place-link" href="https://www.google.com/maps/search/?api=1&amp;query={{ (s.nav_lat|string ~ ',' ~ s.nav_lon|string)|urlencode }}&amp;query_place_id={{ s.google_place_id|urlencode }}" target="_blank" rel="noopener">{{ t('查看Google候选地点') }} ↗</a>{% endif %}
+                  </section>
+                  {% if can_execute %}<form method="post" enctype="multipart/form-data" action="/my/work/batch-stores/{{ s.id }}/complete" class="visit-form" data-visit-photo-form>
                     {{ tokens() }}{{ filters_hidden() }}
                     <input type="hidden" name="request_id" value="{{ nonce_for() }}">
                     <input type="hidden" name="revision" value="{{ s.revision }}">
-                    <label>{{ t('门店状态') }}<select name="status">{% for key,label in [('normal','正常'),('abnormal','异常'),('uncertain','存疑'),('closed','关店')] %}<option value="{{ key }}" {{ 'selected' if s.result.get('business_status')==key else '' }}>{{ t(label) }}</option>{% endfor %}</select></label>
-                    <label>{{ t('本次作业结果') }}<textarea name="note" maxlength="2000" rows="2">{{ s.result.get('note','') }}</textarea></label>
-                    <button class="btn" type="submit">{{ t('完成店铺任务') }}</button>
-                  </form>{% else %}<p>{{ t('只读预览') }}</p>{% endif %}
+                    <label class="visit-field-row"><span>{{ t('门店状态') }}</span><select name="status">{% for key,label in [('normal','正常'),('abnormal','异常'),('uncertain','存疑'),('closed','关店')] %}<option value="{{ key }}" {{ 'selected' if s.result.get('business_status')==key else '' }}>{{ t(label) }}</option>{% endfor %}</select></label>
+                    <div class="visit-field-row visit-outcome-row" role="group" aria-labelledby="visit-outcome-label-{{ s.id }}"><span id="visit-outcome-label-{{ s.id }}">{{ t('作业结果') }}</span><div class="visit-outcome-options">{% for key,label in [('completed','完成'),('undecided','待定'),('incomplete','未完成')] %}<label><input type="radio" name="outcome" value="{{ key }}" {{ 'checked' if s.result.get('outcome','completed')==key else '' }} required><span>{{ t(label) }}</span></label>{% endfor %}</div></div>
+                    <label class="visit-field-row"><span>{{ t('备注（选填）') }}</span><textarea name="note" maxlength="2000" rows="2">{{ s.result.get('note','') }}</textarea></label>
+                    <section class="visit-photo-section" aria-label="{{ t('店铺照片') }}">
+                      <div class="visit-photo-heading"><span>{{ t('店铺照片') }}</span><small>{{ t('最多3张，每张不超过5MB') }}</small></div>
+                      <div class="visit-photo-previews" data-photo-previews>{% for url in s.photo_urls %}<div class="visit-photo-item" data-kept-photo><a href="{{ url }}" target="_blank" rel="noopener"><img src="{{ url }}" alt="{{ t('店铺照片') }}" loading="lazy"></a><input type="hidden" name="keep_photos" value="{{ url }}"><button type="button" data-remove-photo aria-label="{{ t('移除照片') }}">{{ t('移除') }}</button></div>{% endfor %}</div>
+                      <div class="visit-photo-actions"><button class="btn ghost" type="button" data-open-photo-picker aria-haspopup="dialog">{{ t('上传') }}</button><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-photo-camera hidden><input type="file" accept="image/jpeg,image/png,image/webp" multiple data-photo-files hidden></div>
+                      <p role="status" data-photo-message></p>
+                    </section>
+                    <div class="visit-save-row"><small>{{ t('保存即计为已巡店，作业结果单独记录。') }}</small><button class="btn" type="submit">{{ t('保存巡店') }}</button></div>
+                  </form>{% else %}<p>{{ t('作业结果') }}：{{ t({'completed':'完成','undecided':'待定','incomplete':'未完成'}.get(s.result.get('outcome'),'完成')) if s.status=='completed' else '—' }}</p>{% if s.photo_urls %}<div class="visit-photo-previews">{% for url in s.photo_urls %}<a href="{{ url }}" target="_blank" rel="noopener"><img src="{{ url }}" alt="{{ t('店铺照片') }}" loading="lazy"></a>{% endfor %}</div>{% endif %}{% endif %}
                 </div>
               </td>
             </tr>
@@ -129,8 +146,16 @@
   </div>
 </dialog>
 
+<dialog id="visit-photo-picker" class="visit-photo-picker" aria-labelledby="visit-photo-picker-title">
+  <div class="visit-photo-picker-heading"><h2 id="visit-photo-picker-title">{{ t('添加店铺照片') }}</h2><button class="btn ghost" type="button" data-photo-choice="cancel">{{ t('取消') }}</button></div>
+  <button class="btn ghost" type="button" data-photo-choice="camera">{{ t('拍照') }}</button>
+  <button class="btn ghost" type="button" data-photo-choice="file">{{ t('上传文件') }}</button>
+</dialog>
+
 <script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
 <script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
 <script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
+<script id="visit-editor-config" type="application/json">{{ {'photoLimit':t('每家店铺最多保存3张照片'),'photoSize':t('每张照片须不超过5MB'),'photoType':t('请选择JPEG、PNG或WebP照片'),'remove':t('移除'),'photo':t('店铺照片'),'saving':t('正在保存…'),'failed':t('保存失败，请重试'),'locationSaved':t('位置已保存'),'candidate':t('已找到Google候选地点，请核实'),'ambiguous':t('找到多个Google地点，未自动关联'),'no_match':t('未找到Google地点'),'failedLookup':t('Google地点查询失败，位置已保存'),'unconfigured':t('Google地点查询未配置，位置已保存')}|tojson }}</script>
+<script src="/static/bd_visit_editor.js?v={{ static_ver('bd_visit_editor.js') }}" defer></script>
 <script src="/static/bd_visit.js?v={{ static_ver('bd_visit.js') }}" defer></script>
 {% endblock %}

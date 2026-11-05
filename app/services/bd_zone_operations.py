@@ -77,7 +77,7 @@ def audit_log(db,user,domain,action,row,before,after):
             store_source_id=store.store_id if store else '',
             actor_id=user.id,actor_label=user.display_name or user.username or '',
             actor_role=actor_role,team_id=team_id,team_label=team.name if team else '',
-            request_id=store.request_id if store else None,
+            request_id=store.request_id if store and action in ('complete_store_task','update_store_result') else None,
             old_value=before or {},new_value=after or {},
         ))
 

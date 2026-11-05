@@ -52,7 +52,7 @@
     };
     let newMarker;
     window.showNewStoreLocation=(lat,lng)=>{if(!newMarker)newMarker=new google.maps.Marker({map});newMarker.setPosition({lat,lng});map.panTo({lat,lng});};
-    function pickLocation(event){if(!document.getElementById('new-store')?.open)return false;const lat=event.latLng.lat(),lng=event.latLng.lng();document.querySelector('#new-store [name="lat"]').value=lat;document.querySelector('#new-store [name="lon"]').value=lng;window.showNewStoreLocation(lat,lng);return true;}
+    function pickLocation(event){const editor=document.getElementById('new-store');if(!editor||(!editor.open&&!editor.hasAttribute('data-new-store-page')))return false;const lat=event.latLng.lat(),lng=event.latLng.lng();document.querySelector('#new-store [name="lat"]').value=lat;document.querySelector('#new-store [name="lon"]').value=lng;window.showNewStoreLocation(lat,lng);return true;}
     map.addListener('click',pickLocation);
     const focus=new URL(location.href).searchParams.get('focus');if(focus)window.focusVisitStore(focus);
     shops.addListener('click',event=>{const id=event.feature.getProperty('store_id');

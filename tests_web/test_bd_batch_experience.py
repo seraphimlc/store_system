@@ -99,17 +99,27 @@ def test_global_sort_and_map_focus_find_store_beyond_first_page(seed):
 def test_http_new_store_review_private_photo_and_role_navigation(client,seed):
     with appdb.SessionLocal() as db:
         main,rt,grid,store=batch(db,seed);db.commit();mid,rid,gid=main.id,rt.id,grid.id
-    login(client,'worker');page=client.get(f'/my/work/batch-grids/{gid}')
+    login(client,'worker');page=client.get(f'/my/work/batch-grids/{gid}/new-store?kw=abc&task_state=pending&status=normal&page=2')
+    assert page.status_code==200 and 'data-new-store-page' in page.text
+    grid_page=client.get(f'/my/work/batch-grids/{gid}')
+    assert '按店铺任务自动统计' not in grid_page.text
+    assert 'id="new-store"' not in grid_page.text
+    assert f'/my/work/batch-grids/{gid}/new-store' in grid_page.text
     response=client.post(f'/my/work/batch-grids/{gid}/new-store',data={'_ft':form_token(client),
         'csrf_token':csrf(page.text),'request_id':str(uuid.uuid4()),'name':'HTTP新门店','address':'HTTP地址',
+        'kw':'abc','task_state':'pending','status_filter':'normal','page':'2',
         'lat':seed['lat']+0.001,'lon':seed['lon']},files={'photo':('photo.png',PHOTO,'image/png')},follow_redirects=False)
     assert response.status_code==303,response.text
+    assert response.headers['location'].startswith(f'/my/work/batch-grids/{gid}?')
+    assert 'kw=abc' in response.headers['location'] and 'status=normal' in response.headers['location']
+    assert '新店已提交' in client.get(response.headers['location']).text
     with appdb.SessionLocal() as db:pid=db.query(BdStoreProposal).one().id
     assert client.get(f'/my/work/new-stores/{pid}/photo').content==PHOTO
     worker_page=client.get(f'/my/work/batches/{mid}').text
     assert f'/my/work/batch-grids/{gid}' in worker_page and '任务树' not in worker_page
     login(client,'outsider')
     assert client.get(f'/my/work/new-stores/{pid}/photo').status_code==403
+    assert client.get(f'/my/work/batch-grids/{gid}/new-store').status_code==403
     login(client,'captain');page=client.get(f'/my/work/batches/{mid}/new-stores')
     assert page.status_code==200 and '批量通过' in page.text
     result=client.post(f'/my/work/batches/{mid}/new-stores/review',data={'_ft':form_token(client),

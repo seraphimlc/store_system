@@ -3,7 +3,7 @@ import uuid
 import json
 from urllib.parse import quote, urlencode
 from typing import Optional
-from fastapi import APIRouter,Depends,Request,Form,HTTPException
+from fastapi import APIRouter,Depends,Request,Form,HTTPException,File,UploadFile
 from fastapi.responses import HTMLResponse,RedirectResponse,JSONResponse
 from sqlalchemy.orm import Session
 from app.db import get_db
@@ -159,24 +159,33 @@ def batch_grid_page(identity:int,request:Request,page:int=1,kw:str='',task_state
              'lat':location_map.get(s.store_id,{}).get('lat',s.snapshot.get('lat')),
              'lon':location_map.get(s.store_id,{}).get('lon',s.snapshot.get('lon')),
              'visited':s.status=='completed'} for s in grid_stores]
-    resubmit_proposal=None
     if resubmit:
-        from app.models import BdStoreProposal
-        resubmit_proposal=db.query(BdStoreProposal).filter_by(id=resubmit,grid_task_id=grid.id,submitted_by=user.id,state='rejected').first()
-    return render(request,user,'bd_batch_grid.html',resubmit_proposal=resubmit_proposal,task=main,region_task=rt,grid=grid,stores=stores,more=more,
+        return RedirectResponse(f'/my/work/batch-grids/{identity}/new-store?'+urlencode(dict(request.query_params)),303)
+    return render(request,user,'bd_batch_grid.html',task=main,region_task=rt,grid=grid,stores=stores,more=more,
                   page=stats['page'],kw=kw,task_state=task_state,status=status,stats=stats,sort=sort,direction=direction,can_execute=grid.assignee_id==user.id and main.status!='completed',
                   geometry=geometry,points=points,nonce_for=lambda:str(uuid.uuid4()))
 
 
 @router.post('/my/work/batch-stores/{identity}/complete')
-def batch_store_complete(identity:int,request:Request,revision:int=Form(...),request_id:str=Form(...),
-                         status:str=Form(...),note:str=Form(''),csrf_token:str=Form(''),
+async def batch_store_complete(identity:int,request:Request,revision:int=Form(...),request_id:str=Form(...),
+                         status:str=Form(...),note:str=Form(''),outcome:str=Form('completed'),
+                         photos:list[UploadFile|str]=File([]),keep_photos:list[str]=Form([]),csrf_token:str=Form(''),
                          kw:str=Form(''),task_state:str=Form(''),status_filter:str=Form(''),sort:str=Form(''),direction:str=Form('asc'),page:int=Form(1),
                          user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
     try:
         post_guard(request,user,csrf_token)
-        grid_id=task_ops.complete_store(db,user,identity,revision,request_id,status,note);db.commit()
+        from app.services import bd_merchant_media as media
+        if any(isinstance(photo,str) and photo for photo in photos):raise ops.OperationError('照片格式无效')
+        selected_photos=[photo for photo in photos if not isinstance(photo,str) and photo.filename]
+        if len(selected_photos)>media.MAX_PHOTOS:raise ops.OperationError('每家店铺最多保存3张照片')
+        data=[await photo.read(media.MAX_PHOTO_BYTES+1) for photo in selected_photos]
+        from starlette.concurrency import run_in_threadpool
+        grid_id=await run_in_threadpool(media.save_visit,db,user,identity,revision,request_id,status,note,outcome,keep_photos,data)
+        db.commit()
     except ops.OperationError as exc:db.rollback();return error(exc,409)
+    finally:
+        for photo in photos:
+            if not isinstance(photo,str):await photo.close()
     # 提交后回跳要**保留列表筛选**
     pairs=[('kw',kw),('task_state',task_state),('status',status_filter),('sort',sort),('direction',direction),('page',page)]
     query=('?'+urlencode([(k,v) for k,v in pairs if v])) if any(v for _,v in pairs) else ''

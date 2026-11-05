@@ -125,7 +125,8 @@ def run(apply: bool):
         conn.execute(text(f"ALTER TABLE {TABLE} DROP COLUMN IF EXISTS google_place_id"))
         if updates:
             result = conn.execute(text(f"""UPDATE {TABLE} SET name=:name,lat=:lat,lon=:lon,address=:address,
-                municipality=:municipality,location_accuracy='pending' WHERE place_id=:place_id"""), updates)
+                municipality=:municipality,region=:region,prefecture=:prefecture,
+                location_accuracy=COALESCE(NULLIF(location_accuracy,''),'pending') WHERE place_id=:place_id"""), updates)
             if result.rowcount != len(updates):
                 raise RuntimeError(f"expected {len(updates)} updates, got {result.rowcount}")
         if inserts:

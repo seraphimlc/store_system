@@ -123,23 +123,20 @@
     });
   }
 
-  function toggle(row) {
-    reveal(row, row.getAttribute('aria-expanded') !== 'true');
-  }
-
   rows.forEach(row => {
     row.addEventListener('click', event => {
       if (event.target.closest('a')) return;
       window.focusVisitStore?.(row.dataset.storeId);
       rows.forEach(r=>r.classList.toggle('is-selected',r===row));
-      if(event.target.closest('[data-edit-store]'))toggle(row);
+      reveal(row, true);
     });
     row.addEventListener('keydown', event => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       if (event.target.closest('a')) return;
       event.preventDefault();
+      rows.forEach(r=>r.classList.toggle('is-selected',r===row));
       window.focusVisitStore?.(row.dataset.storeId);
-      if(event.target.closest('[data-edit-store]'))toggle(row);
+      reveal(row, true);
     });
   });
 
@@ -147,6 +144,7 @@
     const row = rows.find(candidate => candidate.dataset.storeId === String(id));
     if (!row) { const url=new URL(location.href);url.search='';url.searchParams.set('focus',id);location.assign(url);return; }
     rows.forEach(r=>r.classList.toggle('is-selected',r===row));
+    reveal(row, true);
     window.focusVisitStore?.(id);
     row.scrollIntoView({block:'nearest', behavior:'auto'});
     row.focus({preventScroll:true});

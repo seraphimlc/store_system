@@ -1,0 +1,7 @@
+/* Dedicated same-window new-store entry; map and form scroll independently. */
+.new-store-page .new-store-workspace {grid-template-rows:minmax(150px,36fr) minmax(0,64fr)}
+.new-store-panel .visit-new-store {border:0}
+.new-store-panel .visit-new-store>h2 {margin:0;padding:14px 16px 0;font-size:14px;color:#40516a}
+.new-store-panel .task-form {max-width:640px;margin:0 auto}
+.new-store-panel .task-form label {min-width:0}
+@media(min-width:1000px) {.new-store-page .new-store-workspace {grid-template-columns:minmax(0,1fr) minmax(360px,1fr);grid-template-rows:minmax(0,1fr)}}
