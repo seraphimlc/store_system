@@ -43,6 +43,8 @@ def create_app() -> FastAPI:
     include_current_routes(app, bd_zone_ops_r.router)
     from app.routers import bd_batch_review_r
     app.include_router(bd_batch_review_r.router)
+    from app.routers import bd_merchant_map_r
+    app.include_router(bd_merchant_map_r.router)
     from app.routers import msg_r
     app.include_router(msg_r.router)
 

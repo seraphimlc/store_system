@@ -12,11 +12,18 @@
   const scope = byId('grid-auto-scope'), tolerance = byId('grid-auto-tolerance');
   const maxGrids = byId('grid-auto-max-grids'), maxStores = byId('grid-auto-max-stores');
   const filter = byId('grid-auto-filter'), minStores = byId('grid-auto-min-stores');
+  const smallThreshold = byId('grid-auto-small-threshold');
   const previewButton = byId('grid-auto-preview'), applyButton = byId('grid-auto-apply');
   const result = byId('grid-auto-result');
   const csrf = config.csrf;
   let signature = '', requestNumber = 0, controller;
   let lastParams;
+
+  async function readJsonResponse(response) {
+    const raw = await response.text();
+    try { return JSON.parse(raw); }
+    catch { throw new Error(`${config.texts.error} (HTTP ${response.status})`); }
+  }
 
   function clearPreview() {
     requestNumber++;
@@ -46,6 +53,7 @@
       target_per_zone: Number(target.value),
       max_area_km2: Number(area.value),
       min_stores: filter.checked ? Number(minStores.value) : 0,
+      small_zone_threshold: smallThreshold.value === '' ? null : Number(smallThreshold.value),
       tolerance_pct: Number(tolerance.value),
       max_grids_per_zone: maxGrids.value ? Number(maxGrids.value) : null,
       max_stores_per_zone: maxStores.value ? Number(maxStores.value) : null
@@ -57,6 +65,11 @@
     const summary = document.createElement('p');
     summary.textContent = `${report.zone_count} ${text.zoneCount} · ${report.grids_assigned} ${text.gridCount} · ${report.density.disabled_count} ${text.excludedCount}`;
     result.append(summary);
+    if (report.density.preserved_grid_ids?.length) {
+      const preserved = document.createElement('p');
+      preserved.textContent = `${text.preservedGrids}: ${report.density.preserved_grid_ids.length}`;
+      result.append(preserved);
+    }
     const list = document.createElement('ul');
     report.zones.forEach((zone, index) => {
       const item = document.createElement('li');
@@ -68,6 +81,23 @@
       const unassigned = document.createElement('p');
       unassigned.textContent = `${text.unassignedCount}: ${report.unassigned_grid_ids.map(id => `#${id}`).join(', ')}`;
       result.append(unassigned);
+    }
+    if (report.geometry_unassigned?.length) {
+      const warning = document.createElement('p');
+      warning.textContent = `${text.geometryUnassigned}: ${report.geometry_unassigned.map(group =>
+        `${group.grid_ids.map(id => `#${id}`).join(', ')} (${group.store_count} ${text.storeCount})`).join('; ')}`;
+      result.append(warning);
+    }
+    if (report.small_zone_merge) {
+      const merge = report.small_zone_merge;
+      const summary = document.createElement('p');
+      summary.textContent = `${text.smallMerge}: ${merge.before} → ${merge.remaining.length} · ${text.mergedSmall}: ${merge.merged}`;
+      result.append(summary);
+      for (const item of merge.remaining) {
+        const line = document.createElement('p');
+        line.textContent = `${item.grid_ids.map(id => `#${id}`).join(', ')} · ${item.store_count} ${text.storeCount} · ${text[item.reason] || text.invalid_geometry}`;
+        result.append(line);
+      }
     }
     if (report.out_of_tolerance) {
       const warning = document.createElement('p');
@@ -99,12 +129,12 @@
     clearPreview();
   });
   minStores.disabled = !filter.checked;
-  for (const field of [target, area, minStores, tolerance, maxGrids, maxStores]) field.addEventListener('input', clearPreview);
+  for (const field of [target, area, minStores, tolerance, maxGrids, maxStores, smallThreshold]) field.addEventListener('input', clearPreview);
   scope.addEventListener('change', clearPreview);
 
   previewButton.addEventListener('click', async () => {
     clearPreview();
-    if (!target.reportValidity() || !area.reportValidity() || (filter.checked && !minStores.reportValidity())) return;
+    if (!target.reportValidity() || !area.reportValidity() || !smallThreshold.reportValidity() || (filter.checked && !minStores.reportValidity())) return;
     const body = params(), bodyKey = JSON.stringify(body), current = ++requestNumber;
     controller?.abort();
     controller = new AbortController();
@@ -114,7 +144,7 @@
     try {
       const response = await fetch('/zones/grid-auto-preview', {method:'POST',signal:controller.signal,
         headers:{'Content-Type':'application/json'},body:bodyKey});
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (current !== requestNumber || bodyKey !== JSON.stringify(params())) return;
       if (!response.ok) throw new Error(data.error || config.texts.error);
       signature = data.signature;
@@ -142,7 +172,7 @@
       const response = await fetch('/zones/grid-auto-apply', {method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({...lastParams,signature:expected})});
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || config.texts.error);
       result.textContent = config.texts.applyDone;
       window.location.reload();

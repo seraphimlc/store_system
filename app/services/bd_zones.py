@@ -125,6 +125,11 @@ def polygons(geom):
     return [p for g in getattr(geom, 'geoms', ()) for p in polygons(g)]
 
 
+def _outer_perimeter(geom):
+    """外环总长度；忽略内洞，但支持 MultiPolygon 和 GeometryCollection。"""
+    return sum(poly.exterior.length for poly in polygons(geom))
+
+
 def projected(geojson):
     # 每个面分别舍入会在原本共边的网格之间制造裂缝和假孤岛。
     return set_precision(make_valid(transform(_TO_METERS, shape(geojson))), .001)
@@ -174,7 +179,7 @@ def _group(geoms, counts, target_count, max_area, *, adjacency=None, merge_guard
         shared = a['geom'].boundary.intersection(
             b['geom'].boundary.buffer(.002) if adjacency is None else b['geom'].boundary).length
         # 内部排除地形的孔洞不应左右片区外轮廓的紧凑度。
-        perimeter = a['geom'].exterior.length + b['geom'].exterior.length - 2 * shared
+        perimeter = _outer_perimeter(a['geom']) + _outer_perimeter(b['geom']) - 2 * shared
         compactness = perimeter ** 2 / (4 * math.pi * (a['geom'].area + b['geom'].area))
         contact = shared / max(math.sqrt(min(a['geom'].area, b['geom'].area)), 1)
         score = (area_cost + 0.35 * store_cost
@@ -262,7 +267,12 @@ def _rebalance(groups, geoms, counts, max_area, *, max_stores=None, max_members=
                                 (abs(hard_delta) <= 1e-8 and delta < -1e-8))
                     candidate = (hard_delta, delta, i, a, b)
                     if improves and (best is None or candidate < best):
-                        best = candidate
+                        # Graph adjacency tolerates tiny projection gaps; it does not
+                        # prove that either resulting territory is a continuous face.
+                        remaining = union_all([geoms[j] for j in sorted(part - {i})], grid_size=.001)
+                        receiving = union_all([geoms[j] for j in sorted(members[b] | {i})], grid_size=.001)
+                        if all(g.geom_type == 'Polygon' and g.is_valid for g in (remaining, receiving)):
+                            best = candidate
         if best is None:
             break
         _, _, i, a, b = best

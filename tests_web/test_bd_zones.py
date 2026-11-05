@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
-from shapely.geometry import LineString, Point, box, mapping, shape
+from shapely.geometry import LineString, MultiPolygon, Point, box, mapping, shape
 from shapely import union_all
 from shapely.ops import unary_union
 
@@ -442,6 +442,15 @@ def test_compact_partition_preserves_roads_counts_and_connected_block_shapes():
     assert unary_union([p['geom'] for p in result]).symmetric_difference(unary_union(geoms)).area < .01
     again = zones._compact_partition(geoms, counts, 8, 12_000_000)
     assert [p['members'] for p in again] == [p['members'] for p in result]
+
+
+def test_group_compactness_accepts_multipolygon_input():
+    multipart = MultiPolygon([box(0, 0, 10, 10), box(20, 0, 30, 10)])
+    bridge = box(10, 0, 20, 10)
+    result = zones._group([multipart, bridge], [1, 1], 1, 1000)
+    assert len(result) == 1
+    assert result[0]['geom'].geom_type == 'Polygon'
+    assert result[0]['geom'].area == 300
 
 
 def test_shape_metrics_ignore_natural_holes_but_detect_snake():

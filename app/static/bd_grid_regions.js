@@ -17,15 +17,19 @@
   const key = () => JSON.stringify({selections: selection(), merge_boundaries: mode.checked});
   function style(feature) {
     const box = byId.get(Number(feature.getProperty('id')));
-    if (gridMetadata.get(Number(feature.getProperty('id')))?.disabled) {
+    const grid = gridMetadata.get(Number(feature.getProperty('id')));
+    if (grid?.disabled) {
       return {fillColor: '#9ca3af', fillOpacity: .45, strokeColor: '#6b7280',
         strokeWeight: 1, strokeOpacity: 1, clickable: false, zIndex: 5};
     }
+    const assigned = grid?.zone_id !== null && grid?.zone_id !== undefined;
     const dissolved = box?.checked && mode.checked && !!calculated;
-    return {fillColor: '#176b57', fillOpacity: dissolved ? 0 : box?.checked ? .3 : .03,
-      strokeColor: '#176b57', strokeWeight: dissolved ? 0 : box?.checked ? 3 : 1,
+    return {fillColor: assigned ? '#6b7280' : '#176b57',
+      fillOpacity: assigned ? .36 : dissolved ? 0 : box?.checked ? .48 : .03,
+      strokeColor: box?.checked ? '#094b3b' : assigned ? '#6b7280' : '#176b57',
+      strokeWeight: dissolved ? 0 : box?.checked ? 3 : 1,
       strokeOpacity: dissolved ? 0 : 1,
-      clickable: !box?.disabled, zIndex: 5};
+      clickable: !box?.disabled, zIndex: assigned ? 7 : 5};
   }
   window.showAutomaticGridPreview = report => {
     automaticPreviewLayer?.setMap(null);
@@ -85,7 +89,7 @@
         previewLayer = new google.maps.Data({map: !root.hidden ? map : null});
         previewLayer.addGeoJson({type: 'FeatureCollection', features: [{...data,
           geometry: data.display_geometry || data.geometry}]});
-        previewLayer.setStyle({fillColor: '#176b57', fillOpacity: .12, strokeColor: '#094b3b',
+        previewLayer.setStyle({fillColor: '#176b57', fillOpacity: .48, strokeColor: '#094b3b',
           strokeWeight: 3, clickable: false, zIndex: 6});
       }
       calculated = selectedKey; save.disabled = false;

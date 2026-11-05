@@ -1457,6 +1457,12 @@ class BdTaskEvent(Base):
         Index('ix_bd_task_event_store_time', 'store_task_id', 'created_at'),
         Index('ix_bd_task_event_actor_time', 'actor_id', 'created_at'),
         Index('ix_bd_task_event_team_time', 'team_id', 'created_at'),
+        Index('ix_bd_task_event_visit_time', 'created_at', 'store_source_id',
+              postgresql_where=text("event_type IN ('complete_store_task','update_store_result')"),
+              sqlite_where=text("event_type IN ('complete_store_task','update_store_result')")),
+        Index('ix_bd_task_event_visit_source', 'store_source_id', 'created_at',
+              postgresql_where=text("event_type IN ('complete_store_task','update_store_result')"),
+              sqlite_where=text("event_type IN ('complete_store_task','update_store_result')")),
     )
     id = Column(Integer, primary_key=True)
     main_task_id = Column(Integer, nullable=False)

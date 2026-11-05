@@ -15,7 +15,7 @@ const ids=['grid-region-editor','grid-manual-tab','grid-auto-tab','grid-manual-p
   'grid-auto-basis','grid-auto-target','grid-auto-unit','grid-auto-area','grid-auto-scope',
   'grid-auto-tolerance','grid-auto-max-grids','grid-auto-max-stores','grid-auto-filter',
   'grid-auto-min-stores','grid-auto-preview','grid-auto-apply','grid-auto-result','grid-region-form','grid-region-config',
-  'grid-auto-open'].map(id=>[id,new Element(id)]);
+  'grid-auto-open','grid-auto-small-threshold'].map(id=>[id,new Element(id)]);
 const els=Object.fromEntries(ids);
 els['grid-region-config'].textContent=JSON.stringify({region:'tokyo23',csrf:'csrf',texts:{
   gridCount:'grids',storeCount:'stores',previewLoading:'loading',previewReady:'ready',applyConfirm:'confirm',
@@ -25,18 +25,18 @@ els['grid-auto-basis'].value='stores'; els['grid-auto-target'].value='8000';
 els['grid-auto-area'].value='25'; els['grid-auto-scope'].value='current';
 els['grid-auto-tolerance'].value='15'; els['grid-auto-min-stores'].value='5'; els['grid-auto-filter'].checked=true;
 let applied=false, previewBody;
-const fetch=async(url,options)=>{
+let fetch=async(url,options)=>{
   const body=JSON.parse(options.body);
   if(url.endsWith('grid-auto-preview')) {
     previewBody=body;
-    return {ok:true,json:async()=>({signature:'a'.repeat(64),zone_count:1,grids_assigned:2,
+    return {ok:true,status:200,text:async()=>JSON.stringify({signature:'a'.repeat(64),zone_count:1,grids_assigned:2,
       zones:[{grid_count:2,store_count:10,area_km2:2,geometry:{type:'Polygon',coordinates:[]}}],
       density:{disabled_count:1,disabled_grid_ids:[3]}})};
   }
-  applied=true; assert.equal(body.signature,'a'.repeat(64)); return {ok:true,json:async()=>({ok:true})};
+  applied=true; assert.equal(body.signature,'a'.repeat(64)); return {ok:true,status:200,text:async()=>JSON.stringify({ok:true})};
 };
 const context={document:{getElementById:id=>els[id],createElement:()=>new Element()},
-  window:{confirm:()=>true,location:{reload(){}}},AbortController,fetch};
+  window:{confirm:()=>true,location:{reload(){}}},AbortController,fetch:(...args)=>fetch(...args)};
 vm.runInNewContext(fs.readFileSync('app/static/bd_grid_auto.js','utf8'),context);
 (async()=>{
   els['grid-auto-tab'].handlers.click();
@@ -49,6 +49,7 @@ vm.runInNewContext(fs.readFileSync('app/static/bd_grid_auto.js','utf8'),context)
   await els['grid-auto-preview'].handlers.click();
   assert.equal(previewBody.target_basis,'grids');
   assert.equal(previewBody.region,'tokyo23');
+  assert.equal(previewBody.small_zone_threshold,null);
   assert.equal(els['grid-auto-apply'].hidden,false);
   assert.ok(els['grid-auto-result'].textContent.includes('ready'));
   els['grid-auto-min-stores'].value='6'; els['grid-auto-min-stores'].handlers.input();
@@ -56,8 +57,15 @@ vm.runInNewContext(fs.readFileSync('app/static/bd_grid_auto.js','utf8'),context)
   await els['grid-auto-preview'].handlers.click();
   await els['grid-auto-apply'].handlers.click();
   assert.equal(applied,true);
+  els['grid-auto-small-threshold'].value='20';
+  els['grid-auto-small-threshold'].handlers.input();
+  assert.equal(els['grid-auto-apply'].hidden,true);
   els['grid-auto-scope'].value='all'; els['grid-auto-scope'].handlers.change();
   await els['grid-auto-preview'].handlers.click();
   assert.equal(previewBody.region,'all');
+  assert.equal(previewBody.small_zone_threshold,20);
+  fetch = async () => ({ok:false,status:500,text:async()=>'<html>Internal Server Error</html>'});
+  await els['grid-auto-preview'].handlers.click();
+  assert.equal(els['grid-auto-result'].textContent,'error (HTTP 500)');
   console.log('auto partition: scope, target switch, preview invalidation and apply passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

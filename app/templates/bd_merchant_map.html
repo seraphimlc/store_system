@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('商户地图') }}{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="/static/bd_merchant_map.css?v={{ static_ver('bd_merchant_map.css') }}">{% endblock %}
+{% block content %}
+<section class="merchant-map-page">
+  <header class="merchant-map-heading"><div><h1>{{ t('商户地图') }}</h1><p>{{ t('按地图视野查看商户数量与近30天巡店覆盖；放大查看单店。') }}</p></div><button type="button" class="btn ghost" id="merchant-map-reset">{{ t('查看全部') }}</button></header>
+  <div class="merchant-map-stage" aria-busy="false">
+    <div id="merchant-map" aria-label="{{ t('商户分布地图') }}"></div>
+    <div class="merchant-map-overview"><strong id="merchant-map-summary">{{ t('正在加载商户分布…') }}</strong><p id="merchant-map-status" role="status" aria-live="polite"></p><button type="button" class="btn ghost" id="merchant-map-retry" hidden>{{ t('重试') }}</button></div>
+    <button type="button" class="btn ghost merchant-map-fullscreen" id="merchant-map-fullscreen">{{ t('全屏地图') }}</button>
+    <div class="merchant-map-legend" aria-label="{{ t('近30天覆盖率') }}"><span>{{ t('近30天覆盖率') }}</span><span><i class="coverage-green"></i>≥75%</span><span><i class="coverage-yellow"></i>40–74%</span><span><i class="coverage-red"></i>&lt;40%</span></div>
+    <aside class="merchant-map-detail" id="merchant-map-detail" aria-labelledby="merchant-map-detail-title" hidden>
+      <header><h2 id="merchant-map-detail-title">{{ t('商户详情') }}</h2><button type="button" class="btn ghost" id="merchant-map-close">{{ t('关闭') }}</button></header>
+      <div id="merchant-map-detail-body" role="status" aria-live="polite"></div>
+    </aside>
+  </div>
+  <p class="merchant-map-method">{{ t('覆盖按近30天内提交过巡店记录的唯一商户统计，跨批次不重复计数；未完成作业也算已到访。聚合区域为地图网格，不代表行政区。') }}</p>
+</section>
+{% set texts={'loading':t('正在加载商户分布…'),'error':t('商户地图数据读取失败，请缩小范围后重试。'),'mapError':t('地图加载失败，请检查地图配置后重试。'),'missingKey':t('尚未配置地图密钥，请联系管理员。'),'count':t('商户数'),'covered':t('近30天已覆盖'),'rate':t('覆盖率'),'empty':t('当前视野没有商户'),'zoom':t('继续放大可查看单店'),'dense':t('当前视野商户较多，已保留聚合，请继续放大。'),'asOf':t('统计时间'),'detail':t('商户详情'),'detailLoading':t('正在读取商户详情…'),'detailError':t('商户详情读取失败，请重试。'),'id':t('商户编号'),'address':t('地址'),'phone':t('电话'),'website':t('网站'),'source':t('数据来源'),'coordinates':t('经纬度'),'location':t('定位核实状态'),'lastVisit':t('最近巡店时间'),'notVisited':t('暂无巡店记录'),'yes':t('近30天已覆盖'),'no':t('近30天未覆盖'),'pending':t('待核实'),'accurate':t('准确'),'nonexistent':t('不存在'),'doubtful':t('存疑'),'region':t('地区'),'group':t('商户聚合区域')} %}
+<script id="merchant-map-config" type="application/json">{{ {'key':maps_key,'language':html_lang(),'texts':texts}|tojson }}</script>
+<script src="/static/bd_merchant_map.js?v={{ static_ver('bd_merchant_map.js') }}" defer></script>
+{% endblock %}
