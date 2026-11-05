@@ -7,7 +7,7 @@
   <div class="merchant-map-stage" aria-busy="false">
     <div id="merchant-map" aria-label="{{ t('商户分布地图') }}"></div>
     <div class="merchant-map-overview"><strong id="merchant-map-summary">{{ t('正在加载商户分布…') }}</strong><p id="merchant-map-status" role="status" aria-live="polite"></p><button type="button" class="btn ghost" id="merchant-map-retry" hidden>{{ t('重试') }}</button></div>
-    <button type="button" class="btn ghost merchant-map-fullscreen" id="merchant-map-fullscreen">{{ t('全屏地图') }}</button>
+    <button type="button" class="btn ghost merchant-map-fullscreen" id="merchant-map-fullscreen" data-enter="{{ t('全屏地图') }}" data-exit="{{ t('退出全屏') }}">{{ t('全屏地图') }}</button>
     <div class="merchant-map-legend" aria-label="{{ t('近30天覆盖率') }}"><span>{{ t('近30天覆盖率') }}</span><span><i class="coverage-green"></i>≥75%</span><span><i class="coverage-yellow"></i>40–74%</span><span><i class="coverage-red"></i>&lt;40%</span></div>
     <aside class="merchant-map-detail" id="merchant-map-detail" aria-labelledby="merchant-map-detail-title" hidden>
       <header><h2 id="merchant-map-detail-title">{{ t('商户详情') }}</h2><button type="button" class="btn ghost" id="merchant-map-close">{{ t('关闭') }}</button></header>

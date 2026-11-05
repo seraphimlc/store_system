@@ -33,7 +33,8 @@ def validate_view(west, south, east, north, zoom):
         raise ops.OperationError('地图范围无效，请缩放后重试。')
     width = (east - west if east > west else east - west + 360) / 360
     height = _mercator_y(south) - _mercator_y(north)
-    # At most 21×21 cells, even for a forged world-sized high-zoom request.
+    # At most 22×21 cells (including a dateline split), even for a world-sized
+    # high-zoom request; browser work never scales with total merchant count.
     bucket_zoom = max(0, min(int(zoom) + 1, 22, math.floor(math.log2(20 / max(width, height)))))
     return {'west': west, 'south': south, 'east': east, 'north': north,
             'scale': 2 ** bucket_zoom, 'bucket_zoom': bucket_zoom}
@@ -51,6 +52,10 @@ def _recent():
 def _bounds(db, params):
     if db.bind.dialect.name == 'postgresql':
         if params['west'] < params['east']:
+            # Native point selectivity is estimated poorly for a region-wide box.
+            # Let PostgreSQL scan in parallel when the viewport spans whole regions.
+            if (params['east']-params['west'])*(params['north']-params['south']) >= 1:
+                return 'm.lat BETWEEN :south AND :north AND m.lon BETWEEN :west AND :east'
             return 'point(m.lon,m.lat) <@ box(point(:west,:south),point(:east,:north))'
         return '''(point(m.lon,m.lat) <@ box(point(:west,:south),point(180,:north))
                OR point(m.lon,m.lat) <@ box(point(-180,:south),point(:east,:north)))'''

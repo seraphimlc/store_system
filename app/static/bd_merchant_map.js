@@ -119,6 +119,9 @@
   byId('merchant-map-close').addEventListener('click',closeDetail);
   const fullscreen = byId('merchant-map-fullscreen');
   fullscreen.hidden = !document.fullscreenEnabled;
+  document.addEventListener('fullscreenchange', () => {
+    fullscreen.textContent = document.fullscreenElement ? fullscreen.dataset.exit : fullscreen.dataset.enter;
+  });
   fullscreen.addEventListener('click', async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
