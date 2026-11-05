@@ -153,8 +153,12 @@ def batch_grid_page(identity:int,request:Request,page:int=1,kw:str='',task_state
     # 地图：只用**本批次快照**里的网格几何，不回读基础网格主档。
     geometry={'type':'FeatureCollection','features':[{'type':'Feature',
         'geometry':grid.snapshot.get('geometry'),'properties':{'id':grid.grid_id}}]}
-    points=[{'id':s.id,'name':s.snapshot.get('name'),'lat':s.snapshot.get('lat'),'lon':s.snapshot.get('lon'),
-             'visited':s.status=='completed'} for s in db.query(task_ops.BdStoreTask).filter_by(grid_task_id=grid.id).all()]
+    grid_stores=db.query(task_ops.BdStoreTask).filter_by(grid_task_id=grid.id).all()
+    location_map=task_ops.merchant_location_map(db,[s.store_id for s in grid_stores])
+    points=[{'id':s.id,'name':s.snapshot.get('name'),
+             'lat':location_map.get(s.store_id,{}).get('lat',s.snapshot.get('lat')),
+             'lon':location_map.get(s.store_id,{}).get('lon',s.snapshot.get('lon')),
+             'visited':s.status=='completed'} for s in grid_stores]
     resubmit_proposal=None
     if resubmit:
         from app.models import BdStoreProposal
@@ -177,6 +181,20 @@ def batch_store_complete(identity:int,request:Request,revision:int=Form(...),req
     pairs=[('kw',kw),('task_state',task_state),('status',status_filter),('sort',sort),('direction',direction),('page',page)]
     query=('?'+urlencode([(k,v) for k,v in pairs if v])) if any(v for _,v in pairs) else ''
     return RedirectResponse(f'/my/work/batch-grids/{grid_id}{query}',status_code=303)
+
+
+@router.post('/my/work/batch-stores/{identity}/location')
+def batch_store_location(identity:int,request:Request,location_accuracy:str=Form(...),
+                         lat:Optional[float]=Form(None),lon:Optional[float]=Form(None),
+                         csrf_token:str=Form(''),user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    try:
+        post_guard(request,user,csrf_token)
+        result=task_ops.update_location_accuracy(db,user,identity,location_accuracy,lat,lon)
+        db.commit()
+        return JSONResponse({'ok':True,**result})
+    except ops.OperationError as exc:
+        db.rollback()
+        return JSONResponse({'error':str(exc)},status_code=409)
 
 
 def post_guard(request,user,csrf):

@@ -68,7 +68,11 @@
               <td class="visit-name">{{ s.snapshot.get('name') }} <button type="button" class="visit-edit" data-edit-store="{{ s.id }}" aria-label="{{ t('查看详情') }}">{{ t('详情') }}</button></td>
               <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
               <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}</td>
-              <td class="visit-nav-cell">{% set nav=gmaps_url(s.snapshot.get('lat'),s.snapshot.get('lon'),s.store_id,s.snapshot.get('name')) %}{% if nav %}<a class="visit-nav" href="{{ nav }}" target="_blank" rel="noopener" data-testid="visit-nav">{{ t('定位') }}↗</a>{% else %}<span class="visit-nav-none">—</span>{% endif %}</td>
+              <td class="visit-nav-cell">
+                <span class="visit-location-status location-{{ s.location_accuracy }}" data-location-status>{{ t({'accurate':'准确','nonexistent':'不存在','doubtful':'存疑','pending':'待核实'}.get(s.location_accuracy,'待核实')) }}</span>
+                {% set nav=gmaps_url(s.nav_lat,s.nav_lon) %}
+                {% if nav %}<a class="visit-nav" href="{{ nav }}" data-location-url="{{ nav }}" data-store-task-id="{{ s.id }}" data-testid="visit-nav">{{ t('定位') }}↗</a>{% else %}<span class="visit-nav-none">—</span>{% endif %}
+              </td>
             </tr>
             <tr class="visit-detail-row" id="store-detail-{{ s.id }}" data-detail-for="{{ s.id }}" hidden>
               <td colspan="4">
@@ -99,6 +103,31 @@
     </div>
   </section>
 </section>
+
+<dialog id="location-check-dialog" class="location-check-dialog" aria-labelledby="location-check-title"
+        data-save-url="/my/work/batch-stores/" data-csrf="{{ request.state.csrf }}" data-form-token="{{ form_token() }}"
+        data-accurate="{{ t('准确') }}" data-nonexistent="{{ t('不存在') }}" data-doubtful="{{ t('存疑') }}" data-pending="{{ t('待核实') }}"
+        data-popup-blocked="{{ t('请允许打开新页面后重试。') }}" data-coordinates-required="{{ t('请填写纬度和经度。') }}" data-save-failed="{{ t('保存定位状态失败。') }}">
+  <div class="location-check-body">
+    <h2 id="location-check-title">{{ t('这个坐标准确吗？') }}</h2>
+    <p class="location-check-name" data-location-name></p>
+    <div class="location-check-actions">
+      <button type="button" class="btn primary" data-location-action="accurate">{{ t('准确并导航') }}</button>
+      <button type="button" class="btn ghost" data-location-action="edit">{{ t('不准确，更新坐标') }}</button>
+      <button type="button" class="btn ghost" data-location-action="doubtful">{{ t('存疑并导航') }}</button>
+      <button type="button" class="btn ghost" data-location-action="nonexistent">{{ t('标记不存在') }}</button>
+      <button type="button" class="btn ghost" data-location-action="skip">{{ t('暂不判断，直接导航') }}</button>
+    </div>
+    <div class="location-edit-fields" data-location-editor hidden>
+      <label>{{ t('纬度') }}<input name="lat" type="number" step="any" min="-90" max="90" inputmode="decimal"></label>
+      <label>{{ t('经度') }}<input name="lon" type="number" step="any" min="-180" max="180" inputmode="decimal"></label>
+      <button type="button" class="btn primary" data-location-action="save-coordinates">{{ t('保存坐标并导航') }}</button>
+    </div>
+    <p class="location-check-message" role="status" aria-live="polite" data-location-message
+       data-popup-blocked="{{ t('请允许打开新页面后重试。') }}" data-coordinates-required="{{ t('请填写纬度和经度。') }}" data-save-failed="{{ t('保存定位状态失败。') }}"></p>
+    <button type="button" class="btn ghost location-dialog-cancel" data-location-action="cancel">{{ t('取消') }}</button>
+  </div>
+</dialog>
 
 <script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
 <script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>

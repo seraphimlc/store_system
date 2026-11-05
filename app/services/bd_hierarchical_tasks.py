@@ -1,5 +1,6 @@
 """独立批次的任务及快照；只写bd_*，不修改基础片区、网格或商户主档。"""
 import uuid
+import math
 from copy import deepcopy
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -434,8 +435,67 @@ def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',
         ids=[i for i, in ordered.with_entities(BdStoreTask.id)]
         if focus in ids:page=ids.index(focus)//30+1;offset=(page-1)*30
     stores=ordered.offset(offset).limit(31).all()
+    location_map=merchant_location_map(db,[store.store_id for store in stores])
+    for store in stores:
+        current=location_map.get(store.store_id,{})
+        store.location_accuracy=current.get('location_accuracy') or 'pending'
+        store.nav_lat=current.get('lat',store.snapshot.get('lat'))
+        store.nav_lon=current.get('lon',store.snapshot.get('lon'))
     stats=grid_progress_stats(db,grid.id);stats['page']=page
     return main,rt,grid,stores[:30],len(stores)>30,stats
+
+
+def merchant_location_map(db,store_ids):
+    ids=list(dict.fromkeys(str(value) for value in store_ids if value))
+    if not ids or db.bind.dialect.name!='postgresql':return {}
+    query=text('''SELECT place_id,lat,lon,location_accuracy
+        FROM public.kanto_merchants_v20261029 WHERE place_id IN :ids''').bindparams(
+            bindparam('ids',expanding=True))
+    return {row['place_id']:{'lat':row['lat'],'lon':row['lon'],
+                             'location_accuracy':row['location_accuracy']}
+            for row in db.execute(query,{'ids':ids}).mappings()}
+
+
+def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
+    initial=db.get(BdStoreTask,identity)
+    if not initial:raise ops.OperationError('店铺任务不存在')
+    main,_,grid=context(db,user,initial.grid_task_id,lock=True,execute=True)
+    store=ops.locked(db,BdStoreTask,identity)
+    if accuracy not in ('pending','accurate','nonexistent','doubtful'):
+        raise ops.OperationError('定位核实状态无效')
+    if (lat is None)!=(lon is None):raise ops.OperationError('纬度和经度必须同时填写')
+    if lat is not None:
+        try:lat,lon=float(lat),float(lon)
+        except (TypeError,ValueError):raise ops.OperationError('坐标格式无效')
+        if not math.isfinite(lat) or not math.isfinite(lon) or not (-90<=lat<=90 and -180<=lon<=180):
+            raise ops.OperationError('坐标超出有效范围')
+        accuracy='accurate'
+    if main.status=='completed':raise ops.OperationError('该批次已完成，不能修改定位')
+
+    snapshot=deepcopy(store.snapshot or {})
+    old={'location_accuracy':snapshot.get('location_accuracy','pending'),
+         'lat':snapshot.get('lat'),'lon':snapshot.get('lon')}
+    if db.bind.dialect.name=='postgresql':
+        params={'place_id':store.store_id,'accuracy':accuracy,'lat':lat,'lon':lon}
+        sql=text('''UPDATE public.kanto_merchants_v20261029
+            SET location_accuracy=:accuracy,
+                lat=COALESCE(:lat,lat),lon=COALESCE(:lon,lon)
+            WHERE place_id=:place_id''')
+        db.execute(sql,params)
+    if lat is not None:
+        snapshot.update(lat=lat,lon=lon)
+    snapshot['location_accuracy']=accuracy
+    # Keep only unfinished task snapshots aligned with the shared merchant location.
+    if store.status!='completed':
+        store.snapshot=snapshot
+        store.revision+=1
+    store.updated_at=datetime.utcnow()
+    db.flush()
+    ops.audit_log(db,user,'task','verify_store_location',store,old,
+                  {'location_accuracy':accuracy,'lat':lat if lat is not None else old['lat'],
+                   'lon':lon if lon is not None else old['lon']})
+    return {'location_accuracy':accuracy,'lat':lat if lat is not None else old['lat'],
+            'lon':lon if lon is not None else old['lon']}
 
 
 def complete_store(db,user,identity,revision,request_id,status,note):

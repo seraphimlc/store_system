@@ -57,8 +57,11 @@ def test_batch_grid_table_columns_are_name_status_visit_state_and_navigation(cli
     # 定位列 → 谷歌地图搜索位置，不进入路线导航
     nav=re.search(r'<a class="visit-nav" href="([^"]+)"',html).group(1)
     assert 'https://www.google.com/maps/search/?api=1&amp;query=' in nav
-    assert 'query_place_id=' in nav
+    assert 'query_place_id=' not in nav
     assert '/maps/dir/' not in nav
+    assert 'data-location-status' in html and '待核实' in html
+    assert 'id="location-check-dialog"' in html
+    assert '不准确，更新坐标' in html
 
 
 def test_batch_grid_row_click_opens_editable_store_detail(client,seed):
@@ -145,6 +148,37 @@ def test_batch_grid_submit_keeps_the_active_filters(client,seed):
     assert '/my/work/batch-grids/' in location and 'task_state=pending' in location and 'kw=alpha' in location
 
 
+def test_worker_can_update_location_accuracy_and_coordinates(client,seed):
+    with appdb.SessionLocal() as db:
+        task,rt,gt,st=multi_batch(db,seed);db.commit()
+    login(client,'worker')
+    page=client.get(f"/my/work/batch-grids/{gt.id}")
+    response=client.post(f"/my/work/batch-stores/{st.id}/location",data={
+        '_ft':form_token(client),'csrf_token':csrf(page.text),
+        'location_accuracy':'accurate','lat':'35.7','lon':'139.8'})
+    assert response.status_code==200
+    assert response.json()['location_accuracy']=='accurate'
+    assert response.json()['lat']==35.7 and response.json()['lon']==139.8
+    with appdb.SessionLocal() as db:
+        saved=db.get(BdStoreTask,st.id)
+        assert saved.snapshot['lat']==35.7 and saved.snapshot['lon']==139.8
+        assert saved.snapshot['location_accuracy']=='accurate'
+
+
+def test_location_update_rejects_invalid_coordinate_range(client,seed):
+    with appdb.SessionLocal() as db:
+        task,rt,gt,st=multi_batch(db,seed);db.commit()
+    login(client,'worker')
+    page=client.get(f"/my/work/batch-grids/{gt.id}")
+    response=client.post(f"/my/work/batch-stores/{st.id}/location",data={
+        '_ft':form_token(client),'csrf_token':csrf(page.text),
+        'location_accuracy':'accurate','lat':'35.7','lon':'181'})
+    assert response.status_code==409
+    with appdb.SessionLocal() as db:
+        saved=db.get(BdStoreTask,st.id)
+        assert saved.snapshot['lon']==seed['lon']
+
+
 def test_batch_tree_page_filters_grids_by_state_and_keyword(client,seed):
     with appdb.SessionLocal() as db:
         task,rt,gt,st=multi_batch(db,seed);db.commit()
@@ -161,7 +195,7 @@ def test_batch_tree_page_filters_grids_by_state_and_keyword(client,seed):
     assert f'/my/work/batches/{task.id}/regions/{rt.id}' in found
 
 
-def test_batch_grid_location_uses_google_place_id_without_coordinates(client,seed):
+def test_batch_grid_location_requires_coordinates_and_never_uses_place_id(client,seed):
     with appdb.SessionLocal() as db:
         task,rt,gt,st=multi_batch(db,seed)
         st.store_id='ChIJ-test-place'
@@ -169,7 +203,9 @@ def test_batch_grid_location_uses_google_place_id_without_coordinates(client,see
         db.commit()
     login(client,'worker')
     html=client.get(f"/my/work/batch-grids/{gt.id}").text
-    assert 'query=Google+shop&amp;query_place_id=ChIJ-test-place' in html
+    assert 'query_place_id=ChIJ-test-place' not in html
+    assert f'data-store-task-id="{st.id}"' not in html
+    assert 'visit-nav-none' in html
 
 
 def test_google_maps_location_fallbacks():
