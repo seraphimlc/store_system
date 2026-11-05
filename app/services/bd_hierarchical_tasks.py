@@ -15,6 +15,24 @@ STORE_TASK_FILTERS=('completed','pending')
 GRID_TASK_FILTERS=('unassigned','assigned','in_progress','completed')
 
 
+def require_enabled(main):
+    if main.status == 'disabled':
+        raise ops.OperationError('该批次已禁用，不能更新计划或巡店记录')
+
+
+def disable_batch(db, user, task_id, revision):
+    ops.require_admin(user)
+    main = ops.locked(db, BdMainTask, task_id)
+    ops.revision_ok(main, revision)
+    if main.status == 'disabled':
+        return main.id
+    before = {'status': main.status}
+    main.status = 'disabled'
+    main.revision += 1
+    ops.audit_log(db, user, 'task', 'disable_batch', main, before, {'status': 'disabled'})
+    return main.id
+
+
 def task_events(db,user,main_task_id,page=1,limit=50,*,keyword='',actor_id='',
                 team_id='',region_task_id='',grid_task_id='',event_type='',dfrom='',dto=''):
     """Filter batch events and current completion status within the user's present scope."""
@@ -350,6 +368,8 @@ def context(db,user,grid_task_id,*,lock=False,execute=False):
         if grid.assignee_id!=user.id: raise ops.OperationError('不能访问其他网格任务')
         member(db,user,region)
     elif user.role!='admin': captain(db,user,region)
+    if lock or execute:
+        require_enabled(main)
     return main,region,grid
 
 
@@ -359,14 +379,16 @@ def assign_region_task(db,user,identity,team_id,revision):
     if not rt: raise ops.OperationError('片区任务不存在')
     main=ops.locked(db,BdMainTask,rt.main_task_id)
     rt=ops.locked(db,BdRegionTask,identity);ops.revision_ok(rt,revision)
+    require_enabled(main)
     if main.status=='completed': raise ops.OperationError('该批次已完成')
-    leader=ops.captain(db,team_id)
+    leader=ops.captain(db,team_id) if team_id is not None else None
     if rt.team_id!=team_id:
         for grid in db.query(BdGridTask).filter_by(region_task_id=rt.id).order_by(BdGridTask.id).with_for_update():
             grid.assignee_id=None;grid.revision+=1
+            if grid.status!='completed':grid.status='in_progress' if grid.progress else 'pending'
     before={'team_id':rt.team_id,'leader_id':rt.leader_id}
-    rt.team_id=team_id;rt.leader_id=leader.id;rt.revision+=1
-    ops.audit_log(db,user,'task','assign_region_task',rt,before,{'team_id':team_id,'leader_id':leader.id,'main_task_id':main.id})
+    rt.team_id=team_id;rt.leader_id=leader.id if leader else None;rt.revision+=1
+    ops.audit_log(db,user,'task','assign_region_task',rt,before,{'team_id':team_id,'leader_id':rt.leader_id,'main_task_id':main.id})
     return main.id
 
 
@@ -435,8 +457,15 @@ def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',
         ids=[i for i, in ordered.with_entities(BdStoreTask.id)]
         if focus in ids:page=ids.index(focus)//30+1;offset=(page-1)*30
     stores=ordered.offset(offset).limit(31).all()
+    now=datetime.utcnow()
+    last_visits=dict(db.query(BdTaskEvent.store_source_id,func.max(BdTaskEvent.created_at)).filter(
+        BdTaskEvent.store_source_id.in_([store.store_id for store in stores]),
+        BdTaskEvent.event_type.in_(('complete_store_task','update_store_result')),
+        BdTaskEvent.created_at<=now).group_by(BdTaskEvent.store_source_id).all())
     location_map=merchant_location_map(db,[store.store_id for store in stores])
     for store in stores:
+        store.last_visited_at=last_visits.get(store.store_id)
+        store.overdue_60d=store.last_visited_at is not None and store.last_visited_at < now-timedelta(days=60)
         current=location_map.get(store.store_id,{})
         store.location_accuracy=current.get('location_accuracy') or 'pending'
         store.nav_lat=current.get('lat',store.snapshot.get('lat'))
@@ -567,6 +596,7 @@ def complete_store(db,user,identity,revision,request_id,status,note,*,outcome=No
 
 def refresh_progress(db, main):
     """写入与展示使用同一商户数量口径；调用方已持有批次锁。"""
+    require_enabled(main)
     db.flush()
     regions=db.query(BdRegionTask).filter_by(main_task_id=main.id).all()
     grids=db.query(BdGridTask).filter(BdGridTask.region_task_id.in_([r.id for r in regions])).all()
@@ -619,6 +649,7 @@ def bulk_assign(db,user,region_id,selections,target_id):
     rt=db.get(BdRegionTask,region_id)
     if not rt:raise ops.OperationError('片区任务不存在')
     main=ops.locked(db,BdMainTask,rt.main_task_id)
+    require_enabled(main)
     if main.status=='completed':raise ops.OperationError('该批次已完成')
     captain(db,user,rt)
     if not selections or len(selections)>1000:raise ops.OperationError('请选择网格')

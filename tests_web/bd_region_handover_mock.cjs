@@ -42,4 +42,8 @@ h.form.handlers.submit({preventDefault(){submitted=true;}});
 assert.equal(submitted,false,'accepted handover proceeds normally');assert.equal(h.confirms.length,1);
 h.disclosure.handlers.click();assert.equal(h.panel.hidden,false);
 h.disclosure.handlers.click();assert.equal(h.panel.hidden,true);
+h=harness({current:'1',selected:'',answer:false});submitted=false;
+assert.equal(h.button.textContent,'确认交接');
+h.form.handlers.submit({preventDefault(){submitted=true;}});
+assert.equal(submitted,true,'team removal requires confirmation and can be cancelled');
 console.log('region handover: confirm only changed assignments; cancel/accept and inline disclosure pass');

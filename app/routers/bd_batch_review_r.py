@@ -144,7 +144,7 @@ def proposal_list(task_id:int,request:Request,state:str='pending',region:str='',
         owners=db.query(User.id,User.display_name,User.username).filter(User.id.in_(
             query.with_entities(BdStoreProposal.submitted_by).distinct())).all()
         names={identity:display or username for identity,display,username in owners}
-        can_review=any(r['task'].leader_id==user.id for r in tree)
+        can_review=main.status!='disabled' and any(r['task'].leader_id==user.id for r in tree)
         payload=BdStoreProposal.payload
         columns=[getattr(BdStoreProposal,k) for k in ('id','grid_task_id','submitted_by','state','revision','reason','reviewed_by','reviewed_at')]
         page=max(1,page)

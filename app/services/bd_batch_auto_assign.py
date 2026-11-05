@@ -213,6 +213,8 @@ def plan(db, user, region_task_id, *, include_batch=True, use_efficiency=False, 
     main = db.get(BdMainTask, initial.main_task_id)
     rt = db.query(BdRegionTask).filter_by(id=region_task_id).populate_existing().one()
     tasks.captain(db, user, rt)
+    if main:
+        tasks.require_enabled(main)
     if not main or main.status == 'completed' or rt.status == 'completed':
         raise ops.OperationError('已完成批次不能重新分配')
     members = _members(db, rt)

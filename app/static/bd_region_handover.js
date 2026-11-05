@@ -6,7 +6,7 @@
     const button=form.querySelector('button[type="submit"]');
     const current=String(form.dataset.currentTeam||'');
     const update=()=>{
-      const changing=Boolean(current && select.value && select.value!==current);
+      const changing=Boolean(current && select.value!==current);
       button.textContent=changing?button.dataset.transferLabel:button.dataset.defaultLabel;
       button.classList.toggle('is-transfer',changing);
     };

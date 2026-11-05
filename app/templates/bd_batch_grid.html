@@ -18,9 +18,12 @@
   <div class="dispatch-map-stage">
     <div id="work-map" aria-label="{{ t('作业地图') }}"></div>
     <p id="work-map-status" role="status" aria-live="polite"></p>
+    <button type="button" class="work-location-btn" id="work-location" aria-pressed="false">{{ t('跟随我的位置') }}</button>
+    <p id="work-location-status" class="work-location-status" role="status" aria-live="polite"></p>
     <div class="dispatch-map-legend"><span><i class="visited"></i>{{ t('已巡店') }}</span><span><i class="unvisited"></i>{{ t('未巡店') }}</span></div>
   </div>
   <section class="dispatch-list visit-list" aria-label="{{ t('商户列表') }}">
+    {% if task.status=='disabled' %}<div class="msg">{{ t('批次已禁用') }}</div>{% endif %}
     {% if request.query_params.get('msg') %}<div class="msg ok">{{ request.query_params.get('msg') }}</div>{% endif %}
     {# 作业进展：按店铺任务自动统计（不再让队员手填百分比/状态） #}
     <section class="visit-progress" data-testid="visit-progress" aria-label="{{ t('作业进展') }}">
@@ -62,7 +65,7 @@
           {% for s in stores %}
             <tr class="visit-row" id="store-{{ s.id }}" data-store-id="{{ s.id }}" tabindex="0" aria-expanded="false" aria-controls="store-detail-{{ s.id }}">
               <td class="visit-name">{{ s.snapshot.get('name') }}</td>
-              <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
+              <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}{% if s.overdue_60d %}<span class="visit-overdue-tag" title="{{ t('超过60天未巡店') }}">60d</span>{% endif %}</td>
               <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}</td>
               <td class="visit-nav-cell">
                 <span class="visit-location-status location-{{ s.location_accuracy }}" data-location-status>{{ t({'accurate':'准确','nonexistent':'不存在','doubtful':'存疑','pending':'待核实'}.get(s.location_accuracy,'待核实')) }}</span>
@@ -152,7 +155,8 @@
   <button class="btn ghost" type="button" data-photo-choice="file">{{ t('上传文件') }}</button>
 </dialog>
 
-<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
+<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'language':html_lang(),'locate':true,'locationText':{'mine':t('我的位置'),'loading':t('正在获取定位…'),'failed':t('无法获取定位，请检查定位权限后重试。'),'unsupported':t('当前浏览器不支持定位。')},'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
+<script src="/static/bd_work_location.js?v={{ static_ver('bd_work_location.js') }}" defer></script>
 <script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
 <script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
 <script id="visit-editor-config" type="application/json">{{ {'photoLimit':t('每家店铺最多保存3张照片'),'photoSize':t('每张照片须不超过5MB'),'photoType':t('请选择JPEG、PNG或WebP照片'),'remove':t('移除'),'photo':t('店铺照片'),'saving':t('正在保存…'),'failed':t('保存失败，请重试'),'locationSaved':t('位置已保存'),'candidate':t('已找到Google候选地点，请核实'),'ambiguous':t('找到多个Google地点，未自动关联'),'no_match':t('未找到Google地点'),'failedLookup':t('Google地点查询失败，位置已保存'),'unconfigured':t('Google地点查询未配置，位置已保存')}|tojson }}</script>

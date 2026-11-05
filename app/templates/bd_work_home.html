@@ -9,7 +9,7 @@
 {% for batch in batches %}{% set s=summaries.get(batch.id,{'total':0,'done':0,'pct':0}) %}
 <a class="work-batch-row" href="/my/work/batches/{{ batch.id }}">
   <div class="work-batch-name"><h2>{{ batch.title }}</h2><span>#{{ batch.id }}</span></div>
-  <span class="work-status {{ 'is-complete' if batch.status=='completed' else '' }}">{{ t('已完成') if batch.status=='completed' else t('进行中') }}</span>
+  <span class="work-status {{ 'is-complete' if batch.status=='completed' else '' }}">{{ t('已禁用') if batch.status=='disabled' else t('已完成') if batch.status=='completed' else t('进行中') }}</span>
   <div class="work-batch-count"><span>{{ t('已巡 / 总商户') }}</span><strong>{{ s.done }} <small>/ {{ s.total }}</small></strong></div>
   <div class="work-batch-progress"><progress max="100" value="{{ s.pct }}" aria-label="{{ t('进度') }}"></progress><strong>{{ s.pct }}%</strong></div>
   <svg class="work-row-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>

@@ -20,7 +20,7 @@
     <form class="bd-filters batch-region-filters" method="get" data-autosubmit="1">
       <select name="state" aria-label="{{ t('网格状态') }}"><option value="">{{ t('全部网格状态') }}</option>{% for key,label in [('unassigned','未指派'),('assigned','已指派'),('in_progress','进行中'),('completed','已完成')] %}<option value="{{ key }}" {{ 'selected' if state==key else '' }}>{{ t(label) }}</option>{% endfor %}</select>
       <select name="owner" aria-label="{{ t('负责人') }}"><option value="">{{ t('全部负责人') }}</option><option value="unassigned" {{ 'selected' if owner=='unassigned' else '' }}>{{ t('未指派') }}</option>{% for m in members %}<option value="{{ m.id }}" {{ 'selected' if owner==m.id|string else '' }}>{{ m.display_name or m.username }}</option>{% endfor %}</select>
-      {% if current_user.id==item.task.leader_id and task.status!='completed' and members %}<button class="btn" id="batch-auto-open" type="button" aria-haspopup="dialog">{{ t('智能分配') }}</button>{% endif %}
+      {% if current_user.id==item.task.leader_id and task.status not in ('completed','disabled') and members %}<button class="btn" id="batch-auto-open" type="button" aria-haspopup="dialog">{{ t('智能分配') }}</button>{% endif %}
     </form>
     <div class="dispatch-columns" aria-hidden="true"><span>{{ t('名称') }}</span><span>{{ t('状态') }}</span><span>{{ t('进度') }}</span><span>{{ t('负责人') }}</span></div>
     <div class="dispatch-scroll">
@@ -34,7 +34,7 @@
         </button>
         <div class="dispatch-detail" id="grid-detail-{{ g.task.id }}" hidden>
           <p class="dispatch-facts">{{ g.done }} / {{ g.store_count }} {{ t('家商户') }}<span>·</span>{{ '%.2f'|format(g.grid.area_km2) }} km²</p>
-          {% if current_user.id==item.task.leader_id and task.status!='completed' and g.task.status!='completed' %}
+          {% if current_user.id==item.task.leader_id and task.status not in ('completed','disabled') and g.task.status not in ('completed','disabled') %}
           <form method="post" action="/my/work/batch-grids/{{ g.task.id }}/assign" class="dispatch-assignment">
             {{ tokens(g.task.revision) }}<input type="hidden" name="region_back" value="1"><input type="hidden" name="state_filter" value="{{ state }}"><input type="hidden" name="owner_filter" value="{{ owner }}">
             <select name="target_id" required aria-label="{{ t('选择队员') }}"><option value="">{{ t('选择队员') }}</option>{% for m in members %}<option value="{{ m.id }}" {{ 'selected' if m.id==g.task.assignee_id else '' }}>{{ m.display_name or m.username }}</option>{% endfor %}</select>
@@ -47,7 +47,7 @@
     </div>
   </section>
 </section>
-{% if current_user.id==item.task.leader_id and task.status!='completed' and members %}
+{% if current_user.id==item.task.leader_id and task.status not in ('completed','disabled') and members %}
 <div class="batch-auto-backdrop" id="batch-auto-backdrop" hidden></div>
 <aside class="batch-auto-drawer" id="batch-auto-drawer" role="dialog" aria-modal="true" aria-labelledby="batch-auto-title" hidden>
   <header><h2 id="batch-auto-title">{{ t('智能分配') }}</h2><button type="button" class="icon-btn" id="batch-auto-close" aria-label="{{ t('关闭') }}">×</button></header>
