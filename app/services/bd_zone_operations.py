@@ -441,7 +441,8 @@ def zone_grids(db,zone_id,assignee_id=None,*,task_state='',keyword=''):
     query=db.query(BdWorkGrid).filter(BdWorkGrid.zone_id==zone_id)
     if assignee_id is not None:query=query.filter(BdWorkGrid.assignee_id==assignee_id)
     if keyword:
-        conditions=[BdWorkGrid.source_id.contains(keyword)]
+        from app.services.bd_grid_metadata import grid_match
+        conditions=[grid_match(keyword)]
         if keyword.isdigit():conditions.append(BdWorkGrid.id==int(keyword))
         query=query.filter(or_(*conditions))
     grids=query.order_by(BdWorkGrid.id).all()

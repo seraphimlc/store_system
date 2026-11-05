@@ -407,3 +407,67 @@ def test_auto_partition_rejects_preview_if_a_grid_has_since_been_partitioned(cli
         db.rollback()
         assert db.get(BdWorkGrid,left.id).zone_id==seed['zone']
         assert db.get(BdWorkGrid,right.id).zone_id is None
+
+
+@pytest.mark.parametrize('small_zone_threshold', [0, 15])
+def test_auto_partition_recovers_multipart_grid_with_neighbor(client, seed, source_db, small_zone_threshold):
+    rows(source_db, left=20, right=20)
+    with appdb.SessionLocal() as db:
+        left, right = free_grids(db, seed)
+        left.geometry = z.geographic(MultiPolygon([
+            box(0, 0, 1000, 1000), box(2000, 0, 2100, 1000)]))
+        db.commit()
+        original = json.loads(json.dumps(left.geometry))
+        admin = db.get(User, seed['users']['ops-admin'])
+        params = dict(target_basis='grids', target_per_zone=1, max_area_km2=3,
+                      small_zone_threshold=small_zone_threshold,
+                      source_engine=source_db, source_table='merchant_source')
+        report = builder.plan(db, admin, **params)
+        assert report['zone_count'] == 1
+        assert set(report['zones'][0]['grid_ids']) == {left.id, right.id}
+        assert report['zones'][0]['store_count'] == 40
+        assert report['unassigned_grid_ids'] == report['geometry_unassigned'] == []
+        assert left.zone_id is right.zone_id is None
+        applied = builder.plan(db, admin, apply=True, expected_signature=report['signature'], **params)
+        db.commit()
+        assert applied['grids_assigned'] == 2
+        assert left.zone_id == right.zone_id and left.zone_id is not None
+        assert json.loads(json.dumps(left.geometry)) == original
+        assert db.query(BdGridStore).count() == 40
+
+
+def test_geometry_recovery_combines_multiple_neighbors_without_splitting_grids():
+    groups = [
+        {'geom': MultiPolygon([box(0, 0, 1, 1), box(3, 0, 4, 1)]), 'members': {0}, 'count': 20},
+        {'geom': box(1, 0, 2, 1), 'members': {1}, 'count': 20},
+        {'geom': box(2, 0, 3, 1), 'members': {2}, 'count': 20},
+    ]
+    result = builder._merge_geometry_groups(groups, 4, max_stores=60, max_members=3)
+    assert len(result) == 1
+    assert result[0]['members'] == {0, 1, 2} and result[0]['count'] == 60
+    assert result[0]['geom'].equals(box(0, 0, 4, 1))
+    assert [group['members'] for group in groups] == [{0}, {1}, {2}]
+
+
+@pytest.mark.parametrize('limits', [dict(max_area=2), dict(max_area=4, max_stores=59),
+                                  dict(max_area=4, max_members=2)])
+def test_geometry_recovery_keeps_original_groups_when_hard_limits_block_completion(limits):
+    groups = [
+        {'geom': MultiPolygon([box(0, 0, 1000, 1000), box(3000, 0, 4000, 1000)]), 'members': {0}, 'count': 20},
+        {'geom': box(1000, 0, 2000, 1000), 'members': {1}, 'count': 20},
+        {'geom': box(2000, 0, 3000, 1000), 'members': {2}, 'count': 20},
+    ]
+    limits = {**limits, 'max_area': limits['max_area'] * 1_000_000}
+    result = builder._merge_geometry_groups(groups, **limits)
+    assert [(g['members'], g['count']) for g in result] == [({0}, 20), ({1}, 20), ({2}, 20)]
+
+
+@pytest.mark.parametrize('neighbor', [box(1.01, 0, 2, 1), box(1, 1, 2, 2)])
+def test_geometry_recovery_does_not_bridge_real_gaps_or_corner_contacts(neighbor):
+    groups = [
+        {'geom': MultiPolygon([box(0, 0, 1, 1), box(2, 0, 3, 1)]), 'members': {0}, 'count': 20},
+        {'geom': neighbor, 'members': {1}, 'count': 20},
+    ]
+    result = builder._merge_geometry_groups(groups, 10)
+    assert len(result) == 2
+    assert result[0]['geom'].equals(groups[0]['geom'])

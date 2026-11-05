@@ -9,6 +9,7 @@ from app.models import (BdMainTask, BdRegionTask, BdGridTask, BdStoreTask,
                         BdRegion, BdWorkGrid, BdGridStore, BdWorkStore, BdTeam, BdTeamMember, User,
                         BdTaskEvent)
 from app.services import bd_zone_operations as ops
+from app.services import bd_grid_metadata as metadata
 
 STORE_STATUSES=('normal','abnormal','uncertain','closed')
 STORE_TASK_FILTERS=('completed','pending')
@@ -48,7 +49,8 @@ def task_events(db,user,main_task_id,page=1,limit=50,*,keyword='',actor_id='',
             BdTaskEvent.team_label.ilike(like),BdTaskEvent.main_label.ilike(like),
             BdTaskEvent.region_label.ilike(like),BdTaskEvent.grid_label.ilike(like),
             BdTaskEvent.store_label.ilike(like),BdTaskEvent.store_source_id.ilike(like),
-            BdTaskEvent.store_task_id.cast(String).ilike(like)))
+            BdTaskEvent.store_task_id.cast(String).ilike(like),
+            metadata.event_match(db,keyword)))
     if actor_id:
         try:actor_value=int(actor_id)
         except (TypeError,ValueError):actor_value=-1
@@ -229,7 +231,8 @@ def create_main_task(db, user, title, region_ids):
     grid_tasks={}
     for grid in grids:
         gt=BdGridTask(region_task_id=region_tasks[grid.zone_id].id,grid_id=grid.id,
-                      snapshot={'geometry':deepcopy(grid.geometry),'area_km2':grid.area_km2,'source_id':grid.source_id},
+                      snapshot={'geometry':deepcopy(grid.geometry),'area_km2':grid.area_km2,'source_id':grid.source_id,
+                                'name':grid.name,'stations':deepcopy(grid.stations or []),'keywords':deepcopy(grid.keywords or [])},
                       status='pending' if store_counts[grid.id] else 'completed',progress=0 if store_counts[grid.id] else 100)
         db.add(gt);grid_tasks[grid.id]=gt
     db.flush()
@@ -303,30 +306,48 @@ def task_tree(db,user,task_id,*,task_state='',keyword=''):
     """批次任务树 + 列表头筛选（网格作业状态 / 网格编号搜索）。"""
     ops.require_active(user)
     task_state=task_state if task_state in GRID_TASK_FILTERS else ''
-    keyword=(keyword or '')[:100]
+    keyword=(keyword or '').strip()[:100]
     task=db.get(BdMainTask,task_id)
     if not task: raise ops.OperationError('主任务不存在')
     region_query=visible_regions(db,user).filter(BdRegionTask.main_task_id==task_id)
-    region_tasks=region_query.order_by(BdRegionTask.id).all()
+    region_rows=region_query.add_columns(BdRegion.name).outerjoin(
+        BdRegion,BdRegion.id==BdRegionTask.region_id).order_by(BdRegionTask.id).all()
+    region_tasks=[rt for rt,_ in region_rows]
+    current_regions={rt.region_id:name for rt,name in region_rows}
     if user.role!='admin' and not region_tasks: raise ops.OperationError('不能访问其他批次任务')
     region_ids=[rt.id for rt in region_tasks]
     grid_query=db.query(BdGridTask).filter(BdGridTask.region_task_id.in_(region_ids))
     if user.role!='admin':
         leader_regions=[rt.id for rt in region_tasks if rt.leader_id==user.id]
         grid_query=grid_query.filter((BdGridTask.assignee_id==user.id)|BdGridTask.region_task_id.in_(leader_regions))
-    grids=grid_query.order_by(BdGridTask.id).all()
+    grid_rows=grid_query.add_columns(BdWorkGrid.name,BdWorkGrid.stations,BdWorkGrid.keywords,
+        BdWorkGrid.source_id).outerjoin(BdWorkGrid,BdWorkGrid.id==BdGridTask.grid_id).order_by(BdGridTask.id).all()
+    grids=[row[0] for row in grid_rows]
+    current_grids={g.grid_id:{'name':name,'stations':stations,'keywords':keywords,'source_id':source_id}
+                   for g,name,stations,keywords,source_id in grid_rows}
     counts={identity:(count,done or 0) for identity,count,done in db.query(BdStoreTask.grid_task_id,
         func.count(BdStoreTask.id),func.sum(case((BdStoreTask.status=='completed',1),else_=0)))
         .filter(BdStoreTask.grid_task_id.in_([g.id for g in grids])).group_by(BdStoreTask.grid_task_id)}
+    # Current metadata shares the existing queries; historical snapshots remain intact.
+    region_names={rt.id:[current_regions.get(rt.region_id,''),(rt.snapshot or {}).get('name','')] for rt in region_tasks}
     def keep(g):
         if task_state=='unassigned' and g.assignee_id is not None:return False
         if task_state=='assigned' and not (g.assignee_id is not None and g.status in ('pending','assigned')):return False
         if task_state=='in_progress' and g.status!='in_progress':return False
         if task_state=='completed' and g.status!='completed':return False
-        if keyword and keyword not in str(g.grid_id) and keyword not in str(g.id):return False
+        current=current_grids.get(g.grid_id)
+        if keyword and not metadata.matches(keyword, str(g.grid_id), str(g.id),
+                *region_names[g.region_task_id], metadata.search_text(g.snapshot or {}),
+                metadata.search_text(current) if current else ''):return False
         return True
-    result=[{'task':rt,'region':SimpleNamespace(id=rt.region_id,**rt.snapshot),
-             'grids':[{'task':g,'grid':SimpleNamespace(id=g.grid_id,**g.snapshot),
+    def grid_view(g):
+        values=dict(g.snapshot or {})
+        current=current_grids.get(g.grid_id)
+        if current:values.update(name=current['name'],stations=current['stations'],keywords=current['keywords'])
+        return SimpleNamespace(id=g.grid_id,**values)
+    result=[{'task':rt,'region':SimpleNamespace(id=rt.region_id,**{**rt.snapshot,
+                'name':current_regions.get(rt.region_id,rt.snapshot.get('name',''))}),
+             'grids':[{'task':g,'grid':grid_view(g),
                        'store_count':counts.get(g.id,(0,0))[0],'done':counts.get(g.id,(0,0))[1]}
                       for g in grids if g.region_task_id==rt.id and keep(g)]} for rt in region_tasks]
     return task,result

@@ -3,6 +3,17 @@
   'use strict';
   const dialog=document.getElementById('create-batch');
   if(!dialog)return;
+  const search=dialog.querySelector('#batch-region-search');
+  const choices=[...dialog.querySelectorAll('[data-region-search]')];
+  const normalize=value=>value.normalize('NFKC').toLocaleLowerCase();
+  search?.addEventListener('input',()=>{
+    const keyword=normalize(search.value.trim());
+    let visible=0;
+    choices.forEach(row=>{row.hidden=!normalize(row.dataset.regionSearch).includes(keyword);if(!row.hidden)visible++;});
+    dialog.querySelector('#batch-region-empty').hidden=visible!==0;
+  });
+  // Enter in a search field filters choices; it must not create a batch.
+  search?.addEventListener('keydown',event=>{if(event.key==='Enter')event.preventDefault();});
   let opener;
   const open=()=>{if(!dialog.open){opener=document.activeElement;dialog.showModal();dialog.querySelector('input[name="title"]')?.focus();}};
   const clearHash=()=>{if(location.hash==='#create-batch')history.replaceState(null,'',location.pathname+location.search);};

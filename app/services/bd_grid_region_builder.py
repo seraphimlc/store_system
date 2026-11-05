@@ -26,6 +26,58 @@ def _components(graph):
     return result
 
 
+def _merge_geometry_groups(groups, max_area, *, max_stores=None, max_members=None):
+    """Recover disconnected groups using whole shared-edge neighbors before exclusion."""
+    active = {i: {**group, 'members': set(group['members'])}
+              for i, group in enumerate(groups)}
+    while len(active) > 1:
+        keys = sorted(active)
+        tree = STRtree([active[key]['geom'] for key in keys])
+        did_merge = False
+        for key in sorted(keys, key=lambda k: min(active[k]['members'])):
+            source = active[key]
+            if source['geom'].geom_type == 'Polygon' or not source['geom'].is_valid:
+                continue
+            selected = {key}
+            geom, members, count = source['geom'], set(source['members']), source['count']
+            while geom.geom_type != 'Polygon':
+                options = []
+                for raw in tree.query(geom):
+                    other_key = keys[int(raw)]
+                    if other_key in selected:
+                        continue
+                    other = active[other_key]
+                    shared = geom.boundary.intersection(other['geom'].boundary).length
+                    if shared <= .2:
+                        continue
+                    combined_members = members | other['members']
+                    combined_count = count + other['count']
+                    if (geom.area + other['geom'].area > max_area + 1
+                            or max_stores is not None and combined_count > max_stores
+                            or max_members is not None and len(combined_members) > max_members):
+                        continue
+                    combined = union_all([geom, other['geom']], grid_size=.001)
+                    if not combined.is_valid or combined.geom_type not in ('Polygon', 'MultiPolygon'):
+                        continue
+                    parts = 1 if combined.geom_type == 'Polygon' else len(combined.geoms)
+                    # Prefer closing the gap, then the smallest supporting territory.
+                    score = (parts, combined.area, -shared, min(other['members']))
+                    options.append((score, other_key, combined, combined_members, combined_count))
+                if not options:
+                    break
+                _, other_key, geom, members, count = min(options, key=lambda item: item[0])
+                selected.add(other_key)
+            if geom.geom_type == 'Polygon' and geom.is_valid:
+                active[key] = {'geom': geom, 'members': members, 'count': count}
+                for other_key in selected - {key}:
+                    del active[other_key]
+                did_merge = True
+                break
+        if not did_merge:
+            break
+    return list(active.values())
+
+
 def _merge_small_groups(groups, threshold, max_area, *, target_basis, target_per_zone,
                         max_stores=None, max_members=None):
     """Merge whole low-count territories only across real shared edges."""
@@ -171,6 +223,8 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
                               max_stores=max_stores_per_zone,max_members=max_grids_per_zone)
             groups = z._rebalance(groups, part_geoms, part_counts, max_area,
                                   max_stores=max_stores_per_zone,max_members=max_grids_per_zone)
+            groups = _merge_geometry_groups(groups, max_area,
+                max_stores=max_stores_per_zone, max_members=max_grids_per_zone)
             groups,merge_report=_merge_small_groups(groups,small_zone_threshold,max_area,
                 target_basis=target_basis,target_per_zone=target_per_zone,
                 max_stores=max_stores_per_zone,max_members=max_grids_per_zone)

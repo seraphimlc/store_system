@@ -9,7 +9,7 @@
 </section>
 
 <form method="get" action="/my/work/batches/{{ task.id }}/logs" class="task-event-filters">
-  <label>{{ t('关键词') }}<input type="search" name="kw" value="{{ filters.keyword }}" placeholder="{{ t('商户、网格、队员') }}"></label>
+  <label>{{ t('关键词') }}<input type="search" name="kw" value="{{ filters.keyword }}" placeholder="{{ t('商户、网格、队员、车站或关键字') }}"></label>
   <label>{{ t('操作人') }}<select name="actor_id"><option value="">{{ t('全部') }}</option>{% for id,label in actors %}<option value="{{ id }}" {{ 'selected' if filters.actor_id|string==id|string else '' }}>{{ label }}</option>{% endfor %}</select></label>
   <label>{{ t('历史团队') }}<select name="team_id"><option value="">{{ t('全部') }}</option>{% for id,label in teams %}<option value="{{ id }}" {{ 'selected' if filters.team_id|string==id|string else '' }}>{{ label }}</option>{% endfor %}</select></label>
   <label>{{ t('片区') }}<select name="region_task_id"><option value="">{{ t('全部') }}</option>{% for r in regions %}<option value="{{ r.id }}" {{ 'selected' if filters.region_task_id|string==r.id|string else '' }}>{{ r.snapshot.get('name','') }}</option>{% endfor %}</select></label>

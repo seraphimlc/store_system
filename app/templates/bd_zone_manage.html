@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}{{ t('片区管理') }}{% endblock %}
 {% block content %}
+{% if request.query_params.get('msg') %}<div class="msg ok" role="status">{{ t(request.query_params.get('msg')) }}</div>{% endif %}
 <link rel="stylesheet" href="/static/bd_zone_manage.css?v={{ static_ver('bd_zone_manage.css') }}">
 <div class="zone-manager" data-mode="{{ mode }}">
   <header class="zone-workspace-header"><div><h1>{{ t('片区管理') }}</h1><p>{{ t('在地图上选择网格，组合成新的片区。') if mode=='manage' else t('选择片区，查看责任范围并分配给团队。') }}</p></div>

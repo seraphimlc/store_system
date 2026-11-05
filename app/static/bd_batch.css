@@ -16,3 +16,5 @@
 .batch-create fieldset {border:1px solid var(--line);border-radius:6px;margin:18px 0;padding:16px;max-height:340px;overflow:auto}
 .batch-create fieldset label {display:flex;align-items:center;gap:8px;padding:9px 0;font-size:.86rem}
 .batch-create :focus-visible,.batch-store :focus-visible,.batch-grid :focus-visible {outline:2px solid var(--brand);outline-offset:2px}
+
+.batch-create-dialog [data-region-search][hidden]{display:none}

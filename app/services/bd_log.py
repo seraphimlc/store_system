@@ -81,9 +81,17 @@ def _recent_q(db: Session, domain: str = "", kw: str = "", action: str = "",
         q = q.filter(BdLog.domain == domain)
     if kw:
         like = "%" + kw.strip() + "%"
-        q = q.filter(sa.or_(BdLog.actor.like(like),
-                            BdLog.ref_label.like(like),
-                            BdLog.note.like(like)))
+        from app.models import BdWorkGrid, BdRegion, BdTaskEvent
+        from app.services import bd_grid_metadata as metadata
+        event_ref=sa.func.coalesce(BdTaskEvent.store_task_id,BdTaskEvent.grid_task_id,
+                                  BdTaskEvent.region_task_id,BdTaskEvent.main_task_id)
+        matching_event=sa.exists().where(BdTaskEvent.event_type==BdLog.action,
+            event_ref==BdLog.ref_id,metadata.event_match(db,kw.strip()))
+        q = q.filter(sa.or_(BdLog.actor.like(like),BdLog.ref_label.like(like),BdLog.note.like(like),
+            sa.and_(BdLog.domain=='grid',BdLog.ref_id.in_(db.query(BdWorkGrid.id).filter(metadata.grid_match(kw.strip())))),
+            sa.and_(BdLog.domain=='zone',BdLog.ref_id.in_(db.query(BdRegion.id).filter(
+                metadata.literal_match(BdRegion.name,kw.strip())))),
+            sa.and_(BdLog.domain=='task',matching_event)))
     if action:
         q = q.filter(BdLog.action == action)
     # ⚠️ created_at 存的是 **UTC**，页面显示 JST（+9）→ 用户按 JST 填的日期要换算

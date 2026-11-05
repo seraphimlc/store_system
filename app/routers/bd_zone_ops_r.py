@@ -65,8 +65,11 @@ def task_list(request:Request,user:Optional[User]=Depends(work_login),db:Session
     try:ops.require_admin(user)
     except ops.OperationError as exc:return error(exc)
     regions=db.query(BdZone).filter(BdZone.state!='archived').order_by(BdZone.id).all()
+    from app.services.bd_grid_metadata import region_search_texts
+    search_texts=region_search_texts(db,[r.id for r in regions])
     tasks=db.query(BdMainTask).order_by(BdMainTask.id.desc()).all()
-    return render(request,user,'bd_main_tasks.html',regions=regions,tasks=tasks,summaries=task_ops.batch_summaries(db,user,tasks))
+    return render(request,user,'bd_main_tasks.html',regions=regions,region_search=search_texts,
+                  tasks=tasks,summaries=task_ops.batch_summaries(db,user,tasks))
 
 
 @router.post('/zone-tasks')
@@ -163,7 +166,8 @@ def batch_grid_page(identity:int,request:Request,page:int=1,kw:str='',task_state
              'visited':s.status=='completed'} for s in grid_stores]
     if resubmit:
         return RedirectResponse(f'/my/work/batch-grids/{identity}/new-store?'+urlencode(dict(request.query_params)),303)
-    return render(request,user,'bd_batch_grid.html',task=main,region_task=rt,grid=grid,stores=stores,more=more,
+    grid_name=db.query(BdWorkGrid.name).filter(BdWorkGrid.id==grid.grid_id).scalar() or grid.snapshot.get('name','')
+    return render(request,user,'bd_batch_grid.html',task=main,region_task=rt,grid=grid,grid_name=grid_name,stores=stores,more=more,
                   page=stats['page'],kw=kw,task_state=task_state,status=status,stats=stats,sort=sort,direction=direction,can_execute=grid.assignee_id==user.id and main.status!='completed',
                   geometry=geometry,points=points,nonce_for=lambda:str(uuid.uuid4()))
 
@@ -315,6 +319,20 @@ def zone_panel(zone_id:int,request:Request,user:Optional[User]=Depends(work_logi
         detail=ops.management_detail(db,user,zone_id)
     except ops.OperationError as e:return error(e,404 if user.role=='admin' else 403)
     return render(request,user,'bd_zone_panel.html',**context,**detail)
+
+
+@router.post('/zones/{zone_id}/rename')
+def zone_rename(zone_id:int,request:Request,name:str=Form(...),revision:int=Form(...),csrf_token:str=Form(''),
+                user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    from app.services.bd_grid_metadata import rename_region
+    from app.routers.bd_r import _with_msg
+    try:
+        post_guard(request,user,csrf_token)
+        rename_region(db,user,zone_id,name,revision);db.commit()
+    except ops.OperationError as exc:
+        db.rollback();return error(exc,409)
+    location=zone_location(db,zone_id)
+    return RedirectResponse(_with_msg(location,'msg','片区名称已保存',default=location),status_code=303)
 
 
 @router.post('/zones/formal-generate')

@@ -27,7 +27,7 @@
       {% for g in children %}
       <article class="dispatch-grid" id="grid-{{ g.task.id }}">
         <button class="dispatch-row" type="button" data-grid-id="{{ g.task.id }}" aria-expanded="false" aria-controls="grid-detail-{{ g.task.id }}">
-          <span class="dispatch-grid-name">{{ t('网格') }} #{{ g.grid.id }}</span>
+          <span class="dispatch-grid-name">{{ g.grid.name|default(t('网格'),true) }} #{{ g.grid.id }}</span>
           <span class="dispatch-state">{{ t({'completed':'已完成','in_progress':'进行中','assigned':'已指派'}.get(g.task.status,'未指派')) }}</span>
           <span class="dispatch-progress">{{ g.done*100//g.store_count if g.store_count else 0 }}%</span>
           <span class="dispatch-owner" title="{{ names.get(g.task.assignee_id,t('未指派')) }}">{{ names.get(g.task.assignee_id,t('未指派')) }}</span>
