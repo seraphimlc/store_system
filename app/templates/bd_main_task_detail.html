@@ -8,9 +8,10 @@
 <link rel="stylesheet" href="/static/bd_batch_detail.css?v={{ static_ver('bd_batch_detail.css') }}">
 <div class="batch-detail">
   <header class="batch-header">
-    <div class="batch-title-line"><span class="batch-status {{ 'is-complete' if task.status=='completed' else '' }}"><i aria-hidden="true"></i>{{ t('已完成') if task.status=='completed' else t('进行中') }}</span><span class="batch-id">#{{ task.id }}</span></div>
+    <div class="batch-title-line"><span class="batch-status {{ 'is-complete' if task.status=='completed' else '' }}"><i aria-hidden="true"></i>{{ t('已禁用') if task.status=='disabled' else t('已完成') if task.status=='completed' else t('进行中') }}</span><span class="batch-id">#{{ task.id }}</span></div>
     {# 批次日志入口放在**批次详情**里（紧邻「新店核实」），不再塞进手机顶栏 #}
     <div class="batch-header-actions">
+      {% if current_user.role=='admin' and task.status!='disabled' %}<form method="post" action="/zone-tasks/{{ task.id }}/disable" onsubmit="return confirm(this.dataset.confirm)" data-confirm="{{ t('禁用后将禁止更新该批次的片区、网格计划和巡店记录，确认禁用？') }}">{{ tokens(task.revision) }}<button class="btn ghost" type="submit">{{ t('禁用批次') }}</button></form>{% endif %}
       <a class="btn ghost batch-logs" href="/my/work/batches/{{ task.id }}/logs"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg>{{ t('批次日志') }}</a>
       <a class="btn ghost batch-review" href="/my/work/batches/{{ task.id }}/new-stores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v13H4zM7 2v4m6-4v4M7 10l2 2 4-4"/></svg>{{ t('新店核实') }}</a>
     </div>
@@ -45,10 +46,10 @@
       <span class="batch-region-chevron" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m7 4 6 6-6 6"/></svg></span>
       <span class="batch-region-name">{{ item.region.name }}</span>
     </button>
-    {% if task.status!='completed' %}
+    {% if task.status not in ('completed','disabled') %}
     <form method="post" action="/zone-tasks/regions/{{ item.task.id }}/assign" class="batch-region-handover" data-current-team="{{ item.task.team_id or '' }}" data-current-team-name="{{ item.team_name or '' }}" data-confirm-message="{{ t('更换团队将清除该片区所有网格的现有队员分配。确认将「{old}」更换为「{new}」吗？') }}" data-transfer-label="{{ t('确认交接') }}">
       {{ tokens(item.task.revision) }}
-      <select name="team_id" required aria-label="{{ t('负责团队') }}"><option value="">{{ t('选择团队') }}</option>{% for tm in teams %}<option value="{{ tm.id }}" {{ 'selected' if tm.id==item.task.team_id else '' }}>{{ tm.name }}</option>{% endfor %}</select>
+      <select name="team_id" aria-label="{{ t('负责团队') }}"><option value="">{{ t('取消团队归属') if item.task.team_id else t('未指派') }}</option>{% for tm in teams %}<option value="{{ tm.id }}" {{ 'selected' if tm.id==item.task.team_id else '' }}>{{ tm.name }}</option>{% endfor %}</select>
       <button class="btn ghost" type="submit">{{ t('更新团队') if item.task.team_id else t('分配团队') }}</button>
     </form>
     {% else %}<span class="batch-region-team">{{ item.team_name or t('未指派') }}</span>{% endif %}

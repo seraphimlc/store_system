@@ -16,6 +16,8 @@ from app.services import bd_zone_operations as ops,bd_zones
 from app.services import bd_grid_regions
 from app.services import bd_hierarchical_tasks as task_ops
 from app.templating import get_templates
+from app.routers.bd_r import _with_msg
+from app.i18n import translate as t
 
 router=APIRouter(dependencies=[Depends(require_form_token)])
 templates=get_templates()
@@ -122,12 +124,24 @@ def work_batch(task_id:int,request:Request,state:str='',kw:str='',
     return task_detail(task_id,request,state,kw,user,db)
 
 
+@router.post('/zone-tasks/{task_id}/disable')
+def batch_disable(task_id:int,request:Request,revision:int=Form(...),csrf_token:str=Form(''),
+                  user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    try:
+        post_guard(request,user,csrf_token)
+        task_ops.disable_batch(db,user,task_id,revision);db.commit()
+    except ops.OperationError as exc:db.rollback();return error(exc,409)
+    return RedirectResponse(_with_msg(f'/zone-tasks/{task_id}','msg',t('批次已禁用')),status_code=303)
+
+
 @router.post('/zone-tasks/regions/{identity}/assign')
-def batch_region_assign(identity:int,request:Request,team_id:int=Form(...),revision:int=Form(...),csrf_token:str=Form(''),
+def batch_region_assign(identity:int,request:Request,team_id:str=Form(''),revision:int=Form(...),csrf_token:str=Form(''),
                         user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
     try:
         post_guard(request,user,csrf_token)
-        task_id=task_ops.assign_region_task(db,user,identity,team_id,revision);db.commit()
+        try: selected_team=int(team_id) if team_id else None
+        except ValueError:raise ops.OperationError('团队选择无效')
+        task_id=task_ops.assign_region_task(db,user,identity,selected_team,revision);db.commit()
     except ops.OperationError as exc:db.rollback();return error(exc,409)
     return RedirectResponse(f'/zone-tasks/{task_id}',status_code=303)
 
@@ -168,7 +182,7 @@ def batch_grid_page(identity:int,request:Request,page:int=1,kw:str='',task_state
         return RedirectResponse(f'/my/work/batch-grids/{identity}/new-store?'+urlencode(dict(request.query_params)),303)
     grid_name=db.query(BdWorkGrid.name).filter(BdWorkGrid.id==grid.grid_id).scalar() or grid.snapshot.get('name','')
     return render(request,user,'bd_batch_grid.html',task=main,region_task=rt,grid=grid,grid_name=grid_name,stores=stores,more=more,
-                  page=stats['page'],kw=kw,task_state=task_state,status=status,stats=stats,sort=sort,direction=direction,can_execute=grid.assignee_id==user.id and main.status!='completed',
+                  page=stats['page'],kw=kw,task_state=task_state,status=status,stats=stats,sort=sort,direction=direction,can_execute=grid.assignee_id==user.id and main.status not in ('completed','disabled'),
                   geometry=geometry,points=points,nonce_for=lambda:str(uuid.uuid4()))
 
 

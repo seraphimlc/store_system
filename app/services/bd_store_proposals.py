@@ -65,6 +65,7 @@ def visible(db,user,task_id):
 def review(db,user,task_id,selections,action,reason=''):
     main=ops.locked(db,BdMainTask,task_id)
     if not main:raise ops.OperationError('批次不存在')
+    tasks.require_enabled(main)
     if action not in ('approve','reject') or not selections or len(selections)>200:
         raise ops.OperationError('请选择有效核实操作')
     if len(reason)>500 or action=='reject' and not reason.strip():raise ops.OperationError('驳回须填写原因')

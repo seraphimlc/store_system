@@ -24,7 +24,7 @@ from app.templating import get_templates
 
 #: 允许回跳的本站前缀（防开放重定向：必须是本站路径、不能是 `//host` 或带换行）
 _SAFE_BACK_PREFIXES = ("/tasks", "/my/tasks", "/my/report", "/my/perf", "/my/plan",
-                       "/my/leave", "/messages")
+                       "/my/leave", "/messages", "/zone-tasks")
 
 
 def _safe_back(back: str, default: str) -> str:

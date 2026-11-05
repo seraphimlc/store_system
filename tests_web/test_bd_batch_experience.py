@@ -190,7 +190,7 @@ def test_admin_region_team_handover_is_inline_and_names_reset_effect(client,seed
     assert f'action="/zone-tasks/regions/{rid}/assign"' in row
     assert 'data-current-team="' in row and 'data-confirm-message=' in row
     assert 'batch-region-handover' in row and 'name="revision"' in row
-    assert '选择团队' in row and '更新团队' in row
+    assert '取消团队归属' in row and '更新团队' in row
     content=row.split('<div class="batch-region-content"',1)[1]
     assert 'batch-region-handover' not in content
     assert '清除该片区所有网格的现有队员分配' in row
