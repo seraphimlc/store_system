@@ -61,6 +61,10 @@ a:hover { text-decoration: underline; }
   .topbar .topnav .spacer { display: none; }
   .topbar .topnav .logout-form { padding: .7rem .9rem 0; }
   .topbar .topnav .logout { width: 100%; }
+  /* 手机端导航栏标题**由页面决定**：页面给了标题就让品牌名让位，
+     顶栏只留「返回 + 页面标题 + 汉堡」；PC 端不受影响（品牌名照常显示）。 */
+  .topbar:has(.mobile-navigation-title .dispatch-title) .topbar-brand,
+  .topbar:has(.mobile-navigation-title .work-nav-title) .topbar-brand { display: none; }
 }
 
 main.wrap { max-width: 1180px; margin: 0 auto; padding: 1.4rem 1.5rem 3rem; }

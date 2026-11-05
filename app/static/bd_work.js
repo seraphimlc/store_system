@@ -3,13 +3,26 @@
   'use strict';
   const config=JSON.parse(document.getElementById('work-map-config').textContent);
   const notice=document.getElementById('work-map-status');
+  const assignmentColors=['#1769aa','#a33b20','#39754a','#7545a1','#a26a00','#147d78','#b13c73','#5b6470'];
+  let mapLayer, previewStyle, previewOwnerColors={};
+  window.setBatchGridAssignmentPreview=assignments=>{
+    window.batchGridAssignmentPreview=assignments;
+    const owners=[...new Set(Object.values(assignments||{}))].sort((a,b)=>a-b);
+    const colors=new Map(owners.map((owner,index)=>[owner,assignmentColors[index%assignmentColors.length]]));
+    previewOwnerColors=Object.fromEntries(Object.entries(assignments||{}).map(([grid,owner])=>[grid,colors.get(owner)]));
+    if(mapLayer&&previewStyle)mapLayer.setStyle(previewStyle);
+  };
   window.gm_authFailure=()=>{notice.textContent=config.error;};
   window.initWorkMap=()=>{
     const map=new google.maps.Map(document.getElementById('work-map'),{center:{lat:35.68,lng:139.76},zoom:11,mapTypeControl:false,streetViewControl:false});
-    const layer=new google.maps.Data({map});layer.addGeoJson(config.geometry);
+    const layer=new google.maps.Data({map});mapLayer=layer;layer.addGeoJson(config.geometry);
     let selectedGrid=window.dispatchSelectedGrid ?? null;
     const dispatch=Boolean(config.dispatch);
-    const fillStyle=f=>({fillColor:dispatch?(f.getProperty('assigned')?'#2463b5':'#d59a27'):(f.getProperty('review')?'#a65f00':f.getProperty('assigned')?'#225fa2':'#2c7751'),fillOpacity:dispatch?.32:.25,strokeWeight:0});
+    const fillStyle=f=>{
+      const color=previewOwnerColors[String(f.getProperty('id'))];
+      return {fillColor:color||(dispatch?(f.getProperty('assigned')?'#2463b5':'#d59a27'):(f.getProperty('review')?'#a65f00':f.getProperty('assigned')?'#225fa2':'#2c7751')),fillOpacity:dispatch?.32:.25,strokeWeight:0};
+    };
+    previewStyle=fillStyle;
     layer.setStyle(fillStyle);
     const outlines=new google.maps.Data({map});
     outlines.addGeoJson({type:'FeatureCollection',features:config.geometry.features.map(f=>({type:'Feature',geometry:{type:'MultiLineString',coordinates:(f.geometry.type==='Polygon'?[f.geometry.coordinates]:f.geometry.coordinates).map(r=>r[0])},properties:f.properties}))});

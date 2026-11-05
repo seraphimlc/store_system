@@ -75,7 +75,7 @@ body:has(.zone-manager) main.wrap { max-width: none; padding: 20px 24px; }
 @media (forced-colors: active) { .zone-grid-toggle input { appearance: auto; } }
 
 .zone-region-tools { position: absolute; top: 16px; right: 16px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
-.zone-region-tools form { display: flex; align-items: center; gap: 8px; margin: 0; }
+.zone-region-tools form { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
 .zone-region-tools select { width: 130px; }
 .zone-map-tools { top: 82px; left: auto; right: 16px; }
 .zone-hover-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 10px; }

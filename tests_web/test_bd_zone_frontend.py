@@ -45,15 +45,17 @@ class Data {
  setStyle(style){this.style=style;}
  addListener(name,handler){this.handlers[name]=handler;}
 }
-const context={URL,URLSearchParams,window:{},document:{
+const context={URL,URLSearchParams,location:{href:'https://example.test/'},window:{},document:{
  getElementById(id){return elements[id];},createElement(){return {};},head:{append(node){appended=node;}}},
- google:{maps:{Data,SymbolPath:{CIRCLE:'circle'},Map:class {fitBounds(){}},
+ google:{maps:{Data,SymbolPath:{CIRCLE:'circle'},Map:class {fitBounds(){} addListener(){}},
  LatLngBounds:class {extend(){} isEmpty(){return false;}}}}};
 vm.runInNewContext(fs.readFileSync('app/static/bd_work.js','utf8'),context);
 assert.ok(appended.src.startsWith('https://maps.googleapis.com/maps/api/js?'));
+context.window.setBatchGridAssignmentPreview({'12':7});
 context.window.initWorkMap();
 assert.equal(layers.length,3);
 const polygons=layers[0],shops=layers[2];
+assert.equal(polygons.style({getProperty(){return 12;}}).fillColor,'#1769aa');
 assert.equal(shops.features.length,1);
 assert.equal(shops.features[0].properties.store_id,shopId);
 shops.handlers.click({feature:{getProperty(key){return shops.features[0].properties[key];}}});
@@ -65,4 +67,11 @@ assert.equal(elements['work-map-status'].textContent,'map-error');
 console.log('H5 map: grid selection, store selection and auth failure passed');
 '''
     result=subprocess.run(['node','-e',script],text=True,capture_output=True,timeout=15)
+    assert result.returncode==0,result.stderr
+
+
+def test_ai_assignment_drawer_rejects_stale_response_and_submits_signed_decision():
+    if not shutil.which('node'):
+        pytest.skip('Node is required for frontend script verification')
+    result=subprocess.run(['node','tests_web/bd_batch_auto_ai_mock.cjs'],text=True,capture_output=True,timeout=15)
     assert result.returncode==0,result.stderr

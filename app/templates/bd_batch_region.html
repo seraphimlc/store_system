@@ -4,11 +4,11 @@
 {% block page_head %}
 <link rel="stylesheet" href="/static/bd_dispatch.css?v={{ static_ver('bd_dispatch.css') }}">
 <link rel="stylesheet" href="/static/bd_tasks.css?v={{ static_ver('bd_tasks.css') }}">
+<link rel="stylesheet" href="/static/bd_batch_auto_assign.css?v={{ static_ver('bd_batch_auto_assign.css') }}">
 {% endblock %}
 {% block navigation_title %}
 <a class="dispatch-back" href="/my/work/batches/{{ task.id }}" aria-label="{{ t('返回') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></a>
 <h1 class="dispatch-title">{{ item.region.name }}</h1>
-<a class="btn ghost" href="/my/work/batches/{{ task.id }}/logs">{{ t('批次日志') }}</a>
 {% endblock %}
 {% macro tokens(revision) %}<input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><input type="hidden" name="revision" value="{{ revision }}">{% endmacro %}
 {% block content %}
@@ -20,6 +20,7 @@
     <form class="bd-filters batch-region-filters" method="get" data-autosubmit="1">
       <select name="state" aria-label="{{ t('网格状态') }}"><option value="">{{ t('全部网格状态') }}</option>{% for key,label in [('unassigned','未指派'),('assigned','已指派'),('in_progress','进行中'),('completed','已完成')] %}<option value="{{ key }}" {{ 'selected' if state==key else '' }}>{{ t(label) }}</option>{% endfor %}</select>
       <select name="owner" aria-label="{{ t('负责人') }}"><option value="">{{ t('全部负责人') }}</option><option value="unassigned" {{ 'selected' if owner=='unassigned' else '' }}>{{ t('未指派') }}</option>{% for m in members %}<option value="{{ m.id }}" {{ 'selected' if owner==m.id|string else '' }}>{{ m.display_name or m.username }}</option>{% endfor %}</select>
+      {% if current_user.id==item.task.leader_id and task.status!='completed' and members %}<button class="btn" id="batch-auto-open" type="button" aria-haspopup="dialog">{{ t('智能分配') }}</button>{% endif %}
     </form>
     <div class="dispatch-columns" aria-hidden="true"><span>{{ t('名称') }}</span><span>{{ t('状态') }}</span><span>{{ t('进度') }}</span><span>{{ t('负责人') }}</span></div>
     <div class="dispatch-scroll">
@@ -46,6 +47,25 @@
     </div>
   </section>
 </section>
+{% if current_user.id==item.task.leader_id and task.status!='completed' and members %}
+<div class="batch-auto-backdrop" id="batch-auto-backdrop" hidden></div>
+<aside class="batch-auto-drawer" id="batch-auto-drawer" role="dialog" aria-modal="true" aria-labelledby="batch-auto-title" hidden>
+  <header><h2 id="batch-auto-title">{{ t('智能分配') }}</h2><button type="button" class="icon-btn" id="batch-auto-close" aria-label="{{ t('关闭') }}">×</button></header>
+  <div class="batch-auto-content">
+    <fieldset><legend>{{ t('参与分配的队员') }}</legend><div class="batch-auto-members">
+      {% for m in members %}<label><input type="checkbox" name="auto_member" value="{{ m.id }}" checked><span>{{ m.display_name or m.username }}</span></label>{% endfor %}
+    </div></fieldset>
+    <label class="batch-auto-option"><input type="checkbox" id="batch-auto-load" checked><span>{{ t('考虑同批次其他片区进行中任务') }}</span></label>
+    <label class="batch-auto-option"><input type="checkbox" id="batch-auto-efficiency"><span>{{ t('按历史效率调整任务量') }}<small>{{ t('按近60天日均完成量估算，样本不足按均衡处理。') }}</small></span></label>
+    <p class="batch-auto-help">{{ t('AI综合负载与空间连续性生成建议，预览确认后才会分配。已完成网格保持不变。') }}</p>
+    <button type="button" class="btn" id="batch-auto-preview">{{ t('生成预览') }}</button>
+    <div id="batch-auto-result" role="status" aria-live="polite" hidden></div>
+  </div>
+  <footer class="batch-auto-footer" id="batch-auto-footer" hidden><button type="button" class="btn" id="batch-auto-apply" disabled hidden>{{ t('确认分配') }}</button></footer>
+</aside>
+<script id="batch-auto-config" type="application/json">{{ {'csrf':request.state.csrf,'regionTaskId':item.task.id,'texts':{'resultTitle':t('分配预览'),'member':t('队员'),'gridsLabel':t('网格数'),'pendingLabel':t('待办商户'),'aiReason':t('AI分配理由'),'aiWeight':t('AI容量权重'),'working':t('AI正在生成分配方案…'),'preview':t('生成预览'),'failed':t('AI分配方案生成失败'),'applyFailed':t('应用失败'),'none':t('请至少选择一名队员'),'confirm':t('确认应用此分配方案？'),'done':t('已分配'),'grid':t('个网格'),'stores':t('家待办商户'),'otherLoad':t('其他片区待办'),'efficiency':t('效率系数'),'locked':t('个已完成网格保持不变')}}|tojson }}</script>
+<script src="/static/bd_batch_auto_assign.js?v={{ static_ver('bd_batch_auto_assign.js') }}" defer></script>
+{% endif %}
 <script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':[],'dispatch':true,'language':html_lang(),'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
 <script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
 <script src="/static/bd_task_region.js?v={{ static_ver('bd_task_region.js') }}" defer></script>

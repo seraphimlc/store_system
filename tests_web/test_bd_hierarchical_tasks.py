@@ -1,9 +1,14 @@
 """批次四级任务：隔离、权限、快照及店铺完成后的逐级汇总。"""
 import uuid
+import json
+from types import SimpleNamespace
 import pytest
+from shapely.geometry import box, mapping
 from app.models import (User,BdRegion,BdWorkGrid,BdMainTask,BdRegionTask,BdGridTask,BdStoreTask,BdWorkStore)
+from app.models import BdTaskEvent
 import app.db as appdb
 from app.services import bd_hierarchical_tasks as tasks,bd_zone_operations as ops
+from app.services import bd_batch_auto_assign as auto_assign
 from tests_web.test_bd_zone_operations import seed,login,csrf
 from tests.helpers import form_token
 
@@ -18,6 +23,57 @@ def batch(db,seed,title='巡店批次'):
     db.flush()
     st=db.query(BdStoreTask).filter_by(grid_task_id=gt.id).order_by(BdStoreTask.id).first()
     return task,rt,gt,st
+
+
+@pytest.fixture
+def mock_assign_ai(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(auto_assign.ai_chat, 'configured', lambda: True)
+    def chat(prompt, **kwargs):
+        calls.append(prompt)
+        payload=json.loads(prompt.split('\n',1)[1])
+        return json.dumps({'weights': {str(m['member_id']):1.0 for m in payload['members']},
+                           'reason':'综合当前负载和空间分布，保持均衡容量。'})
+    monkeypatch.setattr(auto_assign.ai_chat, 'chat', chat)
+    return calls
+
+
+def test_auto_assign_preview_apply_keeps_batch_isolated_and_rejects_stale_plan(seed,mock_assign_ai):
+    with appdb.SessionLocal() as db:
+        main,rt,gt,_=batch(db,seed)
+        captain=db.get(User,seed['users']['captain'])
+        other_member=seed['users']['next-worker']
+        gt.assignee_id=other_member
+        gt.revision+=1
+        preview=auto_assign.plan(db,captain,rt.id,include_batch=True,use_efficiency=False,
+                                 member_ids=[seed['users']['worker'],other_member])
+        assert preview['grid_count']==1
+        assert preview['assignments'][str(gt.id)]==seed['users']['worker']
+        assert sum(member['grid_count'] for member in preview['members'])==1
+        gt.revision+=1
+        with pytest.raises(ops.OperationError,match='预览数据已变化'):
+            auto_assign.apply(db,captain,rt.id,preview['signature'],ai_decision=preview['ai_decision'],include_batch=True,
+                              use_efficiency=False,
+                              member_ids=[seed['users']['worker'],other_member])
+        preview=auto_assign.plan(db,captain,rt.id,member_ids=[seed['users']['worker'],other_member])
+        auto_assign.apply(db,captain,rt.id,preview['signature'],ai_decision=preview['ai_decision'],member_ids=[seed['users']['worker'],other_member])
+        assert len(mock_assign_ai)==2  # Applying a preview never invokes the model.
+        assert gt.assignee_id==seed['users']['worker']
+        assert db.get(BdWorkGrid,seed['grid']).assignee_id is None
+        assert db.query(BdTaskEvent).filter_by(event_type='auto_assign_grid').count()==1
+        db.commit()
+
+
+def test_auto_assign_keeps_each_members_grids_edge_connected():
+    rows=[(SimpleNamespace(id=identity,snapshot={'geometry':mapping(box(identity,0,identity+1,1))}),
+           None,10) for identity in range(6)]
+    members=[SimpleNamespace(id=101),SimpleNamespace(id=102)]
+    assignments=auto_assign._solve(rows,members,{101:0,102:0},{101:1,102:1},False)
+    for owner in (101,102):
+        owned=sorted(identity for identity,assigned_to in assignments.items() if assigned_to==owner)
+        assert owned and owned==list(range(owned[0],owned[-1]+1))
+    assert abs(sum(owner==101 for owner in assignments.values())-
+               sum(owner==102 for owner in assignments.values()))<=1
 
 
 def test_batch_isolated_results_rollup_immutable_snapshots_and_retry(seed):
@@ -66,7 +122,7 @@ def test_creation_missing_store_fails_before_any_task_write(seed):
         assert db.query(BdMainTask).count()==0
 
 
-def test_http_admin_create_leader_dispatch_worker_complete(client,seed):
+def test_http_admin_create_leader_dispatch_worker_complete(client,seed,mock_assign_ai):
     login(client,'ops-admin')
     page=client.get('/zone-tasks')
     assert page.status_code==200 and 'name="region_ids"' in page.text
@@ -85,6 +141,15 @@ def test_http_admin_create_leader_dispatch_worker_complete(client,seed):
     assert page.status_code==200 and f'/regions/{rid}' in page.text
     region_page=client.get(f'/my/work/batches/{identity}/regions/{rid}')
     assert region_page.status_code==200 and 'name="target_id"' in region_page.text
+    assert '智能分配' in region_page.text and 'batch-auto-drawer' in region_page.text
+    body={'csrf_token':csrf(region_page.text),'member_ids':[seed['users']['worker'],seed['users']['next-worker']],
+          'include_batch':True,'use_efficiency':False}
+    preview=client.post(f'/my/work/batch-regions/{rid}/auto-preview',json=body)
+    assert preview.status_code==200 and preview.json()['grid_count']==1
+    assert preview.json()['assignments']
+    applied=client.post(f'/my/work/batch-regions/{rid}/auto-apply',
+        json={**body,'signature':preview.json()['signature'],'ai_decision':preview.json()['ai_decision']})
+    assert applied.status_code==200 and applied.json()['ok']
     with appdb.SessionLocal() as db:
         grid_task=db.query(BdGridTask).one();gid=grid_task.id;grid_revision=grid_task.revision
     dispatched=client.post(f'/my/work/batch-grids/{gid}/assign',data={'_ft':form_token(client),
@@ -204,3 +269,88 @@ def test_hierarchy_migration_matches_model_schema_and_reverts():
                 index.name for index in Base.metadata.tables[table].indexes}
         migration.downgrade()
         assert not set(tables)&set(inspect(connection).get_table_names())
+
+
+def test_ai_weights_change_actual_contiguous_assignment():
+    rows=[(SimpleNamespace(id=i,snapshot={'geometry':mapping(box(i,0,i+1,1))}),None,10)
+          for i in range(12)]
+    members=[SimpleNamespace(id=101),SimpleNamespace(id=102)]
+    base=auto_assign._solve(rows,members,{101:0,102:0},{101:1,102:1},False)
+    tilted=auto_assign._solve(rows,members,{101:0,102:0},{101:1,102:1},False,
+                              {'101':.75,'102':1.25})
+    assert tilted!=base
+    assert sum(owner==102 for owner in tilted.values())>sum(owner==102 for owner in base.values())
+    for owner in (101,102):
+        owned=sorted(grid for grid,assigned in tilted.items() if assigned==owner)
+        assert owned==list(range(owned[0],owned[-1]+1))
+
+
+def test_ai_missing_config_and_provider_failure_never_silently_fallback(seed,monkeypatch):
+    with appdb.SessionLocal() as db:
+        _,rt,_,_=batch(db,seed)
+        user=db.get(User,seed['users']['captain'])
+        monkeypatch.setattr(auto_assign.ai_chat,'configured',lambda:False)
+        with pytest.raises(ops.OperationError,match='AI未配置'):
+            auto_assign.plan(db,user,rt.id)
+        monkeypatch.setattr(auto_assign.ai_chat,'configured',lambda:True)
+        def fail(*args,**kwargs):raise RuntimeError('secret-provider-details')
+        monkeypatch.setattr(auto_assign.ai_chat,'chat',fail)
+        with pytest.raises(ops.OperationError,match='未自动回退') as exc:
+            auto_assign.plan(db,user,rt.id)
+        assert 'secret-provider-details' not in str(exc.value)
+        assert db.query(BdTaskEvent).filter_by(event_type='auto_assign_grid').count()==0
+
+
+@pytest.mark.parametrize('bad_weights',[{'999':1}, {}, {'3':True}, {'3':float('nan')}, {'3':4}])
+def test_ai_rejects_invalid_member_or_weight(bad_weights):
+    with pytest.raises(ops.OperationError,match='格式无效'):
+        auto_assign._validate_decision({'weights':bad_weights,'reason':'test',
+                                       'expires_at':int(auto_assign.time.time())+900},[3])
+
+
+def test_ai_preview_cannot_be_tampered_or_applied_after_pending_count_changes(seed,mock_assign_ai):
+    from copy import deepcopy
+    with appdb.SessionLocal() as db:
+        _,rt,gt,st=batch(db,seed)
+        user=db.get(User,seed['users']['captain'])
+        preview=auto_assign.plan(db,user,rt.id)
+        tampered=deepcopy(preview['ai_decision'])
+        tampered['weights'][str(seed['users']['worker'])]=1.25
+        with pytest.raises(ops.OperationError,match='预览数据已变化'):
+            auto_assign.apply(db,user,rt.id,preview['signature'],ai_decision=tampered)
+        assert len(mock_assign_ai)==1
+        st.status='completed';db.flush()  # Even if grid revision has not been rolled up yet.
+        with pytest.raises(ops.OperationError,match='预览数据已变化'):
+            auto_assign.apply(db,user,rt.id,preview['signature'],ai_decision=preview['ai_decision'])
+        assert db.query(BdTaskEvent).filter_by(event_type='auto_assign_grid').count()==0
+        with pytest.raises(ops.OperationError,match='缺少AI'):
+            auto_assign.apply(db,user,rt.id,preview['signature'])
+
+
+def test_ai_member_and_completed_batch_permissions_checked_before_model_call(seed,mock_assign_ai):
+    with appdb.SessionLocal() as db:
+        main,rt,gt,_=batch(db,seed)
+        with pytest.raises(ops.OperationError):
+            auto_assign.plan(db,db.get(User,seed['users']['worker']),rt.id)
+        user=db.get(User,seed['users']['captain'])
+        with pytest.raises(ops.OperationError):
+            auto_assign.plan(db,user,rt.id,member_ids=[seed['users']['outsider']])
+        main.status='completed'
+        with pytest.raises(ops.OperationError,match='已完成'):
+            auto_assign.plan(db,user,rt.id)
+        assert not mock_assign_ai
+
+
+def test_ai_preview_expires_and_malformed_json_is_rejected(seed,mock_assign_ai,monkeypatch):
+    with appdb.SessionLocal() as db:
+        _,rt,_,_=batch(db,seed)
+        user=db.get(User,seed['users']['captain'])
+        preview=auto_assign.plan(db,user,rt.id)
+        now=auto_assign.time.time()
+        monkeypatch.setattr(auto_assign.time,'time',lambda:now+901)
+        with pytest.raises(ops.OperationError,match='已过期'):
+            auto_assign.apply(db,user,rt.id,preview['signature'],ai_decision=preview['ai_decision'])
+        assert len(mock_assign_ai)==1
+        monkeypatch.setattr(auto_assign.ai_chat,'chat',lambda *args,**kwargs:'{"weights":')
+        with pytest.raises(ops.OperationError,match='未自动回退'):
+            auto_assign.plan(db,user,rt.id)

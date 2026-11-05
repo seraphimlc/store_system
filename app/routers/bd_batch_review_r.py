@@ -4,12 +4,15 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Request, Form, File, UploadFile
 from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import User, BdTeamMember, BdGridTask, BdRegionTask, BdStoreProposal
 from app.forms import require_form_token
 from app.routers.bd_zone_ops_r import work_login, render, post_guard, error
-from app.services import bd_hierarchical_tasks as tasks, bd_store_proposals as proposals, bd_zone_operations as ops
+from app.services import (bd_hierarchical_tasks as tasks, bd_store_proposals as proposals,
+                          bd_zone_operations as ops, bd_batch_auto_assign as auto_assign)
 
 router=APIRouter(dependencies=[Depends(require_form_token)])
 
@@ -23,8 +26,8 @@ def region_page(task_id:int,region_id:int,request:Request,state:str='',owner:str
         if user.role!='admin':tasks.captain(db,user,item['task'])
         stats=tasks.summarize([item])
         members=db.query(User).join(BdTeamMember,BdTeamMember.person_code==User.person_code).filter(
-            BdTeamMember.team_id==item['task'].team_id,BdTeamMember.end_date.is_(None),
-            User.is_active.is_(True),User.status=='active').all()
+            BdTeamMember.team_id==item['task'].team_id,BdTeamMember.role=='member',BdTeamMember.end_date.is_(None),
+            User.is_active.is_(True),User.status=='active',User.role.in_(('staff','leader'))).all()
         names={u.id:u.display_name or u.username for u in members}
         def keep(g):
             gt=g['task']
@@ -49,6 +52,35 @@ def bulk_assign(region_id:int,request:Request,selections:list[str]=Form([]),targ
         task_id=tasks.bulk_assign(db,user,region_id,selections,target_id);db.commit()
     except ops.OperationError as exc:db.rollback();return error(exc,409)
     return RedirectResponse(f'/my/work/batches/{task_id}/regions/{region_id}?'+urlencode({'msg':'派发完成'}),303)
+
+
+@router.post('/my/work/batch-regions/{region_id}/auto-preview')
+async def auto_assign_preview(region_id:int,request:Request,user:User=Depends(work_login),db:Session=Depends(get_db)):
+    try:
+        payload=await request.json()
+        if not isinstance(payload,dict):raise ValueError()
+        post_guard(request,user,payload.get('csrf_token',''))
+        result=await run_in_threadpool(auto_assign.plan,db,user,region_id,include_batch=payload.get('include_batch',True),
+            use_efficiency=payload.get('use_efficiency',False),member_ids=payload.get('member_ids'))
+        return JSONResponse(result)
+    except (ValueError,TypeError,ops.OperationError) as exc:
+        return JSONResponse({'error':str(exc) or '无法生成分配方案'},status_code=409)
+
+
+@router.post('/my/work/batch-regions/{region_id}/auto-apply')
+async def auto_assign_apply(region_id:int,request:Request,user:User=Depends(work_login),db:Session=Depends(get_db)):
+    try:
+        payload=await request.json()
+        if not isinstance(payload,dict):raise ValueError()
+        post_guard(request,user,payload.get('csrf_token',''))
+        result=auto_assign.apply(db,user,region_id,payload.get('signature',''),
+            include_batch=payload.get('include_batch',True),use_efficiency=payload.get('use_efficiency',False),
+            member_ids=payload.get('member_ids'),ai_decision=payload.get('ai_decision'))
+        db.commit()
+        return JSONResponse({'ok':True,'grid_count':result['grid_count']})
+    except (ValueError,TypeError,ops.OperationError) as exc:
+        db.rollback()
+        return JSONResponse({'error':str(exc) or '自动分配失败'},status_code=409)
 
 
 @router.post('/my/work/batch-grids/{grid_id}/new-store')

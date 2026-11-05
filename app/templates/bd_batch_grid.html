@@ -9,7 +9,6 @@
 {% block navigation_title %}
 <a class="dispatch-back" href="/my/work/batches/{{ task.id }}" aria-label="{{ t('返回') }}" data-testid="batch-grid-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></a>
 <h1 class="dispatch-title" data-testid="batch-grid-title">{{ t('网格') }} #{{ grid.grid_id }}</h1>
-<a class="btn ghost" href="/my/work/batches/{{ task.id }}/logs">{{ t('批次日志') }}</a>
 {% endblock %}
 {% macro tokens() %}<input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">{% endmacro %}
 {# 提交后回跳要保留列表筛选：表单字段名用 status_filter 避开门店状态的 status #}

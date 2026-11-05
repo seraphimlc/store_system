@@ -1,0 +1,42 @@
+.batch-region-page .batch-region-filters:has(#batch-auto-open) {grid-template-columns:repeat(2,minmax(0,1fr)) auto}
+.batch-region-filters #batch-auto-open {height:40px;min-height:40px;margin:0;padding:8px 10px;font-size:13px;white-space:nowrap}
+.batch-auto-backdrop {position:fixed;inset:0;z-index:80;background:rgba(18,29,44,.36)}
+.batch-auto-drawer {position:fixed;z-index:81;inset:0 0 0 auto;width:min(480px,100vw);height:100dvh;box-sizing:border-box;display:flex;flex-direction:column;background:#fff;box-shadow:-8px 0 28px rgba(20,36,55,.18);color:#20334b}
+.batch-auto-drawer[hidden],.batch-auto-backdrop[hidden],.batch-auto-drawer [hidden] {display:none!important}
+.batch-auto-drawer>header {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid #e2e8f0;flex-shrink:0}
+.batch-auto-drawer h2 {margin:0;font-size:18px;line-height:1.4}
+.batch-auto-drawer .icon-btn {width:36px;height:36px;flex-shrink:0;border:1px solid #d5deea;border-radius:6px;background:#fff;color:#40516a;font-size:22px;line-height:1;cursor:pointer}
+.batch-auto-content {min-height:0;overflow:auto;overscroll-behavior:contain;padding:20px;scrollbar-color:#a6b7cb #f4f7fa}
+.batch-auto-content fieldset {min-width:0;margin:0 0 16px;padding:0;border:0}
+.batch-auto-content legend {margin-bottom:10px;padding:0;font-size:13px;font-weight:650;color:#40516a}
+.batch-auto-members {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.batch-auto-members label,.batch-auto-option {display:flex;align-items:center;gap:9px;min-height:40px;color:#30445a;font-size:13px;line-height:1.5;cursor:pointer}
+.batch-auto-members label {min-width:0;box-sizing:border-box;margin:0;padding:8px 10px;border:1px solid #dce3ed;border-radius:6px}
+.batch-auto-members label:has(input:checked) {border-color:#9eb5de;background:#f3f7ff}
+.batch-auto-members span {overflow-wrap:anywhere;min-width:0}
+.batch-auto-content input[type=checkbox] {width:17px;height:17px;flex:0 0 auto;margin:0;accent-color:#2463b5}
+.batch-auto-option {margin:8px 0;align-items:flex-start}
+.batch-auto-option input {margin-top:2px!important}
+.batch-auto-option small {display:block;margin-top:3px;color:#52647b;font-size:12px;font-weight:400;line-height:1.5}
+.batch-auto-help {margin:12px 0 16px;color:#52647b;font-size:12px;line-height:1.6}
+.batch-auto-content>.btn,.batch-auto-footer>.btn {display:block;box-sizing:border-box;width:100%;min-height:44px;margin:0;padding:11px 14px;font-size:14px;font-weight:600;line-height:1.5}
+.batch-auto-content>.btn:disabled,.batch-auto-footer>.btn:disabled {opacity:.55;cursor:wait}
+.batch-auto-footer {flex-shrink:0;padding:12px 20px max(16px,env(safe-area-inset-bottom));border-top:1px solid #e2e8f0;background:#fff}
+#batch-auto-result {margin-top:20px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:13px;line-height:1.6}
+#batch-auto-result h3 {margin:0 0 4px;font-size:15px;line-height:1.5}
+#batch-auto-result .batch-auto-summary {margin:0 0 12px;color:#52647b;font-size:12px}
+.batch-auto-table {width:100%;margin:0;border-collapse:collapse;table-layout:fixed;font-size:13px}
+.batch-auto-table th,.batch-auto-table td {padding:11px 4px;border:0;border-bottom:1px solid #e9edf3;vertical-align:middle;font-weight:400}
+.batch-auto-table thead th {padding-top:6px;padding-bottom:6px;font-size:12px;color:#52647b;text-align:right}
+.batch-auto-table th:first-child {width:56%;padding-left:0;text-align:left}
+.batch-auto-table tbody td {text-align:right;font-weight:650;font-variant-numeric:tabular-nums}
+.batch-auto-member-name {display:flex;align-items:center;gap:8px;min-width:0;font-weight:550;overflow-wrap:anywhere}
+.batch-auto-swatch {flex:0 0 8px;width:8px;height:8px;border-radius:50%}
+.batch-auto-explanation {margin-top:14px;font-size:12px;color:#52647b}
+.batch-auto-explanation summary {width:fit-content;cursor:pointer;font-weight:600;color:#304b73;min-height:32px;line-height:32px}
+.batch-auto-explanation p {margin:8px 0;line-height:1.7;overflow-wrap:anywhere}
+.batch-auto-explanation ul {margin:10px 0 0;padding-left:17px}
+.batch-auto-explanation li+li {margin-top:6px}
+#batch-auto-result [data-error] {margin:0;color:#a12d2d}
+.batch-auto-drawer :is(button,input,summary):focus-visible {outline:2px solid #3877df;outline-offset:2px}
+@media(max-width:560px) {.batch-auto-drawer {inset:auto 0 0;width:100%;height:86dvh;max-height:calc(100dvh - 24px);border-radius:12px 12px 0 0;overflow:hidden}.batch-auto-drawer>header {padding:14px 16px}.batch-auto-content {padding:16px}.batch-auto-footer {padding-left:16px;padding-right:16px}}

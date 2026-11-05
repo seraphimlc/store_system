@@ -9,7 +9,11 @@
 <div class="batch-detail">
   <header class="batch-header">
     <div class="batch-title-line"><span class="batch-status {{ 'is-complete' if task.status=='completed' else '' }}"><i aria-hidden="true"></i>{{ t('已完成') if task.status=='completed' else t('进行中') }}</span><span class="batch-id">#{{ task.id }}</span></div>
-    <a class="btn ghost batch-review" href="/my/work/batches/{{ task.id }}/new-stores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v13H4zM7 2v4m6-4v4M7 10l2 2 4-4"/></svg>{{ t('新店核实') }}</a>
+    {# 批次日志入口放在**批次详情**里（紧邻「新店核实」），不再塞进手机顶栏 #}
+    <div class="batch-header-actions">
+      <a class="btn ghost batch-logs" href="/my/work/batches/{{ task.id }}/logs"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg>{{ t('批次日志') }}</a>
+      <a class="btn ghost batch-review" href="/my/work/batches/{{ task.id }}/new-stores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v13H4zM7 2v4m6-4v4M7 10l2 2 4-4"/></svg>{{ t('新店核实') }}</a>
+    </div>
   </header>
   {% if request.query_params.get('msg') %}<div class="msg ok">{{ request.query_params.get('msg') }}</div>{% endif %}
   <section class="batch-overview" aria-label="{{ t('作业进展') }}">
@@ -28,7 +32,8 @@
   </section>
   {% endif %}
   <section class="batch-regions" aria-label="{{ t('片区') }}">
-    <header class="batch-regions-header"><div class="batch-section-title"><h2>{{ t('片区') }}</h2><span>{{ tree|length }}</span></div>
+    <header class="batch-regions-header">
+      <!-- <div class="batch-section-title"><h2>{{ t('片区') }}</h2><span>{{ tree|length }}</span></div> -->
       <form class="task-filters batch-filters" method="get" data-testid="batch-filters" data-autosubmit="1"><select name="state" aria-label="{{ t('作业状态') }}" data-testid="filter-state"><option value="">{{ t('全部网格状态') }}</option>{% for key,label in [('unassigned','未指派'),('assigned','已指派'),('in_progress','进行中'),('completed','已完成')] %}<option value="{{ key }}" {{ 'selected' if state==key else '' }}>{{ t(label) }}</option>{% endfor %}</select><div class="batch-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input name="kw" type="search" value="{{ kw }}" placeholder="{{ t('搜索网格编号') }}" aria-label="{{ t('搜索') }}" data-testid="filter-kw"></div></form>
     </header>
     {% if current_user.role=='admin' %}<div class="task-region-columns" aria-hidden="true"><span>{{ t('片区名称') }}</span><span>{{ t('负责团队') }}</span><span>{{ t('面积') }}</span><span>{{ t('已巡 / 总商户') }}</span><span>{{ t('进度') }}</span></div>{% endif %}
