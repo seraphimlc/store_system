@@ -15,10 +15,9 @@
   };
 
   function openMap(url) {
-    const tab = window.open('about:blank', '_blank');
+    const tab = window.open(url, '_blank');
     if (!tab) return false;
     tab.opener = null;
-    tab.location.replace(url);
     return true;
   }
 
@@ -26,12 +25,6 @@
     if (!activeLocationLink) return;
     const message = locationDialog.querySelector('[data-location-message]');
     const openAfter = action !== 'nonexistent';
-    const tab = openAfter ? window.open('about:blank', '_blank') : null;
-    if (openAfter && !tab) {
-      message.textContent = message.dataset.popupBlocked;
-      return;
-    }
-    if (tab) tab.opener = null;
     const params = new URLSearchParams({
       location_accuracy: action,
       csrf_token: locationDialog.dataset.csrf,
@@ -41,7 +34,6 @@
       const lat = locationEditor.querySelector('[name="lat"]').value.trim();
       const lon = locationEditor.querySelector('[name="lon"]').value.trim();
       if (!lat || !lon) {
-        if (tab) tab.close();
         message.textContent = message.dataset.coordinatesRequired;
         return;
       }
@@ -67,11 +59,13 @@
         activeLocationLink.dataset.locationUrl = url.toString();
         activeLocationLink.href = url.toString();
       }
+      if (openAfter && !openMap(activeLocationLink.dataset.locationUrl)) {
+        message.textContent = message.dataset.popupBlocked;
+        return;
+      }
       locationDialog.close();
-      if (tab) tab.location.replace(activeLocationLink.dataset.locationUrl);
       if (action === 'coordinates') window.setTimeout(() => window.location.reload(), 100);
     } catch (error) {
-      if (tab) tab.close();
       message.textContent = error.message || message.dataset.saveFailed;
     }
   }
