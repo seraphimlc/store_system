@@ -26,8 +26,8 @@ def test_append_new_region_keeps_existing_and_filters_map(client,seed):
         result=source()
         release=natural.import_candidate(db,admin,result,append_region=True);db.commit()
         assert db.get(BdWorkGrid,old.id).geometry==before
-        assert db.query(BdWorkGrid).count()==3
-        assert len(regions.management_grids(db,admin,region='kanagawa'))==2
+        assert db.query(BdWorkGrid).count()==2
+        assert len(regions.management_grids(db,admin,region='kanagawa'))==1
         assert len(regions.management_grids(db,admin,region='tokyo23'))==1
         assert release.source['region_code']=='kanagawa'
         assert all(cell['id'].startswith('kanagawa-') for cell in result['source_document']['road_cells'])
@@ -38,12 +38,12 @@ def test_append_new_region_keeps_existing_and_filters_map(client,seed):
     response=client.get('/zones?region=kanagawa&mode=manage')
     assert response.status_code==200
     config=json.loads(re.search('<script id="grid-region-config"[^>]*>(.*?)</script>',response.text,re.S).group(1))
-    assert len(config['grids'])==2
+    assert len(config['grids'])==1
     assert all(grid['id']!=seed['grid'] for grid in config['grids'])
     response=client.get('/zones?region=all&mode=manage')
     assert response.status_code==200
     config=json.loads(re.search('<script id="grid-region-config"[^>]*>(.*?)</script>',response.text,re.S).group(1))
-    assert len(config['grids'])==3
+    assert len(config['grids'])==2
     assert seed['grid'] in {grid['id'] for grid in config['grids']}
     assert len({grid['release_id'] for grid in config['grids']})==2
     assert re.search(r'<option\s+value="all"[^>]*selected',response.text)
@@ -176,13 +176,14 @@ def test_signed_route_refinement_splits_only_real_faces_and_preserves_work_area(
     from shapely.geometry import shape
     result=source(region='kanagawa')
     doc=result['source_document']
-    # 绑定检查点原本两个面；新编号干道横穿，重新切成四面。
+    # 不足 2 km² 的干道两侧会先收成一块；新编号干道再把这一块切开。
     line=z.geographic(LineString([(4900,500),(6100,500)]))
     elements=[{'type':'way','id':42,'tags':{'highway':'tertiary','ref':'123','lanes':'1'},
                'geometry':[{'lon':lon,'lat':lat} for lon,lat in line['coordinates']]}]
     refined=refine(doc,elements)
-    assert len(refined['road_cells'])==4
-    assert refined['natural_audit']['supplementary_split_count']==2
+    assert len(doc['road_cells'])==1
+    assert len(refined['road_cells'])==2
+    assert refined['natural_audit']['supplementary_split_count']==1
     before=union_all([shape(c['metric_geometry']) for c in doc['road_cells']],grid_size=.001)
     after=union_all([shape(c['metric_geometry']) for c in refined['road_cells']],grid_size=.001)
     assert before.equals(after)
@@ -195,8 +196,6 @@ def test_signed_route_refinement_splits_only_real_faces_and_preserves_work_area(
     ('saitama',7,100,True),('chiba',11,100,False),('kanagawa',7,201,False),('tokyo23',7,100,False)])
 def test_rural_natural_blocks_require_all_explicit_limits(region,area,stores,accepted):
     from shapely.geometry import mapping
-    geometry=box(0,0,area*1000,1000)
-    # 采用更紧凑的比例，明确隔离面积/密度政策与形状门槛。
     geometry=box(0,0,(area*1e6)**.5,(area*1e6)**.5)
     doc={'region_code':region,'boundary':z.geographic(geometry),'work_area':z.geographic(geometry),
          'natural_audit':{},'road_cells':[{'id':'whole','metric_geometry':mapping(geometry),
@@ -204,6 +203,132 @@ def test_rural_natural_blocks_require_all_explicit_limits(region,area,stores,acc
     result=natural.normalise(doc)
     assert result['natural_audit']['quality_pass'] is accepted
     if accepted:assert result['natural_audit']['normalisation']['natural_block_exceptions'][0]['reason']=='low_density_rural_block'
+
+
+def test_road_block_policy_keeps_one_compact_arterial_face():
+    from shapely.geometry import mapping
+    geometry=box(0,0,5000,4000)
+    outer=box(-3000,-3000,8000,7000)
+    doc={'region_code':'kanagawa','cover_policy':'road-block','boundary':z.geographic(outer),
+         'work_area':z.geographic(geometry),'natural_audit':{},
+         'road_cells':[{'id':'block','metric_geometry':mapping(geometry),
+            'merchant_ids':[str(i) for i in range(800)],'store_count':800}]}
+    result=natural.normalise(doc)
+    assert result['natural_audit']['quality_pass']
+    assert result['natural_audit']['normalisation']['natural_block_exceptions'][0]['reason']=='indivisible_road_block'
+    # 两条干道之间的完整走廊保持一块。只有细到长宽比超过 12 的才拒绝。
+    corridor=box(0,0,8000,1000)
+    corridor_doc={'region_code':'kanagawa','cover_policy':'road-block',
+          'boundary':z.geographic(box(-3000,-3000,11000,4000)),
+          'work_area':z.geographic(corridor),'natural_audit':{},
+          'road_cells':[{'id':'corridor','metric_geometry':mapping(corridor),'merchant_ids':['shop'],'store_count':1}]}
+    corridor_result=natural.normalise(corridor_doc)
+    assert corridor_result['natural_audit']['quality_pass']
+    assert corridor_result['natural_audit']['normalisation']['natural_block_exceptions'][0]['reason']=='indivisible_road_block'
+    hairline=box(0,0,30000,200)
+    thin={'region_code':'kanagawa','cover_policy':'road-block',
+          'boundary':z.geographic(box(-3000,-3000,33000,3200)),
+          'work_area':z.geographic(hairline),'natural_audit':{},
+          'road_cells':[{'id':'strip','metric_geometry':mapping(hairline),'merchant_ids':['shop'],'store_count':1}]}
+    assert not natural.normalise(thin)['natural_audit']['quality_pass']
+    wide_mountain=box(0,0,20000,21600)
+    wide_doc={'region_code':'saitama','cover_policy':'road-block',
+        'boundary':z.geographic(box(-3000,-3000,23000,24600)),
+        'work_area':z.geographic(wide_mountain),'natural_audit':{},
+        'road_cells':[{'id':'wide','metric_geometry':mapping(wide_mountain),
+            'merchant_ids':[str(i) for i in range(30)],'store_count':30}]}
+    wide_result=natural.normalise(wide_doc)
+    assert wide_result['natural_audit']['quality_pass']
+    assert wide_result['road_cells'][0]['area_km2']==pytest.approx(432)
+    huge=box(0,0,26000,26000)
+    huge_doc={'region_code':'saitama','cover_policy':'road-block',
+        'boundary':z.geographic(box(-3000,-3000,29000,29000)),
+        'work_area':z.geographic(huge),'natural_audit':{},
+        'road_cells':[{'id':'huge','metric_geometry':mapping(huge),
+            'merchant_ids':[str(i) for i in range(30)],'store_count':30}]}
+    assert not natural.normalise(huge_doc)['natural_audit']['quality_pass']
+    mountain=box(0,0,8000,7500)
+    mountain_doc={'region_code':'kanagawa','cover_policy':'road-block',
+        'boundary':z.geographic(box(-3000,-3000,11000,10500)),
+        'work_area':z.geographic(mountain),'natural_audit':{},
+        'road_cells':[{'id':'mountain','metric_geometry':mapping(mountain),
+            'merchant_ids':[str(i) for i in range(20)],'store_count':20}]}
+    mountain_result=natural.normalise(mountain_doc)
+    assert mountain_result['natural_audit']['quality_pass']
+    assert mountain_result['natural_audit']['normalisation']['natural_block_exceptions'][0]['reason']=='indivisible_road_block'
+    crowded=dict(mountain_doc)
+    crowded['road_cells']=[{'id':'crowded','metric_geometry':mapping(mountain),
+        'merchant_ids':[str(i) for i in range(4000)],'store_count':4000}]
+    assert not natural.normalise(crowded)['natural_audit']['quality_pass']
+
+
+def test_empty_speck_below_100_square_metres_is_not_its_own_grid():
+    from shapely.geometry import mapping
+    from shapely import union_all
+    block=box(0,0,1000,1000)
+    speck=box(2000,0,2010,5)
+    work=union_all([block,speck],grid_size=.001)
+    doc={'region_code':'kanagawa','cover_policy':'road-block','boundary':z.geographic(work.buffer(50)),
+         'work_area':z.geographic(work),'natural_audit':{},
+         'road_cells':[
+             {'id':'block','metric_geometry':mapping(block),'merchant_ids':['shop'],'store_count':1},
+             {'id':'speck','metric_geometry':mapping(speck),'merchant_ids':[],'store_count':0}]}
+    result=natural.normalise(doc)
+    assert result['natural_audit']['quality_pass']
+    assert [cell['merchant_ids'] for cell in result['road_cells']]==[['shop']]
+    assert result['natural_audit']['excluded_numerical_empty_cell_ids']==['speck']
+
+
+def test_precision_gap_under_one_square_metre_joins_the_touching_face():
+    from shapely import union_all
+    block=box(0,0,100,100)
+    gap=box(100,0,100.05,10)
+    filled=natural.absorb_precision_gaps([{'geom':block,'members':{0},'count':1}],
+                                          union_all([block,gap],grid_size=.001))
+    assert filled[0]['geom'].area==pytest.approx(block.area+gap.area)
+    wide=box(100,0,110,10)
+    unchanged=natural.absorb_precision_gaps([{'geom':block,'members':{0},'count':1}],
+                                             union_all([block,wide],grid_size=.001))
+    assert unchanged[0]['geom'].area==pytest.approx(block.area)
+    left=box(0,0,10,10)
+    right=box(9.9,0,20,10)
+    trimmed=natural.trim_sliver_overlaps([
+        {'geom':left,'members':{0},'count':0},
+        {'geom':right,'members':{1},'count':0}])
+    merged=union_all([item['geom'] for item in trimmed],grid_size=.001)
+    assert abs(sum(item['geom'].area for item in trimmed)-merged.area)<=.01
+    assert merged.area==pytest.approx(left.union(right).area)
+
+
+def test_road_block_absorbs_a_sliver_into_the_neighbouring_face():
+    from shapely.geometry import mapping
+    from shapely import union_all
+    block=box(0,0,5000,4000)
+    sliver=box(5000,0,5200,50)
+    work=union_all([block,sliver],grid_size=.001)
+    doc={'region_code':'kanagawa','cover_policy':'road-block','boundary':z.geographic(work.buffer(100)),
+         'work_area':z.geographic(work),'natural_audit':{},
+         'road_cells':[
+             {'id':'block','metric_geometry':mapping(block),'merchant_ids':['shop'],'store_count':1},
+             {'id':'sliver','metric_geometry':mapping(sliver),'merchant_ids':[],'store_count':0}]}
+    result=natural.normalise(doc)
+    assert result['natural_audit']['quality_pass']
+    assert len(result['road_cells'])==1
+    assert result['road_cells'][0]['merchant_ids']==['shop']
+    crumbs=[box(5000,index*80,5600,index*80+60) for index in range(8)]
+    neighbour=box(5000,800,6200,2000)
+    wider=union_all([block,*crumbs,neighbour],grid_size=.001)
+    mixed={'region_code':'kanagawa','cover_policy':'road-block','boundary':z.geographic(wider.buffer(100)),
+           'work_area':z.geographic(wider),'natural_audit':{},
+           'road_cells':[
+               {'id':'block','metric_geometry':mapping(block),'merchant_ids':['shop'],'store_count':1},
+               *[{'id':'crumb-'+str(index),'metric_geometry':mapping(crumb),'merchant_ids':[],'store_count':0}
+                 for index,crumb in enumerate(crumbs)],
+               {'id':'neighbour','metric_geometry':mapping(neighbour),'merchant_ids':['other'],'store_count':1}]}
+    mixed_result=natural.normalise(mixed)
+    assert mixed_result['natural_audit']['quality_pass']
+    assert len(mixed_result['road_cells'])==2
+    assert sorted(cell['merchant_ids'] for cell in mixed_result['road_cells'])==[['other'],['shop']]
 
 
 @pytest.mark.parametrize('matching_boundary',[True,False])
@@ -231,7 +356,8 @@ def test_real_local_boundary_can_refine_but_unverified_admin_level_cannot():
     element={'type':'way','id':-42,'tags':{'boundary':'administrative','admin_level':'10','name':'synthetic town'},
              'geometry':[{'lon':lon,'lat':lat} for lon,lat in geometry['coordinates']]}
     result=refine(doc,[element])
-    assert len(result['road_cells'])==4
+    assert len(doc['road_cells'])==1
+    assert len(result['road_cells'])==2
     assert union_all([shape(c['metric_geometry']) for c in result['road_cells']]).equals(
         union_all([shape(c['metric_geometry']) for c in doc['road_cells']]))
     element['tags']['admin_level']='3'
@@ -291,6 +417,61 @@ def test_precision_collapsed_empty_face_is_audited_not_a_fake_land_component():
     assert result['natural_audit']['geometric_pass']
     assert 'precision-empty' in result['natural_audit']['excluded_empty_cell_ids']
     assert len(result['road_cells'])==1 and result['road_cells'][0]['merchant_ids']==['shop']
+
+
+def test_internal_region_seam_does_not_make_a_road_block_a_municipality():
+    from shapely.geometry import MultiPolygon, mapping
+    outer = box(0, 0, 10000, 8000)
+    inner = box(2000, 2000, 6000, 6000)
+    doc = {'region_code': 'tokyo26', 'cover_policy': 'road-block',
+           'boundary': z.geographic(MultiPolygon([outer, inner])),
+           'work_area': z.geographic(inner), 'natural_audit': {},
+           'road_cells': [{'id': 'inner', 'metric_geometry': mapping(inner),
+                           'merchant_ids': ['shop'], 'store_count': 1}]}
+    result = natural.normalise(doc)
+    assert result['natural_audit']['quality_pass']
+    assert result['natural_audit']['normalisation']['natural_block_exceptions'][0]['reason'] == 'indivisible_road_block'
+    whole = {'region_code': 'tokyo26', 'cover_policy': 'road-block',
+             'boundary': z.geographic(outer), 'work_area': z.geographic(outer), 'natural_audit': {},
+             'road_cells': [{'id': 'city', 'metric_geometry': mapping(outer),
+                             'merchant_ids': ['shop'], 'store_count': 1}]}
+    assert not natural.normalise(whole)['natural_audit']['quality_pass']
+
+
+def test_city_centre_fragments_merge_into_a_compact_block_until_stores_or_shape_stop():
+    from shapely.geometry import mapping
+    from shapely import union_all
+    blocks=[box(x*900,y*900,(x+1)*900,(y+1)*900) for y in range(2) for x in range(2)]
+    work=union_all(blocks,grid_size=.001)
+    def doc_for(store_count):
+        cells=[]
+        for index,geom in enumerate(blocks):
+            cells.append({'id':'b'+str(index),'metric_geometry':mapping(geom),
+                          'merchant_ids':[str(index)+'-'+str(n) for n in range(store_count)],
+                          'store_count':store_count})
+        return {'region_code':'tokyo26','cover_policy':'road-block','boundary':z.geographic(work.buffer(50)),
+                'work_area':z.geographic(work),'natural_audit':{},'road_cells':cells}
+    compact=natural.normalise(doc_for(10))
+    assert compact['natural_audit']['quality_pass']
+    assert len(compact['road_cells'])==1
+    assert compact['road_cells'][0]['area_km2']==pytest.approx(3.24)
+    assert compact['natural_audit']['normalisation']['natural_block_exceptions'][0]['reason']=='urban_compact_block'
+    crowded=natural.normalise(doc_for(2000))
+    assert crowded['natural_audit']['quality_pass']
+    assert len(crowded['road_cells'])==2
+    assert max(cell['store_count'] for cell in crowded['road_cells'])<=5000
+    packed=natural.normalise(doc_for(3000))
+    assert packed['natural_audit']['quality_pass']
+    assert len(packed['road_cells'])==4
+    row=[box(index*800,0,(index+1)*800,800) for index in range(6)]
+    ribbon=union_all(row,grid_size=.001)
+    ribbon_doc={'region_code':'tokyo26','cover_policy':'road-block','boundary':z.geographic(ribbon.buffer(50)),
+                'work_area':z.geographic(ribbon),'natural_audit':{},
+                'road_cells':[{'id':'r'+str(index),'metric_geometry':mapping(geom),
+                               'merchant_ids':['s'+str(index)],'store_count':1} for index,geom in enumerate(row)]}
+    ribbon_result=natural.normalise(ribbon_doc)
+    assert ribbon_result['natural_audit']['quality_pass']
+    assert len(ribbon_result['road_cells'])==2
 
 
 def test_small_inhabited_riverbank_merges_into_qualified_rural_neighbour():

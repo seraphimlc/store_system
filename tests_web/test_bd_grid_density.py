@@ -471,3 +471,22 @@ def test_geometry_recovery_does_not_bridge_real_gaps_or_corner_contacts(neighbor
     result = builder._merge_geometry_groups(groups, 10)
     assert len(result) == 2
     assert result[0]['geom'].equals(groups[0]['geom'])
+
+
+def test_auto_partition_does_not_persist_an_i_shaped_grid(client, seed, source_db):
+    from tests_web.test_bd_grid_shapes import dumbbell
+    rows(source_db, left=5, right=5)
+    with appdb.SessionLocal() as db:
+        left, right = free_grids(db, seed)
+        left.geometry = z.geographic(dumbbell())
+        right.geometry = z.geographic(box(3000, 0, 4000, 1000))
+        db.commit()
+        original = json.loads(json.dumps(left.geometry))
+        admin = db.get(User, seed['users']['ops-admin'])
+        report = builder.plan(db, admin, target_basis='grids', target_per_zone=8,
+                              source_engine=source_db, source_table='merchant_source')
+        assert report['zone_count'] == 0
+        assert report['unassigned_grid_ids'] == [left.id]
+        assert report['shape_unassigned'][0]['grid_ids'] == [left.id]
+        assert left.zone_id is None
+        assert json.loads(json.dumps(left.geometry)) == original

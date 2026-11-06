@@ -114,3 +114,162 @@ def repair_grids(db,user,*,apply=False):
             for i in inner:db.delete(rows[i])
             ops.audit_log(db,user,'grid','absorb_enclosed',row,before,entry)
     return report
+
+
+def absorb_zone_fragments(db, user, region_code, *, max_area_km2=0.36, apply=False, target='longest_edge'):
+    """把片区内不足阈值的网格并进共边邻格。未归属碎片只进入贴着的片区，不跨片区。
+
+    target='longest_edge' 时优先共边最长、其次邻格更大。
+    target='smallest_neighbor' 时并进当前面积最小的合法邻格。
+    """
+    import hashlib
+    from datetime import datetime
+    from sqlalchemy import func
+    from shapely import STRtree, union_all
+    from app.models import BdWorkGrid, BdGridStore, BdStoreVisitLog, BdZoneRelease, BdGridTask, BdZone
+    from app.services import bd_zones as z, bd_zone_operations as ops
+    from app.services.bd_regions import release_ids
+    ops.require_admin(user)
+    if max_area_km2 <= 0 or max_area_km2 > 2:
+        raise ops.OperationError('碎片面积阈值无效')
+    if target not in ('longest_edge', 'smallest_neighbor'):
+        raise ops.OperationError('邻格选择方式无效')
+    ids = [row.id for row in release_ids(db, region_code)]
+    if apply:
+        for identity in sorted(ids):
+            ops.locked(db, BdZoneRelease, identity)
+    query = db.query(BdWorkGrid).filter(BdWorkGrid.release_id.in_(ids)).order_by(BdWorkGrid.id)
+    if apply:
+        query = query.populate_existing().with_for_update()
+    rows = query.all()
+    if not rows:
+        return {'region': region_code, 'max_area_km2': max_area_km2, 'removed_grid_count': 0,
+                'groups': [], 'remaining_small_ids': [], 'zones_updated': []}
+    geoms = {row.id: z.projected(row.geometry) for row in rows}
+    items = {row.id: {'geom': geoms[row.id], 'zone_id': row.zone_id, 'release_id': row.release_id,
+                      'absorbed': []} for row in rows}
+    order = [row.id for row in rows]
+    tree = STRtree([geoms[identity] for identity in order])
+    neighbors = {identity: set() for identity in order}
+    for index, identity in enumerate(order):
+        for raw in tree.query(geoms[identity], predicate='intersects'):
+            other = order[int(raw)]
+            if other <= identity:
+                continue
+            if geoms[identity].boundary.intersection(geoms[other].boundary).length > .2:
+                neighbors[identity].add(other)
+                neighbors[other].add(identity)
+    limit = max_area_km2 * 1e6
+    while True:
+        pending = [identity for identity, item in items.items() if item['geom'].area < limit]
+        pending.sort(key=lambda identity: (items[identity]['geom'].area, identity))
+        merged = False
+        for identity in pending:
+            if identity not in items or items[identity]['geom'].area >= limit:
+                continue
+            choices = []
+            for other in sorted(neighbors.get(identity, ())):
+                if other not in items:
+                    continue
+                source_zone, target_zone = items[identity]['zone_id'], items[other]['zone_id']
+                if items[identity]['release_id'] != items[other]['release_id']:
+                    continue
+                if source_zone is not None and target_zone != source_zone:
+                    continue
+                geom = union_all([items[identity]['geom'], items[other]['geom']], grid_size=.001)
+                if (geom.geom_type != 'Polygon' or not geom.is_valid
+                        or abs(geom.area - items[identity]['geom'].area - items[other]['geom'].area) > .01):
+                    continue
+                shared = items[identity]['geom'].boundary.intersection(items[other]['geom'].boundary).length
+                if shared <= .2:
+                    continue
+                if target == 'smallest_neighbor':
+                    choices.append((items[other]['geom'].area, other, geom))
+                else:
+                    choices.append((-shared, -items[other]['geom'].area, other, geom))
+            if not choices:
+                continue
+            other, geom = min(choices)[-2:]
+            items[other]['geom'] = geom
+            items[other]['absorbed'].extend([identity, *items[identity]['absorbed']])
+            if items[other]['zone_id'] is None:
+                items[other]['zone_id'] = items[identity]['zone_id']
+            adjacent = (neighbors[identity] | neighbors[other]) - {identity, other}
+            del items[identity]
+            for key in adjacent:
+                neighbors[key].discard(identity)
+                neighbors[key].discard(other)
+                neighbors[key].add(other)
+            neighbors[other] = adjacent
+            del neighbors[identity]
+            merged = True
+            break
+        if not merged:
+            break
+    by_id = {row.id: row for row in rows}
+    groups = [(identity, item) for identity, item in items.items() if item['absorbed']]
+    absorbed_ids = [absorbed for _, item in groups for absorbed in item['absorbed']]
+    if absorbed_ids:
+        blocked = [row for row in rows if row.id in set(absorbed_ids) and (
+            row.assignee_id is not None or row.progress or row.task_state != 'unvisited')]
+        if blocked or db.query(BdGridTask.id).filter(BdGridTask.grid_id.in_(absorbed_ids)).first():
+            raise ops.OperationError('碎片网格已有派发或巡店批次，不能并入邻格')
+        if db.query(BdStoreVisitLog.id).filter(BdStoreVisitLog.grid_id.in_(absorbed_ids)).first():
+            raise ops.OperationError('碎片网格已有巡店记录，不能并入邻格')
+    zone_ids = sorted({items[identity]['zone_id'] for identity, _ in groups if items[identity]['zone_id'] is not None})
+    zones = {zone.id: zone for zone in db.query(BdZone).filter(BdZone.id.in_(zone_ids)).all()} if zone_ids else {}
+    if any(zone.state == 'archived' or zone.team_id is not None or zone.leader_id is not None for zone in zones.values()):
+        raise ops.OperationError('片区已派发或已归档，不能并入碎片网格')
+    if apply and zone_ids:
+        for identity in zone_ids:
+            zones[identity] = ops.locked(db, BdZone, identity)
+    report = {'region': region_code, 'max_area_km2': max_area_km2, 'groups': [],
+              'removed_grid_count': len(absorbed_ids),
+              'remaining_small_ids': sorted(identity for identity, item in items.items() if item['geom'].area < limit)}
+    now = datetime.utcnow()
+    for identity, item in sorted(groups, key=lambda pair: pair[0]):
+        row = by_id[identity]
+        removed = sorted(item['absorbed'])
+        count = db.query(func.count(BdGridStore.id)).filter(BdGridStore.grid_id.in_([identity, *removed])).scalar()
+        entry = {'target_id': identity, 'absorbed_ids': removed, 'zone_id': item['zone_id'],
+                 'area_km2': item['geom'].area / 1e6, 'store_count': count,
+                 'geometry_sha256': hashlib.sha256(item['geom'].normalize().wkb).hexdigest()}
+        report['groups'].append(entry)
+        if not apply:
+            continue
+        before = {'source_id': row.source_id, 'zone_id': row.zone_id, 'area_km2': row.area_km2,
+                  'store_count': row.store_count,
+                  'absorbed': [{'id': absorbed, 'source_id': by_id[absorbed].source_id} for absorbed in removed]}
+        db.query(BdGridStore).filter(BdGridStore.grid_id.in_(removed)).update(
+            {BdGridStore.grid_id: identity}, synchronize_session=False)
+        db.flush()
+        row.geometry = z.geographic(item['geom'])
+        row.area_km2 = item['geom'].area / 1e6
+        row.store_count = count
+        row.zone_id = item['zone_id']
+        row.revision += 1
+        row.updated_at = now
+        for absorbed in removed:
+            db.delete(by_id[absorbed])
+        ops.audit_log(db, user, 'grid', 'absorb_fragment', row, before, entry)
+    report['zones_updated'] = []
+    if apply:
+        db.flush()
+        for zone_id in zone_ids:
+            zone = zones[zone_id]
+            members = [item['geom'] for identity, item in items.items() if item['zone_id'] == zone_id]
+            geom = union_all(members, grid_size=.001)
+            old_geom = z.projected(zone.geometry)
+            old = {'area_km2': zone.area_km2, 'store_count': zone.store_count, 'revision': zone.revision}
+            member_ids = [identity for identity, item in items.items() if item['zone_id'] == zone_id]
+            zone.store_count = db.query(func.count(BdGridStore.id)).filter(BdGridStore.grid_id.in_(member_ids)).scalar()
+            if not coverage_matches(old_geom, geom) or abs(old_geom.area - geom.area) > .01:
+                zone.geometry = z.geographic(geom)
+                zone.area_km2 = geom.area / 1e6
+                zone.workload = None
+            zone.revision += 1
+            zone.updated_at = now
+            ops.audit_log(db, user, 'zone', 'absorb_fragment', zone, old,
+                          {'area_km2': zone.area_km2, 'store_count': zone.store_count, 'grid_ids': member_ids})
+            report['zones_updated'].append(zone_id)
+    return report

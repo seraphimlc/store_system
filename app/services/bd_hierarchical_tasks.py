@@ -200,17 +200,18 @@ def create_main_task(db, user, title, region_ids):
         raise ops.OperationError('至少选择一个片区')
     ids = sorted(set(region_ids))
     if len(ids)>2000: raise ops.OperationError('选择片区过多')
-    # 与基础网格归组/重建共用版本锁，创建快照时不允许拆改成员。
-    release_ids=[i for i, in db.query(BdRegion.release_id).filter(BdRegion.id.in_(ids)).distinct()]
-    if len(release_ids)!=1: raise ops.OperationError('一次主任务只能包含同一网格版本的片区')
+    # 为所有涉及的地区按固定顺序加锁，避免与网格重组互锁；批次跨地区选取片区。
+    release_ids=sorted(i for i, in db.query(BdRegion.release_id).filter(BdRegion.id.in_(ids)).distinct())
     from app.models import BdZoneRelease
-    ops.locked(db,BdZoneRelease,release_ids[0])
+    for release_id in release_ids: ops.locked(db,BdZoneRelease,release_id)
     regions=db.query(BdRegion).filter(BdRegion.id.in_(ids),BdRegion.state!='archived').order_by(
         BdRegion.id).populate_existing().with_for_update().all()
     if len(regions)!=len(ids): raise ops.OperationError('片区不存在或已归档，请刷新后重试')
     grids=db.query(BdWorkGrid).filter(BdWorkGrid.zone_id.in_(ids), BdWorkGrid.state != 'disabled').order_by(BdWorkGrid.id).with_for_update().all()
     if {g.zone_id for g in grids}!=set(ids): raise ops.OperationError('空片区不能创建巡店任务')
-    if any(g.release_id!=release_ids[0] for g in grids): raise ops.OperationError('网格版本与片区不一致')
+    region_sources={r.id:r.release_id for r in regions}
+    if any(g.release_id!=region_sources[g.zone_id] for g in grids):
+        raise ops.OperationError('网格与片区来源不一致')
     grid_ids=[g.id for g in grids]
     # 固定次数SQL：一次读取本批次全部店铺映射和来源快照。
     if db.bind.dialect.name=='postgresql':
@@ -237,7 +238,7 @@ def create_main_task(db, user, title, region_ids):
             if row[coordinate] is not None:row[coordinate]=float(row[coordinate])
     store_counts={g.id:0 for g in grids}
     for row in source_rows:store_counts[row['grid_id']]+=1
-    task=BdMainTask(release_id=release_ids[0],title=title,status='active',created_by=user.id,started_at=datetime.utcnow())
+    task=BdMainTask(title=title,status='active',created_by=user.id,started_at=datetime.utcnow())
     db.add(task);db.flush()
     region_tasks={}
     for region in regions:

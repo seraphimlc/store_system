@@ -9,17 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def load_river_geometry(root):
-    """读取已有OSM河道面快照；无来源时保守禁止跨河，不联网补造。"""
-    from shapely import union_all
-    from scripts.bd_collect_zones import exclusions
-    from app.services import bd_zones
-    elements = {}
-    for path in sorted(root.glob('*.roads-v1.source.json')):
-        for element in json.loads(path.read_text()).get('elements', []):
-            tags = element.get('tags', {})
-            if tags.get('water') == 'river' or tags.get('waterway') == 'riverbank':
-                elements[(element['type'], element['id'])] = element
-    return union_all([bd_zones.projected(geometry) for geometry in exclusions(elements.values())], grid_size=.001)
+    from app.services.bd_zone_rules import load_river_geometry as load
+    return load(root)
 
 
 def generate(db, user, *, apply=False, target_stores=8000, target_area=25.,

@@ -1,40 +1,33 @@
 {% if grid_rows %}
+<aside id="grid-conversion-panel" class="zone-drawer grid-composition-drawer" aria-labelledby="grid-conversion-title" hidden>
+  <div class="zone-drawer-bar"><h2 id="grid-conversion-title">{{ t('转为可用网格') }}</h2><button type="button" id="grid-conversion-close" class="btn ghost">{{ t('关闭') }}</button></div>
+  <div class="grid-composition-body">
+    <h3 id="grid-conversion-name"></h3>
+    <dl class="grid-selection-facts"><div><dt>{{ t('有效面积') }}</dt><dd><span id="grid-conversion-area"></span><small>km²</small></dd></div><div><dt>{{ t('商户数') }}</dt><dd id="grid-conversion-stores"></dd></div></dl>
+    <p class="zone-help">{{ t('此区域因商户数不足被禁用。转为可用网格后，可手动选择并划入片区，原有边界和商户保持不变。') }}</p>
+  </div>
+  <form method="post" action="/zones/grids/enable" class="grid-composition-footer">
+    <input type="hidden" name="_ft" value="{{ form_token() }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="region" value="{{ region }}">
+    <input type="hidden" name="grid_id" id="grid-conversion-id">
+    <input type="hidden" name="revision" id="grid-conversion-revision">
+    <button type="submit" class="btn">{{ t('转为可用网格') }}</button>
+  </form>
+</aside>
 <aside id="grid-region-editor" class="zone-drawer grid-composition-drawer" aria-labelledby="grid-composition-title" hidden>
   <div class="zone-drawer-bar"><div><span class="grid-selection-count" id="grid-region-count">0</span><h2 id="grid-composition-title">{{ t('网格分区') }}</h2></div><button type="button" id="grid-region-clear" class="btn ghost">{{ t('清空选择') }}</button></div>
-  <div class="grid-region-modes" role="tablist" aria-label="{{ t('分区方式') }}">
-    <button type="button" role="tab" id="grid-manual-tab" aria-selected="true" aria-controls="grid-manual-pane">{{ t('手动合并') }}</button>
-    <button type="button" role="tab" id="grid-auto-tab" aria-selected="false" aria-controls="grid-auto-pane">{{ t('自动分区') }}</button>
+  <div id="grid-manual-pane" class="grid-manual-pane">
+  <div id="grid-region-zone-actions" class="grid-zone-actions">
+    {% set seen=namespace(ids=[]) %}{% for g in grid_rows %}{% if g.zone_id and g.zone_id not in seen.ids %}{% set seen.ids=seen.ids+[g.zone_id] %}
+    <form method="post" action="/zones/split" data-split-zone="{{ g.zone_id }}" hidden>
+      <input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="zone_id" value="{{ g.zone_id }}"><input type="hidden" name="revision" value="{{ g.zone_revision }}">
+      <span>{{ g.zone_name }}</span><button type="submit" class="btn ghost" {% if g.split_locked %}disabled{% endif %}>{{ t('拆分片区') }}</button>
+    </form>{% endif %}{% endfor %}
   </div>
-  <section id="grid-auto-pane" class="grid-auto-pane" hidden aria-labelledby="grid-auto-tab">
-    <div class="grid-auto-fields">
-      <label for="grid-auto-scope">{{ t('分区范围') }}</label>
-      <select id="grid-auto-scope"><option value="current">{{ t('当前地区') }}</option><option value="all">{{ t('全部地区') }}</option></select>
-      <label for="grid-auto-basis">{{ t('分区目标') }}</label>
-      <select id="grid-auto-basis"><option value="stores">{{ t('按片区商户数') }}</option><option value="grids">{{ t('按片区网格数') }}</option></select>
-      <label for="grid-auto-target">{{ t('每片区目标数量') }}</label>
-      <div class="grid-auto-target"><input id="grid-auto-target" type="number" min="1" max="100000" value="8000" inputmode="numeric"><span id="grid-auto-unit">{{ t('家商户') }}</span></div>
-      <label for="grid-auto-area">{{ t('每片区最大面积') }}</label>
-      <div class="grid-auto-target"><input id="grid-auto-area" type="number" min="2" max="500" step="0.5" value="25" inputmode="decimal"><span>km²</span></div>
-      <label for="grid-auto-tolerance">{{ t('目标容差') }}</label>
-      <div class="grid-auto-target"><input id="grid-auto-tolerance" type="number" min="0" max="50" step="1" value="15" inputmode="numeric"><span>%</span></div>
-      <label for="grid-auto-max-grids">{{ t('网格数量上限') }}</label>
-      <input id="grid-auto-max-grids" type="number" min="1" max="100000" placeholder="—" inputmode="numeric">
-      <label for="grid-auto-max-stores">{{ t('商户数量上限') }}</label>
-      <input id="grid-auto-max-stores" type="number" min="1" max="100000" placeholder="—" inputmode="numeric">
-      <label for="grid-auto-min-stores">{{ t('低密度阈值') }}</label>
-      <div class="grid-auto-target"><input id="grid-auto-min-stores" type="number" min="1" max="100000" value="5" inputmode="numeric"><span>{{ t('家商户以下排除') }}</span></div>
-      <label class="grid-auto-filter"><input id="grid-auto-filter" type="checkbox" checked><span>{{ t('过滤低密度网格') }}</span></label>
-      <label for="grid-auto-small-threshold">{{ t('小片区归并阈值') }}</label>
-      <input id="grid-auto-small-threshold" type="number" min="0" max="300000" inputmode="numeric" placeholder="{{ t('自动：低密度阈值的3倍') }}" aria-describedby="grid-auto-small-help">
-    </div>
-    <p id="grid-auto-small-help" class="grid-auto-note">{{ t('低于此商户数的片区优先并入共边邻区；留空自动计算，关闭过滤时默认15家，0关闭归并。') }}</p>
-    <p class="grid-auto-note">{{ t('仅组合共边相连的网格；条件无法满足时保留未分配，不强行跨越或拆分网格。') }}</p>
-    <button type="button" id="grid-auto-preview" class="btn">{{ t('预览自动分区') }}</button>
-    <div id="grid-auto-result" class="grid-auto-result" role="status" aria-live="polite" hidden></div>
-    <button type="button" id="grid-auto-apply" class="btn" hidden disabled>{{ t('应用自动分区') }}</button>
-  </section>
-  <div id="grid-manual-pane" class="grid-manual-pane" role="tabpanel" aria-labelledby="grid-manual-tab">
-  <form method="post" action="/zones/merge-grids" id="grid-region-form">
+  <form method="post" action="/zones/merge-grids" id="grid-region-form" data-ajax="1">
+    <input type="hidden" name="region" value="{{ region }}">
     <input type="hidden" name="_ft" value="{{ form_token() }}">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
     <div class="grid-composition-body">
@@ -44,7 +37,9 @@
       <div class="grid-region-list" aria-label="{{ t('已选网格') }}">
         {% for g in grid_rows %}<label hidden>
           <input type="checkbox" name="selections" data-grid-id="{{ g.id }}" value='{{ {"id":g.id,"revision":g.revision,"zone_id":g.zone_id,"zone_revision":g.zone_revision}|tojson }}' {% if g.locked %}disabled{% endif %}>
-          <span><strong>{{ t('网格') }} #{{ g.id }}</strong><small>{{ '%.2f'|format(g.area) }} km² · {{ g.stores }} {{ t('家商户') }}</small></span>
+          <span class="grid-row-content"><span class="grid-row-title"><strong>{{ g.name }} #{{ g.id }}</strong>{% if g.zone_name %}<span class="grid-tag grid-tag-zone">{{ g.zone_name }}</span>{% endif %}</span>
+            {% if g.keywords or g.stations %}<span class="grid-row-tags">{% for keyword in g.keywords %}<span class="grid-tag">{{ keyword }}</span>{% endfor %}{% for station in g.stations %}<span class="grid-tag grid-tag-station">{{ station }}</span>{% endfor %}</span>{% endif %}
+            <small>{{ '%.2f'|format(g.area) }} km² · {{ g.stores }} {{ t('家商户') }}</small></span>
         </label>{% endfor %}
       </div>
     </div>
@@ -56,6 +51,6 @@
   </form>
   </div>
 </aside>
-{% set editor_texts={'merged':t('已合并边界'),'separate':t('保留网格边界'),'selected':t('已选网格'),'empty':t('尚未选择网格'),'loading':t('正在校验合并边界…'),'ready':t('边界校验通过，可以保存片区。'),'shape':t('边界连续，但形状较狭长或有狭颈，请检查预览。'),'error':t('预览失败，请重试。'),'mapMissing':t('地图暂不可用，边界已通过服务端校验。'),'previewLoading':t('正在计算当前商户分布…'),'previewReady':t('请检查地图和片区明细，确认后再应用。'),'applyConfirm':t('仅对未划分网格新建片区，保留已有片区和网格归属。确认应用吗？'),'applyDone':t('自动分区已应用，正在刷新页面。'),'zoneCount':t('个片区'),'gridCount':t('个网格'),'storeCount':t('家商户'),'excludedCount':t('过滤网格'),'unassignedCount':t('未分配'),'preservedGrids':t('已划分网格已跳过'),'outOfTolerance':t('超出目标容差'),'smallMerge':t('小片区归并前后'),'mergedSmall':t('已归并小片区'),'no_shared_edge':t('无共边邻区'),'hard_limit':t('合并将超过硬上限'),'invalid_geometry':t('合并无法形成有效连续单面'),'geometryUnassigned':t('以下网格无法组成连续单面，保留未分配，商户和基础边界不变')} %}
+{% set editor_texts={'merged':t('已合并边界'),'separate':t('保留网格边界'),'selected':t('已选网格'),'empty':t('尚未选择网格'),'loading':t('正在校验合并边界…'),'saving':t('正在保存片区…'),'saved':t('片区已组合'),'split':t('拆分片区'),'ready':t('边界校验通过，可以保存片区。'),'shape':t('边界连续，但形状较狭长或有狭颈，请检查预览。'),'error':t('预览失败，请重试。'),'mapMissing':t('地图暂不可用，边界已通过服务端校验。'),'close':t('关闭'),'converted':t('已转为可用网格，可选择并划入片区'),'previewLoading':t('正在计算当前商户分布…'),'previewReady':t('请检查地图和片区明细，确认后再应用。'),'applyConfirm':t('仅对未划分网格新建片区，保留已有片区和网格归属。确认应用吗？'),'applyDone':t('自动分区已应用，正在刷新页面。'),'zoneCount':t('个片区'),'gridCount':t('个网格'),'storeCount':t('家商户'),'excludedCount':t('过滤网格'),'unassignedCount':t('未分配'),'preservedGrids':t('已划分网格已跳过'),'outOfTolerance':t('超出目标容差'),'smallMerge':t('小片区归并前后'),'mergedSmall':t('已归并小片区'),'no_shared_edge':t('无共边邻区'),'hard_limit':t('合并将超过硬上限'),'invalid_geometry':t('合并无法形成有效连续单面'),'geometryUnassigned':t('以下网格无法组成连续单面，保留未分配，商户和基础边界不变')} %}
 <script id="grid-region-config" type="application/json">{{ {'grids':grid_rows,'texts':editor_texts,'fit_grids':true,'region':region,'csrf':request.state.csrf}|tojson }}</script>
 {% endif %}

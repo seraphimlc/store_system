@@ -41,6 +41,45 @@ def river_crossing(left, right, rivers, max_width_m):
     return crossing
 
 
+def load_river_geometry(root):
+    """只读取已有OSM河道面证据，不把无标签水域、林地或河流中心线当河道面。"""
+    import json
+    from scripts.bd_collect_zones import exclusions
+    from app.services import bd_zones as z
+    elements = {}
+    for path in sorted(root.glob('*.roads-v1.source.json')):
+        for element in json.loads(path.read_text()).get('elements', []):
+            tags = element.get('tags', {})
+            if tags.get('water') == 'river' or tags.get('waterway') == 'riverbank':
+                elements[(element['type'], element['id'])] = element
+    return union_all([z.projected(geometry) for geometry in exclusions(elements.values())], grid_size=.001)
+
+
+def narrow_river_connected(geometry, rivers, max_width_m=100.):
+    """连通图仅增加经已知河道面验证的窄河边；实际几何不作扩张。"""
+    from app.services.bd_grid_geometry import outline
+    land = outline(geometry)
+    if land.geom_type == 'Polygon':
+        return True
+    parts = list(getattr(land, 'geoms', ()))
+    if not parts or rivers is None or rivers.is_empty:
+        return False
+    graph = [set() for _ in parts]
+    tree = STRtree(parts)
+    for i, part in enumerate(parts):
+        for raw_j in tree.query(part, predicate='dwithin', distance=max_width_m):
+            j = int(raw_j)
+            if j > i and river_crossing(part, parts[j], rivers, max_width_m) is not None:
+                graph[i].add(j)
+                graph[j].add(i)
+    reached, pending = {0}, [0]
+    while pending:
+        for j in graph[pending.pop()] - reached:
+            reached.add(j)
+            pending.append(j)
+    return len(reached) == len(parts)
+
+
 def river_merge_shape_valid(geometry):
     """窄河只是准入条件；整片须紧凑，主要陆块不得有狭颈/长条。
 

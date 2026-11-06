@@ -7,7 +7,7 @@ from datetime import datetime
 from shapely import STRtree, union_all
 
 from app.models import BdRegion, BdStoreVisitLog, BdWorkGrid
-from app.services import bd_grid_density, bd_zone_operations as ops, bd_zones as z
+from app.services import bd_grid_density, bd_grid_shapes, bd_zone_operations as ops, bd_zones as z
 from app.services.bd_regions import release_ids
 
 
@@ -79,7 +79,7 @@ def _merge_geometry_groups(groups, max_area, *, max_stores=None, max_members=Non
 
 
 def _merge_small_groups(groups, threshold, max_area, *, target_basis, target_per_zone,
-                        max_stores=None, max_members=None):
+                        max_stores=None, max_members=None, shape_guard=None):
     """Merge whole low-count territories only across real shared edges."""
     active={i:{**g,'members':set(g['members'])} for i,g in enumerate(groups)}
     before=sum(g['count']<threshold for g in active.values())
@@ -119,7 +119,8 @@ def _merge_small_groups(groups, threshold, max_area, *, target_basis, target_per
                     failures.add('hard_limit')
                     continue
                 combined=union_all([geom,other['geom']],grid_size=.001)
-                if combined.geom_type!='Polygon' or not combined.is_valid:
+                if (combined.geom_type!='Polygon' or not combined.is_valid
+                        or shape_guard is not None and not shape_guard(combined)):
                     failures.add('invalid_geometry')
                     continue
                 units=count if target_basis=='stores' else len(members)
@@ -192,12 +193,15 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
     plan_rows = []
     unassigned_grid_ids = []
     geometry_unassigned = []
+    shape_unassigned = []
     small_zone_merge={'threshold':small_zone_threshold,'before':0,'merged':0,'remaining':[]}
     out_of_tolerance = False
     max_area = max_area_km2 * 1_000_000
     for release_id in release_ids_found:
         grids = db.query(BdWorkGrid).filter_by(release_id=release_id).order_by(BdWorkGrid.id).all()
-        eligible = [g for g in grids if g.zone_id is None and int(counts[str(g.id)]) >= min_stores]
+        # 零商户只表示当前商户源没有覆盖，仍需作为连通范围参与片区组合；
+        # min_stores 只影响目标计数，不再把这些完整网格从拓扑图移除。
+        eligible = [g for g in grids if g.zone_id is None and g.state != 'disabled']
         if not eligible:
             continue
         geoms = [z.projected(g.geometry) for g in eligible]
@@ -219,15 +223,12 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
             if max_stores_per_zone:
                 target_zones = max(target_zones, math.ceil(sum(part_counts) / max_stores_per_zone))
             requested = max(1, target_zones, math.ceil(sum(g.area for g in part_geoms) / max_area))
-            groups = z._group(part_geoms, part_counts, requested, max_area,
-                              max_stores=max_stores_per_zone,max_members=max_grids_per_zone)
-            groups = z._rebalance(groups, part_geoms, part_counts, max_area,
-                                  max_stores=max_stores_per_zone,max_members=max_grids_per_zone)
-            groups = _merge_geometry_groups(groups, max_area,
+            groups = bd_grid_shapes.group(part_geoms, part_counts, requested, max_area,
                 max_stores=max_stores_per_zone, max_members=max_grids_per_zone)
             groups,merge_report=_merge_small_groups(groups,small_zone_threshold,max_area,
                 target_basis=target_basis,target_per_zone=target_per_zone,
-                max_stores=max_stores_per_zone,max_members=max_grids_per_zone)
+                max_stores=max_stores_per_zone,max_members=max_grids_per_zone,
+                shape_guard=bd_grid_shapes.acceptable)
             small_zone_merge['before']+=merge_report['before']
             small_zone_merge['merged']+=merge_report['merged']
             for item in merge_report['remaining']:
@@ -254,6 +255,12 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
                                                 'store_count': group_stores,
                                                 'geometry_type': geometry.geom_type})
                     continue
+                if not bd_grid_shapes.acceptable(geometry):
+                    unassigned_grid_ids.extend(g.id for g in members)
+                    shape_unassigned.append({'grid_ids': [g.id for g in members],
+                                             'store_count': group_stores,
+                                             **z._shape_metrics(geometry)})
+                    continue
                 member_keys = sorted(g.source_id for g in members)
                 source_id = 'density-free-' + hashlib.sha256(
                     '|'.join(member_keys).encode()).hexdigest()[:32]
@@ -267,7 +274,7 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
             raise ops.OperationError('没有可生成片区的未划分网格，请重新预览')
         return {'applied':False,'region':region,'zone_count':0,'grids_assigned':0,
                 'zones':[],'density':density,'unassigned_grid_ids':sorted(unassigned_grid_ids),
-                'geometry_unassigned':geometry_unassigned,
+                'geometry_unassigned':geometry_unassigned, 'shape_unassigned':shape_unassigned,
                 'small_zone_merge':small_zone_merge,
                 'out_of_tolerance':False,'signature':None}
     releases_to_change = sorted({row['release_id'] for row in plan_rows})
@@ -281,7 +288,7 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
         raise ops.OperationError('现有片区或网格已经派发/开展作业，拒绝覆盖；本次事务未提交')
 
     signature_data = {'density_snapshot': density['snapshot_id'], 'region': region,
-                      'scope':'unassigned_only','preserved_grid_ids':density['preserved_grid_ids'],
+                      'scope':'unassigned_only','shape_policy':'compact-v1','preserved_grid_ids':density['preserved_grid_ids'],
                       'small_zone_threshold':small_zone_threshold,
                       'target_basis': target_basis, 'target_per_zone': target_per_zone,
                       'min_stores': min_stores, 'max_area_km2': max_area_km2,
@@ -302,7 +309,7 @@ def plan(db, user, *, region='all', target_stores=8000, max_area_km2=25.,
               'min_stores': min_stores,'tolerance_pct':tolerance_pct,
               'max_grids_per_zone':max_grids_per_zone,'max_stores_per_zone':max_stores_per_zone,
               'signature': signature,'unassigned_grid_ids':sorted(unassigned_grid_ids),
-              'geometry_unassigned':geometry_unassigned,
+              'geometry_unassigned':geometry_unassigned, 'shape_unassigned':shape_unassigned,
               'small_zone_merge':small_zone_merge,
               'out_of_tolerance':out_of_tolerance,
               'zone_count': len(plan_rows),

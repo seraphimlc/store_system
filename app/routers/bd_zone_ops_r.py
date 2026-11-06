@@ -68,9 +68,14 @@ def task_list(request:Request,user:Optional[User]=Depends(work_login),db:Session
     except ops.OperationError as exc:return error(exc)
     regions=db.query(BdZone).filter(BdZone.state!='archived').order_by(BdZone.id).all()
     from app.services.bd_grid_metadata import region_search_texts
+    from app.services.bd_regions import REGIONS as REGION_LABELS
+    release_sources={release.id:release.source or {} for release in db.query(BdZoneRelease).all()}
+    region_codes={region.id:release_sources.get(region.release_id,{}).get('region_code','tokyo23')
+                  for region in regions}
     search_texts=region_search_texts(db,[r.id for r in regions])
     tasks=db.query(BdMainTask).order_by(BdMainTask.id.desc()).all()
     return render(request,user,'bd_main_tasks.html',regions=regions,region_search=search_texts,
+                  region_codes=region_codes,region_options=[('all','全部地区'),*REGION_LABELS.items()],
                   tasks=tasks,summaries=task_ops.batch_summaries(db,user,tasks))
 
 
@@ -313,17 +318,78 @@ async def grid_auto_apply(request:Request,user:Optional[User]=Depends(work_login
         return JSONResponse({'error':'自动分区提交失败，请刷新后重试'},status_code=500)
 
 
-@router.post('/zones/merge-grids')
-def grid_merge(request:Request,name:str=Form(...),selections:list[str]=Form(...),csrf_token:str=Form(''),
-               merge_boundaries:bool=Form(False),
-               user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+@router.post('/zones/grids/enable')
+def enable_grid(request:Request,grid_id:int=Form(...),revision:int=Form(...),
+                region:str=Form('tokyo23'),csrf_token:str=Form(''),
+                user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    back = '/zones?' + urlencode({'mode': 'manage', 'region': region})
+    wants_json = 'application/json' in request.headers.get('accept', '')
     try:
         post_guard(request,user,csrf_token)
-        zone=bd_grid_regions.merge(db,user,[json.loads(item) for item in selections],name,merge_boundaries)
+        grid = bd_grid_regions.enable_grid(db,user,grid_id,revision)
         db.commit()
     except (ValueError,ops.OperationError) as exc:
-        db.rollback();return error(exc,409)
-    return RedirectResponse(zone_location(db,zone.id),status_code=303)
+        db.rollback()
+        if wants_json:
+            return JSONResponse({'error': str(exc)}, status_code=400)
+        return RedirectResponse(_with_msg(back,'err',str(exc),default=back),status_code=303)
+    if wants_json:
+        return JSONResponse({'id': grid.id, 'revision': grid.revision})
+    return RedirectResponse(_with_msg(back,'msg',t('已转为可用网格，可选择并划入片区'),default=back),status_code=303)
+
+
+@router.post('/zones/split')
+def split_zone(request:Request,zone_id:int=Form(...),revision:int=Form(...),
+               region:str=Form('tokyo23'),csrf_token:str=Form(''),
+               user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    back = '/zones?' + urlencode({'mode': 'manage', 'region': region})
+    try:
+        post_guard(request,user,csrf_token)
+        bd_grid_regions.split_zone(db,user,zone_id,revision)
+        db.commit()
+    except (ValueError,ops.OperationError) as exc:
+        db.rollback()
+        return RedirectResponse(_with_msg(back,'err',str(exc),default=back),status_code=303)
+    return RedirectResponse(_with_msg(back,'msg',t('片区已拆分，网格可重新组合'),default=back),status_code=303)
+
+
+def _json_request(request):
+    return 'application/json' in (request.headers.get('content-type') or '').lower()
+
+
+@router.post('/zones/merge-grids')
+async def grid_merge(request:Request,user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    """表单提交仍整页返回；页面脚本用 JSON，只拿回这次改到的片区。"""
+    json_body=_json_request(request)
+    try:
+        if json_body:
+            payload=await request.json()
+            if not isinstance(payload,dict):raise ValueError()
+            post_guard(request,user,str(payload.get('csrf_token') or ''))
+            name=str(payload.get('name') or '')
+            selections=payload.get('selections')
+            if not isinstance(selections,list):raise ValueError()
+            merge_boundaries=payload.get('merge_boundaries',True)
+            region=str(payload.get('region') or 'tokyo23')
+        else:
+            form=await request.form()
+            post_guard(request,user,str(form.get('csrf_token') or ''))
+            name=str(form.get('name') or '')
+            selections=[json.loads(item) for item in form.getlist('selections')]
+            merge_boundaries=str(form.get('merge_boundaries') or '').lower() in ('true','on','1')
+            region=str(form.get('region') or 'tokyo23')
+        if type(merge_boundaries) is not bool:raise ValueError()
+        zone=bd_grid_regions.merge(db,user,selections,name,merge_boundaries)
+        parent_ids=[item.get('zone_id') for item in selections if isinstance(item,dict)]
+        patch=bd_grid_regions.composition_patch(db,zone,parent_ids) if json_body else None
+        db.commit()
+    except (ValueError,ops.OperationError) as exc:
+        db.rollback()
+        if json_body:return JSONResponse({'error':str(exc) or '合并参数无效'},status_code=409)
+        return error(exc,409)
+    if json_body:return JSONResponse(patch)
+    back='/zones?'+urlencode({'mode':'manage','region':region})
+    return RedirectResponse(_with_msg(back,'msg',t('片区已组合'),default=back),status_code=303)
 
 
 @router.get('/zones/{zone_id}/panel',response_class=HTMLResponse)
@@ -332,7 +398,8 @@ def zone_panel(zone_id:int,request:Request,user:Optional[User]=Depends(work_logi
         context=ops.management_context(db,user,with_geometry=False)
         detail=ops.management_detail(db,user,zone_id)
     except ops.OperationError as e:return error(e,404 if user.role=='admin' else 403)
-    return render(request,user,'bd_zone_panel.html',**context,**detail)
+    release=db.get(BdZoneRelease,detail['zone'].release_id)
+    return render(request,user,'bd_zone_panel.html',**context,**detail,region=release.source.get('region_code','tokyo23'))
 
 
 @router.post('/zones/{zone_id}/rename')

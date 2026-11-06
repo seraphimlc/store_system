@@ -69,8 +69,10 @@ def exclusions(elements):
     result = []
     for el in elements:
         tags = el.get('tags', {})
-        if not (tags.get('natural') in ('water', 'wood', 'wetland', 'scrub', 'bare_rock')
-                or tags.get('landuse') in ('forest', 'reservoir')
+        # 只有真实水体是硬排除。森林、灌木、裸岩和湿地可能只是商户源未覆盖，
+        # 不能把“当前没有商户记录”当成“没有可作业区域”。
+        if not (tags.get('natural') == 'water'
+                or tags.get('landuse') == 'reservoir'
                 or tags.get('waterway') == 'riverbank'):
             continue
         if el['type'] == 'relation':

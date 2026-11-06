@@ -153,7 +153,7 @@ def neighbours(geoms):
 
 
 def _group(geoms, counts, target_count, max_area, *, adjacency=None, merge_guard=None,
-           max_stores=None, max_members=None):
+           max_stores=None, max_members=None, merge_geometry=None):
     """有界、确定性的邻接合并。面积优先，店铺均衡次之，兼顾紧凑形状。"""
     graph = neighbours(geoms) if adjacency is None else {i:set(values) for i,values in adjacency.items()}
     groups = {i: {'geom': g, 'members': {i}, 'count': counts[i], 'version': 0}
@@ -198,7 +198,7 @@ def _group(geoms, counts, target_count, max_area, *, adjacency=None, merge_guard
         a, b = groups[i], groups[j]
         if (vi, vj) != (a['version'], b['version']):
             continue
-        merged = union_all([a['geom'], b['geom']], grid_size=.001)
+        merged = (merge_geometry or union_all)([a['geom'], b['geom']], grid_size=.001)
         if merged.geom_type != 'Polygon':
             continue
         if merge_guard is not None and not merge_guard(merged):

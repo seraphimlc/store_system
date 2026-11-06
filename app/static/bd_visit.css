@@ -163,9 +163,9 @@
 .visit-location-heading {display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:32px;padding-right:82px}
 .visit-coordinates {font-variant-numeric:tabular-nums;overflow-wrap:anywhere;color:#30445a}
 .visit-location-editor summary {position:absolute;right:0;top:0;cursor:pointer;width:fit-content;padding:6px 0;color:#245caa;font-weight:600;min-height:32px;box-sizing:border-box}
-.visit-coordinate-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:6px 0 8px}
-.visit-coordinate-fields label {display:grid;gap:4px;min-width:0}
-.visit-coordinate-fields input {width:100%;min-width:0;box-sizing:border-box;height:40px;border:1px solid #ccd7e5;border-radius:5px;padding:7px;font-size:16px}
+.visit-location-controls {display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 8px;min-width:0}
+.visit-coordinate-preview {min-width:0;overflow-wrap:anywhere;color:#30445a;font-variant-numeric:tabular-nums}
+.visit-location-controls .btn {flex:0 0 auto;min-height:36px;margin:0;padding:6px 12px}
 .visit-place-link {display:inline-block;color:#245caa;overflow-wrap:anywhere}
 .visit-detail .visit-form {display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0;margin:0}
 .visit-form .visit-field-row {display:grid;grid-template-columns:88px minmax(0,1fr);align-items:center;gap:10px;margin:0;min-width:0;font-size:13px;color:#40516a}

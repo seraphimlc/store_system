@@ -1,9 +1,9 @@
 /* Browser coordinates stay on this page; one watcher is released when leaving. */
-window.startWorkLocation=(map,text)=>{
+window.startWorkLocation=(map,text,onFirstPosition)=>{
   'use strict';
   const button=document.getElementById('work-location');
   const status=document.getElementById('work-location-status');
-  let watcher=null,marker,accuracy,position,following=false;
+  let watcher=null,marker,accuracy,position,following=false,receivedPosition=false;
   const follow=value=>{following=value;button.setAttribute('aria-pressed',String(value));};
   const stop=()=>{if(watcher!==null)navigator.geolocation.clearWatch(watcher);watcher=null;};
   const start=()=>{
@@ -14,6 +14,7 @@ window.startWorkLocation=(map,text)=>{
       const {latitude:lat,longitude:lng,accuracy:radius}=result.coords;
       if(!Number.isFinite(lat)||!Number.isFinite(lng))return;
       position={lat,lng};
+      if(!receivedPosition){receivedPosition=true;onFirstPosition?.(position);}
       if(!marker)marker=new google.maps.Marker({map,title:text.mine,zIndex:1000,icon:{path:google.maps.SymbolPath.CIRCLE,scale:8,fillColor:'#1677ff',fillOpacity:1,strokeColor:'#fff',strokeWeight:3}});
       marker.setPosition(position);
       if(!accuracy)accuracy=new google.maps.Circle({map,strokeWeight:0,fillColor:'#1677ff',fillOpacity:.12,clickable:false});
@@ -27,5 +28,5 @@ window.startWorkLocation=(map,text)=>{
   map.addListener('dragstart',()=>follow(false));
   window.addEventListener('pagehide',stop);
   window.addEventListener('pageshow',event=>{if(event.persisted)start();});
-  follow(true);start();
+  follow(false);start();
 };

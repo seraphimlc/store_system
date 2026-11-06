@@ -47,14 +47,17 @@ def test_ground_rail_divides_land_and_dangles_are_reported():
     assert not shape(doc['natural_audit']['dangles']).is_empty
 
 
-def test_water_holes_and_islands_remain_in_true_geometry():
+def test_interior_water_is_covered_and_a_boundary_gap_stays_open():
     water = [box(900, -100, 1100, 1100), box(200, 200, 400, 400)]
     doc = natural_source([osm_way(1, [(-100, 500), (2100, 500)], highway='primary')], water)
     geoms = [shape(c['metric_geometry']) for c in doc['road_cells']]
+    covered = union_all(geoms)
     assert len(geoms) == 4
-    assert union_all(geoms).area == pytest.approx(1_760_000, abs=1)
-    assert not union_all(geoms).covers(Point(300, 300))
-    assert natural.boundary_kind({'highway': 'tertiary'}) == 'road'
+    assert covered.area == pytest.approx(1_800_000, abs=1)
+    assert covered.covers(Point(300, 300))
+    assert not covered.covers(Point(1000, 500))
+    assert natural.boundary_kind({'highway': 'tertiary'}) is None
+    assert natural.boundary_kind({'highway': 'tertiary', 'ref': 'R16'}) == 'road'
 
 
 def selected(grid, zone=None):
@@ -232,10 +235,11 @@ def test_shared_url_separates_assignment_and_composition(client,seed):
 
 def test_qualified_arterials_and_junction_links_not_small_roads():
     assert natural.boundary_kind({'highway':'primary_link'}) == 'road'
-    assert natural.boundary_kind({'highway':'tertiary','lanes':'2'}) == 'road'
-    assert natural.boundary_kind({'highway':'tertiary','width':'8 m'}) == 'road'
+    assert natural.boundary_kind({'highway':'tertiary','lanes':'2'}) is None
+    assert natural.boundary_kind({'highway':'tertiary','width':'8 m'}) is None
+    assert natural.boundary_kind({'highway':'tertiary','ref':'246'}) == 'road'
     assert natural.boundary_kind({'highway':'tertiary','lanes':'1'}) is None
-    assert natural.boundary_kind({'highway':'tertiary_link','lanes':'1','oneway':'yes'}) == 'road'
+    assert natural.boundary_kind({'highway':'tertiary_link','lanes':'1','oneway':'yes'}) is None
     assert natural.boundary_kind({'highway':'residential','lanes':'2'}) is None
     assert natural.boundary_kind({'highway':'primary','tunnel':'yes'},length_m=100) == 'road_projection'
     assert natural.boundary_kind({'highway':'primary','tunnel':'yes'},length_m=1000) is None
@@ -311,8 +315,8 @@ def test_extreme_area_is_blocked_and_small_inhabited_island_is_explicit():
     audit=normal['natural_audit']
     assert not audit['quality_pass']
     assert any('oversized' in item['reasons'] for item in audit['normalisation']['violations'])
-    assert len(audit['normalisation']['island_exceptions'])==1
-    assert len(audit['excluded_empty_cell_ids'])==1
+    assert len(audit['normalisation']['island_exceptions'])==2
+    assert len(audit['excluded_empty_cell_ids'])==0
     assert sum(len(c['merchant_ids']) for c in normal['road_cells'])==2
 
 
@@ -331,9 +335,9 @@ def test_empty_indivisible_large_block_is_audited_without_losing_merchants():
         [osm_way(1,[(6000,-100),(6000,1100)],highway='primary')],[],[],captured_at='synthetic',source={})
     lon,lat=z.geographic(Point(6500,500))['coordinates']
     normal=natural.normalise(bind_rows(doc,[{'place_id':'commercial','name':'shop','lon':lon,'lat':lat}],{'backend':'synthetic'}))
-    assert normal['natural_audit']['quality_pass']
-    assert normal['natural_audit']['excluded_large_empty_area_km2']==pytest.approx(6)
-    assert normal['area_km2']==pytest.approx(1)
+    assert not normal['natural_audit']['quality_pass']
+    assert normal['natural_audit']['excluded_large_empty_area_km2']==pytest.approx(0)
+    assert normal['area_km2']==pytest.approx(7)
     assert sum(len(c['merchant_ids']) for c in normal['road_cells'])==1
 
 
@@ -420,6 +424,121 @@ def test_repair_enclosed_grid_keeps_ids_maps_and_effective_area(seed):
         assert repair_grids(db,user,apply=True)['removed_grid_count']==0
 
 
+def test_zone_fragments_below_threshold_join_the_same_zone_neighbor(seed):
+    from app.services.bd_grid_geometry import absorb_zone_fragments
+    from app.models import User
+    with appdb.SessionLocal() as db:
+        user = db.get(User, seed['users']['ops-admin'])
+        release = BdZoneRelease(fingerprint='kanagawa-fragments', source={'region_code': 'kanagawa'},
+                                parameters={}, audit={}, reviews=[], created_by=user.id)
+        db.add(release); db.flush()
+        keeper = box(0, 0, 1000, 1000)
+        short = box(1000, 0, 2000, 1000)
+        fragment = box(900, 1000, 1400, 1200)
+        exact = box(1400, 1000, 2000, 1600)
+        outsider = box(3000, 0, 3600, 200)
+        trapped = box(-300, 3000, 0, 3200)
+        loose = box(0, -400, 500, 0)
+        other_keeper = box(0, 3000, 1000, 4000)
+        other_fragment = box(1000, 3000, 1400, 3400)
+        zone_a_geom = union_all([keeper, short, fragment, exact, outsider, trapped])
+        zone_a = BdZone(release_id=release.id, source_id='zone-a', name='A', review=[], state='ready',
+                        geometry=z.geographic(zone_a_geom), area_km2=zone_a_geom.area / 1e6, store_count=0)
+        zone_b = BdZone(release_id=release.id, source_id='zone-b', name='B', review=[], state='ready',
+                        geometry=z.geographic(union_all([other_keeper, other_fragment])),
+                        area_km2=union_all([other_keeper, other_fragment]).area / 1e6, store_count=0)
+        db.add_all([zone_a, zone_b]); db.flush()
+        rows = {
+            'keeper': add_grid(db, release.id, 'keeper', keeper, zone_a.id),
+            'short': add_grid(db, release.id, 'short', short, zone_a.id),
+            'fragment': add_grid(db, release.id, 'fragment', fragment, zone_a.id),
+            'exact': add_grid(db, release.id, 'exact', exact, zone_a.id),
+            'outsider': add_grid(db, release.id, 'outsider', outsider, zone_a.id),
+            'trapped': add_grid(db, release.id, 'trapped', trapped, zone_a.id),
+            'loose': add_grid(db, release.id, 'loose', loose),
+            'other': add_grid(db, release.id, 'other', other_keeper, zone_b.id),
+            'other-fragment': add_grid(db, release.id, 'other-fragment', other_fragment, zone_b.id),
+        }
+        db.add(BdGridStore(release_id=release.id, grid_id=rows['fragment'].id, source_id='fragment-shop'))
+        db.add(BdGridStore(release_id=release.id, grid_id=rows['loose'].id, source_id='loose-shop'))
+        db.flush()
+        tokyo = db.get(BdWorkGrid, seed['grid'])
+        before_tokyo = copy.deepcopy(tokyo.geometry)
+        report = absorb_zone_fragments(db, user, 'kanagawa', max_area_km2=.36)
+        assert report['removed_grid_count'] == 3
+        assert rows['exact'].id not in report['remaining_small_ids']
+        assert {rows['outsider'].id, rows['trapped'].id} <= set(report['remaining_small_ids'])
+        applied = absorb_zone_fragments(db, user, 'kanagawa', max_area_km2=.36, apply=True)
+        db.flush()
+        assert applied['removed_grid_count'] == 3
+        assert db.get(BdWorkGrid, rows['fragment'].id) is None
+        assert db.get(BdWorkGrid, rows['loose'].id) is None
+        assert db.get(BdWorkGrid, rows['other-fragment'].id) is None
+        assert rows['short'].area_km2 == pytest.approx(1.1)
+        assert rows['short'].store_count == 1
+        assert rows['keeper'].area_km2 == pytest.approx(1.2)
+        assert rows['keeper'].store_count == 1
+        assert db.query(BdGridStore).filter_by(source_id='fragment-shop').one().grid_id == rows['short'].id
+        assert db.query(BdGridStore).filter_by(source_id='loose-shop').one().grid_id == rows['keeper'].id
+        assert rows['exact'].area_km2 == pytest.approx(.36)
+        assert db.get(BdWorkGrid, rows['trapped'].id).zone_id == zone_a.id
+        assert db.get(BdWorkGrid, rows['other'].id).area_km2 == pytest.approx(1.16)
+        assert zone_b.area_km2 == pytest.approx(1.16) and zone_b.store_count == 0
+        assert zone_a.area_km2 == pytest.approx(2.84) and zone_a.store_count == 2
+        assert tokyo.geometry == before_tokyo and tokyo.revision == 0
+        assert absorb_zone_fragments(db, user, 'kanagawa', max_area_km2=.36, apply=True)['removed_grid_count'] == 0
+
+
+def test_fragment_joins_the_smallest_adjacent_grid(seed):
+    from app.services.bd_grid_geometry import absorb_zone_fragments
+    from app.models import User
+    with appdb.SessionLocal() as db:
+        user = db.get(User, seed['users']['ops-admin'])
+        release = BdZoneRelease(fingerprint='saitama-smallest', source={'region_code': 'saitama'},
+                                parameters={}, audit={}, reviews=[], created_by=user.id)
+        db.add(release); db.flush()
+        fragment = box(0, 0, 400, 400)
+        small = box(400, 0, 1400, 500)
+        large = box(0, 400, 400, 2400)
+        rows = {
+            'fragment': add_grid(db, release.id, 'fragment', fragment),
+            'small': add_grid(db, release.id, 'small', small),
+            'large': add_grid(db, release.id, 'large', large),
+        }
+        db.add(BdGridStore(release_id=release.id, grid_id=rows['fragment'].id, source_id='tiny-shop'))
+        db.flush()
+        report = absorb_zone_fragments(db, user, 'saitama', max_area_km2=.5, target='smallest_neighbor')
+        assert report['removed_grid_count'] == 1
+        assert report['groups'][0]['target_id'] == rows['small'].id
+        applied = absorb_zone_fragments(
+            db, user, 'saitama', max_area_km2=.5, target='smallest_neighbor', apply=True)
+        db.flush()
+        assert applied['removed_grid_count'] == 1
+        assert db.get(BdWorkGrid, rows['fragment'].id) is None
+        assert rows['small'].area_km2 == pytest.approx(.66)
+        assert rows['large'].area_km2 == pytest.approx(.8)
+        assert db.query(BdGridStore).filter_by(source_id='tiny-shop').one().grid_id == rows['small'].id
+
+
+def test_assigned_zone_fragment_is_not_absorbed(seed):
+    from app.services.bd_grid_geometry import absorb_zone_fragments
+    from app.models import User
+    with appdb.SessionLocal() as db:
+        user = db.get(User, seed['users']['ops-admin'])
+        release = BdZoneRelease(fingerprint='kanagawa-locked', source={'region_code': 'kanagawa'},
+                                parameters={}, audit={}, reviews=[], created_by=user.id)
+        db.add(release); db.flush()
+        zone = BdZone(release_id=release.id, source_id='locked-zone', name='locked', review=[], state='ready',
+                      geometry=z.geographic(box(0, 0, 1000, 600)), area_km2=.6, store_count=0,
+                      team_id=seed['team'], leader_id=user.id)
+        db.add(zone); db.flush()
+        keeper = add_grid(db, release.id, 'locked-keeper', box(0, 0, 1000, 400), zone.id)
+        fragment = add_grid(db, release.id, 'locked-fragment', box(0, 400, 400, 600), zone.id)
+        with pytest.raises(ops.OperationError, match='已派发'):
+            absorb_zone_fragments(db, user, 'kanagawa', apply=True)
+        assert db.get(BdWorkGrid, fragment.id) is not None and keeper.revision == 0
+
+
 def test_repair_enclosed_assigned_grid_fails_before_modifying(seed):
     from app.services.bd_grid_geometry import repair_grids
     from app.models import User
@@ -499,8 +618,8 @@ def test_main_task_creates_four_level_snapshot_and_keeps_batch_history(seed):
         assert db.query(BdStoreTask).count()==2
 
 
-def test_main_task_rejects_mixed_release_and_non_admin(seed):
-    from app.models import User, BdZoneRelease, BdRegion
+def test_main_task_accepts_areas_across_sources_but_rejects_non_admin(seed):
+    from app.models import User, BdZoneRelease, BdRegion, BdWorkStore
     from app.services import bd_hierarchical_tasks as task_ops
     with appdb.SessionLocal() as db:
         admin=db.get(User,seed['users']['ops-admin'])
@@ -509,7 +628,117 @@ def test_main_task_rejects_mixed_release_and_non_admin(seed):
             task_ops.create_main_task(db,captain,'x',[seed['zone']])
         release=BdZoneRelease(fingerprint='task-other',source={},parameters={},audit={},reviews=[],created_by=admin.id)
         db.add(release);db.flush()
-        other=BdRegion(release_id=release.id,source_id='other-region',name='other',geometry={},area_km2=1,store_count=0,review=[],state='ready')
+        base=db.get(BdRegion,seed['zone'])
+        other=BdRegion(release_id=release.id,source_id='other-region',name='other',geometry=base.geometry,
+                       area_km2=1,store_count=1,review=[],state='ready')
         db.add(other);db.flush()
-        with pytest.raises(ops.OperationError,match='同一网格版本'):
-            task_ops.create_main_task(db,admin,'mixed',[seed['zone'],other.id])
+        grid=BdWorkGrid(release_id=release.id,zone_id=other.id,source_id='other-grid',
+                        geometry=base.geometry,area_km2=1,store_count=1,state='ready')
+        db.add(grid);db.flush()
+        db.add(BdWorkStore(id='other-store',name='cross-region',address='cross-region',lat=35.5,lon=139.5))
+        db.add(BdGridStore(release_id=release.id,grid_id=grid.id,source_id='other-store'))
+        db.flush()
+        task=task_ops.create_main_task(db,admin,'mixed',[seed['zone'],other.id])
+        db.flush()
+        from app.models import BdRegionTask, BdGridTask
+        assert not hasattr(task,'release_id')
+        assert {row.region_id for row in db.query(BdRegionTask).filter_by(main_task_id=task.id)}=={seed['zone'],other.id}
+        assert db.query(BdGridTask).join(BdRegionTask).filter(BdRegionTask.main_task_id==task.id).count()==2
+
+
+
+def test_enable_disabled_grid_preserves_geometry_and_mapping_and_allows_merge(seed):
+    from app.models import User, BdLog
+    with appdb.SessionLocal() as db:
+        admin = db.get(User, seed['users']['ops-admin'])
+        grid = db.get(BdWorkGrid, seed['grid'])
+        grid.zone_id = None
+        grid.state = 'disabled'
+        db.commit()
+        before = copy.deepcopy(grid.geometry), grid.store_count, grid.area_km2
+        mappings = [(r.id, r.source_id) for r in db.query(BdGridStore).all()]
+        row = next(r for r in regions.management_grids(db, admin) if r['id'] == grid.id)
+        assert row['disabled'] and row['locked'] and row['convertible']
+        regions.enable_grid(db, admin, grid.id, grid.revision)
+        db.commit()
+        assert grid.state == 'ready' and grid.revision == 1 and grid.zone_id is None
+        assert (grid.geometry, grid.store_count, grid.area_km2) == before
+        assert [(r.id, r.source_id) for r in db.query(BdGridStore).all()] == mappings
+        assert db.query(BdLog).filter_by(action='enable_grid').count() == 1
+        row = next(r for r in regions.management_grids(db, admin) if r['id'] == grid.id)
+        assert not row['locked'] and not row['disabled'] and not row['convertible']
+        assert regions.preview(db, admin, [selected(grid)])['properties']['grid_count'] == 1
+
+
+@pytest.mark.parametrize('protected', ['zone', 'assignee', 'progress', 'task_state', 'history'])
+def test_enable_disabled_grid_rejects_protected_work(seed, protected):
+    from app.models import User
+    with appdb.SessionLocal() as db:
+        admin = db.get(User, seed['users']['ops-admin'])
+        grid = db.get(BdWorkGrid, seed['grid'])
+        grid.zone_id = None
+        grid.state = 'disabled'
+        if protected == 'zone': grid.zone_id = seed['zone']
+        if protected == 'assignee': grid.assignee_id = seed['users']['worker']
+        if protected == 'progress': grid.progress = 10
+        if protected == 'task_state': grid.task_state = 'visited'
+        if protected == 'history':
+            db.add(BdStoreVisitLog(request_id='enable-history', store_id='shop-synthetic',
+                grid_id=grid.id, actor_id=admin.id, operation='visit', before={}, after={}, note=''))
+        db.commit()
+        row = next(r for r in regions.management_grids(db, admin) if r['id'] == grid.id)
+        assert not row['convertible']
+        with pytest.raises(ops.OperationError, match='已派发或已开展'):
+            regions.enable_grid(db, admin, grid.id, grid.revision)
+        assert grid.state == 'disabled' and grid.revision == 0
+
+
+def test_enable_disabled_grid_rejects_non_admin_stale_revision_and_repeat(seed):
+    from app.models import User
+    with appdb.SessionLocal() as db:
+        admin = db.get(User, seed['users']['ops-admin'])
+        grid = db.get(BdWorkGrid, seed['grid'])
+        grid.zone_id = None
+        grid.state = 'disabled'
+        db.commit()
+        with pytest.raises(ops.OperationError, match='管理员'):
+            regions.enable_grid(db, db.get(User, seed['users']['captain']), grid.id, 0)
+        with pytest.raises(ops.OperationError, match='已变更'):
+            regions.enable_grid(db, admin, grid.id, -1)
+        assert grid.state == 'disabled'
+        regions.enable_grid(db, admin, grid.id, 0)
+        db.flush()
+        with pytest.raises(ops.OperationError, match='状态已变更'):
+            regions.enable_grid(db, admin, grid.id, 1)
+
+
+def test_enable_disabled_grid_form_success_error_csrf_and_permission(client, seed):
+    login(client, 'ops-admin')
+    with appdb.SessionLocal() as db:
+        grid = db.get(BdWorkGrid, seed['grid'])
+        grid.zone_id = None
+        grid.state = 'disabled'
+        db.commit()
+    page = client.get('/zones?mode=manage&region=tokyo23')
+    assert page.status_code == 200
+    assert 'grid-conversion-panel' in page.text and 'grid-map-legend' in page.text
+    data = {'grid_id': seed['grid'], 'revision': 0, 'region': 'tokyo23',
+            'csrf_token': csrf(page.text), '_ft': form_token(client)}
+    rejected = client.post('/zones/grids/enable', data={**data, 'csrf_token': 'wrong'}, follow_redirects=False)
+    assert rejected.status_code == 303 and 'err=' in rejected.headers['location']
+    data['_ft'] = form_token(client)
+    response = client.post('/zones/grids/enable', data=data, follow_redirects=False)
+    assert response.status_code == 303 and 'region=tokyo23' in response.headers['location']
+    success = client.get(response.headers['location'])
+    assert '已转为可用网格，可选择并划入片区' in success.text
+    with appdb.SessionLocal() as db:
+        assert db.get(BdWorkGrid, seed['grid']).state == 'ready'
+    data['_ft'] = form_token(client)
+    stale = client.post('/zones/grids/enable', data=data, follow_redirects=False)
+    assert stale.status_code == 303 and 'err=' in stale.headers['location']
+    assert 'role="alert"' in client.get(stale.headers['location']).text
+    client.cookies.clear()
+    login(client, 'captain')
+    data.update(csrf_token=csrf(client.get('/my/work').text), _ft=form_token(client))
+    denied = client.post('/zones/grids/enable', data=data, follow_redirects=False)
+    assert denied.status_code == 302

@@ -70,6 +70,9 @@
   document.querySelectorAll('[data-location-editor]').forEach(form => form.addEventListener('submit', async event => {
     event.preventDefault();
     const button = form.querySelector('button[type="submit"]'), message = form.querySelector('[data-coordinate-message]');
+    if (!form.querySelector('[name="lat"]').value || !form.querySelector('[name="lon"]').value) {
+      message.textContent = text.coordinatesRequired; return;
+    }
     const label = button.textContent; button.disabled = true; button.textContent = text.saving;
     try {
       const response = await fetch(form.action, {method:'POST',body:new FormData(form)});
@@ -82,4 +85,17 @@
       location.assign(url.toString());
     } catch (error) {message.textContent = error.message || text.failed; button.disabled = false; button.textContent = label;}
   }));
+  document.querySelectorAll('[data-location-editor]').forEach(form => {
+    const button=form.querySelector('[data-get-location]'),message=form.querySelector('[data-coordinate-message]');
+    const lat=form.querySelector('[name="lat"]'),lon=form.querySelector('[name="lon"]'),preview=form.querySelector('[data-coordinate-preview]');
+    button?.addEventListener('click',()=>{
+      if(!navigator.geolocation){message.textContent=text.locationUnsupported;return;}
+      button.disabled=true;message.textContent=text.locationLoading;
+      navigator.geolocation.getCurrentPosition(result=>{
+        lat.value=String(result.coords.latitude);lon.value=String(result.coords.longitude);
+        preview.textContent=`${result.coords.latitude.toFixed(6)}, ${result.coords.longitude.toFixed(6)}`;
+        message.textContent='';button.disabled=false;
+      },()=>{message.textContent=text.locationFailed;button.disabled=false;},{enableHighAccuracy:true,timeout:15000});
+    });
+  });
 })();

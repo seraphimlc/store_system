@@ -2,6 +2,12 @@
   <h3 tabindex="-1" id="zone-detail-title">{{ zone.name }}</h3>
   <p class="zone-state ready">{{ t('已指派') if zone.team_id else t('未指派') }} · #{{ zone.id }}</p>
   <form method="post" action="/zones/{{ zone.id }}/rename" class="zone-detail-section"><input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><input type="hidden" name="revision" value="{{ zone.revision }}"><label for="zone-name">{{ t('片区名称') }}</label><input id="zone-name" name="name" value="{{ zone.name }}" maxlength="128" required><button class="btn" type="submit">{{ t('保存名称') }}</button></form>
+  <form method="post" action="/zones/split" class="zone-detail-section">
+    <input type="hidden" name="_ft" value="{{ form_token() }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+    <input type="hidden" name="zone_id" value="{{ zone.id }}"><input type="hidden" name="revision" value="{{ zone.revision }}"><input type="hidden" name="region" value="{{ region|default('tokyo23') }}">
+    <p class="zone-help">{{ t('拆分后，完整网格返回未分配，可重新组合片区。') }}</p>
+    <button type="submit" class="btn ghost" {% if zone.team_id or zone.leader_id %}disabled{% endif %}>{{ t('拆分片区') }}</button>
+  </form>
   <label class="zone-grid-toggle"><span>{{ t('查看网格') }}</span><input id="zone-grid-toggle" type="checkbox" role="switch" aria-controls="zone-map" {% if not grids %}disabled{% endif %}></label>
   <script id="zone-grid-data" type="application/json">{{ grid_geometry|tojson }}</script>
   <dl class="zone-facts"><div><dt>{{ t('有效面积') }}</dt><dd>{{ '%.2f'|format(zone.area_km2) }} <small>km²</small></dd></div><div><dt>{{ t('商户数') }}</dt><dd>{{ merchant_total }}</dd></div><div><dt>{{ t('负责团队') }}</dt><dd>{{ team_names.get(zone.team_id,t('未指派')) }}</dd></div><div><dt>{{ t('负责人') }}</dt><dd>{{ names.get(zone.leader_id,t('未指派')) }}</dd></div></dl>

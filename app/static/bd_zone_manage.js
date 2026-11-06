@@ -14,6 +14,40 @@
     previewHiddenRegions = new Set(ids);
     layer?.setStyle(style);
   };
+  window.patchZoneFeatures = payload => {
+    if (!layer || !payload) return;
+    const gone = new Set((payload.archived_zone_ids || []).map(Number));
+    const incoming = [...(payload.zones || [])];
+    if (payload.zone) incoming.push(payload.zone);
+    const drop = [];
+    layer.forEach(feature => {
+      const id = Number(feature.getProperty('id'));
+      if (gone.has(id) || incoming.some(zone => Number(zone.id) === id)) drop.push(feature);
+    });
+    drop.forEach(feature => {
+      layer.remove(feature);
+      features.delete(Number(feature.getProperty('id')));
+    });
+    for (const zone of incoming) {
+      const added = layer.addGeoJson({type: 'Feature', geometry: zone.geometry, properties: {
+        id: zone.id, name: zone.name, area: zone.area_km2, preserve_holes: true,
+        stores: zone.store_count, progress: 0, assigned: false, team: '', leader: ''}});
+      features.set(Number(zone.id), added[0]);
+    }
+    highlight();
+    [...select.options].forEach(option => { if (gone.has(Number(option.value))) option.remove(); });
+    for (const zone of incoming) {
+      let option = [...select.options].find(item => Number(item.value) === Number(zone.id));
+      const created = !option;
+      if (!option) {
+        option = document.createElement('option');
+        option.value = String(zone.id);
+        select.append(option);
+      }
+      if (created || Number(zone.id) === Number(payload.zone?.id))
+        option.textContent = `${zone.name} · ${texts.unassigned}`;
+    }
+  };
   const format = value => Number(value).toLocaleString(config.language, {maximumFractionDigits: 2});
   function notify(message) { notice.textContent = message; notice.hidden = !message; }
   // 仅用于地图展示：封闭内洞一起圈入，不改变真实几何、面积或商户归属。

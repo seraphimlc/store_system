@@ -117,8 +117,8 @@ def review(db,user,task_id,selections,action,reason=''):
             # 工作商户和批次任务都保留来源申请；照片只经鉴权路由提供。
             db.add(BdWorkStore(id=identity,name=p['name'],address=p['address'],lat=p['lat'],lon=p['lon']))
             grid=grids[proposal.grid_task_id]
-            db.add(BdGridStore(release_id=main.release_id,grid_id=grid.grid_id,source_id=identity))
             base_grid=base_grids[grid.grid_id];base_grid.store_count+=1
+            db.add(BdGridStore(release_id=base_grid.release_id,grid_id=grid.grid_id,source_id=identity))
             db.add(BdStoreTask(grid_task_id=proposal.grid_task_id,store_id=identity,
                 snapshot={k:v for k,v in p.items() if k not in ('photo','photo_type')},status='pending',result={}))
         ops.audit_log(db,user,'task','review_store_proposal',proposal,before,{'state':proposal.state,'reason':proposal.reason})

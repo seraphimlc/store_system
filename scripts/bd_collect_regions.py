@@ -25,16 +25,13 @@ def collect(pbf,output):
             tags=dict(way.tags)
             kind=boundary_kind(tags,length_m=0)
             coast=tags.get('natural')=='coastline'
-            river=tags.get('waterway')=='river' and tags.get('tunnel','no') in ('no','false','0','')
-            if not kind and not coast and not river:return
+            if not kind and not coast:return
             try:geometry=json.loads(geo.create_linestring(way))
             except (RuntimeError,osmium.InvalidLocationError):
                 self.invalid.append(['way',way.id]);return
             if coast:self.coasts.append(geometry)
             if kind:
                 self.roads.append({'type':'way','id':way.id,'tags':tags,
-                    'geometry':[{'lon':x,'lat':y} for x,y in geometry['coordinates']]})
-            if river:self.dividers.append({'type':'way','id':way.id,'tags':{'waterway':'river'},
                     'geometry':[{'lon':x,'lat':y} for x,y in geometry['coordinates']]})
         def area(self,area):
             tags=dict(area.tags)
@@ -44,16 +41,14 @@ def collect(pbf,output):
             city=admin and ref in TOKYO_CITIES
             municipal=admin and tags.get('admin_level') in ('7','8') and len(ref)==5 and ref[:2] in ('11','12','13','14')
             facility=tags.get('landuse')=='military' or tags.get('aeroway')=='aerodrome'
-            mask=(tags.get('natural') in ('water','wood','wetland','scrub','bare_rock')
-                  or tags.get('landuse') in ('forest','reservoir') or tags.get('waterway')=='riverbank')
-            if not pref and not city and not mask and not municipal and not facility:return
+            # 河、湖、山地留在街区内，由干道外轮廓覆盖，不再挖成孔洞。
+            if not pref and not city and not municipal and not facility:return
             try:geometry=make_valid(shape(json.loads(geo.create_multipolygon(area))))
             except (RuntimeError,ValueError,osmium.InvalidLocationError):
                 self.invalid.append(['area',area.orig_id()]);return
             if geometry.is_empty:return
             if pref:self.boundaries[pref]=mapping(geometry)
             if city:self.cities[ref]=mapping(geometry)
-            if mask:self.masks.append(mapping(geometry))
             if municipal or facility:
                 parts=[geometry] if geometry.geom_type=='Polygon' else list(getattr(geometry,'geoms',()))
                 for index,part in enumerate(parts):

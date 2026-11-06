@@ -79,6 +79,17 @@ def test_batch_grid_row_click_opens_editable_store_detail(client,seed):
     assert f'action="/my/work/batch-stores/{st.id}/complete"' in detail
 
 
+def test_location_editor_uses_readonly_coordinates_and_manual_gps_button(client,seed):
+    with appdb.SessionLocal() as db:
+        _,_,gt,_=multi_batch(db,seed);db.commit()
+    login(client,'worker')
+    html=client.get(f"/my/work/batch-grids/{gt.id}").text
+    detail=re.search(r'<section class="visit-location-info".*?</section>',html,re.S).group(0)
+    assert 'data-coordinate-preview' in detail and 'data-get-location' in detail
+    assert 'type="hidden"' in detail and 'name="lat"' in detail and 'name="lon"' in detail
+    assert 'type="number"' not in detail and '保存位置并查询Google地点' in detail
+
+
 def test_batch_grid_filters_are_one_row_and_autosubmit(client,seed):
     with appdb.SessionLocal() as db:
         task,rt,gt,st=multi_batch(db,seed);db.commit()

@@ -260,13 +260,20 @@ def test_hierarchy_migration_matches_model_schema_and_reverts():
     tables=['bd_store_task','bd_grid_task','bd_region_task','bd_main_task']
     with engine.begin() as connection:
         for table in tables:Base.metadata.tables[table].drop(connection)
-        migration.op=Operations(MigrationContext.configure(connection))
+        operations=Operations(MigrationContext.configure(connection))
+        migration.op=operations
         migration.upgrade()
+        follow_spec=importlib.util.spec_from_file_location(
+            'single_atlas_migration','migrations/versions/b5c6d7e8f901_single_batch_atlas.py')
+        follow=importlib.util.module_from_spec(follow_spec);follow_spec.loader.exec_module(follow)
+        follow.op=operations
+        follow.upgrade()
         for table in tables:
             columns={col['name'] for col in inspect(connection).get_columns(table)}
             assert columns==set(Base.metadata.tables[table].columns.keys())
             assert {idx['name'] for idx in inspect(connection).get_indexes(table)}=={
                 index.name for index in Base.metadata.tables[table].indexes}
+        follow.downgrade()
         migration.downgrade()
         assert not set(tables)&set(inspect(connection).get_table_names())
 

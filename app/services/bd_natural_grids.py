@@ -5,13 +5,32 @@ import heapq
 import math
 
 from shapely import union_all, set_precision, STRtree, prepare as prepare_geometry,clip_by_rect,make_valid
-from shapely.geometry import LineString, mapping, shape
+from shapely.geometry import LineString, Polygon, mapping, shape
 from shapely.ops import polygonize_full, transform
 
 from app.services import bd_zones as z
 
 MAIN_ROADS = frozenset(('motorway', 'trunk', 'primary', 'secondary'))
 SURFACE_RAIL = frozenset(('rail', 'light_rail', 'tram'))
+
+
+def areas_consistent(total, covered):
+    """小范围仍只容忍 0.01 m²；全县拼接的毫米舍入按面积给到十亿分之一。"""
+    return abs(total - covered) <= max(.01, abs(covered) * 1e-9)
+
+
+def region_outer_line(boundary):
+    """地区外轮廓。多面之间的接缝不是市界，不能用来把街区判成整块行政区。"""
+    from app.services.bd_grid_geometry import outline
+    return set_precision(outline(z.projected(boundary)).boundary, 0)
+
+
+def perimeter_share(geom, line):
+    """外环贴着界线的比例。先去掉精度网格，避免同一段共边被算两次。"""
+    from app.services.bd_grid_geometry import outline
+    shell = outline(set_precision(geom, 0))
+    overlap = shell.boundary.intersection(set_precision(line, 0))
+    return overlap.length / max(shell.length, 1)
 
 
 def canonical_sha(value):
@@ -38,26 +57,106 @@ def land_clipper(land, *, tile_m=10000):
     return clip
 
 
+def cover_enclosed(geom):
+    """外轮廓盖住内部水面和飞地；开口到边界的海面保持在作业范围外。"""
+    filled = [Polygon(part.exterior) for part in z.polygons(geom) if not part.is_empty]
+    return union_all(filled, grid_size=.001) if filled else geom
+
+
+def fold_enclosed_crumbs(groups, crumb_area):
+    """只把围在内部的碎屑并进直接外层；够格单独成格的内块保持可选。"""
+    from app.services.bd_grid_geometry import outline
+    groups = list(groups)
+    if not groups:
+        return []
+    shells = [outline(group['geom']) for group in groups]
+    tree = STRtree(shells)
+    parent = list(range(len(shells)))
+    for index, shell in enumerate(shells):
+        containers = [int(other) for other in tree.query(shell, predicate='covered_by')
+                      if int(other) != index and shells[int(other)].area > shell.area + .01]
+        if containers:
+            parent[index] = min(containers, key=lambda other: (shells[other].area, other))
+    alive = set(range(len(groups)))
+    for index in sorted(alive, key=lambda item: groups[item]['geom'].area):
+        container = parent[index]
+        if (index not in alive or container == index or container not in alive
+                or groups[index]['geom'].area >= crumb_area):
+            continue
+        geom = union_all([groups[container]['geom'], groups[index]['geom']], grid_size=.001)
+        if geom.geom_type != 'Polygon':
+            continue
+        groups[container] = {**groups[container], 'geom': geom,
+            'members': groups[container]['members'] | groups[index]['members'],
+            'count': groups[container]['count'] + groups[index]['count'],
+            'contained_group_count': groups[container].get('contained_group_count', 0) + 1}
+        alive.remove(index)
+    return [groups[index] for index in sorted(alive)]
+
+
+def absorb_precision_gaps(groups, land):
+    """把合并舍入留下的亚平方米缝补回相邻网格，不新开孤岛。"""
+    groups = list(groups)
+    if not groups:
+        return groups
+    covered = union_all([group['geom'] for group in groups], grid_size=.001)
+    missing = land.difference(covered)
+    if missing.is_empty or missing.area > 5:
+        return groups
+    geoms = [group['geom'] for group in groups]
+    tree = STRtree(geoms)
+    for part in z.polygons(missing):
+        if part.is_empty or part.area > 1:
+            continue
+        hits = [int(index) for index in tree.query(part.buffer(.01), predicate='intersects')]
+        if not hits:
+            continue
+        def shared(index):
+            return part.boundary.intersection(geoms[index].boundary).length
+        index = max(hits, key=shared)
+        if shared(index) <= .001:
+            continue
+        geom = union_all([geoms[index], part], grid_size=.001)
+        if geom.geom_type != 'Polygon':
+            continue
+        groups[index]['geom'] = geom
+        geoms[index] = geom
+    return groups
+
+
+def trim_sliver_overlaps(groups):
+    """去掉合并舍入造成的亚平方米重叠，避免面积和大于并集。"""
+    groups = list(groups)
+    geoms = [group['geom'] for group in groups]
+    tree = STRtree(geoms)
+    for index, geom in enumerate(list(geoms)):
+        for raw in tree.query(geoms[index], predicate='intersects'):
+            other = int(raw)
+            if other <= index:
+                continue
+            overlap = geoms[index].intersection(geoms[other])
+            if overlap.area <= .0001:
+                continue
+            small, large = (index, other) if geoms[index].area <= geoms[other].area else (other, index)
+            trimmed = set_precision(geoms[small].difference(geoms[large]), .001)
+            if trimmed.is_empty or trimmed.geom_type != 'Polygon':
+                continue
+            geoms[small] = trimmed
+            groups[small]['geom'] = trimmed
+    return groups
+
+
 def boundary_kind(tags, *, length_m=None):
-    # 道路投影分割与通行连通分开；公路桥只裁取陆地投影，绝不填水。
+    # 只沿干道和地面铁路切块。支路、河道不参与切分，避免把整块切成凹边。
     try:
         layer = float(tags.get('layer', 0))
     except (ValueError, TypeError):
         return None
     highway = tags.get('highway', '')
     road = highway in MAIN_ROADS or highway.removesuffix('_link') in MAIN_ROADS
-    # tertiary是城市连接干道；明确单车道/窄路排除，住宅路仍始终排除。
-    if highway in ('tertiary', 'tertiary_link'):
-        try:
-            lanes = max(float(value) for value in str(tags.get('lanes', '0')).split(';'))
-            width = float(str(tags.get('width', '0')).removesuffix(' m'))
-        except ValueError:
-            lanes = width = 0
-        one_way = tags.get('oneway') in ('yes', '1', '-1', 'true')
-        signed_route=bool(tags.get('ref')) and tags.get('access') not in ('private','no')
-        road = signed_route or one_way or ((lanes == 0 or lanes >= 2) and (width == 0 or width >= 8))
-    if highway=='unclassified' and tags.get('ref') and tags.get('access') not in ('private','no'):
-        road=True
+    # 有路线编号的城市干道仍可作为补充边界；无编号支路和住宅路不切。
+    if highway in ('tertiary', 'tertiary_link', 'unclassified'):
+        road = bool(tags.get('ref')) and tags.get('access') not in ('private', 'no')
     if road:
         underground = tags.get('tunnel', 'no') not in ('no', 'false', '0', '') or layer < 0 or tags.get('location') == 'underground'
         if tags.get('location') == 'underwater' or (underground and (length_m is None or length_m > 150)):
@@ -80,7 +179,8 @@ def prepare(boundary, elements, exclusions, coastlines, *, captured_at, source, 
     masks = [z.projected(g) for g in exclusions]
     if masks:
         land = land.difference(union_all(masks, grid_size=.001))
-    land = set_precision(land, .001)
+    # 内部湖面、河心岛并回所在街区；只有开口到海岸或邻区的缺口继续留在范围外。
+    land = set_precision(cover_enclosed(land), .001)
     # 实测大县慢在每条完全位于陆地内的道路也与整个复杂陆地求交。
     # prepared covers只省去恒等求交，不改变任何生成边界。
     clip_to_land=land_clipper(land)
@@ -130,7 +230,7 @@ def prepare(boundary, elements, exclusions, coastlines, *, captured_at, source, 
               'metric_geometry': mapping(face), 'area_km2': face.area / 1e6,
               'store_count': 0, 'merchant_ids': []} for face in faces]
     audit = {'crs': 'EPSG:6677', 'precision_m': .001, 'main_road_classes': sorted(MAIN_ROADS),
-             'junction_links': True, 'tertiary_evidence': 'arterial class; exclude explicit single-lane or width<8m',
+             'junction_links': True, 'tertiary_evidence': 'only a route ref may cut; unsigned tertiary and residential never cut',
              'grade_policy': 'road projection on land; short underpass<=150m; ground rail only; no transit graph',
              'retained_boundaries': retained, 'skipped': skipped,
              'additional_boundaries':extra,
@@ -148,6 +248,7 @@ def prepare(boundary, elements, exclusions, coastlines, *, captured_at, source, 
         error.audit = audit
         raise error
     return {'schema_version': z.SCHEMA_VERSION, 'coverage_revision': 2, 'generation_version': 'natural-1',
+            'cover_policy': 'road-block',
             'metric_crs': 'EPSG:6677', 'snapshot_id': canonical_sha(cells)[:12],
             'captured_at': captured_at, 'source': {**source,'region_code':region_code}, 'region_code':region_code,
             'scope_ward_count':23 if region_code=='tokyo23' else None,
@@ -171,6 +272,58 @@ def candidate(doc):
              'merchant_audit': merchants, 'geojson_sha256': canonical_sha(features)}
     return {'type': 'FeatureCollection', 'features': features, 'audit': audit,
             'source_document': doc, 'status': 'candidate', 'applied': False}
+
+
+def absorb_urban_fragments(groups, topology):
+    """市中心被干道切得太碎时，把不足 2 km² 的邻块收成紧凑块。
+
+    普通合并不超过 4 km²，长宽比不超过 4。不足 0.5 km² 的残块可以贴到 6 km²。
+    商店超过 5000，或合并后变成细长条，就保持分开。
+    """
+    floor, cap, tiny_cap, store_cap = 2e6, 4e6, 6e6, 5000
+    while True:
+        pending = [i for i in groups if groups[i]['geom'].area < floor]
+        pending.sort(key=lambda i: (groups[i]['geom'].area, i))
+        merged = False
+        for i in pending:
+            if i not in groups or groups[i]['geom'].area >= floor:
+                continue
+            piece = groups[i]['geom'].area
+            tiny = piece < .5e6
+            choices = []
+            for j in sorted(topology.get(i, ())):
+                if j not in groups:
+                    continue
+                if groups[i]['count'] + groups[j]['count'] > store_cap:
+                    continue
+                geom = union_all([groups[i]['geom'], groups[j]['geom']], grid_size=.001)
+                if geom.geom_type != 'Polygon' or geom.area > (tiny_cap if tiny else cap) + 1:
+                    continue
+                metrics = z._shape_metrics(geom)
+                if not all(math.isfinite(value) for value in metrics.values()):
+                    continue
+                aspect_limit, solidity_limit = (6, .15) if tiny else (4, .3)
+                if metrics['aspect'] > aspect_limit or metrics['solidity'] < solidity_limit:
+                    continue
+                choices.append((metrics['aspect'], -metrics['solidity'], geom.area, j, geom))
+            if not choices:
+                continue
+            _, _, _, j, geom = min(choices, key=lambda row: row[:3])
+            groups[j]['geom'] = geom
+            groups[j]['members'] |= groups[i]['members']
+            groups[j]['count'] += groups[i]['count']
+            adjacent = (topology[i] | topology[j]) - {i, j}
+            del groups[i]
+            for k in adjacent:
+                topology[k].discard(i)
+                topology[k].discard(j)
+                topology[k].add(j)
+            topology[j] = adjacent
+            del topology[i]
+            merged = True
+            break
+        if not merged:
+            return groups, topology
 
 
 def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
@@ -217,13 +370,11 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         share = geom.boundary.intersection(admin_boundary).length / max(geom.length, 1)
         if share <= .05 and metrics['aspect'] <= 3 and metrics['solidity'] >= .65:
             protected_islands |= component
-    excluded = {i for part in components if sum(counts[i] for i in part) == 0 for i in part}
-    # 机场运行区等完整自然大块若没有任何已知商户，不为补面积纳入任务。
-    # 仅排除完整原子块且必须零商户；正常无商户街块仍参与相邻归并。
-    empty_large = {i for i,geom in enumerate(geoms) if i not in protected_islands
-                   and counts[i] == 0 and geom.area > max_natural_area * 1e6}
-    excluded |= empty_large
-    numerical_empty={i for i,geom in enumerate(geoms) if counts[i]==0 and geom.area<.01}
+    # 数据库没有商户记录，不等于现场没有商户；保留陆地和大块零记录网格。
+    excluded = set()
+    empty_large = set()
+    # 没有商户、不到 100 平方米的碎斑不单独成格，避免地图上留下无法代表街区的点。
+    numerical_empty={i for i,geom in enumerate(geoms) if counts[i]==0 and geom.area<100}
     excluded |= numerical_empty
     retained = [i for i in range(len(geoms)) if i not in excluded]
     if not retained:
@@ -255,19 +406,26 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         _, i, version = heapq.heappop(queue)
         if i not in groups or version != versions[i]: continue
         choices = []
+        piece = groups[i]['geom'].area
+        sliver = piece < .2e6
         for j in sorted(topology[i]):
             geom = union_all([groups[i]['geom'], groups[j]['geom']], grid_size=.001)
-            # 完整自然块不能强切；仅允许吸收极小尾片，不能扩成无界大网格。
+            # 完整自然块不能强切；碎屑可以贴到已经成形的干道整块上。
             largest_atom = max(kept_geoms[k].area for k in groups[j]['members'])
             limit = min(max_natural_area * 1e6, max(max_area * 1e6, largest_atom + min_area * 1e6))
             stores=groups[i]['count']+groups[j]['count']
-            if rural_region and stores<=200 and stores/max(geom.area/1e6,.001)<=30:
+            if sliver:
+                limit = groups[j]['geom'].area + piece + 1
+            elif rural_region and stores<=200 and stores/max(geom.area/1e6,.001)<=30:
                 metrics=z._shape_metrics(geom)
                 if metrics['aspect']<=6 and metrics['solidity']>=.1:limit=10e6
             if geom.geom_type != 'Polygon' or geom.area > limit: continue
             metrics = z._shape_metrics(geom)
-            if not acceptable_merge(geom): continue
-            choices.append((metrics['aspect'], -metrics['solidity'], j, geom))
+            if acceptable_merge(geom):
+                choices.append((metrics['aspect'], -metrics['solidity'], j, geom))
+            elif piece < min_area * 1e6:
+                shared = groups[i]['geom'].boundary.intersection(groups[j]['geom'].boundary).length
+                choices.append((10 + metrics['aspect'], -shared, j, geom))
         if not choices: continue
         _, _, j, geom = min(choices, key=lambda row: row[:3])
         groups[j]['geom'] = geom
@@ -283,9 +441,11 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         # 邻区形状变化后，先前无法吸收的尾片必须重新评估。
         # 只重排当前受影响邻居，不能仅把合并结果本身放回队列。
         for k in sorted(adjacent): enqueue(k)
+    if doc.get('cover_policy') == 'road-block':
+        groups, topology = absorb_urban_fragments(groups, topology)
     # 完整近岸岛屿不按城区目标任意切开。必须独立于行政裁剪边、负载低且紧凑，
     # 上限单独固定；既不是把所有大块当岛，也不是用阈值放过未闭合城区。
-    admin_boundary = z.projected(doc['boundary']).boundary
+    admin_line = region_outer_line(doc['boundary'])
     coastal_islands = {}
     for component in components:
         if component & excluded: continue
@@ -293,7 +453,7 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         stores = sum(counts[i] for i in component)
         if not 5e6 < geom.area <= 15e6 or stores > 1000 or geom.geom_type != 'Polygon': continue
         metrics = z._shape_metrics(geom)
-        admin_share = geom.boundary.intersection(admin_boundary).length / max(geom.length, 1)
+        admin_share = perimeter_share(geom, admin_line)
         if admin_share > .05 or metrics['aspect'] > 3 or metrics['solidity'] < .65: continue
         candidates = [identity for identity,g in groups.items()
                       if {retained[i] for i in g['members']} <= component]
@@ -305,7 +465,16 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         coastal_islands[frozenset(component)] = {'max_area_km2':15, 'max_merchants':1000,
                                                 'admin_boundary_share':admin_share}
     from app.services.bd_grid_geometry import consolidate, outline, coverage_matches
-    groups = consolidate(groups.values())
+    if doc.get('cover_policy') == 'road-block':
+        groups = fold_enclosed_crumbs(groups.values(), min_area * 1e6)
+        excluded_land = union_all([geoms[i] for i in sorted(excluded)], grid_size=.001) if excluded else None
+        covered_land = z.projected(doc['work_area'])
+        if excluded_land is not None:
+            covered_land = covered_land.difference(excluded_land)
+        groups = absorb_precision_gaps(groups, covered_land)
+        groups = trim_sliver_overlaps(groups)
+    else:
+        groups = consolidate(groups.values())
     facilities=[(item,set_precision(shape(item['metric_geometry']),.001))
                 for item in doc.get('facility_boundaries',[])]
     cells, violations, exceptions, natural_exceptions = [], [], [], []
@@ -314,11 +483,7 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         geom = group['geom']
         indices = sorted(retained[i] for i in group['members'])
         ids = sorted(identity for i in indices for identity in doc['road_cells'][i]['merchant_ids'])
-        if not ids and (geom.area<min_area*1e6 or not acceptable_merge(outline(geom))):
-            # 全部共边重试后仍无法形成作业面且无商户的完整街块/链，明确退出范围。
-            # 不切原子面，不排除任何有商户地块；正常空街块仍保留在归并结果中。
-            unworkable_empty.update(indices);excluded.update(indices)
-            continue
+        # 无商户记录不是排除地理范围的依据；保留原始几何待覆盖审计。
         component = next(part for part in components if indices[0] in part)
         whole_island = set(indices) == set(component)-excluded
         if not whole_island and geom.area<min_area*1e6:
@@ -341,6 +506,21 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         largest_atom = max(geoms[i].area for i in indices)
         natural_block = (largest_atom > max_area * 1e6 and geom.area <= max_natural_area * 1e6
                          and geom.area - largest_atom <= min_area * 1e6)
+        # 干道之间的一整块不再按面积目标切开。形状仍须成块，超大细条继续拒绝。
+        admin_share = perimeter_share(geom, admin_line)
+        # 干道夹出的整块保持原样，不再发明切线。低密度山地可以到 500 km²。
+        # 单块用极端形状上限：长宽比 12、填充比 0.05。合并出来的细长条仍走更严的门槛。
+        sparse_mountain = len(ids) <= 500 and len(ids) / max(geom.area / 1e6, .001) <= 30
+        road_cap = 500e6 if sparse_mountain else 40e6
+        road_block = (doc.get('cover_policy') == 'road-block'
+                      and geom.area - largest_atom <= 1e6
+                      and max_area * 1e6 < geom.area <= road_cap
+                      and metrics['aspect'] <= 12 and metrics['solidity'] >= .05
+                      and len(ids) <= 5000 and admin_share <= .45)
+        # 市中心干道格子合并后的紧凑块。细长条和整块行政区仍然不算。
+        urban_compact = (doc.get('cover_policy') == 'road-block' and not road_block
+                         and max_area * 1e6 < geom.area <= 6e6 and len(ids) <= 5000
+                         and admin_share <= .45 and metrics['aspect'] <= 6 and metrics['solidity'] >= .15)
         enclosed_block=group.get('contained_group_count',0)>0 and geom.area<=max_natural_area*1e6
         rural=(rural_region and geom.area<=10e6 and len(ids)<=200
                and len(ids)/max(geom.area/1e6,.001)<=30 and metrics['aspect']<=6 and metrics['solidity']>=.1)
@@ -351,10 +531,12 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         if geom.area<=15e6 and len(ids)<=1000 and metrics['aspect']<=4 and metrics['solidity']>=.5:
             facility=next((item for item,boundary in facilities
                            if boundary.intersects(geom) and boundary.intersection(geom).area>=geom.area*.95),None)
-        if geom.area > max_area * 1e6 + .01 and not (natural_block or coastal or enclosed_block or rural or fringe or facility): reasons.append('oversized')
+        if geom.area > max_area * 1e6 + .01 and not (natural_block or coastal or enclosed_block or rural or fringe or facility or road_block or urban_compact):
+            reasons.append('oversized')
         if not whole_island and geom.area < min_area * 1e6 - .01: reasons.append('undersized')
         if not all(math.isfinite(value) for value in metrics.values()): reasons.append('invalid_shape_metrics')
-        if not whole_island and (metrics['aspect'] > 12 or metrics['solidity'] < .1): reasons.append('extreme_shape')
+        if not whole_island and not road_block and (metrics['aspect'] > 12 or metrics['solidity'] < .1):
+            reasons.append('extreme_shape')
         if len(ids) > 5000: reasons.append('merchant_overload')
         if reasons: violations.append({'id': identity, 'area_km2': geom.area / 1e6, 'stores': len(ids), 'reasons': reasons})
         if whole_island and geom.area < min_area * 1e6:
@@ -367,6 +549,12 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
         elif enclosed_block and geom.area>max_area*1e6:
             natural_exceptions.append({'id':identity,'reason':'enclosed_complete_block',
                                        'contained_groups':group['contained_group_count'],'area_km2':geom.area/1e6})
+        elif urban_compact:
+            natural_exceptions.append({'id':identity,'reason':'urban_compact_block','area_km2':geom.area/1e6,
+                'stores':len(ids),'aspect':metrics['aspect'],'solidity':metrics['solidity']})
+        elif road_block and geom.area>max_area*1e6 and not (natural_block or coastal or enclosed_block or rural or fringe or facility):
+            natural_exceptions.append({'id':identity,'reason':'indivisible_road_block','area_km2':geom.area/1e6,
+                'stores':len(ids),'aspect':metrics['aspect'],'solidity':metrics['solidity']})
         elif geom.area>max_area*1e6 and (rural or fringe or facility):
             reason='verified_facility' if facility else 'low_density_rural_block' if rural else 'empty_fringe_absorption'
             natural_exceptions.append({'id':identity,'reason':reason,'area_km2':geom.area/1e6,
@@ -390,10 +578,13 @@ def normalise(doc, *, min_area=.05, max_area=2., max_natural_area=5.):
                                'max_natural_area_km2':max_natural_area, 'natural_block_exceptions':natural_exceptions,
                                'rural_policy':{'enabled':rural_region,'max_area_km2':10,'max_merchants':200,
                                                'max_density_per_km2':30,'max_aspect':6,'min_solidity':.1},
+                               'urban_policy':{'enabled':doc.get('cover_policy')=='road-block',
+                                               'floor_km2':2,'cap_km2':4,'tiny_cap_km2':6,
+                                               'max_merchants':5000,'max_aspect':4,'min_solidity':.3},
                                'max_merchants': 5000, 'violations': violations, 'island_exceptions': exceptions},
              'quality_pass': not violations,
              'geometric_pass': coverage_matches(expected,work)
-                               and abs(sum(c['area_km2'] for c in cells) * 1e6 - work.area) <= .01}
+                               and areas_consistent(sum(c['area_km2'] for c in cells) * 1e6, work.area)}
     return {**doc, 'road_cells': cells, 'work_area': z.geographic(work), 'area_km2': work.area / 1e6,
             'natural_audit': audit, 'generation_version': 'natural-2', 'snapshot_id': canonical_sha(cells)[:12]}
 
@@ -431,7 +622,7 @@ def import_candidate(db, user, result, *, replace=False, append_region=False):
     from app.services.bd_grid_geometry import outline,coverage_matches
     if (any(not g.is_valid or outline(g).geom_type != 'Polygon' or g.is_empty for g in geometries)
             or not coverage_matches(land,combined)
-            or sum(g.area for g in geometries) - combined.area > .01
+            or not areas_consistent(sum(g.area for g in geometries), combined.area)
             or len({c['id'] for c in cells}) != len(cells)
             or len(ids) != len(set(ids)) or len(ids) != doc['store_count']):
         raise ops.OperationError('网格覆盖或商户唯一归属校验失败')

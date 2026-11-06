@@ -202,6 +202,7 @@
     if (!b || b.disabled) return;
     setTimeout(function () {                 // 让浏览器先发起提交
       var f = b.form;
+      if (f && f.dataset.ajax === '1') return;  // 原地提交自己管按钮，避免 4 秒后被重新点亮
       if (f && f.dataset.submitted === '1') return;
       b.disabled = true;
       if (f) f.dataset.submitted = '1';

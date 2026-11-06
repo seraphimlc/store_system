@@ -1510,7 +1510,6 @@ class BdMainTask(Base):
     """一次完整巡店批次；下挂片区一级任务。"""
     __tablename__ = 'bd_main_task'
     id = Column(Integer, primary_key=True)
-    release_id = Column(Integer, ForeignKey('bd_zone_release.id'), nullable=False, index=True)
     title = Column(String(160), nullable=False)
     status = Column(String(16), nullable=False, default='draft')
     progress = Column(Integer, nullable=False, default=0)

@@ -4,6 +4,7 @@
   const byId = id => document.getElementById(id);
   const root = byId('grid-region-editor');
   if (!root) return;
+  if (!byId('grid-auto-tab') || !byId('grid-auto-open')) return;
   const config = JSON.parse(byId('grid-region-config').textContent);
   const tabs = {manual:byId('grid-manual-tab'), auto:byId('grid-auto-tab')};
   const panes = {manual:byId('grid-manual-pane'), auto:byId('grid-auto-pane')};

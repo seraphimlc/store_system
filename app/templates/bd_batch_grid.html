@@ -84,7 +84,9 @@
                     {% if can_execute %}<details class="visit-location-editor"><summary>{{ t('更新位置') }}</summary>
                       <form method="post" action="/my/work/batch-stores/{{ s.id }}/location" data-location-editor>
                         {{ tokens() }}<input type="hidden" name="location_accuracy" value="accurate">
-                        <div class="visit-coordinate-fields"><label>{{ t('纬度') }}<input name="lat" type="number" min="-90" max="90" step="0.000001" value="{{ '%.6f'|format(s.nav_lat) if s.nav_lat is not none else '' }}" required></label><label>{{ t('经度') }}<input name="lon" type="number" min="-180" max="180" step="0.000001" value="{{ '%.6f'|format(s.nav_lon) if s.nav_lon is not none else '' }}" required></label></div>
+                        <input name="lat" type="hidden" value="{{ s.nav_lat if s.nav_lat is not none else '' }}">
+                        <input name="lon" type="hidden" value="{{ s.nav_lon if s.nav_lon is not none else '' }}">
+                        <div class="visit-location-controls"><span class="visit-coordinate-preview" data-coordinate-preview>{% if s.nav_lat is not none and s.nav_lon is not none %}{{ '%.6f'|format(s.nav_lat) }}, {{ '%.6f'|format(s.nav_lon) }}{% else %}{{ t('暂无坐标') }}{% endif %}</span><button type="button" class="btn ghost" data-get-location>{{ t('获取位置') }}</button></div>
                         <button type="submit" class="btn ghost">{{ t('保存位置并查询Google地点') }}</button>
                         <p role="status" aria-live="polite" data-coordinate-message></p>
                       </form>
@@ -159,7 +161,7 @@
 <script src="/static/bd_work_location.js?v={{ static_ver('bd_work_location.js') }}" defer></script>
 <script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
 <script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
-<script id="visit-editor-config" type="application/json">{{ {'photoLimit':t('每家店铺最多保存3张照片'),'photoSize':t('每张照片须不超过5MB'),'photoType':t('请选择JPEG、PNG或WebP照片'),'remove':t('移除'),'photo':t('店铺照片'),'saving':t('正在保存…'),'failed':t('保存失败，请重试'),'locationSaved':t('位置已保存'),'candidate':t('已找到Google候选地点，请核实'),'ambiguous':t('找到多个Google地点，未自动关联'),'no_match':t('未找到Google地点'),'failedLookup':t('Google地点查询失败，位置已保存'),'unconfigured':t('Google地点查询未配置，位置已保存')}|tojson }}</script>
+<script id="visit-editor-config" type="application/json">{{ {'photoLimit':t('每家店铺最多保存3张照片'),'photoSize':t('每张照片须不超过5MB'),'photoType':t('请选择JPEG、PNG或WebP照片'),'remove':t('移除'),'photo':t('店铺照片'),'saving':t('正在保存…'),'failed':t('保存失败，请重试'),'locationSaved':t('位置已保存'),'candidate':t('已找到Google候选地点，请核实'),'ambiguous':t('找到多个Google地点，未自动关联'),'no_match':t('未找到Google地点'),'failedLookup':t('Google地点查询失败，位置已保存'),'unconfigured':t('Google地点查询未配置，位置已保存'),'locationUnsupported':t('当前浏览器不支持定位。'),'locationFailed':t('无法获取定位，请检查定位权限后重试。'),'locationLoading':t('正在获取定位…'),'coordinatesRequired':t('请先获取位置再保存。')}|tojson }}</script>
 <script src="/static/bd_visit_editor.js?v={{ static_ver('bd_visit_editor.js') }}" defer></script>
 <script src="/static/bd_visit.js?v={{ static_ver('bd_visit.js') }}" defer></script>
 {% endblock %}
