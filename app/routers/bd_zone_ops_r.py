@@ -1,5 +1,4 @@
 """正式片区管理与H5网格执行；角色/团队/归属/CSRF均在服务端校验。"""
-import logging
 import uuid
 import json
 from urllib.parse import quote, urlencode
@@ -21,7 +20,6 @@ from app.i18n import translate as t
 
 router=APIRouter(dependencies=[Depends(require_form_token)])
 templates=get_templates()
-logger=logging.getLogger(__name__)
 
 
 def work_login(user:Optional[User]=Depends(require_login)):
@@ -270,52 +268,6 @@ async def grid_merge_preview(request:Request,user:Optional[User]=Depends(work_lo
         post_guard(request,user,payload.get('csrf_token',''))
         return JSONResponse(bd_grid_regions.preview(db,user,payload.get('selections'),payload.get('merge_boundaries',True)))
     except (ValueError,ops.OperationError) as exc:return JSONResponse({'error':str(exc) or '合并参数无效'},status_code=409)
-
-
-@router.post('/zones/grid-auto-preview')
-async def grid_auto_preview(request:Request,user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
-    try:
-        payload=await request.json()
-        if not isinstance(payload,dict):raise ValueError()
-        post_guard(request,user,payload.get('csrf_token',''))
-        from app.services.bd_grid_region_builder import plan
-        return JSONResponse(plan(db,user,region=payload.get('region','all'),
-            target_basis=payload.get('target_basis'),target_per_zone=payload.get('target_per_zone'),
-            max_area_km2=payload.get('max_area_km2'),min_stores=payload.get('min_stores'),
-            tolerance_pct=payload.get('tolerance_pct'),max_grids_per_zone=payload.get('max_grids_per_zone'),
-            max_stores_per_zone=payload.get('max_stores_per_zone'),
-            small_zone_threshold=payload.get('small_zone_threshold'),
-            apply=False))
-    except (ValueError,ops.OperationError) as exc:
-        db.rollback();return JSONResponse({'error':str(exc) or '自动分区参数无效'},status_code=409)
-    except Exception:
-        db.rollback()
-        logger.exception('Automatic grid partition preview failed')
-        return JSONResponse({'error':'自动分区计算失败，请稍后重试'},status_code=500)
-
-
-@router.post('/zones/grid-auto-apply')
-async def grid_auto_apply(request:Request,user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
-    try:
-        payload=await request.json()
-        if not isinstance(payload,dict):raise ValueError()
-        post_guard(request,user,payload.get('csrf_token',''))
-        from app.services.bd_grid_region_builder import plan
-        report=plan(db,user,region=payload.get('region','all'),
-            target_basis=payload.get('target_basis'),target_per_zone=payload.get('target_per_zone'),
-            max_area_km2=payload.get('max_area_km2'),min_stores=payload.get('min_stores'),
-            tolerance_pct=payload.get('tolerance_pct'),max_grids_per_zone=payload.get('max_grids_per_zone'),
-            max_stores_per_zone=payload.get('max_stores_per_zone'),
-            small_zone_threshold=payload.get('small_zone_threshold'),
-            apply=True,expected_signature=payload.get('signature'))
-        db.commit()
-        return JSONResponse({'ok':True,'zone_count':report['zone_count']})
-    except (ValueError,ops.OperationError) as exc:
-        db.rollback();return JSONResponse({'error':str(exc) or '自动分区提交失败'},status_code=409)
-    except Exception:
-        db.rollback()
-        logger.exception('Automatic grid partition apply failed')
-        return JSONResponse({'error':'自动分区提交失败，请刷新后重试'},status_code=500)
 
 
 @router.post('/zones/grids/enable')

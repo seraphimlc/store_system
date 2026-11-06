@@ -48,10 +48,9 @@
     previewLayer?.setMap(!root.hidden ? map : null);
     window.setGridRegionPreviewZones?.(!root.hidden ? selection().map(grid => grid.zone_id).filter(id => id !== null) : []);
   });
-  byElementId('grid-auto-open')?.addEventListener('click', () => { if (conversion) conversion.hidden = true; });
   let map, layer, previewLayer, controller, timer, requestNumber = 0, calculated = '';
   let saving = false;
-  let automaticPreviewLayer, gridInfoOverlay;
+  let gridInfoOverlay;
   const selection = () => boxes.filter(box => box.checked && !box.disabled).map(box => JSON.parse(box.value));
   const key = () => JSON.stringify({selections: selection(), merge_boundaries: mode.checked});
   function setSelection(gridId, checked) {
@@ -144,31 +143,6 @@
       }
     }();
   }
-  window.showAutomaticGridPreview = report => {
-    automaticPreviewLayer?.setMap(null);
-    if (!map) return false;
-    automaticPreviewLayer = new google.maps.Data({map});
-    const excluded = new Set(report.density.disabled_grid_ids || []);
-    const features = report.zones.map((zone, index) => ({type:'Feature',geometry:zone.geometry,
-      properties:{kind:'zone',index}}));
-    for (const grid of config.grids) {
-      if (excluded.has(Number(grid.id))) features.push({type:'Feature',geometry:grid.geometry,
-        properties:{kind:'excluded'}});
-    }
-    automaticPreviewLayer.addGeoJson({type:'FeatureCollection',features});
-    automaticPreviewLayer.setStyle(feature => feature.getProperty('kind') === 'excluded'
-      ? {fillColor:'#9ca3af',fillOpacity:.5,strokeColor:'#6b7280',strokeWeight:1.5,clickable:false,zIndex:7}
-      : {fillColor:['#176b57','#2459d3','#a45a20','#8b4c78','#487c36'][Number(feature.getProperty('index'))%5],
-        fillOpacity:.12,strokeColor:'#173d33',strokeWeight:2.5,clickable:false,zIndex:6});
-    const previewBounds = new google.maps.LatLngBounds();
-    automaticPreviewLayer.forEach(feature => feature.getGeometry().forEachLatLng(point => previewBounds.extend(point)));
-    if (!previewBounds.isEmpty()) map.fitBounds(previewBounds, 40);
-    return true;
-  };
-  window.clearAutomaticGridPreview = () => {
-    automaticPreviewLayer?.setMap(null);
-    automaticPreviewLayer = null;
-  };
   function upsertSplitForm(zone) {
     const host = byElementId('grid-region-zone-actions');
     if (!host || !zone) return;

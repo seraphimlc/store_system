@@ -13,7 +13,7 @@ MIN_STORES = 5
 
 
 def refresh(db, user, *, region='all', apply=False, source_engine=None, min_stores=MIN_STORES,
-            source_table=None, unassigned_only=False):
+            source_table=None):
     """调用者提交事务；默认只读，apply 时统一按版本→片区→网格顺序锁定。"""
     ops.require_admin(user)
     if isinstance(min_stores, bool) or not isinstance(min_stores, int) or not 0 <= min_stores <= 100_000:
@@ -33,16 +33,6 @@ def refresh(db, user, *, region='all', apply=False, source_engine=None, min_stor
     grids = query.all()
     if not grids:
         raise ops.OperationError('没有可统计的正式网格')
-    preserved=[g.id for g in grids if g.zone_id is not None] if unassigned_only else []
-    if unassigned_only:
-        grids=[g for g in grids if g.zone_id is None]
-        parents=[]  # Existing territories and their counts/geometry are outside this write scope.
-    if not grids:
-        return {'applied':apply,'region':region,'min_stores':min_stores,'blocked_by_work':False,
-                'grid_count':0,'disabled_count':0,'enabled_count':0,'mapped_stores':0,
-                'disabled_stores':0,'disabled_grid_ids':[],'invalid_coordinates':0,
-                'source':{},'snapshot_id':'no-unassigned-grids','grid_counts':{},
-                'preserved_grid_ids':preserved}
     # 有作业中的版本不可重新绑定来源；批次使用独立快照，不在这里改写。
     blocked = any(g.assignee_id is not None or g.progress or g.task_state != 'unvisited' for g in grids) or any(
             p.team_id is not None or p.leader_id is not None for p in parents) or db.query(BdStoreVisitLog.id).filter(
@@ -73,7 +63,6 @@ def refresh(db, user, *, region='all', apply=False, source_engine=None, min_stor
               'disabled_grid_ids': sorted(disabled),
               'invalid_coordinates': audit['invalid_coordinates'],
               'source': info, 'snapshot_id': bound['snapshot_id']}
-    report['preserved_grid_ids']=preserved
     report['grid_counts'] = {str(gid): len(ids) for gid, ids in memberships.items()}
     if not apply:
         return report

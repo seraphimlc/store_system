@@ -120,28 +120,6 @@ body:has(.zone-manager) main.wrap { max-width: none; padding: 20px 24px; }
 .grid-composition-drawer {width:390px;display:flex;flex-direction:column;overflow:hidden;animation:composition-enter .18s ease-out}
 .grid-composition-drawer .zone-drawer-bar {flex-shrink:0;padding:16px 20px}
 .grid-composition-drawer .zone-drawer-bar>div {display:flex;align-items:center;gap:10px}
-.grid-region-modes {display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px 20px;border-bottom:1px solid var(--line)}
-.grid-region-modes button {min-height:36px;border:0;border-radius:5px;background:transparent;color:#425570;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer}
-.grid-region-modes button[aria-selected=true] {background:#e8f1ed;color:#145d49}
-.grid-auto-pane {padding:18px 20px;overflow:auto;flex:1;min-height:0}
-.grid-auto-pane[hidden],.grid-manual-pane[hidden] {display:none}
-.grid-auto-fields {display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,1fr);align-items:center;gap:12px;font-size:.82rem}
-.grid-auto-fields>label:not(.grid-auto-filter) {color:#425570}
-.grid-auto-fields select,.grid-auto-target input {box-sizing:border-box;width:100%;height:38px;border:1px solid #b9c5d4;border-radius:5px;background:#fff;padding:7px 9px;color:#172d46;font:inherit}
-.grid-auto-fields>input[type=number] {box-sizing:border-box;width:100%;height:38px;min-width:0;border:1px solid #b9c5d4;border-radius:5px;background:#fff;padding:7px 9px;color:#172d46;font:inherit}
-.grid-auto-target {display:flex;align-items:center;gap:7px;min-width:0}
-.grid-auto-target input {min-width:0;flex:1;font-variant-numeric:tabular-nums}
-.grid-auto-target span {flex-shrink:0;color:#4e627c;font-size:.76rem}
-.grid-auto-filter {grid-column:1/-1;display:flex;align-items:center;gap:8px;color:#20364f;font-weight:600}
-.grid-auto-filter input {accent-color:#176b57}
-.grid-auto-note {margin:16px 0;color:#4e627c;font-size:.78rem;line-height:1.55}
-#grid-auto-preview,#grid-auto-apply {width:100%;min-height:40px;font-weight:600}
-#grid-auto-apply {margin-top:10px}
-.grid-auto-result {margin:14px 0;padding:12px;border:1px solid #dce4e0;border-radius:5px;background:#f6f9f7;color:#20364f;font-size:.8rem;line-height:1.5}
-.grid-auto-result[hidden] {display:none}
-.grid-auto-result p {margin:0 0 8px}
-.grid-auto-result ul {margin:6px 0 0;padding-left:20px;max-height:190px;overflow:auto}
-.grid-auto-result li {padding:3px 0}
 .grid-selection-count {display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 6px;border-radius:7px;background:#e5f2ed;color:#145d49;font-size:.82rem;font-weight:700;font-variant-numeric:tabular-nums}
 #grid-region-form {display:flex;flex-direction:column;min-height:0;flex:1}
 .grid-composition-body {padding:22px 20px;overflow:auto;flex:1;min-height:0;scrollbar-color:#a1aec0 var(--surface)}
@@ -175,8 +153,6 @@ body:has(.zone-manager) main.wrap { max-width: none; padding: 20px 24px; }
   .zone-mode-switch {align-self:flex-end}
   .zone-manager {--zone-map-height:calc(100dvh - 190px)}
   .grid-composition-drawer {inset:auto 0 0;width:100%;max-height:62%;border-left:0;border-top:1px solid var(--line);border-radius:14px 14px 0 0;box-shadow:0 -6px 22px rgba(16,32,63,.1)}
-  .grid-region-modes {padding-right:18px;padding-left:18px}
-  .grid-auto-pane {padding:14px 18px}
   .grid-composition-body {padding:16px 18px}
   .grid-composition-footer {padding:12px 18px}
   .grid-selection-facts {margin-bottom:10px}

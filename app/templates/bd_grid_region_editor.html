@@ -51,6 +51,6 @@
   </form>
   </div>
 </aside>
-{% set editor_texts={'merged':t('已合并边界'),'separate':t('保留网格边界'),'selected':t('已选网格'),'empty':t('尚未选择网格'),'loading':t('正在校验合并边界…'),'saving':t('正在保存片区…'),'saved':t('片区已组合'),'split':t('拆分片区'),'ready':t('边界校验通过，可以保存片区。'),'shape':t('边界连续，但形状较狭长或有狭颈，请检查预览。'),'error':t('预览失败，请重试。'),'mapMissing':t('地图暂不可用，边界已通过服务端校验。'),'close':t('关闭'),'converted':t('已转为可用网格，可选择并划入片区'),'previewLoading':t('正在计算当前商户分布…'),'previewReady':t('请检查地图和片区明细，确认后再应用。'),'applyConfirm':t('仅对未划分网格新建片区，保留已有片区和网格归属。确认应用吗？'),'applyDone':t('自动分区已应用，正在刷新页面。'),'zoneCount':t('个片区'),'gridCount':t('个网格'),'storeCount':t('家商户'),'excludedCount':t('过滤网格'),'unassignedCount':t('未分配'),'preservedGrids':t('已划分网格已跳过'),'outOfTolerance':t('超出目标容差'),'smallMerge':t('小片区归并前后'),'mergedSmall':t('已归并小片区'),'no_shared_edge':t('无共边邻区'),'hard_limit':t('合并将超过硬上限'),'invalid_geometry':t('合并无法形成有效连续单面'),'geometryUnassigned':t('以下网格无法组成连续单面，保留未分配，商户和基础边界不变')} %}
+{% set editor_texts={'merged':t('已合并边界'),'separate':t('保留网格边界'),'selected':t('已选网格'),'empty':t('尚未选择网格'),'loading':t('正在校验合并边界…'),'saving':t('正在保存片区…'),'saved':t('片区已组合'),'split':t('拆分片区'),'ready':t('边界校验通过，可以保存片区。'),'shape':t('边界连续，但形状较狭长或有狭颈，请检查预览。'),'error':t('预览失败，请重试。'),'mapMissing':t('地图暂不可用，边界已通过服务端校验。'),'close':t('关闭'),'converted':t('已转为可用网格，可选择并划入片区')} %}
 <script id="grid-region-config" type="application/json">{{ {'grids':grid_rows,'texts':editor_texts,'fit_grids':true,'region':region,'csrf':request.state.csrf}|tojson }}</script>
 {% endif %}
