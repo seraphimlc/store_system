@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 import app.db as appdb
-from app.models import User, BdTaskEvent, BdRegion, BdWorkGrid
+from app.models import User, BdTaskEvent, BdRegion, BdWorkGrid, BdStoreTask
 from app.services import bd_hierarchical_tasks as tasks, bd_zone_operations as ops
 from app.services import bd_batch_auto_assign as auto, bd_store_proposals as proposals
 from app.services import bd_merchant_media as media
@@ -66,7 +66,7 @@ def test_cancel_team_clears_grid_assignment_but_preserves_history_and_base(seed)
         assert db.query(BdTaskEvent).filter_by(event_type='assign_region_task').order_by(BdTaskEvent.id.desc()).first().new_value['team_id'] is None
 
 
-@pytest.mark.parametrize('days, expected', [(None, False), (59, False), (60, False), (60.001, True), (90, True)])
+@pytest.mark.parametrize('days, expected', [(None, True), (59, False), (60, False), (60.001, True), (90, True)])
 def test_visit_age_cross_batch_boundary_and_future_events(seed, monkeypatch, days, expected):
     now = datetime(2026, 11, 5, 12)
     class Clock(datetime):
@@ -124,13 +124,19 @@ def test_http_cancel_team_and_render_old_visit_tag(client, seed):
     with appdb.SessionLocal() as db:
         main, rt, grid, store = batch(db, seed)
         mid, rid, gid, revision = main.id, rt.id, grid.id, rt.revision
+        db.add(BdStoreTask(grid_task_id=grid.id, store_id='never-visited-shop',
+            snapshot={'name':'Never visited shop'}, status='pending', result={}))
         db.add(BdTaskEvent(main_task_id=main.id, store_source_id=store.store_id,
             event_type='complete_store_task', created_at=datetime.utcnow()-timedelta(days=61)))
         db.commit()
     login(client, 'worker')
     page = client.get(f'/my/work/batch-grids/{gid}')
     assert 'class="visit-overdue-tag"' in page.text and '>60d</span>' in page.text
-    assert 'class="visit-status"' in page.text.split('class="visit-overdue-tag"')[0]
+    assert page.text.count('class="visit-overdue-tag"') == 2
+    row = page.text.split('class="visit-row"', 1)[1].split('</tr>', 1)[0]
+    visit_state = row.split('class="visit-state', 1)[1].split('</td>', 1)[0]
+    assert 'class="visit-overdue-tag"' in visit_state
+    assert 'class="visit-overdue-tag"' not in row.split('class="visit-status"', 1)[1].split('</td>', 1)[0]
     login(client, 'ops-admin')
     page = client.get(f'/zone-tasks/{mid}')
     response = client.post(f'/zone-tasks/regions/{rid}/assign', data={

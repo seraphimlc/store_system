@@ -487,7 +487,9 @@ def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',
     location_map=merchant_location_map(db,[store.store_id for store in stores])
     for store in stores:
         store.last_visited_at=last_visits.get(store.store_id)
-        store.overdue_60d=store.last_visited_at is not None and store.last_visited_at < now-timedelta(days=60)
+        # No visit event means this merchant has never been visited in the task system.
+        # Treat that as overdue at the merchant level, independent of this batch's task status.
+        store.overdue_60d=store.last_visited_at is None or store.last_visited_at < now-timedelta(days=60)
         current=location_map.get(store.store_id,{})
         store.location_accuracy=current.get('location_accuracy') or 'pending'
         store.nav_lat=current.get('lat',store.snapshot.get('lat'))

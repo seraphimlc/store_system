@@ -65,8 +65,8 @@
           {% for s in stores %}
             <tr class="visit-row" id="store-{{ s.id }}" data-store-id="{{ s.id }}" tabindex="0" aria-expanded="false" aria-controls="store-detail-{{ s.id }}">
               <td class="visit-name">{{ s.snapshot.get('name') }}</td>
-              <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}{% if s.overdue_60d %}<span class="visit-overdue-tag" title="{{ t('超过60天未巡店') }}">60d</span>{% endif %}</td>
-              <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}</td>
+              <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
+              <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}{% if s.overdue_60d %}<span class="visit-overdue-tag" title="{{ t('超过60天未巡店') }}">60d</span>{% endif %}</td>
               <td class="visit-nav-cell">
                 <span class="visit-location-status location-{{ s.location_accuracy }}" data-location-status>{{ t({'accurate':'准确','nonexistent':'不存在','doubtful':'存疑','pending':'待核实'}.get(s.location_accuracy,'待核实')) }}</span>
                 {% set nav=gmaps_url(s.nav_lat,s.nav_lon) %}

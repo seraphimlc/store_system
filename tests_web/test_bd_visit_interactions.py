@@ -55,28 +55,29 @@ window.addEventListener('load',async()=>{try{
  if(button.disabled||button.textContent!==label)throw Error('restored page left save button stuck');
  const nav=q('a[data-location-url]'),dialog=q('#location-check-dialog'),message=q('[data-location-message]');
  const opened=[];let blocked=false,resolveSave;
- window.open=url=>{opened.push(url);return blocked?null:{opener:window};};
+ window.open=url=>{if(blocked)return null;const tab={opener:window,closed:false,location:url,close(){this.closed=true;}};opened.push(tab);return tab;};
  window.fetch=()=>new Promise(resolve=>{resolveSave=resolve;});
  const action=value=>dialog.querySelector(`[data-location-action="${value}"]`).click();
  const openPrompt=()=>{nav.click();if(!dialog.open)throw Error('navigation did not show prompt');};
- openPrompt();if(opened.length)throw Error('map opened before prompt choice');
- action('cancel');if(dialog.open||opened.length)throw Error('cancel opened map');
- openPrompt();action('edit');dialog.querySelector('[name=lat]').value='';
- action('save-coordinates');if(opened.length||!message.textContent)throw Error('invalid coordinates opened tab');
+ openPrompt();if(opened.length!==1||!dialog.open)throw Error('map and prompt did not open together');
+ const canceledTab=opened.length-1;action('cancel');if(dialog.open||!opened[canceledTab].closed)throw Error('cancel did not close map tab');
+ openPrompt();const editTab=opened.length-1;action('edit');dialog.querySelector('[name=lat]').value='';
+ action('save-coordinates');if(opened.length!==editTab+1||!message.textContent)throw Error('invalid coordinates changed map tab');
  action('cancel');
  const finish=async(ok=true)=>{resolveSave({ok,json:async()=>({ok,location_accuracy:'accurate',error:'save failed'})});for(let i=0;i<5;i++)await Promise.resolve();};
  for(const choice of ['accurate','doubtful','nonexistent']){
-  const before=opened.length;openPrompt();action(choice);
-  if(opened.length!==before||!dialog.open)throw Error('tab opened before save completed');
+  const before=opened.length;openPrompt();if(opened.length!==before+1||!dialog.open)throw Error('map and prompt did not open together');action(choice);
   await finish();
-  if(dialog.open||opened.length!==before+(choice==='nonexistent'?0:1))throw Error('save/navigation sequence failed');
+  if(dialog.open||opened.length!==before+1||((choice==='nonexistent')!==opened[before].closed))throw Error('save/navigation sequence failed');
  }
  const beforeFailure=opened.length;openPrompt();action('accurate');await finish(false);
- if(!dialog.open||opened.length!==beforeFailure||!message.textContent)throw Error('failed save opened map');
- action('cancel');openPrompt();blocked=true;action('accurate');await finish();
+ if(!dialog.open||opened.length!==beforeFailure+1||!message.textContent)throw Error('failed save closed map/prompt');
+ action('cancel');blocked=true;openPrompt();if(!dialog.open||opened.length!==beforeFailure+1||!message.textContent)throw Error('blocked popup prompt missing');
+ action('accurate');await finish();
  if(!dialog.open||message.textContent!==message.dataset.popupBlocked)throw Error('blocked navigation lost retry prompt');
+ action('skip');
  blocked=false;action('skip');
- if(dialog.open||opened.some(url=>!url.startsWith('https://www.google.com/maps/search/')))throw Error('navigation did not open map directly');
+ if(dialog.open||opened.some(tab=>!tab.location.startsWith('https://www.google.com/maps/search/')))throw Error('navigation did not open map directly');
  const scroll=q('.visit-list .dispatch-scroll');scroll.scrollTop=80;
  requestAnimationFrame(()=>{try{
   const header=q('.visit-tbl thead th'),bounds=header.getBoundingClientRect(),box=scroll.getBoundingClientRect();
