@@ -7,6 +7,7 @@
   const locationDialog = document.getElementById('location-check-dialog');
   const locationEditor = locationDialog?.querySelector('[data-location-editor]');
   let activeLocationLink = null;
+  let activeMapTab = null;
   const accuracyLabels = {
     accurate: locationDialog?.dataset.accurate,
     nonexistent: locationDialog?.dataset.nonexistent,
@@ -59,11 +60,17 @@
         activeLocationLink.dataset.locationUrl = url.toString();
         activeLocationLink.href = url.toString();
       }
-      if (openAfter && !openMap(activeLocationLink.dataset.locationUrl)) {
+      if (action === 'nonexistent') {
+        activeMapTab?.close();
+        activeMapTab = null;
+      } else if (activeMapTab && !activeMapTab.closed) {
+        activeMapTab.location = activeLocationLink.dataset.locationUrl;
+      } else if (openAfter && !openMap(activeLocationLink.dataset.locationUrl)) {
         message.textContent = message.dataset.popupBlocked;
         return;
       }
       locationDialog.close();
+      activeMapTab = null;
       if (action === 'coordinates') window.setTimeout(() => window.location.reload(), 100);
     } catch (error) {
       message.textContent = error.message || message.dataset.saveFailed;
@@ -76,6 +83,8 @@
       if (!link) return;
       event.preventDefault();
       activeLocationLink = link;
+      activeMapTab?.close();
+      activeMapTab = null;
       locationDialog.querySelector('[data-location-name]').textContent = link.closest('tr').querySelector('.visit-name').textContent.trim();
       locationDialog.querySelector('[data-location-message]').textContent = '';
       const row = link.closest('tr');
@@ -85,20 +94,24 @@
       locationEditor.querySelector('[name="lon"]').value = point?.lon ?? '';
       locationEditor.hidden = true;
       locationDialog.showModal();
+      activeMapTab = window.open(link.dataset.locationUrl, '_blank');
+      if (activeMapTab) activeMapTab.opener = null;
+      else locationDialog.querySelector('[data-location-message]').textContent =
+        locationDialog.querySelector('[data-location-message]').dataset.popupBlocked;
     });
     locationDialog.addEventListener('click', event => {
       const button = event.target.closest('[data-location-action]');
       if (!button) return;
       const action = button.dataset.locationAction;
-      if (action === 'cancel') { locationDialog.close(); return; }
+      if (action === 'cancel') { activeMapTab?.close(); activeMapTab = null; locationDialog.close(); return; }
       if (action === 'edit') { locationEditor.hidden = false; locationEditor.querySelector('[name="lat"]').focus(); return; }
       if (action === 'skip') {
-        if (activeLocationLink && !openMap(activeLocationLink.dataset.locationUrl)) {
+        if ((!activeMapTab || activeMapTab.closed) && activeLocationLink && !openMap(activeLocationLink.dataset.locationUrl)) {
           locationDialog.querySelector('[data-location-message]').textContent =
             locationDialog.querySelector('[data-location-message]').dataset.popupBlocked;
           return;
         }
-        locationDialog.close();return;
+        locationDialog.close();activeMapTab = null;return;
       }
       saveLocation(action === 'save-coordinates' ? 'coordinates' : action);
     });
