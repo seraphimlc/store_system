@@ -5,7 +5,7 @@ from urllib.parse import quote, urlencode
 from typing import Optional
 from fastapi import APIRouter,Depends,Request,Form,HTTPException,File,UploadFile
 from fastapi.responses import HTMLResponse,RedirectResponse,JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,load_only
 from app.db import get_db
 from app.models import User,BdZone,BdWorkGrid,BdTeam,BdTeamMember,BdZoneRelease,BdStoreVisitLog,BdMainTask,BdRegionTask
 from app.routers.auth_r import require_login,csrf_ok
@@ -64,7 +64,9 @@ def batch_logs(task_id:int,request:Request,page:int=1,kw:str='',actor_id:str='',
 def task_list(request:Request,user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
     try:ops.require_admin(user)
     except ops.OperationError as exc:return error(exc)
-    regions=db.query(BdZone).filter(BdZone.state!='archived').order_by(BdZone.id).all()
+    regions=db.query(BdZone).options(load_only(
+        BdZone.id,BdZone.name,BdZone.release_id,BdZone.area_km2,BdZone.store_count
+    )).filter(BdZone.state!='archived').order_by(BdZone.id).all()
     from app.services.bd_grid_metadata import region_search_texts
     from app.services.bd_regions import REGIONS as REGION_LABELS
     release_sources={release.id:release.source or {} for release in db.query(BdZoneRelease).all()}
@@ -75,6 +77,17 @@ def task_list(request:Request,user:Optional[User]=Depends(work_login),db:Session
     return render(request,user,'bd_main_tasks.html',regions=regions,region_search=search_texts,
                   region_codes=region_codes,region_options=[('all','全部地区'),*REGION_LABELS.items()],
                   tasks=tasks,summaries=task_ops.batch_summaries(db,user,tasks))
+
+
+@router.get('/zone-tasks/map')
+def task_picker_map(user:Optional[User]=Depends(work_login),db:Session=Depends(get_db)):
+    try:ops.require_admin(user)
+    except ops.OperationError as exc:return error(exc)
+    return JSONResponse({'type':'FeatureCollection','features':[
+        {'type':'Feature','geometry':geometry,'properties':{'id':identity,'name':name}}
+        for identity,name,geometry in db.query(BdZone.id,BdZone.name,BdZone.geometry).filter(
+            BdZone.state!='archived').order_by(BdZone.id)
+    ]},headers={'Cache-Control':'no-store'})
 
 
 @router.post('/zone-tasks')

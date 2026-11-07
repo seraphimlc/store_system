@@ -131,7 +131,7 @@ def _ask_ai(rows, members, workloads, efficiencies, include_batch, use_efficienc
         f'严格只返回JSON：{{"weights":{{"队员ID":1.0}},"reason":"用{language}说明建议、取舍和数据局限"}}。'
         '不要输出网格分配，不要markdown。\n' + json.dumps(payload, ensure_ascii=False))
     try:
-        raw = ai_chat.chat(prompt, timeout=60, retries=0, max_tokens=2000)
+        raw = ai_chat.chat(prompt, timeout=60, retries=0, max_tokens=4000)
         decision = json.loads(raw)
         if not isinstance(decision, dict) or set(decision) != {'weights', 'reason'}:
             raise ValueError('invalid response')

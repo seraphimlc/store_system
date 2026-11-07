@@ -30,7 +30,8 @@ def test_member_sees_only_own_execution_action_in_batch_page(client,seed):
     login(client,'worker')
     page=client.get(f'/my/work/batch-grids/{gt.id}')
     assert page.status_code==200
-    assert 'visit-row' in page.text and '完成店铺任务' in page.text
+    assert 'visit-row' in page.text
+    assert f'action="/my/work/batch-stores/{st.id}/complete"' in page.text
     assert 'name="target_id"' not in page.text
 
 

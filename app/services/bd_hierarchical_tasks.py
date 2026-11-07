@@ -4,7 +4,7 @@ import math
 from copy import deepcopy
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from sqlalchemy import func, text, bindparam, case, or_, String
+from sqlalchemy import func, text, bindparam, case, or_, String, insert
 from app.models import (BdMainTask, BdRegionTask, BdGridTask, BdStoreTask,
                         BdRegion, BdWorkGrid, BdGridStore, BdWorkStore, BdTeam, BdTeamMember, User,
                         BdTaskEvent)
@@ -191,6 +191,43 @@ def completion_summary(db,main_task_id,start=None,end=None,*,region_task_ids=Non
     return {'first_completed':first_query.scalar() or 0,'completion_events':all_count}
 
 
+def _postgres_batch_sources(db, grid_ids):
+    """在当前事务内固定来源快照，避免将全地区商户搬进Python内存。"""
+    # 标识符只来自内部UUID；临时表随事务结束删除，不进入业务表或迁移。
+    table = 'bd_batch_sources_' + uuid.uuid4().hex
+    db.execute(text(f"""CREATE TEMP TABLE {table} ON COMMIT DROP AS
+        SELECT m.grid_id,m.source_id,
+            COALESCE(w.name,s.name) AS name,COALESCE(w.address,s.address,'') AS address,
+            COALESCE(w.lat,s.lat)::double precision AS lat,
+            COALESCE(w.lon,s.lon)::double precision AS lon
+        FROM bd_grid_store m LEFT JOIN bd_work_store w ON w.id=m.source_id
+        LEFT JOIN public.kanto_merchants_v20261029 s ON s.place_id=m.source_id
+        WHERE m.grid_id IN :ids""").bindparams(bindparam('ids', expanding=True)), {'ids':grid_ids})
+    total, unique, missing = db.execute(text(f"""SELECT COUNT(*),COUNT(DISTINCT source_id),
+        COUNT(*) FILTER (WHERE name IS NULL OR name='') FROM {table}""")).one()
+    if total != unique:
+        raise ops.OperationError('同一批次存在重复店铺归属')
+    if missing:
+        raise ops.OperationError('存在缺失源信息的店铺，不能生成任务快照')
+    counts = {identity:0 for identity in grid_ids}
+    counts.update(dict(db.execute(text(f'SELECT grid_id,COUNT(*) FROM {table} GROUP BY grid_id')).all()))
+    return table, counts, total
+
+
+def _insert_postgres_batch_stores(db, source_table, main_task_id):
+    """直接复制已校验快照；临时来源与全部任务同一事务提交/回滚。"""
+    db.execute(text(f"""INSERT INTO bd_store_task
+        (grid_task_id,store_id,snapshot,status,result,updated_at,revision)
+        SELECT g.id,s.source_id,
+            json_build_object('name',s.name,'address',s.address,'lat',s.lat,'lon',s.lon),
+            'pending',CAST('{{}}' AS json),:now,0
+        FROM {source_table} s JOIN bd_grid_task g ON g.grid_id=s.grid_id
+        JOIN bd_region_task r ON r.id=g.region_task_id
+        WHERE r.main_task_id=:main_task_id"""),
+        {'main_task_id':main_task_id,'now':datetime.utcnow()})
+    db.execute(text(f'DROP TABLE {source_table}'))
+
+
 def create_main_task(db, user, title, region_ids):
     ops.require_admin(user)
     title = (title or '').strip()
@@ -213,15 +250,9 @@ def create_main_task(db, user, title, region_ids):
     if any(g.release_id!=region_sources[g.zone_id] for g in grids):
         raise ops.OperationError('网格与片区来源不一致')
     grid_ids=[g.id for g in grids]
-    # 固定次数SQL：一次读取本批次全部店铺映射和来源快照。
-    if db.bind.dialect.name=='postgresql':
-        sql=text('''SELECT m.grid_id,m.source_id,
-            COALESCE(w.name,s.name) AS name,COALESCE(w.address,s.address,'') AS address,
-            COALESCE(w.lat,s.lat) AS lat,COALESCE(w.lon,s.lon) AS lon
-            FROM bd_grid_store m LEFT JOIN bd_work_store w ON w.id=m.source_id
-            LEFT JOIN public.kanto_merchants_v20261029 s ON s.place_id=m.source_id
-            WHERE m.grid_id IN :ids ORDER BY m.grid_id,m.source_id''').bindparams(bindparam('ids',expanding=True))
-        source_rows=[dict(row) for row in db.execute(sql,{'ids':grid_ids}).mappings()]
+    source_table = None
+    if db.bind.dialect.name == 'postgresql':
+        source_table, store_counts, store_total = _postgres_batch_sources(db, grid_ids)
     else:
         source_rows=[{'grid_id':mapping.grid_id,'source_id':mapping.source_id,
                       'name':store.name if store else None,'address':store.address if store else '',
@@ -229,15 +260,16 @@ def create_main_task(db, user, title, region_ids):
                      for mapping,store in db.query(BdGridStore,BdWorkStore).outerjoin(
                          BdWorkStore,BdWorkStore.id==BdGridStore.source_id).filter(
                              BdGridStore.grid_id.in_(grid_ids)).order_by(BdGridStore.id)]
-    seen=set()
-    for row in source_rows:
-        if row['source_id'] in seen: raise ops.OperationError('同一批次存在重复店铺归属')
-        seen.add(row['source_id'])
-        if not row['name']: raise ops.OperationError('存在缺失源信息的店铺，不能生成任务快照')
-        for coordinate in ('lat','lon'):
-            if row[coordinate] is not None:row[coordinate]=float(row[coordinate])
-    store_counts={g.id:0 for g in grids}
-    for row in source_rows:store_counts[row['grid_id']]+=1
+        seen=set()
+        store_counts={g.id:0 for g in grids}
+        for row in source_rows:
+            if row['source_id'] in seen: raise ops.OperationError('同一批次存在重复店铺归属')
+            seen.add(row['source_id'])
+            if not row['name']: raise ops.OperationError('存在缺失源信息的店铺，不能生成任务快照')
+            for coordinate in ('lat','lon'):
+                if row[coordinate] is not None:row[coordinate]=float(row[coordinate])
+            store_counts[row['grid_id']]+=1
+        store_total = len(source_rows)
     task=BdMainTask(title=title,status='active',created_by=user.id,started_at=datetime.utcnow())
     db.add(task);db.flush()
     region_tasks={}
@@ -262,11 +294,18 @@ def create_main_task(db, user, title, region_ids):
     if all(rt.status=='completed' for rt in region_tasks.values()):
         task.status='completed';task.completed_at=datetime.utcnow()
     task.progress=sum(rt.progress for rt in region_tasks.values())//len(region_tasks)
-    db.add_all([BdStoreTask(grid_task_id=grid_tasks[row['grid_id']].id,store_id=row['source_id'],
-                            snapshot={k:row[k] for k in ('name','address','lat','lon')},result={}) for row in source_rows])
-    db.flush()
+    if source_table is not None:
+        _insert_postgres_batch_stores(db, source_table, task.id)
+    else:
+        # 其他数据库分批写入；任一批失败仍回滚整个巡店批次。
+        for offset in range(0, len(source_rows), 1000):
+            db.execute(insert(BdStoreTask), [
+                {'grid_task_id': grid_tasks[row['grid_id']].id, 'store_id': row['source_id'],
+                 'snapshot': {k: row[k] for k in ('name', 'address', 'lat', 'lon')}, 'result': {}}
+                for row in source_rows[offset:offset + 1000]
+            ])
     ops.audit_log(db,user,'task','create_batch',task,{}, {'title':title,'regions':ids,
-        'grids':len(grids),'stores':len(source_rows)})
+        'grids':len(grids),'stores':store_total})
     for grid_id,grid_task in grid_tasks.items():
         if store_counts[grid_id]==0:
             ops.audit_log(db,user,'task','grid_auto_completed_empty',grid_task,{},

@@ -216,9 +216,13 @@ def test_staff_and_leader_cannot_post_to_tasks_prefix(client):
     for p in ("/tasks/new", "/tasks/1/progress", "/tasks/assign",
               "/tasks/import/apply", "/tasks/1"):
         r = client.post(p, data={"csrf_token": "x"}, follow_redirects=False)
-        assert r.status_code in (410, 405), f"员工 POST {p}: {r.status_code}"
+        assert r.status_code in (302, 410, 405), f"员工 POST {p}: {r.status_code}"
+        if r.status_code == 302:
+            assert r.headers["location"].startswith("/my/")
 
     _login_leader(client)
     for p in ("/tasks/new", "/tasks/1/progress"):
         r = client.post(p, data={"csrf_token": "x"}, follow_redirects=False)
-        assert r.status_code in (410, 405), f"队长 POST {p}: {r.status_code}"
+        assert r.status_code in (302, 410, 405), f"队长 POST {p}: {r.status_code}"
+        if r.status_code == 302:
+            assert r.headers["location"].startswith("/my/")

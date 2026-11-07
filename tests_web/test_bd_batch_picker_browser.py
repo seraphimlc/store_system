@@ -9,6 +9,27 @@ import pytest
 from tests_web.test_bd_zone_operations import seed, login  # noqa: F401
 
 
+def test_batch_map_is_lazy_exact_and_admin_only(client,seed):
+    import app.db as appdb
+    from app.models import BdRegion
+    login(client,'ops-admin')
+    page=client.get('/zone-tasks')
+    match=re.search(r'<script id="batch-map-config" type="application/json">(.*?)</script>',page.text,re.S)
+    config=json.loads(match.group(1))
+    assert config['geometry_url']=='/zone-tasks/map' and 'geometry' not in config
+    response=client.get(config['geometry_url'])
+    assert response.status_code==200 and response.headers['cache-control']=='no-store'
+    feature=response.json()['features'][0]
+    with appdb.SessionLocal() as db:
+        region=db.get(BdRegion,seed['zone'])
+        assert feature['geometry']==region.geometry
+        assert feature['properties']=={'id':region.id,'name':region.name}
+    client.cookies.clear()
+    login(client,'worker')
+    denied=client.get(config['geometry_url'],follow_redirects=False)
+    assert denied.status_code==302 and denied.headers['location'].startswith('/my/')
+
+
 def test_batch_map_selection_form_and_responsive_layout(client, seed, tmp_path):
     chrome = Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
     if not chrome.exists():
@@ -31,20 +52,24 @@ def test_batch_map_selection_form_and_responsive_layout(client, seed, tmp_path):
         db.commit()
     login(client, 'ops-admin')
     page = client.get('/zone-tasks').text
+    geometry = client.get('/zone-tasks/map').json()
     page = re.sub(r'<script\b[^>]*\bsrc="[^"]*"[^>]*>\s*</script>', '', page)
     page = re.sub(r'<link\b[^>]*rel="stylesheet"[^>]*>', '', page)
     css = '\n'.join(Path('app/static/' + name).read_text() for name in
                     ('app.css', 'bd_batch.css', 'bd_tasks.css', 'bd_batch_picker.css'))
     page = page.replace('</head>', '<style>' + css + '</style></head>')
     harness = r'''
-addEventListener('load',()=>{try{
+addEventListener('load',async()=>{try{
  const q=s=>document.querySelector(s),config=JSON.parse(q('#batch-map-config').textContent);
  config.key='mock-key';q('#batch-map-config').textContent=JSON.stringify(config);
+ window.fetch=async()=>({ok:true,json:async()=>(GEOMETRY)});
  const layers=[];let fitted=0;
  class Data{constructor(){this.handlers={};layers.push(this);}addGeoJson(collection){this.features=collection.features.map(f=>({getProperty:key=>f.properties[key],getGeometry:()=>({forEachLatLng:cb=>cb({lat:1,lng:1})})}));}setStyle(fn){this.style=fn;}addListener(k,f){this.handlers[k]=f;}forEach(f){this.features.forEach(f);}overrideStyle(){}revertStyle(){}}
  window.google={maps:{Map:class{fitBounds(){fitted++;}},Data,LatLngBounds:class{extend(){}},event:{trigger(){}}}};
  new Function(CONTROLLER)();new Function(PICKER)();
- q('[data-create-batch]').click();const dialog=q('#create-batch'),layer=layers[0];
+ if(layers.length)throw Error('map loaded before open');
+ q('[data-create-batch]').click();await new Promise(resolve=>setTimeout(resolve,0));
+ const dialog=q('#create-batch'),layer=layers[0];
  if(!dialog.open||!layer||!fitted)throw Error('map not initialized on open');
  const rows=[...dialog.querySelectorAll('[data-region-search]')], first=rows.find(r=>!r.hidden),id=Number(first.querySelector('input').value),feature=layer.features.find(f=>f.getProperty('id')===id);
  const form=dialog.querySelector('form');form.elements.title.value='地图创建验收';
@@ -75,6 +100,8 @@ addEventListener('load',()=>{try{
  q('#batch-select-invert').click();
  if(q('#batch-selected-count').textContent!=='1'||chibaRows.some(r=>r.querySelector('input').checked)||!first.querySelector('input').checked)throw Error('invert changed another region');
  q('#batch-select-invert').click();regionFilter.value='all';regionFilter.dispatchEvent(new Event('change'));
+ q('#batch-select-all').click();
+ if(rows.some(r=>!r.querySelector('input').checked)||new FormData(form).getAll('region_ids').length!==rows.length)throw Error('all regions not fully selected');
  const bounds=dialog.getBoundingClientRect(),map=q('#batch-region-map').getBoundingClientRect(),side=q('.batch-picker-sidebar').getBoundingClientRect();
  if(bounds.left<0||bounds.right>innerWidth+1||dialog.scrollWidth>dialog.clientWidth+1||map.height<280)throw Error('layout overflow');
  if(innerWidth>760&&side.left<map.right-1)throw Error('selected list not right of map');
@@ -86,6 +113,7 @@ addEventListener('load',()=>{try{
  parent.postMessage({batchPicker:true,width:innerWidth,selection:true,form:true,layout:true,fallback:true},'*');
 }catch(error){parent.postMessage({batchPicker:true,width:innerWidth,error:String(error)},'*');}});
 '''
+    harness = harness.replace('GEOMETRY', json.dumps(geometry))
     harness = harness.replace('CONTROLLER', json.dumps(Path('app/static/bd_batch_create.js').read_text()))
     harness = harness.replace('PICKER', json.dumps(Path('app/static/bd_batch_picker.js').read_text()))
     fixture = page.replace('</body>', '<script>' + harness + '</script></body>')

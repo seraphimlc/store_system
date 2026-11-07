@@ -39,6 +39,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXCLUDED_TABLES = {
     # alembic 自己的版本表，ORM 里本来就没有（迁移库独有）。
     "alembic_version",
+    # d9f42a310bce将作业片区迁至bd_region，明确保留旧表供downgrade恢复。
+    # BdZone已是BdRegion兼容别名；此表不是缺失的新模型，不能为测试删除历史表。
+    "bd_zone",
     # 迁移建过、ORM 从未声明过的**历史遗留表**：从第一个 commit（7efe40e）起
     # `app/models.py` 里就没有这些模型。`app/services/importer.py` 里写明
     # "历史遗留表（模型已下线，但线上仍有 FK）"，用原生 SQL 清理。

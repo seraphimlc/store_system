@@ -742,3 +742,35 @@ def test_enable_disabled_grid_form_success_error_csrf_and_permission(client, see
     data.update(csrf_token=csrf(client.get('/my/work').text), _ft=form_token(client))
     denied = client.post('/zones/grids/enable', data=data, follow_redirects=False)
     assert denied.status_code == 302
+
+
+def test_display_multipart_does_not_snap_degrees_or_intrude_adjacent_region():
+    from shapely.geometry import MultiPolygon, Polygon, mapping
+    from shapely import union_all
+    from app.services.bd_grid_geometry import display_geometry
+    left = Polygon([(139.789137, 35.675173), (139.790413, 35.675397),
+                    (139.790197, 35.677219), (139.789137, 35.675173)])
+    right = Polygon([(139.791217, 35.675193), (139.792319, 35.675419),
+                     (139.792173, 35.677331), (139.791217, 35.675193)])
+    raw = mapping(MultiPolygon([left, right]))
+    shown = shape(display_geometry(raw))
+    expected = union_all([left, right])
+    neighbour = Polygon([(139.790413, 35.675397), (139.790827, 35.675509),
+                         (139.790197, 35.677219), (139.790413, 35.675397)])
+    assert shown.equals(expected)
+    assert shown.bounds == expected.bounds
+    assert shown.intersection(neighbour).area == 0
+    assert raw == mapping(MultiPolygon([left, right]))
+
+
+def test_display_multipart_fills_lake_without_rounding_enclosing_ring():
+    from shapely.geometry import MultiPolygon, Polygon, mapping
+    from app.services.bd_grid_geometry import display_geometry
+    outer = box(139.789137, 35.675173, 139.792319, 35.677331)
+    hole = box(139.790113, 35.675711, 139.791193, 35.676719)
+    island = box(139.790371, 35.675913, 139.790713, 35.676317)
+    real = MultiPolygon([outer.difference(hole), island])
+    shown = shape(display_geometry(mapping(real)))
+    assert shown.equals(Polygon(outer.exterior))
+    assert len(shown.interiors) == 0 and shown.bounds == outer.bounds
+    assert not real.covers(Point(139.791, 35.676))

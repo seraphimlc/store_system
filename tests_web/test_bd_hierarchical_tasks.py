@@ -112,6 +112,50 @@ def test_tree_and_store_tasks_deny_other_users_and_stale_assignments(seed):
         assert tasks.my_tasks(db,db.get(User,seed['users']['captain']))[0].id==main.id
 
 
+def test_large_batch_bulk_writes_keep_snapshots_defaults_and_atomicity(seed):
+    from sqlalchemy import event, insert
+    from app.models import BdGridStore
+    with appdb.SessionLocal() as db:
+        grid=db.get(BdWorkGrid,seed['grid'])
+        db.execute(insert(BdWorkStore),[
+            {'id':f'bulk-{i}','name':f'shop-{i}','address':'bulk-address',
+             'lat':seed['lat'],'lon':seed['lon']} for i in range(2500)])
+        db.execute(insert(BdGridStore),[
+            {'release_id':grid.release_id,'grid_id':grid.id,'source_id':f'bulk-{i}'}
+            for i in range(2500)])
+        db.commit()
+        sizes=[]
+        def capture(conn,cursor,statement,parameters,context,executemany):
+            if statement.startswith('INSERT INTO bd_store_task '):
+                sizes.append(len(parameters) if executemany else 1)
+        event.listen(db.bind,'before_cursor_execute',capture)
+        try:
+            task=tasks.create_main_task(db,db.get(User,seed['users']['ops-admin']),'bulk',[seed['zone']])
+        finally:
+            event.remove(db.bind,'before_cursor_execute',capture)
+        assert sizes==[1000,1000,501]
+        assert db.query(BdStoreTask).count()==2501
+        row=db.query(BdStoreTask).filter_by(store_id='bulk-2499').one()
+        assert row.snapshot=={'name':'shop-2499','address':'bulk-address','lat':seed['lat'],'lon':seed['lon']}
+        assert row.status=='pending' and row.revision==0 and row.result=={}
+        assert row.updated_at is not None and row.request_id is None
+        assert db.query(BdTaskEvent).filter_by(main_task_id=task.id,event_type='create_batch').one().new_value['stores']==2501
+        db.rollback()
+        attempts=[]
+        def fail_second_chunk(conn,cursor,statement,parameters,context,executemany):
+            if statement.startswith('INSERT INTO bd_store_task '):
+                attempts.append(1)
+                if len(attempts)==2:raise RuntimeError('chunk failed')
+        event.listen(db.bind,'before_cursor_execute',fail_second_chunk)
+        try:
+            with pytest.raises(RuntimeError,match='chunk failed'):
+                tasks.create_main_task(db,db.get(User,seed['users']['ops-admin']),'failed',[seed['zone']])
+        finally:
+            event.remove(db.bind,'before_cursor_execute',fail_second_chunk)
+        db.rollback()
+        assert db.query(BdMainTask).count()==0 and db.query(BdStoreTask).count()==0
+
+
 def test_creation_missing_store_fails_before_any_task_write(seed):
     from app.models import BdGridStore
     with appdb.SessionLocal() as db:

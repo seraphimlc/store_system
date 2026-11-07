@@ -49,14 +49,17 @@
   search.addEventListener('input',()=>{filter();if(search.value)q('.batch-picker-options').open=true;});
   q('#batch-map-fit').addEventListener('click',fit);
   dialog.querySelector('form').addEventListener('submit',event=>{if(!selected.size)event.preventDefault();});
-  window.initBatchPickerMap=()=>{try{
+  window.initBatchPickerMap=async()=>{try{
+    const response=await fetch(config.geometry_url,{credentials:'same-origin',headers:{Accept:'application/json'}});
+    if(!response.ok)throw Error('map geometry unavailable');
+    const geometry=await response.json();
     clearTimeout(loadTimer);
     map=new google.maps.Map(q('#batch-region-map'),{center:{lat:35.68,lng:139.76},zoom:11,mapTypeControl:false,streetViewControl:false,fullscreenControl:false,gestureHandling:'greedy'});
-    layer=new google.maps.Data({map});layer.addGeoJson(config.geometry);layer.setStyle(style);
+    layer=new google.maps.Data({map});layer.addGeoJson(geometry);layer.setStyle(style);
     layer.addListener('click',event=>{const id=Number(event.feature.getProperty('id'));if(visible(id))toggle(id);});
     layer.addListener('mouseover',event=>layer.overrideStyle(event.feature,{strokeWeight:3,fillOpacity:.4}));
     layer.addListener('mouseout',event=>layer.revertStyle(event.feature));notify('');fit();
-  }catch{fallback(config.texts.error);}};
+  }catch{map=null;loading=false;fallback(config.texts.error);}};
   function openMap(){if(map){google.maps.event.trigger(map,'resize');fit();return;}if(loading)return;
     if(!rows.length){fallback(config.texts.empty);return;}if(!config.key){fallback(config.texts.missing);return;}
     loading=true;if(window.google?.maps?.Map){window.initBatchPickerMap();return;}

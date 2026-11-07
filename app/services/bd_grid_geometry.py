@@ -3,16 +3,18 @@ from shapely import STRtree, union_all
 from shapely.geometry import Polygon, mapping, shape
 
 
-def outline(geometry):
+def outline(geometry, *, grid_size=.001):
     if geometry.geom_type == 'Polygon':
         return Polygon(geometry.exterior)
-    return union_all([outline(g) for g in getattr(geometry, 'geoms', ())
-                      if g.geom_type in ('Polygon', 'MultiPolygon')], grid_size=.001)
+    return union_all([outline(g, grid_size=grid_size) for g in getattr(geometry, 'geoms', ())
+                      if g.geom_type in ('Polygon', 'MultiPolygon')], grid_size=grid_size)
 
 
 def display_geometry(geojson):
     """只供地图显示/点击，不得用于面积、门店位置校验或覆盖审计。"""
-    return mapping(outline(shape(geojson)))
+    # GeoJSON是经纬度，不能使用米制计算的.001精度（约100米角度网格）。
+    # 多面外轮廓仍合并包含岛，但保留源坐标，避免显示越界和阶梯轮廓。
+    return mapping(outline(shape(geojson), grid_size=0))
 
 
 def coverage_matches(expected, actual, *, precision_m=.001):
