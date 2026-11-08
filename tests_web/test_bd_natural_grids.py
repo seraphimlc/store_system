@@ -216,7 +216,7 @@ def test_shared_url_separates_assignment_and_composition(client,seed):
     assignment=client.get(f'/zones?zone={seed["zone"]}')
     assert assignment.status_code==200
     assert 'data-mode="assign"' in assignment.text
-    assert f'action="/zones/{seed["zone"]}/assign"' in assignment.text
+    assert f'action="/zones/{seed["zone"]}/assign"' not in assignment.text
     assert 'id="grid-region-editor"' not in assignment.text
     management=client.get(f'/zones?mode=manage&zone={seed["zone"]}')
     assert management.status_code==200

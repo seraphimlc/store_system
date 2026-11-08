@@ -244,7 +244,7 @@ def test_admin_saved_audits_and_review_details(client,seed):
     login(client,'ops-admin')
     page=client.get(f"/zones/manage?zone={seed['zone']}")
     assert page.status_code==200 and 'review-synthetic' not in page.text and 'geometric_pass' not in page.text
-    assert 'synthetic-team</option>' in page.text
+    assert 'synthetic-team</option>' not in page.text
     assert 'synthetic-other</option>' not in page.text  # 无有效唯一队长的团队不能供指派。
 
 
@@ -297,7 +297,7 @@ def test_retired_zone_and_grid_forms_no_longer_execute(client,seed):
     grid_path=f"/my/work/grids/{seed['grid']}"
     login(client,'ops-admin')
     action=f"/zones/{seed['zone']}/assign"
-    data=page_form(client,'/zones/manage',action)
+    data={'_ft':form_token(client),'csrf_token':csrf(client.get('/zones/manage').text),'revision':0}
     data['team_id']=seed['team']
     assert client.post(action,data=data,follow_redirects=False).status_code==303
     with appdb.SessionLocal() as db:
@@ -313,7 +313,7 @@ def test_retired_zone_and_grid_forms_no_longer_execute(client,seed):
     # 召回片区仍可用（管理端不受退役影响）
     login(client,'ops-admin')
     action=f"/zones/{seed['zone']}/recall"
-    data=page_form(client,'/zones/manage',action)
+    data={'_ft':form_token(client),'csrf_token':csrf(client.get('/zones/manage').text),'revision':zone.revision}
     assert client.post(action,data=data,follow_redirects=False).status_code==303
     with appdb.SessionLocal() as db:
         zone=db.get(BdZone,seed['zone'])
@@ -410,7 +410,7 @@ def test_region_switch_scopes_zones_and_formula_uses_release_parameters(client,s
     page=client.get(f"/zones?zone={seed['zone']}")
     assert '负载计算' in page.text and '0.40 × (2.000 / 20.0)²' in page.text
     assert '/ 6000)²' in page.text and 'S = 0.004' in page.text
-    assert f"/zones/{seed['zone']}/assign" in page.text and '待复核' not in page.text
+    assert f"/zones/{seed['zone']}/assign" not in page.text and '待复核' not in page.text
     config=json.loads(re.search(r'<script id="zone-management-config"[^>]*>(.*?)</script>',page.text,re.S).group(1))
     assert config['geometry']['features'][0]['properties']['progress']==35
     for region in ('tokyo26','kanagawa','saitama','chiba'):
@@ -419,3 +419,15 @@ def test_region_switch_scopes_zones_and_formula_uses_release_parameters(client,s
         config=json.loads(re.search(r'<script id="zone-management-config"[^>]*>(.*?)</script>',page.text,re.S).group(1))
         assert config['geometry']['features']==[]
     assert client.get('/zones?region=invalid').status_code==404
+
+
+def test_zone_management_only_shows_grid_management_and_region_view(client,seed):
+    login(client,'ops-admin')
+    page=client.get(f"/zones?zone={seed['zone']}")
+    assert page.status_code==200
+    assert '网格管理' in page.text and '片区查看' in page.text
+    for content in (page.text,client.get(f"/zones/{seed['zone']}/panel").text):
+        assert f"/zones/{seed['zone']}/assign" not in content
+        assert f"/zones/{seed['zone']}/recall" not in content
+        assert '分配给团队' not in content and '责任管理' not in content
+    assert client.get('/zones?mode=manage').status_code==200

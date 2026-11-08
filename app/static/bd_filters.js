@@ -1,16 +1,19 @@
 /* 列表头筛选：改动即搜索（不用点按钮）。
-   任何 <form data-autosubmit="1"> 都生效：下拉选择立刻提交，搜索框输入停 500ms 提交。 */
+   下拉立即提交；搜索默认停500ms提交，data-search-submit="1"时按Enter或点查询提交。 */
 (() => {
   'use strict';
   document.querySelectorAll('form[data-autosubmit="1"]').forEach(form => {
     let timer = null;
+    let composing = false;
+    const submitSearch = form.dataset.searchSubmit === '1';
 
     // 空值不带进 URL（?visit=&kw= 这种噪音看着脏）
     const go = () => {
       if (timer) { clearTimeout(timer); timer = null; }
       const params = new URLSearchParams(new FormData(form));
       for (const [key, value] of [...params]) {
-        if (!value) params.delete(key);
+        if (key === 'kw') params.set(key, value.trim());
+        if (!params.get(key)) params.delete(key);
       }
       window.location.search = params.toString();
     };
@@ -91,15 +94,25 @@
     });
     const search = form.querySelector('input[type=search]');
     if (search) {
-      search.addEventListener('input', () => {
+      search.addEventListener('compositionstart', () => {
+        composing = true;
+        if (timer) clearTimeout(timer);
+      });
+      const schedule = () => {
+        if (submitSearch || composing) return;
         if (timer) clearTimeout(timer);
         timer = setTimeout(go, 500);
+      };
+      search.addEventListener('compositionend', () => { composing = false; schedule(); });
+      search.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && (composing || event.isComposing || event.keyCode === 229)) event.preventDefault();
       });
-      search.addEventListener('search', go);   // type=search 自带的清空 ×
+      search.addEventListener('input', schedule);
+      search.addEventListener('search', () => { if (!submitSearch && !composing) go(); });   // type=search 自带的清空 ×
     }
     form.addEventListener('submit', event => {
       event.preventDefault();
-      go();
+      if (!composing) go();
     });
   });
 })();

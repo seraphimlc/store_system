@@ -107,9 +107,7 @@ def task_detail(task_id:int,request:Request,state:str='',kw:str='',
     try: task,tree=task_ops.task_tree(db,user,task_id,task_state=state,keyword=kw)
     except ops.OperationError as exc:return error(exc,403)
     team_ids={item['task'].team_id for item in tree if item['task'].leader_id==user.id}
-    members=db.query(User,BdTeamMember.team_id).join(BdTeamMember,BdTeamMember.person_code==User.person_code).filter(
-        BdTeamMember.team_id.in_(team_ids),BdTeamMember.role=='member',BdTeamMember.end_date.is_(None),
-        User.is_active.is_(True),User.status=='active',User.role.in_(('staff','leader'))).all() if team_ids else []
+    members=task_ops.assignment_members(db,team_ids)
     members_by_team={identity:[account for account,team in members if team==identity] for identity in team_ids}
     names={account.id:account.display_name or account.username for account in db.query(User).filter(User.id.in_(
         {g['task'].assignee_id for item in tree for g in item['grids'] if g['task'].assignee_id})).all()}

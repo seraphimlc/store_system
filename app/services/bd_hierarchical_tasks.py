@@ -326,9 +326,24 @@ def captain(db,user,rt):
         raise ops.OperationError('仅本批次片区的当前队长可派发')
 
 
+def assignment_members(db,team_ids):
+    """批次派发的同一候选池：本队在岗队长和队员，按person_code关联账号。"""
+    if not team_ids:return []
+    return (db.query(User,BdTeamMember.team_id)
+        .join(BdTeamMember,BdTeamMember.person_code==User.person_code)
+        .join(BdTeam,BdTeam.id==BdTeamMember.team_id)
+        .filter(BdTeamMember.team_id.in_(team_ids),BdTeamMember.role.in_(('leader','member')),
+                BdTeamMember.end_date.is_(None),BdTeam.status=='active',
+                User.is_active.is_(True),User.status=='active',User.role.in_(('staff','leader')))
+        .order_by(User.id).all())
+
+
 def member(db,user,rt):
     team=db.get(BdTeam,rt.team_id) if rt.team_id else None
     if not team or team.status!='active':raise ops.OperationError('任务团队不存在或已停用')
+    if user.id==rt.leader_id:
+        captain(db,user,rt)
+        return
     ops.require_member(db,user,SimpleNamespace(team_id=rt.team_id,leader_id=rt.leader_id))
 
 
@@ -492,16 +507,16 @@ def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',
     """
     main,rt,grid=context(db,user,grid_task_id)
     page=max(1,page);offset=(page-1)*30
-    keyword=(keyword or '')[:100]
+    keyword=(keyword or '').strip()[:100]
     task_state=task_state if task_state in STORE_TASK_FILTERS else ''
     status=status if status in STORE_STATUSES else ''
     query=db.query(BdStoreTask).filter(BdStoreTask.grid_task_id==grid.id)
     if keyword:
-        like='%'+keyword+'%'
+        like='%'+keyword.replace('/','//').replace('%','/%').replace('_','/_')+'%'
         query=query.filter(or_(
-            BdStoreTask.snapshot['name'].as_string().ilike(like),
-            BdStoreTask.snapshot['address'].as_string().ilike(like),
-            BdStoreTask.store_id.ilike(like)))
+            BdStoreTask.snapshot['name'].as_string().ilike(like,escape='/'),
+            BdStoreTask.snapshot['address'].as_string().ilike(like,escape='/'),
+            BdStoreTask.store_id.ilike(like,escape='/')))
     if status:
         query=query.filter(BdStoreTask.result['business_status'].as_string()==status)
     if task_state=='completed':

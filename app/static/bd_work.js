@@ -5,6 +5,10 @@
   const notice=document.getElementById('work-map-status');
   const assignmentColors=['#1769aa','#a33b20','#39754a','#7545a1','#a26a00','#147d78','#b13c73','#5b6470'];
   let mapLayer, previewStyle, previewOwnerColors={};
+  let focusStore, resetStoreFocus, pendingStoreId=null;
+  const showAll=document.getElementById('work-show-all');
+  showAll?.addEventListener('click',()=>resetStoreFocus?.());
+  window.focusVisitStore=id=>{pendingStoreId=String(id);focusStore?.(pendingStoreId);};
   window.setBatchGridAssignmentPreview=assignments=>{
     window.batchGridAssignmentPreview=assignments;
     const owners=[...new Set(Object.values(assignments||{}))].sort((a,b)=>a-b);
@@ -43,28 +47,66 @@
     function extend(coords){if(typeof coords[0]==='number')bounds.extend({lng:coords[0],lat:coords[1]});else coords.forEach(extend);}
     config.geometry.features.forEach(f=>extend(f.geometry.coordinates));
     if(!bounds.isEmpty())map.fitBounds(bounds,24);
+    const stores=(config.stores||[]).filter(s=>Number.isFinite(s.lat)&&Number.isFinite(s.lon));
+    const storesById=new Map(stores.map(store=>[String(store.id),store]));
+    const storePoints=items=>({type:'FeatureCollection',features:items.map(s=>({type:'Feature',
+      geometry:{type:'Point',coordinates:[s.lon,s.lat]},properties:{store_id:s.id,visited:s.visited,title:s.name}}))});
+    const shopStyle=(f,selected=false)=>({title:f.getProperty('title'),icon:{path:google.maps.SymbolPath.CIRCLE,
+      scale:selected?10:6,fillColor:f.getProperty('visited')?'#2c7751':'#225fa2',
+      fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
     const shops=new google.maps.Data({map});
-    shops.addGeoJson({type:'FeatureCollection',features:(config.stores||[]).filter(s=>Number.isFinite(s.lat)&&Number.isFinite(s.lon)).map(s=>({type:'Feature',geometry:{type:'Point',coordinates:[s.lon,s.lat]},properties:{store_id:s.id,visited:s.visited,title:s.name}}))});
-    shops.setStyle(f=>({title:f.getProperty('title'),icon:{path:google.maps.SymbolPath.CIRCLE,scale:6,fillColor:f.getProperty('visited')?'#2c7751':'#225fa2',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}}));
-    window.focusVisitStore=id=>{
-      const store=(config.stores||[]).find(s=>String(s.id)===String(id));
-      if(store&&Number.isFinite(store.lat)&&Number.isFinite(store.lon)){map.panTo({lat:store.lat,lng:store.lon});map.setZoom(Math.max(map.getZoom()||16,17));shops.setStyle(f=>({title:f.getProperty('title'),icon:{path:google.maps.SymbolPath.CIRCLE,scale:String(f.getProperty('store_id'))===String(id)?10:6,fillColor:f.getProperty('visited')?'#2c7751':'#225fa2',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}}));}
+    shops.addGeoJson(storePoints(stores));
+    shops.setStyle(f=>shopStyle(f));
+    let focusedShops,selectedStoreId=null;
+    focusStore=id=>{
+      const store=storesById.get(String(id));
+      if(!store)return;
+      const wasFocused=selectedStoreId!==null;
+      selectedStoreId=String(store.id);
+      // Detach the overview once; subsequent clicks only replace the selected point.
+      if(!focusedShops){
+        shops.setMap(null);
+        focusedShops=new google.maps.Data({map});
+        focusedShops.setStyle(f=>shopStyle(f,true));
+        focusedShops.addListener('click',openShop);
+      }else if(!wasFocused){
+        shops.setMap(null);focusedShops.setMap(map);
+      }
+      if(showAll)showAll.hidden=false;
+      const previous=[];focusedShops.forEach(feature=>previous.push(feature));
+      previous.forEach(feature=>focusedShops.remove(feature));
+      focusedShops.addGeoJson(storePoints([store]));
+      map.moveCamera({center:{lat:store.lat,lng:store.lon},zoom:Math.max(map.getZoom()||16,17)});
+    };
+    resetStoreFocus=()=>{
+      selectedStoreId=null;pendingStoreId=null;
+      focusedShops?.setMap(null);shops.setMap(map);
+      if(!bounds.isEmpty())map.fitBounds(bounds,24);
+      if(showAll)showAll.hidden=true;
+      window.clearVisitStoreSelection?.();
+      const url=new URL(location.href);
+      if(url.searchParams.has('focus')){
+        url.searchParams.delete('focus');
+        window.history.replaceState(null,'',url.pathname+url.search+url.hash);
+      }
     };
     let newMarker;
     window.showNewStoreLocation=(lat,lng)=>{if(!newMarker)newMarker=new google.maps.Marker({map});newMarker.setPosition({lat,lng});map.panTo({lat,lng});};
     function pickLocation(event){const editor=document.getElementById('new-store');if(!editor||(!editor.open&&!editor.hasAttribute('data-new-store-page')))return false;const lat=event.latLng.lat(),lng=event.latLng.lng();document.querySelector('#new-store [name="lat"]').value=lat;document.querySelector('#new-store [name="lon"]').value=lng;window.showNewStoreLocation(lat,lng);return true;}
     map.addListener('click',pickLocation);
-    const focus=new URL(location.href).searchParams.get('focus');if(focus)window.focusVisitStore(focus);
+    const focus=pendingStoreId??new URL(location.href).searchParams.get('focus');if(focus)window.focusVisitStore(focus);
     if(config.locate)window.startWorkLocation?.(map,config.locationText,position=>{
+      if(selectedStoreId!==null)return;
       const combined=new google.maps.LatLngBounds();
       const extendBound=coords=>{if(typeof coords[0]==='number')combined.extend({lng:coords[0],lat:coords[1]});else coords.forEach(extendBound);};
       config.geometry.features.forEach(feature=>extendBound(feature.geometry.coordinates));
       combined.extend(position);map.fitBounds(combined,24);
     });
-    shops.addListener('click',event=>{const id=event.feature.getProperty('store_id');
+    function openShop(event){const id=event.feature.getProperty('store_id');
       if(window.openVisitStore){window.openVisitStore(id);return;}
       const card=document.getElementById('store-'+id);
-      if(card){card.querySelector('details').open=true;card.scrollIntoView({behavior:'smooth',block:'start'});}});
+      if(card){card.querySelector('details').open=true;card.scrollIntoView({behavior:'smooth',block:'start'});}}
+    shops.addListener('click',openShop);
     layer.addListener('click',event=>{if(pickLocation(event))return;const id=Number(event.feature.getProperty('id'));if(Number.isInteger(id)){if(window.openDispatchGrid)window.openDispatchGrid(id);else document.getElementById((config.selectPrefix || 'grid-').replace(/^#/, '')+id)?.scrollIntoView({behavior:'smooth',block:'start'});}});
   };
   if(!config.key){notice.textContent=config.error;return;}

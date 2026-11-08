@@ -130,6 +130,11 @@
     });
   }
 
+  window.clearVisitStoreSelection=()=>{
+    rows.forEach(row=>row.classList.remove('is-selected'));
+    reveal(null,false);
+  };
+
   rows.forEach(row => {
     row.addEventListener('click', event => {
       if (event.target.closest('a')) return;

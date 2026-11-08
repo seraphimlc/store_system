@@ -75,3 +75,13 @@ def test_ai_assignment_drawer_rejects_stale_response_and_submits_signed_decision
         pytest.skip('Node is required for frontend script verification')
     result=subprocess.run(['node','tests_web/bd_batch_auto_ai_mock.cjs'],text=True,capture_output=True,timeout=15)
     assert result.returncode==0,result.stderr
+
+
+def test_h5_store_focus_shows_only_selected_shop_and_preserves_manual_view():
+    if not shutil.which('node'):
+        pytest.skip('Node is required for frontend script verification')
+    result=subprocess.run(['node','tests_web/bd_visit_map_mock.cjs'],text=True,capture_output=True,timeout=15)
+    assert result.returncode==0,result.stderr
+    report=json.loads(result.stdout)
+    assert report['singleTarget'] and report['gpsPreserved'] and report['restoreAll']
+    assert all(row['stylesPerFocus']==1 for row in report['counts'])

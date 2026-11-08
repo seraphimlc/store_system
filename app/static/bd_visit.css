@@ -216,3 +216,12 @@
 .work-location-btn[aria-pressed="true"] {color:#1677ff;border-color:#91caff;background:#e6f4ff}
 .work-location-status {position:absolute;left:12px;bottom:45px;max-width:65%;z-index:2;background:#fff;border-radius:4px;font-size:12px;padding:4px 8px}
 .work-location-status:empty {display:none}
+
+/* Keep explicit search reachable while typing, including on narrow screens. */
+.visit-search-control{display:flex;gap:6px;min-width:0}
+.visit-page .visit-search-control input{flex:1;width:0}
+.visit-search-control .btn{flex-shrink:0;margin:0;white-space:nowrap}
+@media(max-width:760px){.visit-page .visit-equal-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.visit-search-control{grid-column:1/-1}}
+
+.work-show-all-btn{left:12px;top:12px;right:auto;bottom:auto;min-height:44px}
+.work-show-all-btn[hidden]{display:none}

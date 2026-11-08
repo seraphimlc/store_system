@@ -13,7 +13,7 @@ from sqlalchemy import func
 from shapely.geometry import shape
 
 from app.models import (BdGridTask, BdMainTask, BdRegionTask, BdStoreTask,
-                        BdTaskEvent, BdWorkGrid, BdTeamMember, User)
+                        BdTaskEvent, BdWorkGrid)
 from app.services import bd_hierarchical_tasks as tasks
 from app.services import bd_zone_operations as ops
 from app.services import ai_chat
@@ -21,11 +21,7 @@ from app.config import get_settings
 
 
 def _members(db, rt):
-    rows = (db.query(User).join(BdTeamMember, BdTeamMember.person_code == User.person_code)
-            .filter(BdTeamMember.team_id == rt.team_id, BdTeamMember.role == 'member',
-                    BdTeamMember.end_date.is_(None), User.is_active.is_(True),
-                    User.status == 'active', User.role.in_(('staff', 'leader')))
-            .order_by(User.id).all())
+    rows = [account for account,_ in tasks.assignment_members(db,[rt.team_id])]
     if not rows:
         raise ops.OperationError('团队没有在岗队员')
     return rows

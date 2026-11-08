@@ -5,14 +5,14 @@
 {% if request.query_params.get('err') %}<div class="msg err" role="alert">{{ t(request.query_params.get('err')) }}</div>{% endif %}
 <link rel="stylesheet" href="/static/bd_zone_manage.css?v={{ static_ver('bd_zone_manage.css') }}">
 <div class="zone-manager" data-mode="{{ mode }}">
-  <header class="zone-workspace-header"><div><h1>{{ t('片区管理') }}</h1><p>{{ t('在地图上选择网格，组合成新的片区。') if mode=='manage' else t('选择片区，查看责任范围并分配给团队。') }}</p></div>
-    <nav class="zone-mode-switch" aria-label="{{ t('切换工作模式') }}">{% for key,label in [('assign','分配片区'),('manage','管理片区')] %}<a href="{{ request.url.replace(path='/zones').include_query_params(mode=key).remove_query_params('zone') }}" {% if mode==key %}aria-current="page"{% endif %}>{{ t(label) }}</a>{% endfor %}</nav>
+  <header class="zone-workspace-header"><div><h1>{{ t('片区管理') }}</h1><p>{{ t('在地图上选择网格，组合成新的片区。') if mode=='manage' else t('选择片区，查看范围和网格详情。') }}</p></div>
+    <nav class="zone-mode-switch" aria-label="{{ t('切换工作模式') }}">{% for key,label in [('manage','网格管理'),('assign','片区查看')] %}<a href="{{ request.url.replace(path='/zones').include_query_params(mode=key).remove_query_params('zone') }}" {% if mode==key %}aria-current="page"{% endif %}>{{ t(label) }}</a>{% endfor %}</nav>
   </header>
   <div class="zone-map-layout">
     <div class="zone-map-stage">
       <div id="zone-map" aria-label="{{ t('作业地图') }}"></div>
       <div class="zone-region-tools"><form method="get" action="/zones"><input type="hidden" name="mode" value="{{ mode }}"><label for="zone-region">{{ t('地区') }}</label><select id="zone-region" name="region">{% for key,label in regions %}<option value="{{ key }}" {{ 'selected' if region==key else '' }}>{{ t(label) }}</option>{% endfor %}</select><button type="submit" class="btn ghost">{{ t('切换地区') }}</button></form></div>
-      <div class="zone-map-tools" {% if mode=='manage' %}hidden{% endif %}><label for="zone-select">{{ t('选择片区') }}</label><select id="zone-select"><option value="">{{ t('选择片区') }}</option>{% for z in zones %}<option value="{{ z.id }}" {{ 'selected' if selected and selected.zone.id==z.id else '' }}>{{ z.name }} · {{ names.get(z.leader_id,t('未指派')) }}</option>{% endfor %}</select><button type="button" id="zone-reset" class="btn ghost">{{ t('查看全部') }}</button></div>
+      <div class="zone-map-tools" {% if mode=='manage' %}hidden{% endif %}><label for="zone-select">{{ t('选择片区') }}</label><select id="zone-select"><option value="">{{ t('选择片区') }}</option>{% for z in zones %}<option value="{{ z.id }}" {{ 'selected' if selected and selected.zone.id==z.id else '' }}>{{ z.name }}</option>{% endfor %}</select><button type="button" id="zone-reset" class="btn ghost">{{ t('查看全部') }}</button></div>
       <div class="zone-map-caption"><span>{{ t('网格边界') if mode=='manage' else t('片区边界') }}</span><span>{% if mode=='manage' %}{{ grid_rows|length }} {{ t('个网格') }}{% else %}{{ zones|length }} {{ t('个片区') }}{% endif %}</span></div>
       {% if mode=='manage' %}<div class="grid-map-legend" aria-label="{{ t('网格状态') }}">
         <span><i class="grid-legend-assigned" aria-hidden="true"></i>{{ t('已分配') }}</span>

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from app.db import get_db
-from app.models import User, BdTeamMember, BdGridTask, BdRegionTask, BdStoreProposal
+from app.models import User, BdGridTask, BdRegionTask, BdStoreProposal
 from app.forms import require_form_token
 from app.routers.bd_zone_ops_r import work_login, render, post_guard, error
 from app.services import (bd_hierarchical_tasks as tasks, bd_store_proposals as proposals,
@@ -26,9 +26,7 @@ def region_page(task_id:int,region_id:int,request:Request,state:str='',owner:str
         if not item:raise ops.OperationError('片区任务不存在')
         if user.role!='admin':tasks.captain(db,user,item['task'])
         stats=tasks.summarize([item])
-        members=db.query(User).join(BdTeamMember,BdTeamMember.person_code==User.person_code).filter(
-            BdTeamMember.team_id==item['task'].team_id,BdTeamMember.role=='member',BdTeamMember.end_date.is_(None),
-            User.is_active.is_(True),User.status=='active',User.role.in_(('staff','leader'))).all()
+        members=[account for account,_ in tasks.assignment_members(db,[item['task'].team_id])]
         names={u.id:u.display_name or u.username for u in members}
         def keep(g):
             gt=g['task']

@@ -18,6 +18,7 @@
   <div class="dispatch-map-stage">
     <div id="work-map" aria-label="{{ t('作业地图') }}"></div>
     <p id="work-map-status" role="status" aria-live="polite"></p>
+    <button type="button" class="work-location-btn work-show-all-btn" id="work-show-all" aria-controls="work-map" hidden>{{ t('查看全部') }}</button>
     <button type="button" class="work-location-btn" id="work-location" aria-pressed="false">{{ t('跟随我的位置') }}</button>
     <p id="work-location-status" class="work-location-status" role="status" aria-live="polite"></p>
     <div class="dispatch-map-legend"><span><i class="visited"></i>{{ t('已巡店') }}</span><span><i class="unvisited"></i>{{ t('未巡店') }}</span></div>
@@ -35,7 +36,7 @@
       {% if can_execute %}<a class="btn ghost visit-add-store" href="{{ request.url.replace(path='/my/work/batch-grids/' ~ grid.id ~ '/new-store').remove_query_params(['focus','msg','resubmit']) }}">{{ t('新增店铺') }}</a>{% endif %}
     </section>
     {# 筛选栏：三个控件**同一行**排列，改动即搜索（不用点按钮） #}
-    <form class="bd-filters visit-equal-filters" method="get" data-testid="visit-filters" data-autosubmit="1"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}">
+    <form class="bd-filters visit-equal-filters" method="get" data-testid="visit-filters" data-autosubmit="1" data-search-submit="1"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}">
       <label><span class="bd-filter-label" hidden>{{ t('作业状态') }}</span>
         <select name="task_state" data-testid="filter-task-state" aria-label="{{ t('作业状态') }}" title="{{ t('作业状态') }}">
           <option value="">{{ t('全部巡店状态') }}</option>
@@ -51,9 +52,11 @@
           {% endfor %}
         </select>
       </label>
-      <label><span class="bd-filter-label" hidden>{{ t('搜索') }}</span>
-        <input type="search" name="kw" value="{{ kw }}" maxlength="100" placeholder="{{ t('商户名称') }}" data-testid="filter-kw" aria-label="{{ t('搜索') }}" title="{{ t('搜索') }}">
-      </label>
+      <div class="visit-search-control">
+        <input type="search" name="kw" value="{{ kw }}" maxlength="100" placeholder="{{ t('名称、地址或商户编号') }}" enterkeyhint="search" data-testid="filter-kw" aria-label="{{ t('搜索') }}" title="{{ t('搜索') }}">
+
+    <button class="btn ghost" type="submit">{{ t('查询') }}</button>
+      </div>
     </form>
     <div class="dispatch-scroll">
 
@@ -134,20 +137,20 @@
     <h2 id="location-check-title">{{ t('这个坐标准确吗？') }}</h2>
     <p class="location-check-name" data-location-name></p>
     <div class="location-check-actions">
-      <button type="button" class="btn primary" data-location-action="accurate">{{ t('准确并导航') }}</button>
-      <button type="button" class="btn ghost" data-location-action="edit">{{ t('不准确，更新坐标') }}</button>
-      <button type="button" class="btn ghost" data-location-action="doubtful">{{ t('存疑并导航') }}</button>
-      <button type="button" class="btn ghost" data-location-action="nonexistent">{{ t('标记不存在') }}</button>
-      <button type="button" class="btn ghost" data-location-action="skip">{{ t('暂不判断，直接导航') }}</button>
+      <button type="button" class="btn primary" data-location-action="accurate">{{ t('确认坐标准确') }}</button>
+      <button type="button" class="btn ghost" data-location-action="edit">{{ t('坐标有误，修改坐标') }}</button>
+      <button type="button" class="btn ghost" data-location-action="doubtful">{{ t('暂时无法确认，标记存疑') }}</button>
+      <button type="button" class="btn ghost" data-location-action="nonexistent">{{ t('标记店铺不存在') }}</button>
+      <button type="button" class="btn ghost" data-location-action="skip">{{ t('暂不判断，保留地图') }}</button>
     </div>
     <div class="location-edit-fields" data-location-editor hidden>
       <label>{{ t('纬度') }}<input name="lat" type="number" step="any" min="-90" max="90" inputmode="decimal"></label>
       <label>{{ t('经度') }}<input name="lon" type="number" step="any" min="-180" max="180" inputmode="decimal"></label>
-      <button type="button" class="btn primary" data-location-action="save-coordinates">{{ t('保存坐标并导航') }}</button>
+      <button type="button" class="btn primary" data-location-action="save-coordinates">{{ t('保存并更新地图') }}</button>
     </div>
     <p class="location-check-message" role="status" aria-live="polite" data-location-message
        data-popup-blocked="{{ t('请允许打开新页面后重试。') }}" data-coordinates-required="{{ t('请填写纬度和经度。') }}" data-save-failed="{{ t('保存定位状态失败。') }}"></p>
-    <button type="button" class="btn ghost location-dialog-cancel" data-location-action="cancel">{{ t('取消') }}</button>
+    <button type="button" class="btn ghost location-dialog-cancel" data-location-action="cancel">{{ t('取消并关闭地图') }}</button>
   </div>
 </dialog>
 

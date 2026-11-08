@@ -61,7 +61,7 @@ def test_batch_grid_table_columns_are_name_status_visit_state_and_navigation(cli
     assert '/maps/dir/' not in nav
     assert 'data-location-status' in html and '待核实' in html
     assert 'id="location-check-dialog"' in html
-    assert '不准确，更新坐标' in html
+    assert '坐标有误，修改坐标' in html
 
 
 def test_batch_grid_row_click_opens_editable_store_detail(client,seed):
@@ -90,7 +90,7 @@ def test_location_editor_uses_readonly_coordinates_and_manual_gps_button(client,
     assert 'type="number"' not in detail and '保存位置并查询Google地点' in detail
 
 
-def test_batch_grid_filters_are_one_row_and_autosubmit(client,seed):
+def test_batch_grid_filters_submit_search_explicitly(client,seed):
     with appdb.SessionLocal() as db:
         task,rt,gt,st=multi_batch(db,seed);db.commit()
     login(client,'worker')
@@ -99,6 +99,9 @@ def test_batch_grid_filters_are_one_row_and_autosubmit(client,seed):
     assert 'method="get"' in filters and 'data-autosubmit="1"' in filters
     assert 'name="task_state"' in filters and 'name="status"' in filters and 'name="kw"' in filters
     assert 'bd_filters.js' in html
+    assert 'data-search-submit="1"' in filters
+    assert '名称、地址或商户编号' in filters
+    assert 'type="submit"' in filters
     # 三个控件**同一行**（CSS 固定单行 flex），不再是一列
     css=DISPATCH_CSS.read_text()
     assert '.bd-filters {display:flex' in css
@@ -229,3 +232,18 @@ def test_google_maps_location_fallbacks():
     for lat,lon in [(None,None),('bad',139),(91,139),(35,181),(float('nan'),139)]:
         assert gmaps_url(lat,lon)==''
     assert gmaps_url(None,None,'new-local-id','shop')==''
+
+
+def test_batch_grid_keyword_is_trimmed_literal_and_matches_documented_fields(client,seed):
+    with appdb.SessionLocal() as db:
+        _,_,grid,_=multi_batch(db,seed)
+        stores=db.query(BdStoreTask).filter_by(grid_task_id=grid.id).order_by(BdStoreTask.id).all()
+        stores[0].snapshot={**stores[0].snapshot,'name':'Cafe 100%_ / Tokyo','address':'港区南青山'}
+        gid=grid.id;target=stores[0].id;db.commit()
+    login(client,'worker')
+    for keyword in ('  cAfE  ','100%_','%','_','/','南青山'):
+        page=client.get(f"/my/work/batch-grids/{gid}",params={'kw':keyword})
+        assert page.status_code==200
+        assert re.findall(r'<tr class="visit-row" id="store-([^" ]+)"',page.text)==[str(target)],keyword
+    page=client.get(f"/my/work/batch-grids/{gid}",params={'kw':'shop-b'})
+    assert len(re.findall(r'<tr class="visit-row"',page.text))==1

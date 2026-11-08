@@ -1,11 +1,12 @@
 """批次四级任务：隔离、权限、快照及店铺完成后的逐级汇总。"""
 import uuid
+from datetime import date
 import json
 from types import SimpleNamespace
 import pytest
 from shapely.geometry import box, mapping
 from app.models import (User,BdRegion,BdWorkGrid,BdMainTask,BdRegionTask,BdGridTask,BdStoreTask,BdWorkStore)
-from app.models import BdTaskEvent
+from app.models import BdTaskEvent, BdTeamMember, BdTeam
 import app.db as appdb
 from app.services import bd_hierarchical_tasks as tasks,bd_zone_operations as ops
 from app.services import bd_batch_auto_assign as auto_assign
@@ -405,3 +406,85 @@ def test_ai_preview_expires_and_malformed_json_is_rejected(seed,mock_assign_ai,m
         monkeypatch.setattr(auto_assign.ai_chat,'chat',lambda *args,**kwargs:'{"weights":')
         with pytest.raises(ops.OperationError,match='未自动回退'):
             auto_assign.plan(db,user,rt.id)
+
+
+@pytest.mark.parametrize('account_role',['leader','staff'])
+def test_captain_can_select_self_assign_and_complete_own_grid_http(client,seed,account_role):
+    with appdb.SessionLocal() as db:
+        main,rt,grid,store=batch(db,seed)
+        captain=db.get(User,seed['users']['captain']);captain.role=account_role
+        mid,rid,gid,sid,revision=main.id,rt.id,grid.id,store.id,grid.revision
+        db.commit()
+    login(client,'captain')
+    page=client.get(f"/my/work/batches/{mid}/regions/{rid}")
+    assert page.status_code==200
+    import re
+    select=re.search(r'<select name="target_id".*?</select>',page.text,re.S).group(0)
+    assert f'value="{seed["users"]["captain"]}"' in select
+    assert f'name="auto_member" value="{seed["users"]["captain"]}" checked' in page.text
+    response=client.post(f"/my/work/batch-grids/{gid}/assign",data={
+        '_ft':form_token(client),'csrf_token':csrf(page.text),'revision':revision,
+        'target_id':seed['users']['captain']},follow_redirects=False)
+    assert response.status_code==303,response.text
+    page=client.get(f"/my/work/batch-grids/{gid}")
+    assert page.status_code==200 and '保存巡店' in page.text
+    response=client.post(f"/my/work/batch-stores/{sid}/complete",data={
+        '_ft':form_token(client),'csrf_token':csrf(page.text),'revision':0,
+        'request_id':str(uuid.uuid4()),'status':'normal','note':'队长巡店'},follow_redirects=False)
+    assert response.status_code==303,response.text
+    with appdb.SessionLocal() as db:
+        assert db.get(BdGridTask,gid).assignee_id==seed['users']['captain']
+        assert db.get(BdStoreTask,sid).actor_id==seed['users']['captain']
+        for model,identity in [(BdGridTask,gid),(BdRegionTask,rid),(BdMainTask,mid)]:
+            row=db.get(model,identity);assert row.status=='completed' and row.progress==100
+        assert db.query(BdTaskEvent).filter_by(event_type='complete_store_task',
+            actor_id=seed['users']['captain'],store_task_id=sid).count()==1
+
+
+@pytest.mark.parametrize('only_captain',[False,True])
+def test_smart_assignment_includes_captain_and_can_apply_self(seed,mock_assign_ai,only_captain):
+    with appdb.SessionLocal() as db:
+        main,rt,grid,store=batch(db,seed)
+        captain=db.get(User,seed['users']['captain'])
+        if only_captain:
+            db.query(BdTeamMember).filter_by(team_id=seed['team'],role='member').update({'end_date':date.today()})
+            db.flush()
+        preview=auto_assign.plan(db,captain,rt.id)
+        assert captain.id in {member['member_id'] for member in preview['members']}
+        if only_captain:assert len(preview['members'])==1
+        preview=auto_assign.plan(db,captain,rt.id,member_ids=[captain.id])
+        assert preview['assignments']=={str(grid.id):captain.id}
+        auto_assign.apply(db,captain,rt.id,preview['signature'],ai_decision=preview['ai_decision'],member_ids=[captain.id])
+        assert len(mock_assign_ai)==2
+        assert grid.assignee_id==captain.id
+        tasks.complete_store(db,captain,store.id,store.revision,str(uuid.uuid4()),'normal','')
+        assert main.progress==100
+
+
+@pytest.mark.parametrize('restriction',['inactive','off_duty','left_team','handover','not_assignee','outsider','disabled_team'])
+def test_captain_visit_permissions_remain_bound_to_current_membership_and_owner(seed,restriction):
+    with appdb.SessionLocal() as db:
+        main,rt,grid,store=batch(db,seed)
+        captain=db.get(User,seed['users']['captain'])
+        tasks.assign_grid_task(db,captain,grid.id,captain.id,grid.revision)
+        actor=captain
+        membership=db.query(BdTeamMember).filter_by(team_id=seed['team'],role='leader',end_date=None).one()
+        if restriction=='inactive':captain.is_active=False
+        elif restriction=='off_duty':captain.status='inactive'
+        elif restriction=='left_team':membership.end_date=date.today()
+        elif restriction=='handover':
+            membership.role='member'
+            db.add(BdTeamMember(team_id=seed['team'],person_code='next-captain',role='leader',start_date=date.today()))
+        elif restriction=='not_assignee':
+            tasks.assign_grid_task(db,captain,grid.id,seed['users']['worker'],grid.revision)
+        elif restriction=='outsider':actor=db.get(User,seed['users']['outsider'])
+        elif restriction=='disabled_team':db.get(BdTeam,seed['team']).status='inactive'
+        db.flush()
+        with pytest.raises(ops.OperationError):
+            tasks.complete_store(db,actor,store.id,store.revision,str(uuid.uuid4()),'normal','')
+        assert store.status!='completed' and main.progress==0
+        if restriction in ('inactive','off_duty','left_team','disabled_team'):
+            assert captain.id not in {account.id for account,_ in tasks.assignment_members(db,[seed['team']])}
+        if restriction=='handover':
+            assert tasks.my_tasks(db,captain)==[]
+            with pytest.raises(ops.OperationError):tasks.store_page(db,captain,grid.id)
