@@ -640,6 +640,9 @@ def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
     from app.services import bd_merchant_media as media
     snapshot=deepcopy(store.snapshot or {})
     store_id=store.store_id
+    store_revision=store.revision
+    profile_before=media.detail_map(db,[store_id]).get(store_id)
+    profile_revision=profile_before.revision if profile_before else 0
     current=merchant_location_map(db,[store_id]).get(store_id,{})
     changed=lat is not None and (lat!=current.get('lat',snapshot.get('lat')) or lon!=current.get('lon',snapshot.get('lon')))
     lookup=media.lookup_place_id(snapshot.get('name',''),lat,lon) if changed else None
@@ -649,12 +652,15 @@ def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
     main,_,grid=context(db,user,initial.grid_task_id,lock=True,execute=True)
     store=ops.locked(db,BdStoreTask,identity)
     if store.store_id!=store_id:raise ops.OperationError('店铺任务已变化，请刷新后重试')
+    if store.revision!=store_revision:raise ops.OperationError('店铺任务已变化，请刷新后重试')
     if main.status=='completed':raise ops.OperationError('该批次已完成，不能修改定位')
     profile=media.locked_detail(db,store_id)
+    if profile.revision!=profile_revision:raise ops.OperationError('商户信息已变化，请刷新后重试')
     snapshot=deepcopy(store.snapshot or {})
     current=merchant_location_map(db,[store_id]).get(store_id,{})
     changed=lat is not None and (lat!=current.get('lat',snapshot.get('lat')) or lon!=current.get('lon',snapshot.get('lon')))
     if changed:
+        if lookup is None:raise ops.OperationError('商户坐标已变化，请刷新后重试')
         profile.lat,profile.lon=lat,lon
         profile.google_place_id=lookup['google_place_id']
         profile.place_lookup_state=lookup['place_lookup_state']
@@ -745,11 +751,12 @@ def refresh_progress(db, main):
         _set_task_progress(g,g.total_stores,g.completed_stores)
         g.revision+=1
     for r in regions:
-        own=[counts.get(g.id,(0,0)) for g in grids if g.region_task_id==r.id]
-        _set_task_progress(r,sum(n for n,d in own),sum(d for n,d in own))
+        own=[g for g in grids if g.region_task_id==r.id]
+        _set_task_progress(r,sum(g.total_stores for g in own),
+                           sum(g.completed_stores for g in own))
         r.revision+=1
-    total=sum(n for n,d in counts.values());done=sum(d for n,d in counts.values())
-    _set_task_progress(main,total,done)
+    _set_task_progress(main,sum(g.total_stores for g in grids),
+                       sum(g.completed_stores for g in grids))
     main.revision+=1
 
 

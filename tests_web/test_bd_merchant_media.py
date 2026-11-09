@@ -29,15 +29,26 @@ def test_every_saved_outcome_counts_as_completed_visit(seed,outcome):
 
 
 def test_three_photos_stored_on_merchant_and_result_not_source_identity(seed,monkeypatch):
+    original_context=tasks.context
+    lock_states=[]
+    def tracked_context(*args,**kwargs):
+        lock_states.append(kwargs.get('lock',False))
+        return original_context(*args,**kwargs)
+    monkeypatch.setattr(tasks,'context',tracked_context)
     upload=Mock(side_effect=[f'https://cdn.test/store-system-files/{i}.jpg' for i in range(3)])
-    monkeypatch.setattr(media,'upload_photo',upload)
+    def upload_without_task_lock(*args):
+        assert lock_states[-1] is False
+        return upload(*args)
+    monkeypatch.setattr(media,'upload_photo',upload_without_task_lock)
     with appdb.SessionLocal() as db:
         _,_,_,store=multi_batch(db,seed); original=store.store_id
         user=db.get(User,seed['users']['worker'])
+        lock_states.clear()
         media.save_visit(db,user,store.id,store.revision,str(uuid.uuid4()),'normal','', 'undecided',[],[photo()]*3)
         assert store.store_id==original
         profile=db.get(BdMerchantDetail,original)
         assert len(profile.photo_urls)==3 and store.result['photo_urls']==profile.photo_urls
+        assert lock_states[:2]==[False,True]
         assert all(args[0][1].startswith(b'\xff\xd8') for args in upload.call_args_list)
         keep=profile.photo_urls[:2]
         media.save_visit(db,user,store.id,store.revision,str(uuid.uuid4()),'normal','', 'incomplete',keep,[])
@@ -68,12 +79,23 @@ def test_photo_upload_failure_keeps_visit_unsaved(seed,monkeypatch):
 
 
 def test_coordinate_lookup_saved_separately_and_provider_failure_does_not_lose_location(seed,monkeypatch):
+    original_context=tasks.context
+    lock_states=[]
+    def tracked_context(*args,**kwargs):
+        lock_states.append(kwargs.get('lock',False))
+        return original_context(*args,**kwargs)
+    monkeypatch.setattr(tasks,'context',tracked_context)
     lookup=Mock(return_value={'google_place_id':'ChIJ-test','place_lookup_state':'candidate'})
-    monkeypatch.setattr(media,'lookup_place_id',lookup)
+    def lookup_without_task_lock(*args):
+        assert lock_states[-1] is False
+        return lookup(*args)
+    monkeypatch.setattr(media,'lookup_place_id',lookup_without_task_lock)
     with appdb.SessionLocal() as db:
         _,_,_,store=multi_batch(db,seed);user=db.get(User,seed['users']['worker']); original=store.store_id
+        lock_states.clear()
         result=tasks.update_location_accuracy(db,user,store.id,'accurate',35.712345,139.812345)
         assert result['google_place_id']=='ChIJ-test'
+        assert lock_states[:2]==[False,True]
         assert db.get(BdMerchantDetail,original).google_place_id=='ChIJ-test'
         assert store.store_id==original
         tasks.update_location_accuracy(db,user,store.id,'accurate',35.712345,139.812345)

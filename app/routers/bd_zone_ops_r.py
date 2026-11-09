@@ -267,7 +267,7 @@ def manage(request:Request,zone:Optional[int]=None,user:Optional[User]=Depends(w
     except ops.OperationError as e:return error(e,404 if user.role=='admin' else 403)
     from app.services.bd_regions import release_ids
     return render(request,user,'bd_zone_manage.html',**context,selected=selected,region=region,regions=regions,mode=mode,
-                  grid_rows=bd_grid_regions.management_grids(db,user,region=region),
+                  grid_rows=bd_grid_regions.management_grids(db,user,region=region) if mode=='manage' else [],
                   releases=db.query(BdZoneRelease).filter(BdZoneRelease.id.in_(release_ids(db,region))).order_by(BdZoneRelease.id.desc()).all())
 
 

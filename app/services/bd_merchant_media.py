@@ -128,6 +128,7 @@ def save_visit(db, user, identity, revision, request_id, status, note, outcome, 
     store_id = store.store_id
     profile = detail_map(db, [store_id]).get(store_id)
     existing_photos = list(profile.photo_urls or []) if profile else []
+    profile_revision = profile.revision if profile else 0
     if len(set(keep_photos)) != len(keep_photos) or set(keep_photos) - set(existing_photos):
         raise ops.OperationError('照片选择已变化，请刷新后重试')
     if store.request_id != request_id:
@@ -143,6 +144,8 @@ def save_visit(db, user, identity, revision, request_id, status, note, outcome, 
     grid_id = tasks.complete_store(db, user, identity, revision, request_id, status, note,
                                    outcome=outcome, photo_urls=urls)
     profile = locked_detail(db, store_id)
+    if profile.revision != profile_revision:
+        raise ops.OperationError('商户照片已变化，请刷新后重试')
     if set(keep_photos) - set(profile.photo_urls or []):
         raise ops.OperationError('照片选择已变化，请刷新后重试')
     profile.photo_urls = urls

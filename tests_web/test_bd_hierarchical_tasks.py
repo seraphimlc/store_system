@@ -92,9 +92,34 @@ def test_batch_isolated_results_rollup_immutable_snapshots_and_retry(seed):
         assert second.status=='active' and gt2.progress==0 and st2.result=={}
         assert db.get(BdWorkGrid,seed['grid']).progress==0
         assert db.get(BdWorkStore,'shop-synthetic').status=='normal'
+        assert (gt.total_stores,gt.completed_stores)==(1,1)
+        assert (rt.progress,first.progress,rt.status,first.status)==(100,100,'completed','completed')
         assert tasks.complete_store(db,worker,st.id,0,request,'abnormal','第一轮结果')==gt.id
         with pytest.raises(ops.OperationError,match='冲突'):
             tasks.complete_store(db,worker,st.id,0,request,'normal','different')
+
+
+def test_completed_store_result_edit_does_not_increment_cached_progress(seed):
+    from sqlalchemy import event
+    with appdb.SessionLocal() as db:
+        main,rt,grid,store=batch(db,seed)
+        db.add(BdStoreTask(grid_task_id=grid.id,store_id='second-store',snapshot={'name':'second'}))
+        grid.total_stores=2
+        db.flush()
+        worker=db.get(User,seed['users']['worker'])
+        tasks.complete_store(db,worker,store.id,store.revision,str(uuid.uuid4()),'normal','first')
+        before=(grid.total_stores,grid.completed_stores,rt.progress,main.progress)
+        statements=[]
+        def capture(conn,cursor,statement,parameters,context,executemany):
+            statements.append(statement.lower())
+        event.listen(db.bind,'before_cursor_execute',capture)
+        try:
+            tasks.complete_store(db,worker,store.id,store.revision,str(uuid.uuid4()),'abnormal','edit')
+        finally:
+            event.remove(db.bind,'before_cursor_execute',capture)
+        assert before==(2,1,50,50)
+        assert (grid.total_stores,grid.completed_stores,rt.progress,main.progress)==before
+        assert not any('count(bd_store_task' in statement for statement in statements)
 
 
 def test_tree_and_store_tasks_deny_other_users_and_stale_assignments(seed):
@@ -313,11 +338,19 @@ def test_hierarchy_migration_matches_model_schema_and_reverts():
         follow=importlib.util.module_from_spec(follow_spec);follow_spec.loader.exec_module(follow)
         follow.op=operations
         follow.upgrade()
+        progress_spec=importlib.util.spec_from_file_location(
+            'grid_progress_migration','migrations/versions/c1d2e3f4a5b6_bd_grid_task_progress_counts.py')
+        progress=importlib.util.module_from_spec(progress_spec);progress_spec.loader.exec_module(progress)
+        progress.op=operations
+        progress.upgrade()
         for table in tables:
             columns={col['name'] for col in inspect(connection).get_columns(table)}
             assert columns==set(Base.metadata.tables[table].columns.keys())
             assert {idx['name'] for idx in inspect(connection).get_indexes(table)}=={
                 index.name for index in Base.metadata.tables[table].indexes}
+        for column in ('total_stores','completed_stores'):
+            assert column in {item['name'] for item in inspect(connection).get_columns('bd_grid_task')}
+        progress.downgrade()
         follow.downgrade()
         migration.downgrade()
         assert not set(tables)&set(inspect(connection).get_table_names())

@@ -30,6 +30,7 @@ def test_proposal_approval_adds_unvisited_store_once_and_changes_denominator(see
         assert added.status=='pending' and p.state=='approved'
         assert db.get(BdWorkStore,p.store_id) and db.query(BdGridStore).filter_by(source_id=p.store_id).count()==1
         assert tasks.grid_progress_stats(db,grid.id)['total']==2
+        assert (grid.total_stores,grid.completed_stores)==(2,0)
         with pytest.raises(ops.OperationError):proposals.review(db,captain,main.id,[f'{p.id}:0'],'approve')
         assert db.query(BdStoreTask).count()==2
 
@@ -66,6 +67,7 @@ def test_rollup_weights_merchants_not_grids(seed):
         rt2=BdRegionTask(main_task_id=main.id,region_id=rt.region_id+999,snapshot=rt.snapshot)
         db.add(rt2);db.flush()
         gt2=BdGridTask(region_task_id=rt2.id,grid_id=grid.grid_id+999,snapshot=grid.snapshot)
+        gt2.total_stores=9
         db.add(gt2);db.flush()
         for i in range(9):db.add(BdStoreTask(grid_task_id=gt2.id,store_id=f'weight-{i}',snapshot={'name':str(i)}))
         db.flush();tasks.complete_store(db,db.get(User,seed['users']['worker']),store.id,store.revision,str(uuid.uuid4()),'normal','')
