@@ -229,6 +229,9 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True}
 
+    from app.diagnostics import RequestDiagnostics
+    app.add_middleware(RequestDiagnostics)
+
     return app
 
 
