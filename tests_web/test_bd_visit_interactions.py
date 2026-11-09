@@ -83,6 +83,28 @@ window.addEventListener('load',async()=>{const releaseFocus=await parent.claimVi
  window.clearVisitStoreSelection();
  if(rows.some(row=>row.classList.contains('is-selected')||row.getAttribute('aria-expanded')!=='false'))throw Error('reset retained list selection');
  if(note.value!=='keep my unsaved text'||input.files.length!==1)throw Error('reset lost form data');
+
+ const tools=q('.visit-map-tools'),toolButtons=[...tools.querySelectorAll('button')];
+ if(toolButtons.map(button=>button.id).join(',')!=='work-show-all,work-location,work-fullscreen')throw Error('map toolbar actions');
+ const toolBoxes=toolButtons.map(button=>button.getBoundingClientRect());
+ toolBoxes.forEach((box,index)=>{if(box.width!==44||box.height!==44||Math.abs(box.left-toolBoxes[0].left)>1||index&&Math.abs(box.top-toolBoxes[index-1].bottom)>1)throw Error('map tools not adjacent in one column');});
+ toolButtons.forEach(button=>{if(button.textContent.trim()||!button.getAttribute('aria-label')||!button.querySelector('svg'))throw Error('map tool must be accessible icon');});
+ const add=q('.visit-add-store'),progress=q('.visit-progress-bar').getBoundingClientRect(),addBox=add.getBoundingClientRect();
+ if(add.textContent.trim()||!add.getAttribute('aria-label')||!add.querySelector('svg')||addBox.left<progress.right||addBox.top>progress.bottom||addBox.bottom<progress.top||addBox.right>innerWidth)throw Error('add store not beside progress');
+ const fullscreen=q('#work-fullscreen'),stage=q('.dispatch-map-stage');
+ Object.defineProperty(stage,'requestFullscreen',{configurable:true,value:undefined});
+ fullscreen.click();await Promise.resolve();
+ if(!stage.classList.contains('is-expanded')||fullscreen.getAttribute('aria-pressed')!=='true')throw Error('fullscreen fallback did not expand');
+ fullscreen.click();await Promise.resolve();
+ if(stage.classList.contains('is-expanded')||fullscreen.getAttribute('aria-pressed')!=='false')throw Error('fullscreen fallback did not exit');
+ let fullElement=null;
+ Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullElement});
+ Object.defineProperty(stage,'requestFullscreen',{configurable:true,value:async()=>{fullElement=stage;document.dispatchEvent(new Event('fullscreenchange'));}});
+ Object.defineProperty(document,'exitFullscreen',{configurable:true,value:async()=>{fullElement=null;document.dispatchEvent(new Event('fullscreenchange'));}});
+ fullscreen.click();await Promise.resolve();
+ if(fullscreen.getAttribute('aria-pressed')!=='true'||fullElement!==stage)throw Error('native fullscreen did not expand');
+ fullscreen.click();await Promise.resolve();await Promise.resolve();
+ if(fullscreen.getAttribute('aria-pressed')!=='false'||fullElement)throw Error('native fullscreen did not exit');
  rows[0].click();showAll.hidden=true;
 
  const location=q('.visit-location-info').getBoundingClientRect(),summary=q('.visit-location-editor summary').getBoundingClientRect();

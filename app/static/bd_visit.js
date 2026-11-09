@@ -4,6 +4,39 @@
   const list = document.querySelector('.visit-list');
   if (!list) return;
 
+  const fullscreenButton = document.getElementById('work-fullscreen');
+  const mapStage = document.querySelector('.dispatch-map-stage');
+  if (fullscreenButton && mapStage) {
+    const syncFullscreen = () => {
+      const expanded = document.fullscreenElement === mapStage || mapStage.classList.contains('is-expanded');
+      fullscreenButton.setAttribute('aria-pressed', String(expanded));
+      fullscreenButton.title = expanded ? fullscreenButton.dataset.exitLabel : fullscreenButton.dataset.enterLabel;
+      fullscreenButton.setAttribute('aria-label', fullscreenButton.title);
+    };
+    const closeFullscreen = async () => {
+      if (document.fullscreenElement === mapStage) await document.exitFullscreen();
+      mapStage.classList.remove('is-expanded');
+      syncFullscreen();
+    };
+    fullscreenButton.addEventListener('click', async () => {
+      if (document.fullscreenElement === mapStage || mapStage.classList.contains('is-expanded')) {
+        await closeFullscreen();
+      } else {
+        try {
+          if (!mapStage.requestFullscreen) throw new Error('fullscreen unavailable');
+          await mapStage.requestFullscreen();
+        } catch (_) {
+          mapStage.classList.add('is-expanded');
+        }
+        syncFullscreen();
+      }
+    });
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && mapStage.classList.contains('is-expanded')) closeFullscreen();
+    });
+  }
+
   const locationDialog = document.getElementById('location-check-dialog');
   const locationEditor = locationDialog?.querySelector('[data-location-editor]');
   let activeLocationLink = null;

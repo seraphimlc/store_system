@@ -18,8 +18,11 @@
   <div class="dispatch-map-stage">
     <div id="work-map" aria-label="{{ t('作业地图') }}"></div>
     <p id="work-map-status" role="status" aria-live="polite"></p>
-    <button type="button" class="work-location-btn work-show-all-btn" id="work-show-all" aria-controls="work-map" hidden>{{ t('查看全部') }}</button>
-    <button type="button" class="work-location-btn" id="work-location" aria-pressed="false">{{ t('跟随我的位置') }}</button>
+    <div class="visit-map-tools">
+      <button type="button" class="work-location-btn" id="work-show-all" aria-controls="work-map" aria-label="{{ t('查看全部') }}" title="{{ t('查看全部') }}" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5M8 12h8m-4-4v8"/></svg></button>
+      <button type="button" class="work-location-btn" id="work-location" aria-pressed="false" aria-label="{{ t('跟随我的位置') }}" title="{{ t('跟随我的位置') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></svg></button>
+      <button type="button" class="work-location-btn" id="work-fullscreen" aria-pressed="false" aria-controls="work-map" aria-label="{{ t('全屏') }}" title="{{ t('全屏') }}" data-enter-label="{{ t('全屏') }}" data-exit-label="{{ t('退出全屏') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fullscreen-enter" d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/><path class="fullscreen-exit" d="M4 9h5V4m6 0v5h5M9 20v-5H4m16 0h-5v5"/></svg></button>
+    </div>
     <p id="work-location-status" class="work-location-status" role="status" aria-live="polite"></p>
     <div class="dispatch-map-legend"><span><i class="visited"></i>{{ t('已巡店') }}</span><span><i class="unvisited"></i>{{ t('未巡店') }}</span></div>
   </div>
@@ -33,7 +36,7 @@
       <span class="visit-progress-count" data-testid="visit-progress-count">{{ stats.done }} / {{ stats.total }} {{ t('家') }}</span>
       <span class="visit-progress-bar" role="progressbar" aria-valuenow="{{ stats.pct }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t('进度') }}"><i style="width:{{ stats.pct }}%"></i></span>
       <span class="visit-progress-pct">{{ stats.pct }}%</span>
-      {% if can_execute %}<a class="btn ghost visit-add-store" href="{{ request.url.replace(path='/my/work/batch-grids/' ~ grid.id ~ '/new-store').remove_query_params(['focus','msg','resubmit']) }}">{{ t('新增店铺') }}</a>{% endif %}
+      {% if can_execute %}<a class="btn ghost visit-add-store" aria-label="{{ t('新增店铺') }}" title="{{ t('新增店铺') }}" href="{{ request.url.replace(path='/my/work/batch-grids/' ~ grid.id ~ '/new-store').remove_query_params(['focus','msg','resubmit']) }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></a>{% endif %}
     </section>
     {# 筛选栏：三个控件**同一行**排列，改动即搜索（不用点按钮） #}
     <form class="bd-filters visit-equal-filters" method="get" data-testid="visit-filters" data-autosubmit="1" data-search-submit="1"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="direction" value="{{ direction }}">
@@ -80,13 +83,15 @@
                 </button>
               </div></td>
               <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
-              <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}{% if s.overdue_60d %}<span class="visit-overdue-tag" title="{{ t('超过60天未巡店') }}">60d</span>{% endif %}</td>
+              <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}"><div class="visit-cell-stack"><span class="visit-cell-primary">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}</span>{% if s.overdue_60d %}<span class="visit-overdue-tag" title="{{ t('超过60天未巡店') }}">60d</span>{% endif %}</div></td>
               <td class="visit-nav-cell">
-                <span class="visit-location-status location-{{ s.location_accuracy }}" data-location-status>{{ t({'accurate':'准确','nonexistent':'不存在','doubtful':'存疑','pending':'待核实'}.get(s.location_accuracy,'待核实')) }}</span>
+                <div class="visit-cell-stack">
                 {% set nav=gmaps_url(s.nav_lat,s.nav_lon) %}
                 {% if nav and can_execute %}<a class="visit-nav" href="{{ nav }}" data-location-url="{{ nav }}" data-store-task-id="{{ s.id }}" data-testid="visit-nav">{{ t('定位') }}↗</a>
                 {% elif nav %}<a class="visit-nav" href="{{ nav }}" target="_blank" rel="noopener" data-testid="visit-nav">{{ t('定位') }}↗</a>
-                {% else %}<span class="visit-nav-none">—</span>{% endif %}
+                {% else %}<span class="visit-nav-none visit-cell-primary">—</span>{% endif %}
+                <span class="visit-location-status location-{{ s.location_accuracy }}" data-location-status>{{ t({'accurate':'准确','nonexistent':'不存在','doubtful':'存疑','pending':'待核实'}.get(s.location_accuracy,'待核实')) }}</span>
+                </div>
               </td>
             </tr>
             <tr class="visit-detail-row" id="store-detail-{{ s.id }}" data-detail-for="{{ s.id }}" hidden>

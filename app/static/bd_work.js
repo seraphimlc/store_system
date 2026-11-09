@@ -18,7 +18,7 @@
   };
   window.gm_authFailure=()=>{notice.textContent=config.error;};
   window.initWorkMap=()=>{
-    const map=new google.maps.Map(document.getElementById('work-map'),{center:{lat:35.68,lng:139.76},zoom:11,mapTypeControl:false,streetViewControl:false});
+    const map=new google.maps.Map(document.getElementById('work-map'),{center:{lat:35.68,lng:139.76},zoom:11,mapTypeControl:false,streetViewControl:false,fullscreenControl:!document.getElementById('work-fullscreen')});
     const layer=new google.maps.Data({map});mapLayer=layer;layer.addGeoJson(config.geometry);
     let selectedGrid=window.dispatchSelectedGrid ?? null;
     const dispatch=Boolean(config.dispatch);

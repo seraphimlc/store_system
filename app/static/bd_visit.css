@@ -41,7 +41,7 @@
 .visit-state.visited {color:#176448;font-weight:600}
 .visit-nav {color:#245caa;text-decoration:none;white-space:nowrap;font-size:.78rem;font-weight:600}
 .visit-nav:hover {text-decoration:underline}
-.visit-location-status {display:inline-block;margin-right:5px;padding:2px 5px;border-radius:4px;background:#f0f3f7;color:#607087;font-size:10px;white-space:nowrap}
+.visit-location-status {display:inline-block;border:1px solid transparent;border-radius:4px;background:#f0f3f7;color:#607087;white-space:nowrap}
 .visit-location-status.location-accurate {background:#e5f4ec;color:#176448}
 .visit-location-status.location-nonexistent {background:#fff0ed;color:#a33a2d}
 .visit-location-status.location-doubtful {background:#fff5dd;color:#805700}
@@ -159,7 +159,12 @@
 .visit-filter-menu [role=option]:focus-visible,.visit-filter-trigger:focus-visible {outline:2px solid #3877df;outline-offset:-2px}
 @media(max-width:760px) {.visit-filter-trigger {padding:7px 5px;font-size:12px}}
 
-.visit-progress .visit-add-store {flex:0 0 auto;margin-left:auto;padding:5px 10px;min-height:32px;box-sizing:border-box;font-size:12px;line-height:20px;white-space:nowrap}
+/* Keep the add action beside progress, including on narrow screens. */
+.visit-page .visit-progress {flex-wrap:nowrap;gap:6px}
+.visit-progress-title,.visit-progress-state,.visit-progress-count,.visit-progress-pct {flex-shrink:0}
+.visit-page .visit-progress-bar {flex:1 1 0;min-width:16px}
+.visit-progress .visit-add-store {display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;min-height:44px;box-sizing:border-box;margin:0;padding:0}
+.visit-add-store svg,.visit-map-tools svg {width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* Compact, wrapping merchant detail; do not inherit sticky first-column table sizing. */
 .visit-tbl tr.visit-detail-row>td {position:static!important;min-width:0!important;max-width:none;padding:0!important;white-space:normal;overflow-wrap:anywhere}
@@ -209,7 +214,9 @@
 .visit-tbl thead th:first-child {z-index:6}
 .visit-tbl tbody>tr.visit-row>td:first-child {position:static!important;min-width:0!important}
 .visit-tbl tbody>tr.visit-row {scroll-margin-top:44px}
-.visit-nav-cell .visit-location-status {display:block;width:fit-content;margin:0 0 3px;max-width:100%;box-sizing:border-box}
+.visit-cell-stack {display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}
+.visit-cell-primary,.visit-cell-stack>.visit-nav {min-height:20px;line-height:20px}
+.visit-cell-stack .visit-overdue-tag,.visit-cell-stack .visit-location-status {display:inline-flex;align-items:center;width:fit-content;max-width:100%;min-height:20px;box-sizing:border-box;margin:0;padding:0 5px;font-size:11px;line-height:18px;font-weight:400}
 .visit-nav-cell .visit-nav {display:inline-block}
 .visit-photo-picker {position:fixed;inset:auto 0 0;margin:0 auto;padding:18px 20px max(20px,env(safe-area-inset-bottom));width:min(420px,100%);max-width:100%;box-sizing:border-box;border:0;border-radius:12px 12px 0 0;background:#fff;color:#20334b;box-shadow:0 -8px 28px rgba(16,32,63,.18)}
 .visit-photo-picker::backdrop {background:rgba(18,29,44,.36)}
@@ -229,5 +236,15 @@
 .visit-search-control .btn{flex-shrink:0;margin:0;white-space:nowrap}
 @media(max-width:760px){.visit-page .visit-equal-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.visit-search-control{grid-column:1/-1}}
 
-.work-show-all-btn{left:12px;top:12px;right:auto;bottom:auto;min-height:44px}
-.work-show-all-btn[hidden]{display:none}
+/* Map actions share one compact vertical toolbar. */
+.visit-map-tools {position:absolute;top:12px;right:12px;z-index:3;display:flex;flex-direction:column;gap:0;border:1px solid #d5deea;border-radius:7px;background:#fff;box-shadow:0 2px 6px #0002;overflow:hidden}
+.visit-map-tools .work-location-btn {position:static;display:grid;place-items:center;width:44px;height:44px;box-sizing:border-box;margin:0;padding:0;border:0;border-radius:0;background:#fff;box-shadow:none;color:#40516a}
+.visit-map-tools .work-location-btn+button {border-top:1px solid #e2e8f0}
+.visit-map-tools .work-location-btn[hidden] {display:none}
+.visit-map-tools .work-location-btn[aria-pressed="true"] {color:#1677ff;background:#e6f4ff}
+.visit-map-tools button:hover {background:#f2f6fc}
+.visit-map-tools button:focus-visible {outline:2px solid #3877df;outline-offset:-3px}
+.fullscreen-exit,#work-fullscreen[aria-pressed="true"] .fullscreen-enter {display:none}
+#work-fullscreen[aria-pressed="true"] .fullscreen-exit {display:block}
+.visit-page .dispatch-map-stage:fullscreen,.visit-page .dispatch-map-stage.is-expanded {position:fixed;inset:0;z-index:2000;width:100vw;height:100dvh;background:#fff}
+.visit-page .dispatch-map-stage:fullscreen #work-map,.visit-page .dispatch-map-stage.is-expanded #work-map {width:100%;height:100%}
