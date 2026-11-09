@@ -476,3 +476,27 @@ def summary(db: Session) -> dict:
     return {"n_team": len(ids), "n_active_member": n_member,
             "no_leader": [(tid, nm) for tid, nm in teams
                           if not lead_cnt.get(tid)]}
+
+
+
+
+
+def leader_member_options(db: Session, user) -> List[dict]:
+    """当前有效队长所属团队的在岗队员编号和姓名（作业域只读）。"""
+    if not user or user.role != ROLE_LEADER or not user.person_code:
+        return []
+    team_ids = [team_id for team_id, in db.query(BdTeamMember.team_id)
+                .join(BdTeam, BdTeam.id == BdTeamMember.team_id)
+                .filter(BdTeamMember.person_code == user.person_code,
+                        BdTeamMember.role == ROLE_LEADER,
+                        BdTeamMember.end_date.is_(None),
+                        BdTeam.status == "active").all()]
+    if not team_ids:
+        return []
+    return [{"person_code": code, "name": name or code}
+            for code, name in (db.query(BdTeamMember.person_code, Person.display_name)
+                               .join(Person, Person.code == BdTeamMember.person_code)
+                               .filter(BdTeamMember.team_id.in_(team_ids),
+                                       BdTeamMember.role == ROLE_MEMBER,
+                                       BdTeamMember.end_date.is_(None))
+                               .order_by(BdTeamMember.person_code).all())]

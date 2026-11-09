@@ -135,6 +135,51 @@
     reveal(null,false);
   };
 
+  async function copyStoreName(button) {
+    const text = button.dataset.copyText || '';
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = text;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.append(input);
+        input.select();
+        if (!document.execCommand('copy')) throw new Error('copy failed');
+        input.remove();
+      }
+      button.setAttribute('aria-label', button.dataset.copiedLabel);
+      button.title = button.dataset.copiedLabel;
+      button.classList.add('is-copied');
+      window.setTimeout(() => {
+        button.setAttribute('aria-label', button.dataset.copyLabel);
+        button.title = button.dataset.copyLabel;
+        button.classList.remove('is-copied');
+      }, 1200);
+    } catch (_error) {
+      button.setAttribute('aria-label', button.dataset.copyFailedLabel);
+      button.title = button.dataset.copyFailedLabel;
+      window.setTimeout(() => {
+        button.setAttribute('aria-label', button.dataset.copyLabel);
+        button.title = button.dataset.copyLabel;
+      }, 1200);
+    }
+  }
+
+  list.querySelectorAll('[data-copy-store]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      copyStoreName(button);
+    });
+    button.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+    });
+  });
+
   rows.forEach(row => {
     row.addEventListener('click', event => {
       if (event.target.closest('a')) return;

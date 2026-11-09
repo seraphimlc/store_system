@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.services import bd_tasks, daily_report
+from app.services import bd_tasks, bd_teams, daily_report
 from app.services.date_plan import jst_today
 
 
@@ -184,3 +184,10 @@ def admin_day_save(db: Session, actor, *, person_code: str, on_date=None,
     return {"p1": report.p1_cnt, "p2": report.p2_cnt, "tasks": done,
             "skipped": skipped, "report_date": report.report_date,
             "created": created}
+
+
+
+def team_member_reports(db: Session, user, month: str) -> list[dict]:
+    """跨域只读编排：队长授权的队员名单 + 员工填报数据。"""
+    people = bd_teams.leader_member_options(db, user)
+    return daily_report.reports_for_people(db, people, month)

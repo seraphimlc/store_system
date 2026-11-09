@@ -1547,6 +1547,8 @@ class BdGridTask(Base):
     assignee_id = Column(Integer, ForeignKey('users.id'), index=True)
     status = Column(String(16), nullable=False, default='pending')
     progress = Column(Integer, nullable=False, default=0)
+    total_stores = Column(Integer, nullable=False, default=0, server_default=text('0'))
+    completed_stores = Column(Integer, nullable=False, default=0, server_default=text('0'))
     revision = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=_now)
 

@@ -55,6 +55,10 @@ window.addEventListener('load',async()=>{const releaseFocus=await parent.claimVi
  if(searchBox.left<0||searchBox.right>innerWidth||queryButton.width<44||queryButton.right>searchBox.right+1)throw Error('search controls overflow');
  const rows=qa('tr.visit-row'),form=rows[0].nextElementSibling.querySelector('.visit-form');
  if(q('[data-edit-store]'))throw Error('small details trigger still exists');
+ let copied='';Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{copied=text;}}});
+ const copy=rows[0].querySelector('[data-copy-store]');
+ copy.click();await new Promise(resolve=>setTimeout(resolve,0));
+ if(copied!==copy.dataset.copyText||rows[0].getAttribute('aria-expanded')!=='false'||!copy.classList.contains('is-copied'))throw Error('copy store name failed or opened row');
  rows[0].click();
  if(rows[0].getAttribute('aria-expanded')!=='true'||window.lastFocused!==rows[0].dataset.storeId)throw Error('row did not open/focus');
  const note=form.querySelector('[name=note]');note.value='keep my unsaved text';

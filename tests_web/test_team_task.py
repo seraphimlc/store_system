@@ -4716,6 +4716,26 @@ def test_daily_report_includes_my_tasks_for_leader(client, seeded):
     row = bd_tasks.day_progress_map(db, [tid]).get(tid)
     assert row is not None and row.pct == 45 and row.note == "做了四成"
     db.close()
+
+
+def test_leader_can_view_current_team_members_daily_reports(client, seeded):
+    db = appdb.SessionLocal()
+    db.add(StaffDailyReport(person_code="P2", report_date=date(2026, 11, 8),
+                             area="渋谷", p1_cnt=3, p2_cnt=2, total_cnt=5))
+    db.commit()
+    db.close()
+
+    _login(client, "ogawa")
+    page = client.get("/my/report?month=2026-11")
+    assert page.status_code == 200
+    assert 'data-testid="team-member-reports"' in page.text
+    assert "汤静" in page.text and "渋谷" in page.text
+    assert re.search(r">3<.*>2<.*>5<", page.text, re.S)
+    assert 'name="p1_cnt"' in page.text  # 队长仍可填自己的自报
+
+    _login(client, "tangjing")
+    member_page = client.get("/my/report?month=2026-11")
+    assert 'data-testid="team-member-reports"' not in member_page.text
     # 没有任务的人：保持原来的"点数"表单（不出现任务块）
     _login(client, "admin")            # 管理员不进这页（303），换一个无任务的员工
     db = appdb.SessionLocal()

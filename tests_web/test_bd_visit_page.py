@@ -62,6 +62,7 @@ def test_batch_grid_table_columns_are_name_status_visit_state_and_navigation(cli
     assert 'data-location-status' in html and '待核实' in html
     assert 'id="location-check-dialog"' in html
     assert '坐标有误，修改坐标' in html
+    assert 'data-copy-store' in html and 'copy-store-btn' in html
 
 
 def test_batch_grid_row_click_opens_editable_store_detail(client,seed):

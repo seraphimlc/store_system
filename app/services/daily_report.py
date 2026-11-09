@@ -10,7 +10,7 @@ from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 
-from app.models import StaffDailyReport
+from app.models import Person, StaffDailyReport
 from app.services.daterange import month_bounds
 
 JST = timezone(timedelta(hours=9))
@@ -52,11 +52,32 @@ def to_count(value, field="数量") -> int:
     return n
 
 
+def reports_for_people(db, people: list[dict], month: str) -> list[dict]:
+    """按已授权的员工编号读取指定月份自报；不负责团队权限。"""
+    try:
+        start, end = month_bounds(month)
+    except (TypeError, ValueError):
+        return []
+    names = {item["person_code"]: item["name"] for item in people if item.get("person_code")}
+    if not names:
+        return []
+    rows = (db.query(StaffDailyReport)
+            .filter(StaffDailyReport.person_code.in_(names),
+                    StaffDailyReport.report_date >= start,
+                    StaffDailyReport.report_date <= end)
+            .order_by(StaffDailyReport.report_date.desc(), StaffDailyReport.person_code).all())
+    return [{"date": row.report_date, "name": names[row.person_code],
+             "person_code": row.person_code, "area": row.area or "",
+             "p1": row.p1_cnt, "p2": row.p2_cnt, "stores": row.total_cnt}
+            for row in rows]
+
+
 def today_report(db, person_code: str) -> Optional[StaffDailyReport]:
     return (db.query(StaffDailyReport)
             .filter(StaffDailyReport.person_code == person_code,
                     StaffDailyReport.report_date == jst_today())
             .first())
+
 
 
 class NoReport(Exception):

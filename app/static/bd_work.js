@@ -57,30 +57,46 @@
     const shops=new google.maps.Data({map});
     shops.addGeoJson(storePoints(stores));
     shops.setStyle(f=>shopStyle(f));
-    let focusedShops,selectedStoreId=null;
+    let focusedShops,focusRadius,selectedStoreId=null;
     focusStore=id=>{
       const store=storesById.get(String(id));
       if(!store)return;
       const wasFocused=selectedStoreId!==null;
       selectedStoreId=String(store.id);
+      const radians=Math.PI/180,earthRadius=6371000,latitude=store.lat*radians;
+      const nearby=[...stores.map(other=>{
+        const dLat=(other.lat-store.lat)*radians;
+        const dLon=(other.lon-store.lon)*radians;
+        const a=Math.sin(dLat/2)**2+Math.cos(latitude)*Math.cos(other.lat*radians)*Math.sin(dLon/2)**2;
+        return {store:other,distance:2*earthRadius*Math.asin(Math.sqrt(Math.min(1,a)))};
+      }).filter(item=>item.distance<=100)
+        .sort((a,b)=>a.distance-b.distance||String(a.store.id).localeCompare(String(b.store.id)))
+        .slice(0,20).map(item=>item.store)];
+      if(!nearby.some(item=>String(item.id)===selectedStoreId))nearby.unshift(store);
+      if(nearby.length>20)nearby.length=20;
       // Detach the overview once; subsequent clicks only replace the selected point.
       if(!focusedShops){
         shops.setMap(null);
         focusedShops=new google.maps.Data({map});
-        focusedShops.setStyle(f=>shopStyle(f,true));
+        focusedShops.setStyle(f=>shopStyle(f,String(f.getProperty('store_id'))===selectedStoreId));
         focusedShops.addListener('click',openShop);
       }else if(!wasFocused){
         shops.setMap(null);focusedShops.setMap(map);
       }
       if(showAll)showAll.hidden=false;
+      if(!focusRadius)focusRadius=new google.maps.Circle({map,center:{lat:store.lat,lng:store.lon},radius:100,
+        clickable:false,strokeColor:'#1677ff',strokeOpacity:.9,strokeWeight:2,
+        fillColor:'#1677ff',fillOpacity:.12,zIndex:1});
+      else {focusRadius.setMap(map);focusRadius.setCenter({lat:store.lat,lng:store.lon});}
       const previous=[];focusedShops.forEach(feature=>previous.push(feature));
       previous.forEach(feature=>focusedShops.remove(feature));
-      focusedShops.addGeoJson(storePoints([store]));
+      focusedShops.addGeoJson(storePoints(nearby));
       map.moveCamera({center:{lat:store.lat,lng:store.lon},zoom:Math.max(map.getZoom()||16,17)});
     };
     resetStoreFocus=()=>{
       selectedStoreId=null;pendingStoreId=null;
       focusedShops?.setMap(null);shops.setMap(map);
+      focusRadius?.setMap(null);
       if(!bounds.isEmpty())map.fitBounds(bounds,24);
       if(showAll)showAll.hidden=true;
       window.clearVisitStoreSelection?.();

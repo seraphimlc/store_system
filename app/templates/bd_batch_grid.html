@@ -67,7 +67,18 @@
           <tbody>
           {% for s in stores %}
             <tr class="visit-row" id="store-{{ s.id }}" data-store-id="{{ s.id }}" tabindex="0" aria-expanded="false" aria-controls="store-detail-{{ s.id }}">
-              <td class="visit-name">{{ s.snapshot.get('name') }}</td>
+              <td class="visit-name"><div class="visit-name-inner">
+                <span class="visit-name-text">{{ s.snapshot.get('name') }}</span>
+                <button type="button" class="copy-store-btn" data-copy-store
+                        data-copy-text="{{ s.snapshot.get('name') }}"
+                        data-copy-label="{{ t('复制') }} {{ s.snapshot.get('name') }}"
+                        data-copied-label="{{ t('已复制') }}"
+                        data-copy-failed-label="{{ t('复制失败') }}"
+                        aria-label="{{ t('复制') }} {{ s.snapshot.get('name') }}"
+                        title="{{ t('复制') }}">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V5a2 2 0 0 1 2-2h9"></path></svg>
+                </button>
+              </div></td>
               <td class="visit-status">{{ t({'normal':'正常','abnormal':'异常','uncertain':'存疑','closed':'关店'}.get(s.result.get('business_status'),'未核实')) }}</td>
               <td class="visit-state {{ 'visited' if s.status=='completed' else '' }}">{{ t('已巡店') if s.status=='completed' else t('未巡店') }}{% if s.overdue_60d %}<span class="visit-overdue-tag" title="{{ t('超过60天未巡店') }}">60d</span>{% endif %}</td>
               <td class="visit-nav-cell">

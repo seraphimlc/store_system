@@ -70,6 +70,8 @@ def my_report_page(request: Request,
     # 旧车站任务进度与点数沿用原有单次提交编排；批次任务仍走独立页面。
     from app.services import self_report as _sr
     sr = _sr.view(db, user)
+    team_reports = (_sr.team_member_reports(db, user, month)
+                    if user.role == "leader" else [])
     return templates.TemplateResponse("my_report.html", {
         "request": request, "current_user": user,
         "today": today, "existing": existing, "self_report": sr,
@@ -78,6 +80,7 @@ def my_report_page(request: Request,
         "view": view, "chart": chart, "month": month, "months": months,
         "wd_labels": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
         "msg": msg, "err": err,
+        "team_reports": team_reports,
     })
 
 

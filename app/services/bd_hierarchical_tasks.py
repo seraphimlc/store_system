@@ -228,6 +228,46 @@ def _insert_postgres_batch_stores(db, source_table, main_task_id):
     db.execute(text(f'DROP TABLE {source_table}'))
 
 
+def _set_task_progress(task, total, completed):
+    task.progress = completed * 100 // total if total else 100
+    if isinstance(task, BdGridTask):
+        task.status = ('completed' if completed == total else
+                       'in_progress' if completed else
+                       'assigned' if task.assignee_id else 'pending')
+    elif isinstance(task, BdMainTask):
+        task.status = 'completed' if completed == total else 'active'
+        task.completed_at = datetime.utcnow() if task.status == 'completed' else None
+    else:
+        task.status = ('completed' if completed == total else
+                       'in_progress' if completed else 'pending')
+
+
+def _refresh_parent_progress(db, main, region):
+    region_total, region_done = db.query(
+        func.coalesce(func.sum(BdGridTask.total_stores), 0),
+        func.coalesce(func.sum(BdGridTask.completed_stores), 0),
+    ).filter(BdGridTask.region_task_id == region.id).one()
+    _set_task_progress(region, region_total, region_done)
+    main_total, main_done = db.query(
+        func.coalesce(func.sum(BdGridTask.total_stores), 0),
+        func.coalesce(func.sum(BdGridTask.completed_stores), 0),
+    ).join(BdRegionTask, BdRegionTask.id == BdGridTask.region_task_id).filter(
+        BdRegionTask.main_task_id == main.id).one()
+    _set_task_progress(main, main_total, main_done)
+
+
+def add_store_task_counts(db, grid, count=1):
+    """Keep the bounded grid denominator in sync when an approved store is added."""
+    grid.total_stores += count
+    _set_task_progress(grid, grid.total_stores, grid.completed_stores)
+    region = db.get(BdRegionTask, grid.region_task_id)
+    main = db.get(BdMainTask, region.main_task_id)
+    _refresh_parent_progress(db, main, region)
+    grid.revision += 1
+    region.revision += 1
+    main.revision += 1
+
+
 def create_main_task(db, user, title, region_ids):
     ops.require_admin(user)
     title = (title or '').strip()
@@ -284,16 +324,21 @@ def create_main_task(db, user, title, region_ids):
         gt=BdGridTask(region_task_id=region_tasks[grid.zone_id].id,grid_id=grid.id,
                       snapshot={'geometry':deepcopy(grid.geometry),'area_km2':grid.area_km2,'source_id':grid.source_id,
                                 'name':grid.name,'stations':deepcopy(grid.stations or []),'keywords':deepcopy(grid.keywords or [])},
-                      status='pending' if store_counts[grid.id] else 'completed',progress=0 if store_counts[grid.id] else 100)
+                      status='pending' if store_counts[grid.id] else 'completed',
+                      progress=0 if store_counts[grid.id] else 100,
+                      total_stores=store_counts[grid.id],completed_stores=0)
         db.add(gt);grid_tasks[grid.id]=gt
     db.flush()
     for rt in region_tasks.values():
         children=[g for g in grid_tasks.values() if g.region_task_id==rt.id]
-        rt.progress=sum(g.progress for g in children)//len(children)
+        total=sum(g.total_stores for g in children)
+        completed=sum(g.completed_stores for g in children)
+        _set_task_progress(rt,total,completed)
         if all(g.status=='completed' for g in children):rt.status='completed'
     if all(rt.status=='completed' for rt in region_tasks.values()):
         task.status='completed';task.completed_at=datetime.utcnow()
-    task.progress=sum(rt.progress for rt in region_tasks.values())//len(region_tasks)
+    _set_task_progress(task,store_total,0)
+    if task.status=='completed':task.completed_at=datetime.utcnow()
     if source_table is not None:
         _insert_postgres_batch_stores(db, source_table, task.id)
     else:
@@ -579,8 +624,8 @@ def merchant_location_map(db,store_ids):
 def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
     initial=db.get(BdStoreTask,identity)
     if not initial:raise ops.OperationError('店铺任务不存在')
-    main,_,grid=context(db,user,initial.grid_task_id,lock=True,execute=True)
-    store=ops.locked(db,BdStoreTask,identity)
+    main,_,grid=context(db,user,initial.grid_task_id,execute=True)
+    store=initial
     if accuracy not in ('pending','accurate','nonexistent','doubtful'):
         raise ops.OperationError('定位核实状态无效')
     if (lat is None)!=(lon is None):raise ops.OperationError('纬度和经度必须同时填写')
@@ -593,13 +638,23 @@ def update_location_accuracy(db,user,identity,accuracy,lat=None,lon=None):
     if main.status=='completed':raise ops.OperationError('该批次已完成，不能修改定位')
 
     from app.services import bd_merchant_media as media
-    profile=media.locked_detail(db,store.store_id)
     snapshot=deepcopy(store.snapshot or {})
-    lookup=None
-    current=merchant_location_map(db,[store.store_id]).get(store.store_id,{})
+    store_id=store.store_id
+    current=merchant_location_map(db,[store_id]).get(store_id,{})
+    changed=lat is not None and (lat!=current.get('lat',snapshot.get('lat')) or lon!=current.get('lon',snapshot.get('lon')))
+    lookup=media.lookup_place_id(snapshot.get('name',''),lat,lon) if changed else None
+
+    # Google is queried before taking batch/grid/store locks. Re-read and validate
+    # under the normal lock order before writing the coordinate result.
+    main,_,grid=context(db,user,initial.grid_task_id,lock=True,execute=True)
+    store=ops.locked(db,BdStoreTask,identity)
+    if store.store_id!=store_id:raise ops.OperationError('店铺任务已变化，请刷新后重试')
+    if main.status=='completed':raise ops.OperationError('该批次已完成，不能修改定位')
+    profile=media.locked_detail(db,store_id)
+    snapshot=deepcopy(store.snapshot or {})
+    current=merchant_location_map(db,[store_id]).get(store_id,{})
     changed=lat is not None and (lat!=current.get('lat',snapshot.get('lat')) or lon!=current.get('lon',snapshot.get('lon')))
     if changed:
-        lookup=media.lookup_place_id(snapshot.get('name',''),lat,lon)
         profile.lat,profile.lon=lat,lon
         profile.google_place_id=lookup['google_place_id']
         profile.place_lookup_state=lookup['place_lookup_state']
@@ -655,11 +710,15 @@ def complete_store(db,user,identity,revision,request_id,status,note,*,outcome=No
     before={'status':store.status,'result':store.result}
     store.status='completed';store.result=result;store.actor_id=user.id
     store.updated_at=datetime.utcnow();store.request_id=request_id;store.revision+=1;db.flush()
-    counts=db.query(func.count(BdStoreTask.id),func.count(BdStoreTask.id).filter(BdStoreTask.status=='completed')).filter_by(grid_task_id=grid.id).one()
-    grid.progress=counts[1]*100//counts[0] if counts[0] else 0
-    grid.status='completed' if counts[0] and counts[0]==counts[1] else 'in_progress';grid.revision+=1
-    db.flush()
-    refresh_progress(db,main)
+    first_completion = before['status'] != 'completed'
+    if first_completion:
+        grid.completed_stores += 1
+    _set_task_progress(grid,grid.total_stores,grid.completed_stores)
+    grid.revision+=1
+    if first_completion:
+        _refresh_parent_progress(db,main,rt)
+        rt.revision+=1
+        main.revision+=1
     event='complete_store_task' if before['status']!='completed' else 'update_store_result'
     ops.audit_log(db,user,'task',event,store,before,{'main_task_id':main.id,'result':result})
     for row,old_state,new_state,event_name in (
@@ -673,7 +732,7 @@ def complete_store(db,user,identity,revision,request_id,status,note,*,outcome=No
 
 
 def refresh_progress(db, main):
-    """写入与展示使用同一商户数量口径；调用方已持有批次锁。"""
+    """Explicit reconciliation; normal visits use cached per-grid counters."""
     require_enabled(main)
     db.flush()
     regions=db.query(BdRegionTask).filter_by(main_task_id=main.id).all()
@@ -681,18 +740,16 @@ def refresh_progress(db, main):
     counts={i:(n,d or 0) for i,n,d in db.query(BdStoreTask.grid_task_id,func.count(BdStoreTask.id),
         func.sum(case((BdStoreTask.status=='completed',1),else_=0))).filter(
             BdStoreTask.grid_task_id.in_([g.id for g in grids])).group_by(BdStoreTask.grid_task_id)}
-    def apply(obj,n,d):
-        obj.progress=d*100//n if n else 100
-        obj.status='completed' if d==n else ('in_progress' if d else ('assigned' if getattr(obj,'assignee_id',None) else 'pending'))
-        obj.revision+=1
-    for g in grids:apply(g,*counts.get(g.id,(0,0)))
+    for g in grids:
+        g.total_stores,g.completed_stores=counts.get(g.id,(0,0))
+        _set_task_progress(g,g.total_stores,g.completed_stores)
+        g.revision+=1
     for r in regions:
         own=[counts.get(g.id,(0,0)) for g in grids if g.region_task_id==r.id]
-        apply(r,sum(n for n,d in own),sum(d for n,d in own))
+        _set_task_progress(r,sum(n for n,d in own),sum(d for n,d in own))
+        r.revision+=1
     total=sum(n for n,d in counts.values());done=sum(d for n,d in counts.values())
-    main.progress=done*100//total if total else 100
-    main.status='completed' if total==done else 'active'
-    main.completed_at=datetime.utcnow() if main.status=='completed' else None
+    _set_task_progress(main,total,done)
     main.revision+=1
 
 

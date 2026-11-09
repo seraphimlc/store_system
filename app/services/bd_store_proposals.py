@@ -92,6 +92,7 @@ def review(db,user,task_id,selections,action,reason=''):
     base_grids={g.id:g for g in db.query(BdWorkGrid).filter(BdWorkGrid.id.in_({g.grid_id for g in grids.values()})).order_by(BdWorkGrid.id).with_for_update().all()} if action=='approve' else {}
     snapshots.extend({'name':name,'lat':lat,'lon':lon} for name,lat,lon in master_stores)
     chosen_names=set();chosen_positions=[]
+    approved_counts={}
     for proposal in proposals:
         grid=grids[proposal.grid_task_id]
         ops.revision_ok(proposal,parsed[proposal.id])
@@ -121,6 +122,8 @@ def review(db,user,task_id,selections,action,reason=''):
             db.add(BdGridStore(release_id=base_grid.release_id,grid_id=grid.grid_id,source_id=identity))
             db.add(BdStoreTask(grid_task_id=proposal.grid_task_id,store_id=identity,
                 snapshot={k:v for k,v in p.items() if k not in ('photo','photo_type')},status='pending',result={}))
+            approved_counts[proposal.grid_task_id]=approved_counts.get(proposal.grid_task_id,0)+1
         ops.audit_log(db,user,'task','review_store_proposal',proposal,before,{'state':proposal.state,'reason':proposal.reason})
-    if action=='approve':tasks.refresh_progress(db,main)
+    for grid_id,count in approved_counts.items():
+        tasks.add_store_task_counts(db,grids[grid_id],count)
     return len(proposals)

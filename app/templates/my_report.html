@@ -213,4 +213,20 @@
   </tr>
   {% else %}<tr><td colspan="10" class="empty">{{ t('本月还没有填报记录') }}</td></tr>{% endfor %}
 </table></div>
+{% if current_user.role == 'leader' %}
+<section class="card" data-testid="team-member-reports" style="margin-top:1.2rem">
+  <h2 style="font-size:1.05rem;margin:.1rem 0 .5rem">{{ t('队员自报出勤') }}（{{ month }}）</h2>
+  <p class="hint">{{ t('仅显示当前团队队员已提交的自报，队长只能查看。') }}</p>
+  <div class="tbl-wrap">
+    <table class="grid-tbl">
+      <thead><tr><th>{{ t('日期') }}</th><th>{{ t('队员') }}</th><th>{{ t('担当区域') }}</th><th>{{ t('1点店铺数') }}</th><th>{{ t('2点店铺数') }}</th><th>{{ t('总店铺数') }}</th></tr></thead>
+      <tbody>
+      {% for r in team_reports %}
+      <tr><td>{{ r.date }}</td><td>{{ r.name }}</td><td>{{ r.area or '—' }}</td><td class="num">{{ r.p1 }}</td><td class="num">{{ r.p2 }}</td><td class="num">{{ r.stores }}</td></tr>
+      {% else %}<tr><td colspan="6" class="empty">{{ t('本月暂无队员自报') }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 {% endblock %}

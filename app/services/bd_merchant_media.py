@@ -112,8 +112,8 @@ def save_visit(db, user, identity, revision, request_id, status, note, outcome, 
     initial = db.get(BdStoreTask, identity)
     if initial is None:
         raise ops.OperationError('店铺任务不存在')
-    main, _, grid = tasks.context(db, user, initial.grid_task_id, lock=True, execute=True)
-    store = ops.locked(db, BdStoreTask, identity)
+    main, _, grid = tasks.context(db, user, initial.grid_task_id, execute=True)
+    store = initial
     if outcome not in OUTCOMES or status not in tasks.STORE_STATUSES or len(note) > 2000:
         raise ops.OperationError('门店状态或作业结果无效')
     import uuid
@@ -125,8 +125,10 @@ def save_visit(db, user, identity, revision, request_id, status, note, outcome, 
     if len(photos) > MAX_PHOTOS or len(keep_photos) + len(photos) > MAX_PHOTOS:
         raise ops.OperationError('每家店铺最多保存3张照片')
     clean = [sanitize_photo(data) for data in photos]
-    profile = locked_detail(db, store.store_id)
-    if len(set(keep_photos)) != len(keep_photos) or set(keep_photos) - set(profile.photo_urls or []):
+    store_id = store.store_id
+    profile = detail_map(db, [store_id]).get(store_id)
+    existing_photos = list(profile.photo_urls or []) if profile else []
+    if len(set(keep_photos)) != len(keep_photos) or set(keep_photos) - set(existing_photos):
         raise ops.OperationError('照片选择已变化，请刷新后重试')
     if store.request_id != request_id:
         if main.status == 'completed':
@@ -135,10 +137,14 @@ def save_visit(db, user, identity, revision, request_id, status, note, outcome, 
         if db.query(BdStoreTask.id).filter_by(request_id=request_id).first():
             raise ops.OperationError('提交标识冲突')
     urls = list(keep_photos)
-    urls.extend(upload_photo(store.store_id, data) for data in clean)
+    # Network/object-store latency must not be inside the batch row-lock window.
+    urls.extend(upload_photo(store_id, data) for data in clean)
     urls = list(dict.fromkeys(urls))
     grid_id = tasks.complete_store(db, user, identity, revision, request_id, status, note,
                                    outcome=outcome, photo_urls=urls)
+    profile = locked_detail(db, store_id)
+    if set(keep_photos) - set(profile.photo_urls or []):
+        raise ops.OperationError('照片选择已变化，请刷新后重试')
     profile.photo_urls = urls
     profile.revision += 1
     from datetime import datetime
