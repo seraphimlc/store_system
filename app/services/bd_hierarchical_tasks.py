@@ -428,6 +428,10 @@ def task_tree(db,user,task_id,*,task_state='',keyword=''):
     task=db.get(BdMainTask,task_id)
     if not task: raise ops.OperationError('主任务不存在')
     region_query=visible_regions(db,user).filter(BdRegionTask.main_task_id==task_id)
+    # 管理员在片区行分团队；队长在片区下分网格负责人，两端分别按可分派对象筛选。
+    if user.role=='admin' and task_state in ('unassigned','assigned'):
+        region_query=region_query.filter(BdRegionTask.team_id.is_(None) if task_state=='unassigned'
+                                         else BdRegionTask.team_id.is_not(None))
     region_rows=region_query.add_columns(BdRegion.name).outerjoin(
         BdRegion,BdRegion.id==BdRegionTask.region_id).order_by(BdRegionTask.id).all()
     region_tasks=[rt for rt,_ in region_rows]
@@ -449,8 +453,9 @@ def task_tree(db,user,task_id,*,task_state='',keyword=''):
     # Current metadata shares the existing queries; historical snapshots remain intact.
     region_names={rt.id:[current_regions.get(rt.region_id,''),(rt.snapshot or {}).get('name','')] for rt in region_tasks}
     def keep(g):
-        if task_state=='unassigned' and g.assignee_id is not None:return False
-        if task_state=='assigned' and not (g.assignee_id is not None and g.status in ('pending','assigned')):return False
+        if user.role!='admin':
+            if task_state=='unassigned' and g.assignee_id is not None:return False
+            if task_state=='assigned' and not (g.assignee_id is not None and g.status in ('pending','assigned')):return False
         if task_state=='in_progress' and g.status!='in_progress':return False
         if task_state=='completed' and g.status!='completed':return False
         current=current_grids.get(g.grid_id)

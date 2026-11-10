@@ -39,6 +39,7 @@ window.addEventListener('load',async()=>{try{
  config.grids.push({id:999,name:'低密度 <网格>',revision:9,disabled:true,convertible:true,area:1,stores:0},
    {id:998,zone_id:null,area:1,stores:1},{id:997,disabled:true,convertible:false,area:1,stores:0});
  q('#grid-region-config').textContent=JSON.stringify(config);
+ let previewRequests=0;
  const layers=[];
  class Data {
    constructor(){this.handlers={};layers.push(this);} setMap(map){this.map=map;}
@@ -50,8 +51,8 @@ window.addEventListener('load',async()=>{try{
    getProjection(){return {fromLatLngToDivPixel:()=>({x:160,y:80})};}
  }
  window.google={maps:{Data,OverlayView}};
- window.fetch=async()=>({ok:true,json:async()=>({geometry:{type:'Polygon',coordinates:[]},
-   properties:{area_km2:2,store_count:1,grid_count:1,shape_valid:true}})});
+ window.fetch=async()=>{previewRequests++;return {ok:true,json:async()=>({geometry:{type:'Polygon',coordinates:[]},
+   properties:{area_km2:2,store_count:1,grid_count:1,shape_valid:true}})};};
  const map={addListener(){},getDiv(){return q('#zone-map');}};
  new Function(GRID_SCRIPT)();window.initGridRegionEditor(map);
  const feature=id=>({getProperty:()=>id});
@@ -66,6 +67,9 @@ window.addEventListener('load',async()=>{try{
  const list=q('.grid-region-list'),save=q('#grid-region-save'),buttonBox=save.getBoundingClientRect();
  if(getComputedStyle(list).overflowY!=='auto'||list.clientHeight<40||list.scrollHeight<=list.clientHeight)throw Error('grid list scroll bounds '+JSON.stringify({height:list.clientHeight,scroll:list.scrollHeight}));
  list.scrollTop=list.scrollHeight;if(!list.scrollTop)throw Error('grid list cannot scroll');
+ const requestsBeforeTyping=previewRequests, name=q('#grid-region-name');
+ for(const char of '重新合并后的片区'){name.value+=char;name.dispatchEvent(new Event('input',{bubbles:true}));}
+ if(name.value!=='重新合并后的片区'||previewRequests!==requestsBeforeTyping||save.disabled)throw Error('name input recalculates geometry');
  if(save.disabled||buttonBox.bottom>innerHeight+1||buttonBox.left<0||buttonBox.right>innerWidth+1)throw Error('save button not reachable '+JSON.stringify(buttonBox));
  if(q('.grid-region-list').scrollWidth>q('.grid-region-list').clientWidth+1)throw Error('tag overflow');
  if(!q('.grid-tag-zone')||!q('.grid-tag-station')||!q('.grid-row-tags'))throw Error('missing metadata tags');
@@ -95,10 +99,22 @@ window.addEventListener('load',async()=>{try{
  if(!panel.hidden||q('#grid-region-editor').hidden)throw Error('restore selection');
  layer.handlers.click({feature:feature(997),stop(){}});
  if(!panel.hidden)throw Error('protected grid conversion');
- parent.postMessage({gridQA:true,width:innerWidth,colors,conversion:true,noOverflow:true},'*');
+ const visit=document.createElement('div');visit.className='visit-list';
+ visit.innerHTML='<table><tbody>'+[1,2].map(id=>'<tr class="visit-row" data-store-id="'+id+'" aria-expanded="false" tabindex="0"><td>Shop '+id+'</td></tr><tr class="visit-detail-row" data-detail-for="'+id+'" hidden><td>Detail</td></tr>').join('')+'</tbody></table>';
+ document.body.append(visit);
+ let mapFocusCalls=0;window.focusVisitStore=()=>mapFocusCalls++;
+ new Function(VISIT_SCRIPT)();
+ const rows=[...visit.querySelectorAll('.visit-row')],details=[...visit.querySelectorAll('.visit-detail-row')];
+ rows[0].click();if(details[0].hidden||rows[0].getAttribute('aria-expanded')!=='true')throw Error('shop did not open');
+ rows[0].click();if(!details[0].hidden||mapFocusCalls!==1||rows[0].getAttribute('aria-expanded')!=='false')throw Error('shop did not collapse');
+ for(const key of ['Enter',' ']){rows[0].dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));if(details[0].hidden)throw Error('keyboard did not open');rows[0].dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));if(!details[0].hidden)throw Error('keyboard did not collapse');}
+ rows[0].click();rows[1].click();if(!details[0].hidden||details[1].hidden)throw Error('shops do not switch');
+ window.openVisitStore(2);window.openVisitStore(2);if(details[1].hidden)throw Error('map should keep details open');
+ parent.postMessage({gridQA:true,width:innerWidth,colors,conversion:true,noOverflow:true,shopToggle:true,nameInput:true},'*');
 }catch(error){parent.postMessage({gridQA:true,width:innerWidth,error:String(error)},'*');}});
 '''
     harness = harness.replace('GRID_SCRIPT', json.dumps(Path('app/static/bd_grid_regions.js').read_text()))
+    harness = harness.replace('VISIT_SCRIPT', json.dumps(Path('app/static/bd_visit.js').read_text()))
     fixture = page.replace('</body>', '<script>' + harness + '</script></body>')
     parent = '<meta charset="utf-8"><pre id="qa">waiting</pre><script>let results=[];addEventListener("message",e=>{if(e.data.gridQA){results.push(e.data);document.getElementById("qa").textContent=JSON.stringify(results)}})</script>'
     for width, height in ((393, 852), (1100, 900)):

@@ -213,20 +213,23 @@
     });
   });
 
+  function toggleRow(row) {
+    const open = row.getAttribute('aria-expanded') !== 'true';
+    if (open) window.focusVisitStore?.(row.dataset.storeId);
+    rows.forEach(candidate => candidate.classList.toggle('is-selected', candidate === row && open));
+    reveal(row, open);
+  }
+
   rows.forEach(row => {
     row.addEventListener('click', event => {
       if (event.target.closest('a')) return;
-      window.focusVisitStore?.(row.dataset.storeId);
-      rows.forEach(r=>r.classList.toggle('is-selected',r===row));
-      reveal(row, true);
+      toggleRow(row);
     });
     row.addEventListener('keydown', event => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       if (event.target.closest('a')) return;
       event.preventDefault();
-      rows.forEach(r=>r.classList.toggle('is-selected',r===row));
-      window.focusVisitStore?.(row.dataset.storeId);
-      reveal(row, true);
+      toggleRow(row);
     });
   });
 

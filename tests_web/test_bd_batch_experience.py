@@ -198,3 +198,30 @@ def test_admin_region_team_handover_is_inline_and_names_reset_effect(client,seed
     assert '清除该片区所有网格的现有队员分配' in row
     result=__import__('subprocess').run(['node','tests_web/bd_region_handover_mock.cjs'],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
+
+
+def test_assignment_filters_follow_team_for_admin_and_worker_for_captain(client, seed):
+    with appdb.SessionLocal() as db:
+        main, rt, grid, store = batch(db, seed)
+        grid.assignee_id = None
+        grid.status = 'pending'
+        db.commit()
+        mid, rid = main.id, rt.id
+        admin = db.get(User, seed['users']['ops-admin'])
+        captain = db.get(User, seed['users']['captain'])
+        assert tasks.task_tree(db, admin, mid, task_state='unassigned')[1] == []
+        assigned = tasks.task_tree(db, admin, mid, task_state='assigned')[1]
+        assert [item['task'].id for item in assigned] == [rid]
+        assert [child['task'].id for child in assigned[0]['grids']] == [grid.id]
+        unassigned = tasks.task_tree(db, captain, mid, task_state='unassigned')[1]
+        assert [child['task'].id for child in unassigned[0]['grids']] == [grid.id]
+        assert tasks.task_tree(db, captain, mid, task_state='assigned')[1][0]['grids'] == []
+    login(client, 'ops-admin')
+    assert 'batch-admin-region' not in client.get(f'/zone-tasks/{mid}?state=unassigned').text.split('<body', 1)[1]
+    assert f'action="/zone-tasks/regions/{rid}/assign"' in client.get(f'/zone-tasks/{mid}?state=assigned').text
+    with appdb.SessionLocal() as db:
+        rt = db.get(BdRegionTask, rid)
+        tasks.assign_region_task(db, db.get(User, seed['users']['ops-admin']), rid, None, rt.revision)
+        db.commit()
+    assert f'action="/zone-tasks/regions/{rid}/assign"' in client.get(f'/zone-tasks/{mid}?state=unassigned').text
+    assert f'action="/zone-tasks/regions/{rid}/assign"' not in client.get(f'/zone-tasks/{mid}?state=assigned').text
