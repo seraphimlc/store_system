@@ -1,5 +1,6 @@
 """批次网格页（队员端巡店）：网格标题 + 返回、地图/商户列表三段式、商户表四列、
 列表头筛选同一行且改动即搜、点行展开可编辑详情、导航跳谷歌地图、作业进展自动算。"""
+import json
 import re
 import pathlib
 import uuid
@@ -248,3 +249,25 @@ def test_batch_grid_keyword_is_trimmed_literal_and_matches_documented_fields(cli
         assert re.findall(r'<tr class="visit-row" id="store-([^" ]+)"',page.text)==[str(target)],keyword
     page=client.get(f"/my/work/batch-grids/{gid}",params={'kw':'shop-b'})
     assert len(re.findall(r'<tr class="visit-row"',page.text))==1
+
+
+def test_grid_map_keeps_every_coordinate_and_lists_only_the_first_twenty(client,seed):
+    with appdb.SessionLocal() as db:
+        _,_,grid,first=batch(db,seed)
+        for i in range(24):
+            db.add(BdStoreTask(grid_task_id=grid.id,store_id=f'map-{i}',
+                               snapshot={'name':f'map-{i}','lat':seed['lat'],'lon':seed['lon']},
+                               status='completed' if i==23 else 'pending'))
+        db.flush()
+        completed=db.query(BdStoreTask).filter_by(grid_task_id=grid.id,store_id='map-23').one()
+        gid,completed_id=grid.id,completed.id
+        total=db.query(BdStoreTask).filter_by(grid_task_id=grid.id).count()
+        db.commit()
+    login(client,'worker')
+    page=client.get(f'/my/work/batch-grids/{gid}',params={'sort':'visit','direction':'desc'})
+    config=json.loads(re.search(r'<script id="work-map-config" type="application/json">(.*?)</script>',page.text).group(1))
+    assert config['locate'] is True
+    assert len(config['stores'])==total
+    assert config['listIds'][0]==completed_id
+    assert len(config['listIds'])==20
+    assert first.id not in config['listIds'][:1]

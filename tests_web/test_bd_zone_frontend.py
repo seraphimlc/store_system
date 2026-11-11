@@ -83,5 +83,6 @@ def test_h5_store_focus_shows_only_selected_shop_and_preserves_manual_view():
     result=subprocess.run(['node','tests_web/bd_visit_map_mock.cjs'],text=True,capture_output=True,timeout=15)
     assert result.returncode==0,result.stderr
     report=json.loads(result.stdout)
-    assert report['radius100'] and report['cap20'] and report['gpsPreserved'] and report['restoreAll']
+    assert report['radius100'] and report['cap20'] and report['gpsPreserved'] and report['overviewCap']
+    assert report['nearestOnGrant'] and report['listOnDeny']
     assert all(row['stylesPerFocus']<=20 for row in report['counts'])

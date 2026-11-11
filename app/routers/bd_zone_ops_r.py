@@ -192,12 +192,16 @@ def batch_grid_page(identity:int,request:Request,page:int=1,kw:str='',task_state
              'lat':location_map.get(s.store_id,{}).get('lat',s.snapshot.get('lat')),
              'lon':location_map.get(s.store_id,{}).get('lon',s.snapshot.get('lon')),
              'visited':s.status=='completed'} for s in grid_stores]
+    # 没拿到定位时，地图按当前列表顺序画前 20 家，而不是把整格点位都铺上去。
+    list_ids=[row[0] for row in task_ops.store_task_query(
+        db,grid.id,kw,task_state=task_state,status=status,sort=sort,direction=direction
+    ).with_entities(task_ops.BdStoreTask.id).limit(20)]
     if resubmit:
         return RedirectResponse(f'/my/work/batch-grids/{identity}/new-store?'+urlencode(dict(request.query_params)),303)
     grid_name=db.query(BdWorkGrid.name).filter(BdWorkGrid.id==grid.grid_id).scalar() or grid.snapshot.get('name','')
     return render(request,user,'bd_batch_grid.html',task=main,region_task=rt,grid=grid,grid_name=grid_name,stores=stores,more=more,
                   page=stats['page'],kw=kw,task_state=task_state,status=status,stats=stats,sort=sort,direction=direction,can_execute=grid.assignee_id==user.id and main.status not in ('completed','disabled'),
-                  geometry=geometry,points=points,nonce_for=lambda:str(uuid.uuid4()))
+                  geometry=geometry,points=points,list_ids=list_ids,nonce_for=lambda:str(uuid.uuid4()))
 
 
 @router.post('/my/work/batch-stores/{identity}/complete')

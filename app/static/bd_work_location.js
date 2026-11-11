@@ -1,13 +1,14 @@
 /* Browser coordinates stay on this page; one watcher is released when leaving. */
-window.startWorkLocation=(map,text,onFirstPosition)=>{
+window.startWorkLocation=(map,text,onFirstPosition,onUnavailable)=>{
   'use strict';
   const button=document.getElementById('work-location');
   const status=document.getElementById('work-location-status');
   let watcher=null,marker,accuracy,position,following=false,receivedPosition=false;
   const follow=value=>{following=value;button.setAttribute('aria-pressed',String(value));};
   const stop=()=>{if(watcher!==null)navigator.geolocation.clearWatch(watcher);watcher=null;};
+  const unavailable=()=>{if(!receivedPosition)onUnavailable?.();};
   const start=()=>{
-    if(!navigator.geolocation){status.textContent=text.unsupported;follow(false);return;}
+    if(!navigator.geolocation){status.textContent=text.unsupported;follow(false);unavailable();return;}
     if(watcher!==null)return;
     status.textContent=text.loading;
     watcher=navigator.geolocation.watchPosition(result=>{
@@ -21,7 +22,7 @@ window.startWorkLocation=(map,text,onFirstPosition)=>{
       accuracy.setCenter(position);accuracy.setRadius(Number.isFinite(radius)?Math.max(0,radius):0);
       status.textContent='';
       if(following)map.panTo(position);
-    },()=>{stop();follow(false);status.textContent=text.failed;},
+    },()=>{stop();follow(false);status.textContent=text.failed;unavailable();},
     {enableHighAccuracy:true,timeout:15000,maximumAge:10000});
   };
   button.addEventListener('click',()=>{follow(!following);if(following){start();if(position)map.panTo(position);}});

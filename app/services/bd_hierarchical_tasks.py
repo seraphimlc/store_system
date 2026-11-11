@@ -547,20 +547,12 @@ def grid_progress_stats(db, grid_task_id):
     return {'total':total,'done':done,'pct':pct,'state':state}
 
 
-def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',sort='',direction='asc',focus=None):
-    """批次网格页的商户分页 + 列表头筛选 + 自动作业进展。
-
-    筛选口径（与巡店页一致）：
-    - task_state：completed=已巡店 / pending=未巡店（按店铺任务是否完成）；
-    - status：完成时记录���门店状态（正常/异常/存疑/关店）；
-    - keyword：商户名称、地址或商户编号，任一命中即算。
-    """
-    main,rt,grid=context(db,user,grid_task_id)
-    page=max(1,page);offset=(page-1)*30
+def store_task_query(db,grid_id,keyword='',*,task_state='',status='',sort='',direction='asc'):
+    """网格商户列表的筛选和排序。没有定位时，地图按这个顺序取前 20 家。"""
     keyword=(keyword or '').strip()[:100]
     task_state=task_state if task_state in STORE_TASK_FILTERS else ''
     status=status if status in STORE_STATUSES else ''
-    query=db.query(BdStoreTask).filter(BdStoreTask.grid_task_id==grid.id)
+    query=db.query(BdStoreTask).filter(BdStoreTask.grid_task_id==grid_id)
     if keyword:
         like='%'+keyword.replace('/','//').replace('%','/%').replace('_','/_')+'%'
         query=query.filter(or_(
@@ -578,7 +570,20 @@ def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',
     elif sort=='status':
         order=case(*[(BdStoreTask.result['business_status'].as_string()==key,i+1)
                      for i,key in enumerate(STORE_STATUSES)],else_=0)
-    ordered=query.order_by(order.desc() if direction=='desc' else order.asc(),BdStoreTask.id)
+    return query.order_by(order.desc() if direction=='desc' else order.asc(),BdStoreTask.id)
+
+
+def store_page(db,user,grid_task_id,page=1,keyword='',*,task_state='',status='',sort='',direction='asc',focus=None):
+    """批次网格页的商户分页 + 列表头筛选 + 自动作业进展。
+
+    筛选口径（与巡店页一致）：
+    - task_state：completed=已巡店 / pending=未巡店（按店铺任务是否完成）；
+    - status：完成时记录���门店状态（正常/异常/存疑/关店）；
+    - keyword：商户名称、地址或商户编号，任一命中即算。
+    """
+    main,rt,grid=context(db,user,grid_task_id)
+    page=max(1,page);offset=(page-1)*30
+    ordered=store_task_query(db,grid.id,keyword,task_state=task_state,status=status,sort=sort,direction=direction)
     if focus is not None:
         ids=[i for i, in ordered.with_entities(BdStoreTask.id)]
         if focus in ids:page=ids.index(focus)//30+1;offset=(page-1)*30

@@ -49,15 +49,46 @@
     if(!bounds.isEmpty())map.fitBounds(bounds,24);
     const stores=(config.stores||[]).filter(s=>Number.isFinite(s.lat)&&Number.isFinite(s.lon));
     const storesById=new Map(stores.map(store=>[String(store.id),store]));
+    const storeCap=20;
     const storePoints=items=>({type:'FeatureCollection',features:items.map(s=>({type:'Feature',
       geometry:{type:'Point',coordinates:[s.lon,s.lat]},properties:{store_id:s.id,visited:s.visited,title:s.name}}))});
     const shopStyle=(f,selected=false)=>({title:f.getProperty('title'),icon:{path:google.maps.SymbolPath.CIRCLE,
       scale:selected?10:6,fillColor:f.getProperty('visited')?'#2c7751':'#225fa2',
       fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
     const shops=new google.maps.Data({map});
-    shops.addGeoJson(storePoints(stores));
     shops.setStyle(f=>shopStyle(f));
-    let focusedShops,focusRadius,selectedStoreId=null;
+    let focusedShops,focusRadius,selectedStoreId=null,overviewItems=null,userPosition=null,overviewKind=null;
+    const distanceMeters=(lat,lon,other)=>{
+      const radians=Math.PI/180,earth=6371000,dLat=(other.lat-lat)*radians,dLon=(other.lon-lon)*radians,base=lat*radians;
+      const a=Math.sin(dLat/2)**2+Math.cos(base)*Math.cos(other.lat*radians)*Math.sin(dLon/2)**2;
+      return 2*earth*Math.asin(Math.sqrt(Math.min(1,a)));
+    };
+    const nearestStores=position=>stores.map(store=>({store,distance:distanceMeters(position.lat,position.lng,store)}))
+      .sort((a,b)=>a.distance-b.distance||String(a.store.id).localeCompare(String(b.store.id)))
+      .slice(0,storeCap).map(item=>item.store);
+    const listStores=()=>{
+      const ranked=(config.listIds||[]).map(id=>storesById.get(String(id))).filter(Boolean);
+      return (ranked.length?ranked:stores).slice(0,storeCap);
+    };
+    const replaceFeatures=(layer,items)=>{
+      const previous=[];layer.forEach(feature=>previous.push(feature));
+      previous.forEach(feature=>layer.remove(feature));
+      if(items.length)layer.addGeoJson(storePoints(items));
+    };
+    const fitItems=(items,position)=>{
+      const area=new google.maps.LatLngBounds();
+      items.forEach(store=>area.extend({lat:store.lat,lng:store.lon}));
+      if(position)area.extend(position);
+      if(!area.isEmpty())map.fitBounds(area,24);
+      else if(!bounds.isEmpty())map.fitBounds(bounds,24);
+    };
+    const showOverview=(items,{fit=false}={})=>{
+      overviewItems=items;
+      if(selectedStoreId!==null)return;
+      replaceFeatures(shops,items);
+      if(fit)fitItems(items,overviewKind==='nearest'?userPosition:null);
+    };
+    if(!config.locate)shops.addGeoJson(storePoints(stores));
     focusStore=id=>{
       const store=storesById.get(String(id));
       if(!store)return;
@@ -97,7 +128,8 @@
       selectedStoreId=null;pendingStoreId=null;
       focusedShops?.setMap(null);shops.setMap(map);
       focusRadius?.setMap(null);
-      if(!bounds.isEmpty())map.fitBounds(bounds,24);
+      if(config.locate)showOverview(overviewItems||[],{fit:true});
+      else if(!bounds.isEmpty())map.fitBounds(bounds,24);
       if(showAll)showAll.hidden=true;
       window.clearVisitStoreSelection?.();
       const url=new URL(location.href);
@@ -112,11 +144,15 @@
     map.addListener('click',pickLocation);
     const focus=pendingStoreId??new URL(location.href).searchParams.get('focus');if(focus)window.focusVisitStore(focus);
     if(config.locate)window.startWorkLocation?.(map,config.locationText,position=>{
-      if(selectedStoreId!==null)return;
-      const combined=new google.maps.LatLngBounds();
-      const extendBound=coords=>{if(typeof coords[0]==='number')combined.extend({lng:coords[0],lat:coords[1]});else coords.forEach(extendBound);};
-      config.geometry.features.forEach(feature=>extendBound(feature.geometry.coordinates));
-      combined.extend(position);map.fitBounds(combined,24);
+      userPosition=position;
+      const fit=overviewKind!=='nearest'&&selectedStoreId===null;
+      overviewKind='nearest';
+      showOverview(nearestStores(position),{fit});
+    },()=>{
+      if(overviewKind==='nearest'||userPosition)return;
+      const fit=overviewKind!=='list'&&selectedStoreId===null;
+      overviewKind='list';
+      showOverview(listStores(),{fit});
     });
     function openShop(event){const id=event.feature.getProperty('store_id');
       if(window.openVisitStore){window.openVisitStore(id);return;}

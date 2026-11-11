@@ -176,7 +176,7 @@
   <button class="btn ghost" type="button" data-photo-choice="file">{{ t('上传文件') }}</button>
 </dialog>
 
-<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'language':html_lang(),'locate':true,'locationText':{'mine':t('我的位置'),'loading':t('正在获取定位…'),'failed':t('无法获取定位，请检查定位权限后重试。'),'unsupported':t('当前浏览器不支持定位。')},'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
+<script id="work-map-config" type="application/json">{{ {'key':maps_key,'geometry':geometry,'stores':points,'listIds':list_ids,'language':html_lang(),'locate':true,'locationText':{'mine':t('我的位置'),'loading':t('正在获取定位…'),'failed':t('无法获取定位，请检查定位权限后重试。'),'unsupported':t('当前浏览器不支持定位。')},'error':t('地图加载失败，仍可使用下方任务列表。')}|tojson }}</script>
 <script src="/static/bd_work_location.js?v={{ static_ver('bd_work_location.js') }}" defer></script>
 <script src="/static/bd_work.js?v={{ static_ver('bd_work.js') }}" defer></script>
 <script src="/static/bd_filters.js?v={{ static_ver('bd_filters.js') }}" defer></script>
