@@ -1,0 +1,40 @@
+import {Body,Controller,Get,Inject,Injectable,Post,Req} from '@nestjs/common';import type {Request} from 'express';import type {PoolClient} from 'pg';import {createHash} from 'node:crypto';import {z} from 'zod';import {Database} from './database';import {AuthService} from './auth';import {BusinessError} from './errors';import {planStationPlaces,type AssetStation,type AssetPlace,type AssetLine} from '../../../packages/domain/src/station-rebuild';
+const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+@Injectable()
+export class StationRebuildService{
+ constructor(@Inject(Database)private readonly db:Database){}
+ private async admin(client:PoolClient,id:number,write=false){const actor=(await client.query(`SELECT username,display_name AS name FROM users WHERE id=$1 AND role='admin' AND is_active=true AND status IN('active','leave') ${write?'FOR SHARE':''}`,[id])).rows[0];if(!actor)throw new BusinessError('FORBIDDEN','仅管理员可体检和重建资产',403);return actor;}
+ private async state(client:PoolClient){const stations=(await client.query<AssetStation>('SELECT id,name,name_norm,pref,lon,lat,group_code,line_id,place_id FROM bd_station ORDER BY id')).rows,places=(await client.query<AssetPlace>('SELECT id,name,name_norm,pref,lon,lat,group_code,n_line,n_operator,operators,lines_text,source FROM bd_station_place ORDER BY id')).rows,lines=(await client.query<AssetLine&{n_station:number}>('SELECT id,name,operator,operator_short,n_station FROM bd_line ORDER BY id')).rows,tasks=(await client.query<{id:number;place_id:number|null;station_id:number|null}>('SELECT id,place_id,station_id FROM bd_task ORDER BY id')).rows;
+  const plan=planStationPlaces(stations,places,lines,new Set(tasks.flatMap(row=>row.place_id===null?[]:[row.place_id])));return {plan,token:digest({stations,places,lines,tasks}),lines};}
+ private async auditTransaction(client:PoolClient){
+  const rows=(await client.query(`SELECT kind,n FROM(
+   SELECT '缺少线路' AS kind,count(*)::int AS n FROM bd_station WHERE line_id IS NULL UNION ALL SELECT '缺少物理车站',count(*)::int FROM bd_station WHERE place_id IS NULL UNION ALL SELECT '缺少县',count(*)::int FROM bd_station WHERE pref='' UNION ALL SELECT '缺少坐标',count(*)::int FROM bd_station WHERE lon IS NULL
+   UNION ALL SELECT '同组站名不一致',count(*)::int FROM(SELECT group_code FROM bd_station WHERE group_code<>'' GROUP BY group_code HAVING count(DISTINCT name_norm)>1)x
+   UNION ALL SELECT '线路数与成员数不符',count(*)::int FROM(SELECT p.id FROM bd_station_place p LEFT JOIN bd_station s ON s.place_id=p.id GROUP BY p.id HAVING p.n_line<>count(DISTINCT s.line_id))x
+   UNION ALL SELECT '线路站数与实际不符',count(*)::int FROM(SELECT l.id FROM bd_line l LEFT JOIN bd_station s ON s.line_id=l.id GROUP BY l.id HAVING l.n_station<>count(s.id))x
+   UNION ALL SELECT '同线重名',count(*)::int FROM(SELECT line_id,name_norm FROM bd_station GROUP BY line_id,name_norm HAVING count(*)>1)x
+   UNION ALL SELECT '孤儿物理车站',count(*)::int FROM bd_station_place p WHERE NOT EXISTS(SELECT 1 FROM bd_station s WHERE s.place_id=p.id)
+  )q WHERE n>0 ORDER BY kind`)).rows;
+  const stats=(await client.query(`SELECT (SELECT count(*)::int FROM bd_station_place) AS places,(SELECT count(*)::int FROM bd_station) AS stations,(SELECT count(*)::int FROM bd_line) AS lines,(SELECT count(*)::int FROM bd_station_place WHERE n_line>1) AS "multiLine",(SELECT count(*)::int FROM bd_station_place WHERE city='') AS "missingCity",(SELECT count(*)::int FROM bd_line WHERE source='mlit') AS "sourceLines",(SELECT count(*)::int FROM bd_station WHERE group_code<>'') AS "sourceStations"`)).rows[0];return {healthy:!rows.length,issues:rows,stats};
+ }
+ async audit(actorId:number){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');await this.admin(client,actorId);return this.auditTransaction(client);});}
+ async preview(actorId:number){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');await this.admin(client,actorId);const {plan,token,lines}=await this.state(client);const actual=(await client.query<{line_id:number;count:number}>('SELECT line_id,count(*)::int AS count FROM bd_station WHERE line_id IS NOT NULL GROUP BY line_id')).rows,counts=new Map(actual.map(row=>[row.line_id,row.count]));return {token,summary:plan.summary,lineCountsChanged:lines.filter(row=>row.n_station!==(counts.get(row.id)??0)).length,blockers:plan.blockers.slice(0,30),referencedOrphans:plan.retained.slice(0,30),canApply:!plan.blockers.length};});}
+ async apply(actorId:number,body:unknown){const input=z.object({token:z.string().regex(/^[a-f0-9]{64}$/),confirm:z.literal('REBUILD_STATION_PLACES')}).strict().safeParse(body);if(!input.success)throw new BusinessError('VALIDATION','请预览并确认物理车站重建',400);return this.db.transaction(async client=>{
+  // Same lock order as task writes; prevents task creation/deletion racing orphan cleanup.
+  await client.query("SELECT pg_advisory_xact_lock(hashtext('teams-write'),0)");await client.query("SELECT pg_advisory_xact_lock(hashtext('station-assets'),0)");const actor=await this.admin(client,actorId,true);const {plan,token}=await this.state(client);if(input.data.token!==token)throw new BusinessError('ASSET_PREVIEW_CHANGED','资产或任务关联已变化，请重新预览',409);if(plan.blockers.length)throw new BusinessError('ASSET_TASK_REFERENCE','重建会改变已有任务的物理站关联，已拒绝；请先人工核对这些资产',409);
+  for(const row of plan.updates){let placeId=row.placeId;const v=row.values;if(placeId===null)placeId=(await client.query(`INSERT INTO bd_station_place(name,name_norm,pref,lon,lat,group_code,n_line,n_operator,operators,lines_text,source,note,status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'','active',now(),now()) RETURNING id`,[v.name,v.name_norm,v.pref,v.lon,v.lat,v.group_code,v.n_line,v.n_operator,v.operators,v.lines_text,v.source])).rows[0].id;else if(row.changed)await client.query('UPDATE bd_station_place SET name=$1,name_norm=$2,pref=$3,lon=$4,lat=$5,group_code=$6,n_line=$7,n_operator=$8,operators=$9,lines_text=$10,source=$11,updated_at=now() WHERE id=$12',[v.name,v.name_norm,v.pref,v.lon,v.lat,v.group_code,v.n_line,v.n_operator,v.operators,v.lines_text,v.source,placeId]);
+   await client.query('UPDATE bd_station SET place_id=$1 WHERE id=ANY($2::int[]) AND place_id IS DISTINCT FROM $1',[placeId,row.stationIds]);
+  }
+  await client.query('DELETE FROM bd_station_place p WHERE p.id=ANY($1::int[]) AND NOT EXISTS(SELECT 1 FROM bd_station s WHERE s.place_id=p.id) AND NOT EXISTS(SELECT 1 FROM bd_task t WHERE t.place_id=p.id)',[plan.remove]);
+  const recounted=await client.query('UPDATE bd_line l SET n_station=(SELECT count(*) FROM bd_station s WHERE s.line_id=l.id),updated_at=now() WHERE l.n_station<>(SELECT count(*) FROM bd_station s WHERE s.line_id=l.id) RETURNING id');
+  if(plan.summary.changed||plan.summary.linked||plan.remove.length||recounted.rowCount)await client.query("INSERT INTO bd_log(domain,action,ref_id,ref_label,field,old_value,new_value,actor,actor_name,note,created_at) VALUES('station','update',NULL,'物理车站重建','资产汇总','',$1,$2,$3,'不迁移任务；保留被引用孤儿',now())",[JSON.stringify({...plan.summary,lineCountsChanged:recounted.rowCount}),actor.username,actor.name]);
+  return {ok:true,summary:plan.summary,lineCountsChanged:recounted.rowCount,audit:await this.auditTransaction(client)};
+ });}
+}
+@Controller('station-maintenance')
+export class StationRebuildController{
+ constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(StationRebuildService)private readonly service:StationRebuildService){}
+ @Get('audit')async audit(@Req()req:Request){const {user}=await this.auth.require(req,{admin:true});return this.service.audit(user.id);}
+ @Get('preview')async preview(@Req()req:Request){const {user}=await this.auth.require(req,{admin:true});return this.service.preview(user.id);}
+ @Post('rebuild')async rebuild(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.apply(user.id,body);}
+}

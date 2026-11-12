@@ -1,0 +1,3 @@
+import {Button} from 'antd-mobile';import {BatchWork as View} from '../../../packages/client/src/BatchWork';import type {TaskButtonProps} from '../../../packages/client/src/StationTasks';import type {Session} from '../../../packages/contracts/src';import {api} from './api';
+function Action({children,disabled,onClick,primary}:TaskButtonProps){return <Button color={primary?'primary':'default'} fill={primary?'solid':'outline'} disabled={disabled} onClick={onClick}>{children}</Button>;}
+export function MyBatchWork({session,language}:{session:Session;language:string}){return <View mobile session={session} language={language} request={api} Button={Action} base="/my/work/batches" gridBase="/my/work/batch-grids"/>;}

@@ -1,0 +1,137 @@
+# Appica UI
+
+> Open-source, accessible React component library built on Base UI and Tailwind CSS v4, plus the Appica Icons and Country Flags packages.
+
+This index covers the React integration.
+
+## Rules
+
+- Tailwind CSS v4 only. Do NOT create a `tailwind.config.js` - v4 config lives in CSS via `@theme`.
+  If the project is on v3, convert unsupported syntax rather than downgrading the components.
+- Scan the library for class names or everything renders unstyled: `@source '../node_modules/@appica/ui-react/dist';`
+  in the stylesheet that imports Tailwind. The path is relative to that stylesheet - count the `../`
+  needed to reach the project root. A bare package name resolves to nothing and fails silently.
+- React 19 is a hard requirement. No `forwardRef` - `ref` is a plain prop.
+- Import from the subpath, one component per import:
+  `import { Button } from '@appica/ui-react/button'`.
+- Never write hex colors, px radii, or duration literals. Use the role-based tokens:
+  `bg-background-muted`, `text-foreground-intense`, `border-border-strong`, `var(--radius-md)`.
+  Full list: https://appica.dev/ui/docs/react/colors.md
+- Never write hue-based utilities (`bg-gray-100`, `text-slate-600`). The palette is organized by
+  role, not hue.
+- Prefer v4 variant syntax (`*:`, `**:`, `data-*:`, `not-*:`) over `[&_...]` arbitrary selectors.
+- Never put `:has()` on `html`, `:root` or `body`, including variants like `in-[:root:has(...)]`. Beside the library's
+  own `:has()` rules, each check restyles the whole page. Derive page state from the route or React state instead.
+- For a link styled as a button, put `buttonVariants(...)` on the `<a>` - never `<Button render={<a/>}>`.
+- Put `className` overrides on the wrapper component, not on the JSX passed to `render`.
+- A carousel with `pauseOnHover: false` or `pauseOnFocus: false` takes a `CarouselPlayToggle`.
+- Do not hand-roll a component that exists in the library. Check the component list first:
+  https://appica.dev/ui/react/llms.txt
+- Every documentation page is served as clean markdown at `<url>.md` - fetch that, not the HTML.
+
+## Documentation
+
+- [Accessibility](https://appica.dev/ui/docs/react/accessibility.md): What's built in, and what's yours to handle.
+- [Animation](https://appica.dev/ui/docs/react/animation.md): Built-in motion that's reduced-motion aware and customizable.
+- [Changelog](https://appica.dev/ui/changelog/react.md): Every @appica/ui-react release, newest first, with what each one added, improved and fixed.
+- [Colors](https://appica.dev/ui/docs/react/colors.md): Semantic color roles, and when to use each.
+- [Composition](https://appica.dev/ui/docs/react/composition.md): Swap elements, compose with your router, merge styles.
+- [Dark Mode](https://appica.dev/ui/docs/react/dark-mode.md): Add light and dark mode to your app.
+- [Direction Provider](https://appica.dev/ui/docs/react/direction-provider.md): Set the LTR or RTL reading direction.
+- [Fonts](https://appica.dev/ui/docs/react/fonts.md): Swap the default system fonts for a local or Google font.
+- [Forms & Validation](https://appica.dev/ui/docs/react/forms.md): Build accessible forms with validation.
+- [Installation](https://appica.dev/ui/docs/react/installation.md): Add Appica UI to your React project.
+- [Reduced Motion Provider](https://appica.dev/ui/docs/react/reduced-motion-provider.md): Force-disable animations for any subtree.
+- [Right-to-Left (RTL)](https://appica.dev/ui/docs/react/rtl.md): Mirror your interface for right-to-left languages.
+- [Set up your coding agent](https://appica.dev/ui/docs/react/agents.md): Teach Claude Code, Cursor, or Copilot to write Appica UI correctly.
+- [Theme Provider](https://appica.dev/ui/docs/react/theme-provider.md): Theming and dark mode, without the flash.
+- [Theming](https://appica.dev/ui/docs/react/theming.md): Recolor, reshape, and restyle with design tokens.
+- [Usage](https://appica.dev/ui/docs/react/usage.md): Imports, props, styling, and Server Components.
+- [useDirection](https://appica.dev/ui/docs/react/use-direction.md): Read the current text direction.
+- [useDismissible](https://appica.dev/ui/docs/react/use-dismissible.md): Track and persist dismissed surfaces.
+- [useLocalStorage](https://appica.dev/ui/docs/react/use-local-storage.md): SSR-safe state, persisted and synced across tabs.
+- [useMediaQuery](https://appica.dev/ui/docs/react/use-media-query.md): Subscribe to a CSS media query, SSR-safe.
+- [useReducedMotion](https://appica.dev/ui/docs/react/use-reduced-motion.md): Detect when to skip animations.
+- [useTheme](https://appica.dev/ui/docs/react/use-theme.md): Read and set the active theme.
+
+## Components
+
+- [Accordion](https://appica.dev/ui/components/react/accordion.md): A stack of sections that expand and collapse to show or hide their content.
+- [Alert](https://appica.dev/ui/components/react/alert.md): A prominent, in-page message that draws attention to a status or event.
+- [Alert Dialog](https://appica.dev/ui/components/react/alert-dialog.md): A modal confirmation that interrupts the user to demand a deliberate response.
+- [Autocomplete](https://appica.dev/ui/components/react/autocomplete.md): A text input that suggests matching options as you type.
+- [Avatar](https://appica.dev/ui/components/react/avatar.md): A user image with a text or icon fallback when it's missing.
+- [Background Pattern](https://appica.dev/ui/components/react/background-pattern.md): A decorative pattern behind your content, with an optional cursor-following spotlight.
+- [Badge](https://appica.dev/ui/components/react/badge.md): A small label that highlights a status, count, or category.
+- [Border Beam](https://appica.dev/ui/components/react/border-beam.md): A comet of light that laps the border of your content.
+- [Breadcrumb](https://appica.dev/ui/components/react/breadcrumb.md): A trail of links showing the current page's location in a navigational hierarchy.
+- [Button](https://appica.dev/ui/components/react/button.md): A clickable button for actions, in a range of styles and sizes.
+- [Button Group](https://appica.dev/ui/components/react/button-group.md): Groups related buttons into a single segmented control, sharing variant, size, and state.
+- [Calendar](https://appica.dev/ui/components/react/calendar.md): A grid for picking a date, several dates, or a range.
+- [Card](https://appica.dev/ui/components/react/card.md): A flexible content container for a title, description, media, and actions.
+- [Carousel](https://appica.dev/ui/components/react/carousel.md): A draggable, swipeable slider built on Embla - with autoplay, fade, auto-height, thumbnails, and creative scroll effects.
+- [Checkbox](https://appica.dev/ui/components/react/checkbox.md): A box for turning an option on or off.
+- [Chip](https://appica.dev/ui/components/react/chip.md): A small, optionally removable tag for filters and selections.
+- [Collapsible](https://appica.dev/ui/components/react/collapsible.md): A section that expands and collapses to show or hide its content.
+- [Color Area](https://appica.dev/ui/components/react/color-area.md): A two-dimensional gradient for adjusting two channels of a color at once.
+- [Color Picker](https://appica.dev/ui/components/react/color-picker.md): A trigger, a popover and a color panel, composed from the color primitives and sharing one value.
+- [Color Slider](https://appica.dev/ui/components/react/color-slider.md): A gradient track for adjusting one channel of a color.
+- [Color Swatch](https://appica.dev/ui/components/react/color-swatch.md): A preview of a single color, transparency included.
+- [Color Swatch Picker](https://appica.dev/ui/components/react/color-swatch-picker.md): A palette of colors to choose one from.
+- [Combobox](https://appica.dev/ui/components/react/combobox.md): An input with a dropdown list for picking one option or several.
+- [Compare Slider](https://appica.dev/ui/components/react/compare-slider.md): Two layers split by a draggable divider, for before and after comparisons.
+- [Context Menu](https://appica.dev/ui/components/react/context-menu.md): A menu that opens where you right-click or long-press.
+- [Copy Button](https://appica.dev/ui/components/react/copy-button.md): A button that copies text to the clipboard, with a check on success.
+- [Countdown](https://appica.dev/ui/components/react/countdown.md): A timer that counts down to a set time, with rolling digits.
+- [Data Table](https://appica.dev/ui/components/react/data-table.md): A data table recipe - Appica UI components wired to TanStack Table for sorting, filtering, selection, column visibility, and pagination.
+- [Date Field](https://appica.dev/ui/components/react/date-field.md): A segmented input for typing a date.
+- [Date Picker](https://appica.dev/ui/components/react/date-picker.md): An input paired with a calendar for picking a date, a range, or a time.
+- [Dialog](https://appica.dev/ui/components/react/dialog.md): A modal window that overlays the page for focused tasks and content.
+- [Drawer](https://appica.dev/ui/components/react/drawer.md): A panel that slides in from a screen edge, with swipe-to-dismiss and snap points.
+- [Dropdown Menu](https://appica.dev/ui/components/react/dropdown-menu.md): A button that opens a menu of actions and options.
+- [Field](https://appica.dev/ui/components/react/field.md): A wrapper that pairs a form control with its label, description, and validation messages.
+- [Form](https://appica.dev/ui/components/react/form.md): A form that validates its fields on submit and shows server errors.
+- [Gradient Glow](https://appica.dev/ui/components/react/gradient-glow.md): A soft, drifting gradient glow that wraps around your content.
+- [Input](https://appica.dev/ui/components/react/input.md): A single-line text field, with icons and an optional clear button.
+- [Kbd](https://appica.dev/ui/components/react/kbd.md): A keyboard key, and groups of keys, for documenting shortcuts.
+- [Loader](https://appica.dev/ui/components/react/loader.md): An indicator that shows a loading state.
+- [Menubar](https://appica.dev/ui/components/react/menubar.md): A bar of menus for an app's top-level commands.
+- [Meter](https://appica.dev/ui/components/react/meter.md): A graphical display of a numeric value within a known range.
+- [Navigation](https://appica.dev/ui/components/react/navigation.md): Links for moving between the main areas of your app or site.
+- [Navigation Menu](https://appica.dev/ui/components/react/navigation-menu.md): A navigation bar of links and menus that open panels of content.
+- [Number Field](https://appica.dev/ui/components/react/number-field.md): A number input with stepper buttons for adjusting the value.
+- [OTP Field](https://appica.dev/ui/components/react/otp-field.md): A row of single-character boxes for entering one-time codes.
+- [Pagination](https://appica.dev/ui/components/react/pagination.md): Navigation for splitting long lists of content across multiple pages.
+- [Popover](https://appica.dev/ui/components/react/popover.md): A floating panel anchored to a trigger for rich, interactive content.
+- [Preview Card](https://appica.dev/ui/components/react/preview-card.md): A hover preview of a link's destination, shown beside it.
+- [Progress](https://appica.dev/ui/components/react/progress.md): Displays the completion status of a task that takes a while.
+- [Radio](https://appica.dev/ui/components/react/radio.md): A group of options where only one can be selected.
+- [Rating](https://appica.dev/ui/components/react/rating.md): A score input built from a row of stars, or any icon you choose, with support for fractional values.
+- [Scroll Area](https://appica.dev/ui/components/react/scroll-area.md): A scroll container with custom, themeable scrollbars.
+- [Select](https://appica.dev/ui/components/react/select.md): A trigger that opens a popup list for choosing one or several options.
+- [Separator](https://appica.dev/ui/components/react/separator.md): A thin horizontal or vertical line that separates content.
+- [Skeleton](https://appica.dev/ui/components/react/skeleton.md): An animated placeholder that holds a content's shape while it loads.
+- [Slider](https://appica.dev/ui/components/react/slider.md): A draggable control for picking a number or a range.
+- [Sparkline](https://appica.dev/ui/components/react/sparkline.md): A compact, interactive inline chart for showing a trend at a glance.
+- [Spinner](https://appica.dev/ui/components/react/spinner.md): A spinning indicator that shows a loading state.
+- [Switch](https://appica.dev/ui/components/react/switch.md): A toggle for turning a single setting on or off.
+- [Table](https://appica.dev/ui/components/react/table.md): A styled table for displaying rows of data.
+- [Table of Content (TOC)](https://appica.dev/ui/components/react/toc.md): A scroll-spy navigation sidebar that tracks the current section as the page scrolls.
+- [Tabs](https://appica.dev/ui/components/react/tabs.md): A set of layered panels where only the selected one is shown at a time.
+- [Text Animate](https://appica.dev/ui/components/react/text-animate.md): A text animator that works by character, word, or line - typewriter, scramble, wave, and more.
+- [Textarea](https://appica.dev/ui/components/react/textarea.md): A multi-line text field for longer text entry.
+- [Thumbnail](https://appica.dev/ui/components/react/thumbnail.md): A small preview tile for an image or icon, with a fallback when the image is missing.
+- [Time Field](https://appica.dev/ui/components/react/time-field.md): A segmented input for typing a time.
+- [Toast](https://appica.dev/ui/components/react/toast.md): A brief, dismissible notification that stacks in a corner of the screen.
+- [Toggle](https://appica.dev/ui/components/react/toggle.md): A two-state button that stays pressed or unpressed.
+- [Toggle Group](https://appica.dev/ui/components/react/toggle-group.md): A set of toggle buttons where one or several can be pressed.
+- [Toolbar](https://appica.dev/ui/components/react/toolbar.md): A container that groups buttons, links, and inputs together.
+- [Tooltip](https://appica.dev/ui/components/react/tooltip.md): A small hint that appears on hover or focus to label a control.
+
+## Icons
+
+- [Appica Icons](https://appica.dev/ui/icons/react.md): Open-source collection of 5,000+ high-quality SVG icons for web and mobile projects.
+
+## Country Flags
+
+- [Appica Country Flags](https://appica.dev/ui/country-flags/react.md): Open-source, high-fidelity collection of 262 SVG country flag icons in rounded and circle shapes.

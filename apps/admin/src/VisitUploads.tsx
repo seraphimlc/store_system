@@ -1,0 +1,35 @@
+import {Card} from '@appica/ui-react/card';
+import {Alert} from '@appica/ui-react/alert';
+import {Form} from '@appica/ui-react/form';
+import {Textarea} from '@appica/ui-react/textarea';
+import {useEffect,useRef,useState,type FormEvent} from 'react';import {Button} from '@appica/ui-react/button';import {Upload,Download,Settings2} from 'lucide-react';
+import type {Session} from '../../../packages/contracts/src';import {api} from './api';import {upload} from '../../../packages/client/src/request';
+interface ImportJob {status:string;result?:{ok:boolean;message?:string;code?:string;admissionPending?:boolean}}
+interface LayoutDetail {id:number;fileName:string;status:string;format:string;headerRow:number;parsedRows:number;warnings:string[];errors:string[];layout:{sheet_name?:string;source?:string;ai_model?:string;ai_tokens?:number;header_row?:number;cols?:Record<string,number>;value_map?:unknown;point_rules?:unknown[]}|null}
+async function completed(jobId:string,onStatus:(text:string)=>void,language:string){
+ for(let attempt=0;attempt<1200;attempt++){
+  const job=await api<ImportJob>('/imports/jobs/'+jobId);
+  if(job.status==='failed')throw new Error(job.result?.message||job.result?.code||'IMPORT_FAILED');
+  if(job.status==='done'){if(!job.result?.ok)throw new Error(job.result?.message||'IMPORT_FAILED');return job.result;}
+  onStatus(language==='ja'?(job.status==='running'?'解析・判定・月次集計中…':'待機中…'):(job.status==='running'?'正在解析、判定并同步月度结果…':'已入队，等待后台处理…'));await new Promise(resolve=>setTimeout(resolve,500));
+ }
+ throw new Error(language==='ja'?'処理は引き続き実行中です。ファイル一覧で状態を確認してください。':'任务仍在后台运行，请在文件列表中查看状态，不必重复上传。');
+}
+export function VisitUploads({session,language,onComplete}:{session:Session;language:string;onComplete:(id:number)=>Promise<void>}){
+ const t=(zh:string,ja:string)=>language==='ja'?ja:zh;const [files,setFiles]=useState<File[]>([]),[busy,setBusy]=useState(false),[status,setStatus]=useState(''),[results,setResults]=useState<{name:string;ok:boolean;message:string}[]>([]);const input=useRef<HTMLInputElement>(null),writing=useRef(false);
+ async function submit(event:FormEvent){event.preventDefault();if(writing.current||!files.length)return;writing.current=true;setBusy(true);setResults([]);
+ try{for(const file of files){if(!file.name.toLowerCase().endsWith('.xlsx')||file.size>50*1024*1024){setResults(current=>[...current,{name:file.name,ok:false,message:t('仅支持不超过50MB的.xlsx文件','50MB以下の.xlsxファイルのみ対応しています')}]);continue;}
+  let identity:number|undefined;
+  try{setStatus(t('正在上传原件…','元ファイルをアップロード中…'));const form=new FormData();form.append('file',file);const value=await upload<{id:number;jobId:string}>('/imports/upload',session,form);identity=value.id;const result=await completed(value.jobId,setStatus,language);await onComplete(value.id);setResults(current=>[...current,{name:file.name,ok:true,message:result.admissionPending?result.message||t('解析完成，待处理申诉后入表','解析完了。申立処理後に確定してください'):t('解析、判定与月度同步完成','解析・判定・月次同期が完了しました')}]);}
+  catch(error){if(identity)await onComplete(identity).catch(()=>{});setResults(current=>[...current,{name:file.name,ok:false,message:(error as Error).message}]);}
+ }}finally{setBusy(false);writing.current=false;setStatus('');setFiles([]);if(input.current)input.current.value='';}}
+ return <Card className="visit-upload"><h2>{t('上传巡店文件','巡回ファイルをアップロード')}</h2><Form onSubmit={submit}><label>{t('选择Excel文件（可多选）','Excelファイルを選択（複数可）')}<input ref={input} type="file" accept=".xlsx" multiple disabled={busy} onChange={event=>setFiles([...event.target.files??[]])}/></label><Button type="submit" disabled={busy||!files.length}><Upload size={16}/>{t(busy?'正在处理…':'上传并处理',busy?'処理中…':'アップロードして処理')}</Button></Form>{status&&<p role="status">{status}</p>}{results.length>0&&<ul className="upload-results">{results.map((result,index)=><li key={result.name+'-'+index} className={result.ok?'ok':'failed'}><strong>{result.name}</strong><p role={result.ok?'status':'alert'}>{result.message}</p></li>)}</ul>}</Card>;
+}
+export function VisitImportLayout({id,session,language,onComplete}:{id:number;session:Session;language:string;onComplete:()=>Promise<void>}){
+ const t=(zh:string,ja:string)=>language==='ja'?ja:zh;const [detail,setDetail]=useState<LayoutDetail|null>(null),[open,setOpen]=useState(false),[layout,setLayout]=useState(''),[error,setError]=useState(''),[status,setStatus]=useState(''),[busy,setBusy]=useState(false);const writing=useRef(false),generation=useRef(0);
+ async function load(){const token=++generation.current;try{const result=await api<LayoutDetail>('/imports/'+id);if(token!==generation.current)return;setDetail(result);const {sheet_name,header_row,cols,value_map,point_rules}=result.layout??{};setLayout(JSON.stringify({sheet_name,header_row,cols,value_map,point_rules},null,2));setError('');}catch(error){if(token===generation.current)setError((error as Error).message);}}
+ useEffect(()=>{setOpen(false);setDetail(null);void load();return()=>{generation.current++;};},[id]);
+ async function reparse(event:FormEvent){event.preventDefault();if(writing.current)return;let input:unknown;try{input=JSON.parse(layout);}catch{setError(t('布局不是合法JSON','レイアウトは有効なJSONではありません'));return;}if(!window.confirm(t('按新布局重新解析？已有正式记录或申诉的文件会拒绝替换源记录。','新しいレイアウトで再解析しますか。確定記録・申立があるファイルは元データを置換できません。')))return;
+ writing.current=true;setBusy(true);setError('');try{const result=await api<{jobId:string}>('/imports/'+id+'/reparse',session,{layout:input,requestId:crypto.randomUUID()});await completed(result.jobId,setStatus,language);await load();await onComplete();setStatus(t('重新解析完成','再解析が完了しました'));}catch(error){setError((error as Error).message);}finally{writing.current=false;setBusy(false);}}
+ return <section className="import-layout"><div className="import-layout-actions"><a href={'/api/imports/'+id+'/original'} className="toolbar-download" download><Download size={16}/>{t('下载私有原件','元ファイルをダウンロード')}</a><Button variant="outline" onClick={()=>setOpen(!open)}><Settings2 size={16}/>{t('查看诊断与解析布局','診断と解析レイアウト')}</Button></div>{open&&<><h3>{detail?.fileName} · {detail?.format||'—'}</h3>{detail?.layout?.source==='ai'&&<p>{t('自动模型布局','AI解析レイアウト')} · {detail.layout.ai_model||'—'} · {detail.layout.ai_tokens??0} tokens</p>}{detail&&detail.errors.length>0&&<ul className="import-errors">{detail.errors.map((message,index)=><li key={index}>{message}</li>)}</ul>}{detail&&detail.warnings.length>0&&<ul className="import-warnings">{detail.warnings.map((message,index)=><li key={index}>{message}</li>)}</ul>}<p>{t('列坐标和表头行均从1开始。布局识别失败可显式纠正，不会猜测或修改已有历史引用。','列番号・ヘッダー行は1から指定します。解析に失敗した場合に明示的なレイアウトで修正できます。既存履歴を暗黙に置換しません。')}</p><Form onSubmit={reparse}><label>{t('解析布局JSON','解析レイアウトJSON')}<Textarea aria-label={t('解析布局JSON','解析レイアウトJSON')} value={layout} onChange={event=>setLayout(event.target.value)} rows={12} spellCheck={false}/></label><Button type="submit" disabled={busy}>{t(busy?'正在解析…':'按布局重新解析',busy?'解析中…':'レイアウトで再解析')}</Button></Form></>}{status&&<p role="status">{status}</p>}{error&&<Alert className="error" role="alert">{error}</Alert>}</section>;
+}

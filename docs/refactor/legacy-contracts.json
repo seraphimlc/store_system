@@ -1,0 +1,4688 @@
+{
+  "sourceCommit": "439e83464744a1e37bf666428e2d2bdf33a850ef",
+  "generatedBy": "One-time Python AST inventory during P0; runtime registration and business tests remain authoritative",
+  "note": "Route proposals are not implemented API contracts. Runtime registration proves only four direct grid/zone endpoints retired; station routes remain active. Permission classification must be enforced and tested per service during migration.",
+  "routes": [
+    {
+      "method": "GET",
+      "legacyPath": "/my/password",
+      "uiTarget": "/my/password",
+      "apiTarget": null,
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:53",
+      "function": "my_password_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/password",
+      "uiTarget": "/my/password",
+      "apiTarget": "/api/my/password",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:69",
+      "function": "my_password_submit",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-admin",
+      "uiTarget": "/admin/staff-admin",
+      "apiTarget": null,
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:103",
+      "function": "staff_admin_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/create",
+      "uiTarget": "/admin/staff-admin/create",
+      "apiTarget": "/api/staff-admin/create",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:141",
+      "function": "staff_create",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/{uid}/edit",
+      "uiTarget": "/admin/staff-admin/{uid}/edit",
+      "apiTarget": "/api/staff-admin/{uid}/edit",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:168",
+      "function": "staff_edit",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/suggest-username",
+      "uiTarget": "/admin/staff-admin/suggest-username",
+      "apiTarget": "/api/staff-admin/suggest-username",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:207",
+      "function": "staff_suggest_username",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/{uid}/lang",
+      "uiTarget": "/admin/staff-admin/{uid}/lang",
+      "apiTarget": "/api/staff-admin/{uid}/lang",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:219",
+      "function": "staff_set_lang",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/{uid}/status",
+      "uiTarget": "/admin/staff-admin/{uid}/status",
+      "apiTarget": "/api/staff-admin/{uid}/status",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:242",
+      "function": "staff_set_status",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/{uid}/reset",
+      "uiTarget": "/admin/staff-admin/{uid}/reset",
+      "apiTarget": "/api/staff-admin/{uid}/reset",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:269",
+      "function": "staff_reset",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-admin/accounts-export",
+      "uiTarget": "/admin/staff-admin/accounts-export",
+      "apiTarget": null,
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:289",
+      "function": "staff_accounts_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/reset-all",
+      "uiTarget": "/admin/staff-admin/reset-all",
+      "apiTarget": "/api/staff-admin/reset-all",
+      "module": "employees",
+      "handler": "app/routers/accounts_r.py:313",
+      "function": "staff_reset_all",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/login",
+      "uiTarget": "/login",
+      "apiTarget": null,
+      "module": "auth",
+      "handler": "app/routers/auth_r.py:72",
+      "function": "login_page",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/login",
+      "uiTarget": "/login",
+      "apiTarget": "/api/login",
+      "module": "auth",
+      "handler": "app/routers/auth_r.py:90",
+      "function": "login_submit",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/logout",
+      "uiTarget": "/logout",
+      "apiTarget": "/api/logout",
+      "module": "auth",
+      "handler": "app/routers/auth_r.py:120",
+      "function": "logout",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": []
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/",
+      "uiTarget": "/admin/",
+      "apiTarget": null,
+      "module": "auth",
+      "handler": "app/routers/auth_r.py:129",
+      "function": "root_redirect",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/batches/{task_id}/regions/{region_id}",
+      "uiTarget": "/my/work/batches/{task_id}/regions/{region_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:22",
+      "function": "region_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-regions/{region_id}/assign",
+      "uiTarget": "/my/work/batch-regions/{region_id}/assign",
+      "apiTarget": "/api/my/work/batch-regions/{region_id}/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:47",
+      "function": "bulk_assign",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-regions/{region_id}/auto-preview",
+      "uiTarget": "/my/work/batch-regions/{region_id}/auto-preview",
+      "apiTarget": "/api/my/work/batch-regions/{region_id}/auto-preview",
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:57",
+      "function": "auto_assign_preview",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-regions/{region_id}/auto-apply",
+      "uiTarget": "/my/work/batch-regions/{region_id}/auto-apply",
+      "apiTarget": "/api/my/work/batch-regions/{region_id}/auto-apply",
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:70",
+      "function": "auto_assign_apply",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/batch-grids/{grid_id}/new-store",
+      "uiTarget": "/my/work/batch-grids/{grid_id}/new-store",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:93",
+      "function": "new_store_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "bd_store_proposal",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-grids/{grid_id}/new-store",
+      "uiTarget": "/my/work/batch-grids/{grid_id}/new-store",
+      "apiTarget": "/api/my/work/batch-grids/{grid_id}/new-store",
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:114",
+      "function": "new_store",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/batches/{task_id}/new-stores",
+      "uiTarget": "/my/work/batches/{task_id}/new-stores",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:130",
+      "function": "proposal_list",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "bd_grid_task",
+        "bd_store_proposal",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/new-stores/{identity}/photo",
+      "uiTarget": "/my/work/new-stores/{identity}/photo",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:158",
+      "function": "photo",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "bd_grid_task",
+        "bd_region_task",
+        "bd_store_proposal",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batches/{task_id}/new-stores/review",
+      "uiTarget": "/my/work/batches/{task_id}/new-stores/review",
+      "apiTarget": "/api/my/work/batches/{task_id}/new-stores/review",
+      "module": "operations",
+      "handler": "app/routers/bd_batch_review_r.py:171",
+      "function": "review",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_batch_auto_assign",
+        "bd_hierarchical_tasks",
+        "bd_store_proposals",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/merchant-map",
+      "uiTarget": "/admin/merchant-map",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_merchant_map_r.py:19",
+      "function": "page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_merchant_map",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/merchant-map/data",
+      "uiTarget": "/admin/merchant-map/data",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_merchant_map_r.py:28",
+      "function": "data",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_merchant_map",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/merchant-map/detail",
+      "uiTarget": "/admin/merchant-map/detail",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_merchant_map_r.py:42",
+      "function": "detail",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_merchant_map",
+        "bd_zone_operations"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/teams",
+      "uiTarget": "/admin/teams",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:129",
+      "function": "teams_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/teams/{team_id}",
+      "uiTarget": "/admin/teams/{team_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:145",
+      "function": "team_detail",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "bd_team",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/teams/create",
+      "uiTarget": "/admin/teams/create",
+      "apiTarget": "/api/teams/create",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:173",
+      "function": "team_create",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/teams/{team_id}/edit",
+      "uiTarget": "/admin/teams/{team_id}/edit",
+      "apiTarget": "/api/teams/{team_id}/edit",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:194",
+      "function": "team_edit",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/teams/{team_id}/members",
+      "uiTarget": "/admin/teams/{team_id}/members",
+      "apiTarget": "/api/teams/{team_id}/members",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:218",
+      "function": "team_members_save",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "bd_task",
+        "bd_task_assign",
+        "bd_team_member",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/stations",
+      "uiTarget": "/stations",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:276",
+      "function": "stations_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/stations/export",
+      "uiTarget": "/stations/export",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:318",
+      "function": "stations_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stations/{station_id}/edit",
+      "uiTarget": "/stations/{station_id}/edit",
+      "apiTarget": "/api/stations/{station_id}/edit",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:358",
+      "function": "station_edit",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/tasks",
+      "uiTarget": "/tasks",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:384",
+      "function": "tasks_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/tasks/new",
+      "uiTarget": "/tasks/new",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:491",
+      "function": "task_new_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/new",
+      "uiTarget": "/tasks/new",
+      "apiTarget": "/api/tasks/new",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:521",
+      "function": "task_new_create",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/tasks/import",
+      "uiTarget": "/tasks/import",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:643",
+      "function": "task_import_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/import",
+      "uiTarget": "/tasks/import",
+      "apiTarget": "/api/tasks/import",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:654",
+      "function": "task_import_preview",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/import/apply",
+      "uiTarget": "/tasks/import/apply",
+      "apiTarget": "/api/tasks/import/apply",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:720",
+      "function": "task_import_apply",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/{task_id}/progress",
+      "uiTarget": "/tasks/{task_id}/progress",
+      "apiTarget": "/api/tasks/{task_id}/progress",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:779",
+      "function": "task_progress_admin",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/ai-suggest",
+      "uiTarget": "/tasks/ai-suggest",
+      "apiTarget": "/api/tasks/ai-suggest",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:807",
+      "function": "tasks_ai_suggest",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/assign",
+      "uiTarget": "/tasks/assign",
+      "apiTarget": "/api/tasks/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:834",
+      "function": "tasks_assign",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/tasks/export",
+      "uiTarget": "/tasks/export",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:869",
+      "function": "tasks_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/reassign",
+      "uiTarget": "/tasks/reassign",
+      "apiTarget": "/api/tasks/reassign",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:904",
+      "function": "tasks_reassign",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/ai-summary",
+      "uiTarget": "/tasks/ai-summary",
+      "apiTarget": "/api/tasks/ai-summary",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:937",
+      "function": "tasks_ai_summary",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/return-pool",
+      "uiTarget": "/tasks/return-pool",
+      "apiTarget": "/api/tasks/return-pool",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:969",
+      "function": "tasks_return_pool",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/tasks/reviews",
+      "uiTarget": "/tasks/reviews",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1008",
+      "function": "task_reviews_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/tasks/reviews/reject",
+      "uiTarget": "/tasks/reviews/reject",
+      "apiTarget": "/api/tasks/reviews/reject",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1041",
+      "function": "task_reviews_reject",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/tasks",
+      "uiTarget": "/my/tasks",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1103",
+      "function": "my_tasks_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/assign",
+      "uiTarget": "/my/tasks/assign",
+      "apiTarget": "/api/my/tasks/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1261",
+      "function": "my_tasks_assign",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/assign-bulk",
+      "uiTarget": "/my/tasks/assign-bulk",
+      "apiTarget": "/api/my/tasks/assign-bulk",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1299",
+      "function": "my_tasks_assign_bulk",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/reject",
+      "uiTarget": "/my/tasks/reject",
+      "apiTarget": "/api/my/tasks/reject",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1359",
+      "function": "task_reject",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/self-report",
+      "uiTarget": "/my/self-report",
+      "apiTarget": "/api/my/self-report",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1393",
+      "function": "my_self_report",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/progress",
+      "uiTarget": "/my/tasks/progress",
+      "apiTarget": "/api/my/tasks/progress",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1440",
+      "function": "my_tasks_progress",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/tasks/{task_id}",
+      "uiTarget": "/tasks/{task_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1487",
+      "function": "task_detail",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/logs",
+      "uiTarget": "/admin/logs",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1528",
+      "function": "logs_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "bd_task",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/confirm-bulk",
+      "uiTarget": "/my/tasks/confirm-bulk",
+      "apiTarget": "/api/my/tasks/confirm-bulk",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1585",
+      "function": "my_tasks_confirm_bulk",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/transfer",
+      "uiTarget": "/my/tasks/transfer",
+      "apiTarget": "/api/my/tasks/transfer",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1633",
+      "function": "my_tasks_transfer",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/progress-bulk",
+      "uiTarget": "/my/tasks/progress-bulk",
+      "apiTarget": "/api/my/tasks/progress-bulk",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1675",
+      "function": "my_tasks_progress_bulk",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/return",
+      "uiTarget": "/my/tasks/return",
+      "apiTarget": "/api/my/tasks/return",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1719",
+      "function": "my_tasks_return",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/confirm-day",
+      "uiTarget": "/my/tasks/confirm-day",
+      "apiTarget": "/api/my/tasks/confirm-day",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1755",
+      "function": "my_tasks_confirm_day",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/tasks/confirm",
+      "uiTarget": "/my/tasks/confirm",
+      "apiTarget": "/api/my/tasks/confirm",
+      "module": "operations",
+      "handler": "app/routers/bd_r.py:1785",
+      "function": "my_tasks_confirm",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/batches/{task_id}/logs",
+      "uiTarget": "/my/work/batches/{task_id}/logs",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:46",
+      "function": "batch_logs",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zone-tasks",
+      "uiTarget": "/admin/zone-tasks",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:64",
+      "function": "task_list",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_main_task",
+        "bd_zone_release",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zone-tasks/map",
+      "uiTarget": "/admin/zone-tasks/map",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:83",
+      "function": "task_picker_map",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zone-tasks",
+      "uiTarget": "/admin/zone-tasks",
+      "apiTarget": "/api/zone-tasks",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:94",
+      "function": "task_create",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zone-tasks/{task_id}",
+      "uiTarget": "/admin/zone-tasks/{task_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:105",
+      "function": "task_detail",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_team",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/batches/{task_id}",
+      "uiTarget": "/my/work/batches/{task_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:136",
+      "function": "work_batch",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zone-tasks/{task_id}/disable",
+      "uiTarget": "/admin/zone-tasks/{task_id}/disable",
+      "apiTarget": "/api/zone-tasks/{task_id}/disable",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:142",
+      "function": "batch_disable",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zone-tasks/regions/{identity}/assign",
+      "uiTarget": "/admin/zone-tasks/regions/{identity}/assign",
+      "apiTarget": "/api/zone-tasks/regions/{identity}/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:152",
+      "function": "batch_region_assign",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-grids/{identity}/assign",
+      "uiTarget": "/my/work/batch-grids/{identity}/assign",
+      "apiTarget": "/api/my/work/batch-grids/{identity}/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:164",
+      "function": "batch_grid_assign",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/batch-grids/{identity}",
+      "uiTarget": "/my/work/batch-grids/{identity}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:180",
+      "function": "batch_grid_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_work_grid",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-stores/{identity}/complete",
+      "uiTarget": "/my/work/batch-stores/{identity}/complete",
+      "apiTarget": "/api/my/work/batch-stores/{identity}/complete",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:204",
+      "function": "batch_store_complete",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/batch-stores/{identity}/location",
+      "uiTarget": "/my/work/batch-stores/{identity}/location",
+      "apiTarget": "/api/my/work/batch-stores/{identity}/location",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:230",
+      "function": "batch_store_location",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zones/manage",
+      "uiTarget": "/admin/zones/manage",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:256",
+      "function": "manage",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_zone_release",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/grid-merge-preview",
+      "uiTarget": "/admin/zones/grid-merge-preview",
+      "apiTarget": "/api/zones/grid-merge-preview",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:275",
+      "function": "grid_merge_preview",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/grids/enable",
+      "uiTarget": "/admin/zones/grids/enable",
+      "apiTarget": "/api/zones/grids/enable",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:285",
+      "function": "enable_grid",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/split",
+      "uiTarget": "/admin/zones/split",
+      "apiTarget": "/api/zones/split",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:305",
+      "function": "split_zone",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/merge-grids",
+      "uiTarget": "/admin/zones/merge-grids",
+      "apiTarget": "/api/zones/merge-grids",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:324",
+      "function": "grid_merge",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zones/{zone_id}/panel",
+      "uiTarget": "/admin/zones/{zone_id}/panel",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:359",
+      "function": "zone_panel",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_zone_release",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/{zone_id}/rename",
+      "uiTarget": "/admin/zones/{zone_id}/rename",
+      "apiTarget": "/api/zones/{zone_id}/rename",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:369",
+      "function": "zone_rename",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/formal-generate",
+      "uiTarget": "/admin/zones/formal-generate",
+      "apiTarget": "/api/zones/formal-generate",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:383",
+      "function": "generate",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/{zone_id}/assign",
+      "uiTarget": "/admin/zones/{zone_id}/assign",
+      "apiTarget": "/api/zones/{zone_id}/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:390",
+      "function": "zone_assign",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/zones/{zone_id}/recall",
+      "uiTarget": "/admin/zones/{zone_id}/recall",
+      "apiTarget": "/api/zones/{zone_id}/recall",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:399",
+      "function": "zone_recall",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work",
+      "uiTarget": "/my/work",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:408",
+      "function": "work",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/zones/{zone_id}",
+      "uiTarget": "/my/work/zones/{zone_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:415",
+      "function": "work_zone",
+      "retiredPath": true,
+      "accessBoundary": "authenticated-retirement-handler",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_team_member",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/grids/{grid_id}/assign",
+      "uiTarget": "/my/work/grids/{grid_id}/assign",
+      "apiTarget": "/api/my/work/grids/{grid_id}/assign",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:435",
+      "function": "grid_assign",
+      "retiredPath": true,
+      "accessBoundary": "authenticated-retirement-handler",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_work_grid",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/work/grids/{grid_id}",
+      "uiTarget": "/my/work/grids/{grid_id}",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:448",
+      "function": "grid_page",
+      "retiredPath": true,
+      "accessBoundary": "authenticated-retirement-handler",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "bd_store_visit_log",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/work/grids/{grid_id}/visit",
+      "uiTarget": "/my/work/grids/{grid_id}/visit",
+      "apiTarget": "/api/my/work/grids/{grid_id}/visit",
+      "module": "operations",
+      "handler": "app/routers/bd_zone_ops_r.py:464",
+      "function": "visit",
+      "retiredPath": true,
+      "accessBoundary": "authenticated-retirement-handler",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_grid_regions",
+        "bd_hierarchical_tasks",
+        "bd_zone_operations",
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zones",
+      "uiTarget": "/admin/zones",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zones_r.py:25",
+      "function": "page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zones/preview",
+      "uiTarget": "/admin/zones/preview",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zones_r.py:35",
+      "function": "generate",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/zones/review.csv",
+      "uiTarget": "/admin/zones/review.csv",
+      "apiTarget": null,
+      "module": "operations",
+      "handler": "app/routers/bd_zones_r.py:43",
+      "function": "merchant_review",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "bd_zones"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/files",
+      "uiTarget": "/admin/files",
+      "apiTarget": null,
+      "module": "imports",
+      "handler": "app/routers/files_r.py:29",
+      "function": "files_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "appeals",
+        "formal_records",
+        "imports",
+        "raw_records",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/files/preview",
+      "uiTarget": "/admin/files/preview",
+      "apiTarget": null,
+      "module": "imports",
+      "handler": "app/routers/files_r.py:64",
+      "function": "upload_files",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/upload",
+      "uiTarget": "/admin/files/upload",
+      "apiTarget": "/api/files/upload",
+      "module": "imports",
+      "handler": "app/routers/files_r.py:64",
+      "function": "upload_files",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/files/{fid}/report",
+      "uiTarget": "/admin/files/{fid}/report",
+      "apiTarget": null,
+      "module": "imports",
+      "handler": "app/routers/files_r.py:113",
+      "function": "file_report",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/{fid}/records/adjust",
+      "uiTarget": "/admin/files/{fid}/records/adjust",
+      "apiTarget": "/api/files/{fid}/records/adjust",
+      "module": "imports",
+      "handler": "app/routers/files_r.py:133",
+      "function": "delete_file",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "imports",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/{fid}/settle",
+      "uiTarget": "/admin/files/{fid}/settle",
+      "apiTarget": "/api/files/{fid}/settle",
+      "module": "imports",
+      "handler": "app/routers/files_r.py:133",
+      "function": "delete_file",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "imports",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/{fid}/rerun",
+      "uiTarget": "/admin/files/{fid}/rerun",
+      "apiTarget": "/api/files/{fid}/rerun",
+      "module": "imports",
+      "handler": "app/routers/files_r.py:133",
+      "function": "delete_file",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "imports",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/{fid}/delete",
+      "uiTarget": "/admin/files/{fid}/delete",
+      "apiTarget": "/api/files/{fid}/delete",
+      "module": "imports",
+      "handler": "app/routers/files_r.py:133",
+      "function": "delete_file",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "imports",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/files/{fid}/layout",
+      "uiTarget": "/admin/files/{fid}/layout",
+      "apiTarget": null,
+      "module": "imports",
+      "handler": "app/routers/files_r.py:228",
+      "function": "file_layout",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "imports",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/{fid}/reparse",
+      "uiTarget": "/admin/files/{fid}/reparse",
+      "apiTarget": "/api/files/{fid}/reparse",
+      "module": "imports",
+      "handler": "app/routers/files_r.py:258",
+      "function": "file_reparse",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "importer"
+      ],
+      "directModelTables": [
+        "imports",
+        "raw_records",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/product",
+      "uiTarget": "/product",
+      "apiTarget": null,
+      "module": "info",
+      "handler": "app/routers/info_r.py:21",
+      "function": "product_page",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": []
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/product/raw",
+      "uiTarget": "/product/raw",
+      "apiTarget": null,
+      "module": "info",
+      "handler": "app/routers/info_r.py:29",
+      "function": "product_raw",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": []
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/messages",
+      "uiTarget": "/messages",
+      "apiTarget": null,
+      "module": "messages",
+      "handler": "app/routers/msg_r.py:47",
+      "function": "messages_page",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/messages/send",
+      "uiTarget": "/messages/send",
+      "apiTarget": "/api/messages/send",
+      "module": "messages",
+      "handler": "app/routers/msg_r.py:80",
+      "function": "messages_send",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/messages/{message_id}/read",
+      "uiTarget": "/messages/{message_id}/read",
+      "apiTarget": "/api/messages/{message_id}/read",
+      "module": "messages",
+      "handler": "app/routers/msg_r.py:107",
+      "function": "messages_read",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/messages/{message_id}/go",
+      "uiTarget": "/messages/{message_id}/go",
+      "apiTarget": null,
+      "module": "messages",
+      "handler": "app/routers/msg_r.py:123",
+      "function": "messages_go",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "bd_message",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/messages/read-all",
+      "uiTarget": "/messages/read-all",
+      "apiTarget": "/api/messages/read-all",
+      "module": "messages",
+      "handler": "app/routers/msg_r.py:145",
+      "function": "messages_read_all",
+      "retiredPath": false,
+      "accessBoundary": "authenticated-recipient",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/.well-known/oauth-protected-resource",
+      "uiTarget": "/.well-known/oauth-protected-resource",
+      "apiTarget": null,
+      "module": "oauth",
+      "handler": "app/routers/oauth_r.py:71",
+      "function": "oauth_protected_resource",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "oauth"
+      ],
+      "directModelTables": []
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/.well-known/oauth-authorization-server",
+      "uiTarget": "/.well-known/oauth-authorization-server",
+      "apiTarget": null,
+      "module": "oauth",
+      "handler": "app/routers/oauth_r.py:82",
+      "function": "oauth_authorization_server",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "oauth"
+      ],
+      "directModelTables": []
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/oauth/register",
+      "uiTarget": "/oauth/register",
+      "apiTarget": "/api/oauth/register",
+      "module": "oauth",
+      "handler": "app/routers/oauth_r.py:100",
+      "function": "oauth_register",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "oauth"
+      ],
+      "directModelTables": []
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/oauth/authorize",
+      "uiTarget": "/oauth/authorize",
+      "apiTarget": null,
+      "module": "oauth",
+      "handler": "app/routers/oauth_r.py:153",
+      "function": "oauth_authorize_page",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "oauth"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/oauth/authorize",
+      "uiTarget": "/oauth/authorize",
+      "apiTarget": "/api/oauth/authorize",
+      "module": "oauth",
+      "handler": "app/routers/oauth_r.py:179",
+      "function": "oauth_authorize_submit",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "oauth"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/oauth/token",
+      "uiTarget": "/oauth/token",
+      "apiTarget": "/api/oauth/token",
+      "module": "oauth",
+      "handler": "app/routers/oauth_r.py:262",
+      "function": "oauth_token",
+      "retiredPath": false,
+      "accessBoundary": "public-protocol",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "oauth"
+      ],
+      "directModelTables": []
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/employees",
+      "uiTarget": "/admin/employees",
+      "apiTarget": null,
+      "module": "employees",
+      "handler": "app/routers/perf_r.py:25",
+      "function": "employees_list",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/employees/{code}",
+      "uiTarget": "/admin/employees/{code}",
+      "apiTarget": null,
+      "module": "employees",
+      "handler": "app/routers/perf_r.py:34",
+      "function": "employee_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/plan",
+      "uiTarget": "/my/plan",
+      "apiTarget": null,
+      "module": "plans",
+      "handler": "app/routers/plan_r.py:58",
+      "function": "my_plan_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/plan",
+      "uiTarget": "/my/plan",
+      "apiTarget": "/api/my/plan",
+      "module": "plans",
+      "handler": "app/routers/plan_r.py:89",
+      "function": "my_plan_submit",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-plans",
+      "uiTarget": "/admin/staff-plans",
+      "apiTarget": null,
+      "module": "plans",
+      "handler": "app/routers/plan_r.py:126",
+      "function": "staff_plans_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-plans/export",
+      "uiTarget": "/admin/staff-plans/export",
+      "apiTarget": null,
+      "module": "plans",
+      "handler": "app/routers/plan_r.py:148",
+      "function": "staff_plans_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/leave",
+      "uiTarget": "/my/leave",
+      "apiTarget": "/api/my/leave",
+      "module": "plans",
+      "handler": "app/routers/plan_r.py:182",
+      "function": "my_leave_start",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/leave/end",
+      "uiTarget": "/my/leave/end",
+      "apiTarget": "/api/my/leave/end",
+      "module": "plans",
+      "handler": "app/routers/plan_r.py:216",
+      "function": "my_leave_end",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/report",
+      "uiTarget": "/my/report",
+      "apiTarget": null,
+      "module": "reports",
+      "handler": "app/routers/report_r.py:49",
+      "function": "my_report_page",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/report",
+      "uiTarget": "/my/report",
+      "apiTarget": "/api/my/report",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:88",
+      "function": "my_report_submit",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-reports/compare/analyze",
+      "uiTarget": "/admin/staff-reports/compare/analyze",
+      "apiTarget": "/api/staff-reports/compare/analyze",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:116",
+      "function": "staff_reports_analyze",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-reports/analysis/{aid}/retry",
+      "uiTarget": "/admin/staff-reports/analysis/{aid}/retry",
+      "apiTarget": "/api/staff-reports/analysis/{aid}/retry",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:138",
+      "function": "staff_reports_analysis_retry",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/my/report/update",
+      "uiTarget": "/my/report/update",
+      "apiTarget": "/api/my/report/update",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:161",
+      "function": "my_report_update",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/report/feedback",
+      "uiTarget": "/my/report/feedback",
+      "apiTarget": null,
+      "module": "reports",
+      "handler": "app/routers/report_r.py:187",
+      "function": "my_report_feedback",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "staff_report_analyses",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-reports",
+      "uiTarget": "/admin/staff-reports",
+      "apiTarget": null,
+      "module": "reports",
+      "handler": "app/routers/report_r.py:277",
+      "function": "staff_reports_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "persons",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-reports/report/save",
+      "uiTarget": "/admin/staff-reports/report/save",
+      "apiTarget": "/api/staff-reports/report/save",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:317",
+      "function": "staff_report_save",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-reports/report/delete",
+      "uiTarget": "/admin/staff-reports/report/delete",
+      "apiTarget": "/api/staff-reports/report/delete",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:385",
+      "function": "staff_report_delete",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-reports/analysis/{aid}/delete",
+      "uiTarget": "/admin/staff-reports/analysis/{aid}/delete",
+      "apiTarget": "/api/staff-reports/analysis/{aid}/delete",
+      "module": "reports",
+      "handler": "app/routers/report_r.py:415",
+      "function": "staff_reports_analysis_delete",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-reports/compare",
+      "uiTarget": "/admin/staff-reports/compare",
+      "apiTarget": null,
+      "module": "reports",
+      "handler": "app/routers/report_r.py:435",
+      "function": "staff_reports_compare",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/staff-reports/export",
+      "uiTarget": "/admin/staff-reports/export",
+      "apiTarget": null,
+      "module": "reports",
+      "handler": "app/routers/report_r.py:477",
+      "function": "staff_reports_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/files/{fid}/finalize",
+      "uiTarget": "/admin/files/{fid}/finalize",
+      "apiTarget": "/api/files/{fid}/finalize",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:40",
+      "function": "finalize_file",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/my/perf",
+      "uiTarget": "/my/perf",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:59",
+      "function": "my_perf",
+      "retiredPath": false,
+      "accessBoundary": "self-or-current-team",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/dashboard",
+      "uiTarget": "/admin/dashboard",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:118",
+      "function": "dashboard",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/dashboard/staff",
+      "uiTarget": "/admin/dashboard/staff",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:234",
+      "function": "dashboard_staff_module",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/dashboard/analysis",
+      "uiTarget": "/admin/dashboard/analysis",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:260",
+      "function": "dashboard_analysis",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "staff_analyses",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/config",
+      "uiTarget": "/admin/config",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:305",
+      "function": "sys_config_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "sys_configs",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/config/save",
+      "uiTarget": "/admin/config/save",
+      "apiTarget": "/api/config/save",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:328",
+      "function": "sys_config_save",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "sys_configs",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/perf",
+      "uiTarget": "/admin/perf",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:370",
+      "function": "perf",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/v3/perf",
+      "uiTarget": "/admin/v3/perf",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:370",
+      "function": "perf",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/perf/per-point",
+      "uiTarget": "/admin/perf/per-point",
+      "apiTarget": "/api/perf/per-point",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:459",
+      "function": "v3_set_per_point",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/perf/export",
+      "uiTarget": "/admin/perf/export",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:485",
+      "function": "perf_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/v3/perf/export",
+      "uiTarget": "/admin/v3/perf/export",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:485",
+      "function": "perf_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/recon",
+      "uiTarget": "/admin/recon",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:524",
+      "function": "recon_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "persons",
+        "recon_day_rows",
+        "recon_results",
+        "recon_tasks",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/v3/recon",
+      "uiTarget": "/admin/v3/recon",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:524",
+      "function": "recon_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "persons",
+        "recon_day_rows",
+        "recon_results",
+        "recon_tasks",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/recon/upload2",
+      "uiTarget": "/admin/recon/upload2",
+      "apiTarget": "/api/recon/upload2",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:629",
+      "function": "recon_upload2",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/v3/recon/upload2",
+      "uiTarget": "/admin/v3/recon/upload2",
+      "apiTarget": "/api/v3/recon/upload2",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:629",
+      "function": "recon_upload2",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/recon/{task_id}/interpret",
+      "uiTarget": "/admin/recon/{task_id}/interpret",
+      "apiTarget": "/api/recon/{task_id}/interpret",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:664",
+      "function": "recon_interpret",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/v3/recon/{task_id}/interpret",
+      "uiTarget": "/admin/v3/recon/{task_id}/interpret",
+      "apiTarget": "/api/v3/recon/{task_id}/interpret",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:664",
+      "function": "recon_interpret",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/recon/{task_id}/adjust/{code}",
+      "uiTarget": "/admin/recon/{task_id}/adjust/{code}",
+      "apiTarget": "/api/recon/{task_id}/adjust/{code}",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:682",
+      "function": "recon_adjust",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/v3/recon/{task_id}/adjust/{code}",
+      "uiTarget": "/admin/v3/recon/{task_id}/adjust/{code}",
+      "apiTarget": "/api/v3/recon/{task_id}/adjust/{code}",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:682",
+      "function": "recon_adjust",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/recon/export",
+      "uiTarget": "/admin/recon/export",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:708",
+      "function": "recon_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/v3/recon/export",
+      "uiTarget": "/admin/v3/recon/export",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:708",
+      "function": "recon_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/recon/report",
+      "uiTarget": "/admin/recon/report",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:733",
+      "function": "recon_report",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/v3/recon/report",
+      "uiTarget": "/admin/v3/recon/report",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:733",
+      "function": "recon_report",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/recon/result",
+      "uiTarget": "/admin/recon/result",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:758",
+      "function": "recon_result",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "recon_tasks",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/v3/recon/result",
+      "uiTarget": "/admin/v3/recon/result",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:758",
+      "function": "recon_result",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "recon_tasks",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/month/rebuild",
+      "uiTarget": "/admin/month/rebuild",
+      "apiTarget": "/api/month/rebuild",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:803",
+      "function": "month_rebuild",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/v3/month/rebuild",
+      "uiTarget": "/admin/v3/month/rebuild",
+      "apiTarget": "/api/v3/month/rebuild",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:803",
+      "function": "month_rebuild",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/payroll-settle",
+      "uiTarget": "/admin/payroll-settle",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:827",
+      "function": "payroll_settle_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/payroll-settle/generate",
+      "uiTarget": "/admin/payroll-settle/generate",
+      "apiTarget": "/api/payroll-settle/generate",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:870",
+      "function": "payroll_settle_generate",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/payroll-settle/{month}/{person_code}/update",
+      "uiTarget": "/admin/payroll-settle/{month}/{person_code}/update",
+      "apiTarget": "/api/payroll-settle/{month}/{person_code}/update",
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:913",
+      "function": "payroll_settle_update",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/payroll-settle/export",
+      "uiTarget": "/admin/payroll-settle/export",
+      "apiTarget": null,
+      "module": "settlement",
+      "handler": "app/routers/settle_r.py:935",
+      "function": "payroll_settle_export",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "flow"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/stores",
+      "uiTarget": "/admin/stores",
+      "apiTarget": null,
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:64",
+      "function": "stores_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/groups/merge",
+      "uiTarget": "/admin/stores/groups/merge",
+      "apiTarget": "/api/stores/groups/merge",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:84",
+      "function": "merge_group",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/groups/skip",
+      "uiTarget": "/admin/stores/groups/skip",
+      "apiTarget": "/api/stores/groups/skip",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:101",
+      "function": "skip_group",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/groups/apply-all",
+      "uiTarget": "/admin/stores/groups/apply-all",
+      "apiTarget": "/api/stores/groups/apply-all",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:114",
+      "function": "apply_all",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/ai-run",
+      "uiTarget": "/admin/stores/ai-run",
+      "apiTarget": "/api/stores/ai-run",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:129",
+      "function": "ai_run",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "ai_runs",
+        "store_pairs",
+        "users"
+      ]
+    },
+    {
+      "method": "GET",
+      "legacyPath": "/stores/entities",
+      "uiTarget": "/admin/stores/entities",
+      "apiTarget": null,
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:156",
+      "function": "entities_page",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "store_entities",
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/pairs/{pid}/merge",
+      "uiTarget": "/admin/stores/pairs/{pid}/merge",
+      "apiTarget": "/api/stores/pairs/{pid}/merge",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:189",
+      "function": "merge_pair",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/pairs/{pid}/skip",
+      "uiTarget": "/admin/stores/pairs/{pid}/skip",
+      "apiTarget": "/api/stores/pairs/{pid}/skip",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:207",
+      "function": "skip_pair",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/stores/entities/{eid}/split",
+      "uiTarget": "/admin/stores/entities/{eid}/split",
+      "apiTarget": "/api/stores/entities/{eid}/split",
+      "module": "stores",
+      "handler": "app/routers/stores_r.py:219",
+      "function": "split_entity",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "ai_batch",
+        "store_master"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/{uid}/tokens/issue",
+      "uiTarget": "/admin/staff-admin/{uid}/tokens/issue",
+      "apiTarget": "/api/staff-admin/{uid}/tokens/issue",
+      "module": "auth",
+      "handler": "app/routers/tokens_r.py:38",
+      "function": "staff_admin_tokens_issue",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "mcp_tokens"
+      ],
+      "directModelTables": [
+        "users"
+      ]
+    },
+    {
+      "method": "POST",
+      "legacyPath": "/staff-admin/{uid}/tokens/{tid}/revoke",
+      "uiTarget": "/admin/staff-admin/{uid}/tokens/{tid}/revoke",
+      "apiTarget": "/api/staff-admin/{uid}/tokens/{tid}/revoke",
+      "module": "auth",
+      "handler": "app/routers/tokens_r.py:63",
+      "function": "staff_admin_tokens_revoke",
+      "retiredPath": false,
+      "accessBoundary": "admin",
+      "permissionEvidence": "classification requires handler/service guards; not an authorization policy",
+      "directServiceImports": [
+        "mcp_tokens"
+      ],
+      "directModelTables": [
+        "api_tokens",
+        "users"
+      ]
+    }
+  ],
+  "models": {
+    "User": "users",
+    "ImportFile": "imports",
+    "RawRecord": "raw_records",
+    "Person": "persons",
+    "DashMetric": "dash_metrics",
+    "StaffAnalysis": "staff_analyses",
+    "SysConfig": "sys_configs",
+    "ReconTask": "recon_tasks",
+    "ReconResult": "recon_results",
+    "AiRun": "ai_runs",
+    "StoreEntity": "store_entities",
+    "StorePair": "store_pairs",
+    "StoreMergeLog": "store_merge_logs",
+    "FormalRecord": "formal_records",
+    "AppealRecord": "appeals",
+    "AdjustRecord": "adjust_records",
+    "ReconDayRow": "recon_day_rows",
+    "PersonDailyStat": "person_daily_stats",
+    "ReconDataRow": "recon_data_rows",
+    "PayrollPeriodRow": "payroll_period_rows",
+    "MonthPerfRecord": "month_perf_records",
+    "ApiToken": "api_tokens",
+    "McpAuditLog": "mcp_audit_log",
+    "OAuthClient": "oauth_clients",
+    "OAuthCode": "oauth_codes",
+    "OAuthRefreshToken": "oauth_refresh_tokens",
+    "SealedMonth": "sealed_months",
+    "RebuildSnapshot": "rebuild_snapshots",
+    "PayrollPaidMark": "payroll_paid_marks",
+    "PayrollPayment": "payroll_payments",
+    "PayrollAdjust": "payroll_adjusts",
+    "PayrollSettlementLink": "payroll_settlement_links",
+    "StaffDailyReport": "staff_daily_reports",
+    "StaffReportAnalysis": "staff_report_analyses",
+    "StaffReportComparePerson": "staff_report_compare_person",
+    "StaffReportCompareDay": "staff_report_compare_day",
+    "StaffDatePlan": "staff_date_plans",
+    "FormToken": "form_tokens",
+    "BdArea": "bd_area",
+    "BdStore": "bd_store",
+    "BdTeam": "bd_team",
+    "BdTeamMember": "bd_team_member",
+    "BdLine": "bd_line",
+    "BdStationPlace": "bd_station_place",
+    "BdStation": "bd_station",
+    "BdTask": "bd_task",
+    "BdTaskAssign": "bd_task_assign",
+    "BdTaskProgress": "bd_task_progress",
+    "BdLog": "bd_log",
+    "BdRoleCap": "bd_role_cap",
+    "BdAiSummary": "bd_ai_summary",
+    "BdStaffLeave": "bd_staff_leave",
+    "BdMessage": "bd_message",
+    "BdMessageRecipient": "bd_message_recipient",
+    "BdZoneRelease": "bd_zone_release",
+    "BdRegion": "bd_region",
+    "BdWorkGrid": "bd_work_grid",
+    "BdGridStore": "bd_grid_store",
+    "BdWorkStore": "bd_work_store",
+    "BdStoreVisitLog": "bd_store_visit_log",
+    "BdTaskEvent": "bd_task_event",
+    "BdStoreProposal": "bd_store_proposal",
+    "BdMainTask": "bd_main_task",
+    "BdRegionTask": "bd_region_task",
+    "BdGridTask": "bd_grid_task",
+    "BdStoreTask": "bd_store_task",
+    "BdMerchantDetail": "bd_merchant_detail"
+  },
+  "existingTests": [
+    "tests_web/test_accounts_export.py",
+    "tests_web/test_ai_batch.py",
+    "tests_web/test_ai_recon.py",
+    "tests_web/test_ai_visit.py",
+    "tests_web/test_auth.py",
+    "tests_web/test_autocreate.py",
+    "tests_web/test_bd_batch_controls.py",
+    "tests_web/test_bd_batch_experience.py",
+    "tests_web/test_bd_batch_picker_browser.py",
+    "tests_web/test_bd_dispatch.py",
+    "tests_web/test_bd_grid_address_names.py",
+    "tests_web/test_bd_grid_density.py",
+    "tests_web/test_bd_grid_metadata.py",
+    "tests_web/test_bd_grid_places.py",
+    "tests_web/test_bd_grid_regions_browser.py",
+    "tests_web/test_bd_grid_reorganize.py",
+    "tests_web/test_bd_hierarchical_tasks.py",
+    "tests_web/test_bd_merchant_map.py",
+    "tests_web/test_bd_merchant_map_browser.py",
+    "tests_web/test_bd_merchant_media.py",
+    "tests_web/test_bd_natural_grids.py",
+    "tests_web/test_bd_ops.py",
+    "tests_web/test_bd_p1_performance.py",
+    "tests_web/test_bd_refresh_tokyo_names.py",
+    "tests_web/test_bd_region_generation.py",
+    "tests_web/test_bd_task_events.py",
+    "tests_web/test_bd_task_navigation.py",
+    "tests_web/test_bd_visit_interactions.py",
+    "tests_web/test_bd_visit_page.py",
+    "tests_web/test_bd_zone_balance.py",
+    "tests_web/test_bd_zone_coverage.py",
+    "tests_web/test_bd_zone_frontend.py",
+    "tests_web/test_bd_zone_merchants.py",
+    "tests_web/test_bd_zone_operations.py",
+    "tests_web/test_bd_zone_rules.py",
+    "tests_web/test_bd_zones.py",
+    "tests_web/test_daily_report.py",
+    "tests_web/test_dashboard_perf.py",
+    "tests_web/test_date_plan.py",
+    "tests_web/test_defensive.py",
+    "tests_web/test_diagnostics.py",
+    "tests_web/test_first_login_password.py",
+    "tests_web/test_flow.py",
+    "tests_web/test_form_token.py",
+    "tests_web/test_health.py",
+    "tests_web/test_i18n.py",
+    "tests_web/test_integrity.py",
+    "tests_web/test_login_names.py",
+    "tests_web/test_migrations.py",
+    "tests_web/test_mobile_nav_title.py",
+    "tests_web/test_oauth.py",
+    "tests_web/test_page_perf.py",
+    "tests_web/test_period.py",
+    "tests_web/test_permission.py",
+    "tests_web/test_permissions.py",
+    "tests_web/test_rebuild_snapshot.py",
+    "tests_web/test_recon_report.py",
+    "tests_web/test_report_admin_edit.py",
+    "tests_web/test_report_delete_and_acc.py",
+    "tests_web/test_report_robustness.py",
+    "tests_web/test_staff_status.py",
+    "tests_web/test_store_address_import.py",
+    "tests_web/test_store_auto.py",
+    "tests_web/test_store_master.py",
+    "tests_web/test_store_rules.py",
+    "tests_web/test_task_import.py",
+    "tests_web/test_team_task.py",
+    "tests_web/test_templates.py",
+    "tests_web/test_time_display.py",
+    "tests_web/test_token_pages.py"
+  ],
+  "effectiveRoutes": [
+    {
+      "path": "/openapi.json",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.openapi"
+    },
+    {
+      "path": "/docs",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.swagger_ui_html"
+    },
+    {
+      "path": "/docs/oauth2-redirect",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.swagger_ui_redirect"
+    },
+    {
+      "path": "/redoc",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.redoc_html"
+    },
+    {
+      "path": "/login",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.auth_r.login_page"
+    },
+    {
+      "path": "/login",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.auth_r.login_submit"
+    },
+    {
+      "path": "/logout",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.auth_r.logout"
+    },
+    {
+      "path": "/",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.auth_r.root_redirect"
+    },
+    {
+      "path": "/files",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.files_r.files_page"
+    },
+    {
+      "path": "/files/upload",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.files_r.upload_files"
+    },
+    {
+      "path": "/files/preview",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.files_r.upload_files"
+    },
+    {
+      "path": "/files/{fid}/report",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.files_r.file_report"
+    },
+    {
+      "path": "/files/{fid}/delete",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.files_r.delete_file"
+    },
+    {
+      "path": "/files/{fid}/rerun",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.files_r.delete_file"
+    },
+    {
+      "path": "/files/{fid}/settle",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.files_r.delete_file"
+    },
+    {
+      "path": "/files/{fid}/records/adjust",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.files_r.delete_file"
+    },
+    {
+      "path": "/files/{fid}/layout",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.files_r.file_layout"
+    },
+    {
+      "path": "/files/{fid}/reparse",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.files_r.file_reparse"
+    },
+    {
+      "path": "/employees",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.perf_r.employees_list"
+    },
+    {
+      "path": "/employees/{code}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.perf_r.employee_page"
+    },
+    {
+      "path": "/stores",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.stores_r.stores_page"
+    },
+    {
+      "path": "/stores/groups/merge",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.merge_group"
+    },
+    {
+      "path": "/stores/groups/skip",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.skip_group"
+    },
+    {
+      "path": "/stores/groups/apply-all",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.apply_all"
+    },
+    {
+      "path": "/stores/ai-run",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.ai_run"
+    },
+    {
+      "path": "/stores/entities",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.stores_r.entities_page"
+    },
+    {
+      "path": "/stores/pairs/{pid}/merge",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.merge_pair"
+    },
+    {
+      "path": "/stores/pairs/{pid}/skip",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.skip_pair"
+    },
+    {
+      "path": "/stores/entities/{eid}/split",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.stores_r.split_entity"
+    },
+    {
+      "path": "/my/password",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.accounts_r.my_password_page"
+    },
+    {
+      "path": "/my/password",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.my_password_submit"
+    },
+    {
+      "path": "/staff-admin",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_admin_page"
+    },
+    {
+      "path": "/staff-admin/create",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_create"
+    },
+    {
+      "path": "/staff-admin/{uid}/edit",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_edit"
+    },
+    {
+      "path": "/staff-admin/suggest-username",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_suggest_username"
+    },
+    {
+      "path": "/staff-admin/{uid}/lang",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_set_lang"
+    },
+    {
+      "path": "/staff-admin/{uid}/status",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_set_status"
+    },
+    {
+      "path": "/staff-admin/{uid}/reset",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_reset"
+    },
+    {
+      "path": "/staff-admin/accounts-export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_accounts_export"
+    },
+    {
+      "path": "/staff-admin/reset-all",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.accounts_r.staff_reset_all"
+    },
+    {
+      "path": "/product",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.info_r.product_page"
+    },
+    {
+      "path": "/product/raw",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.info_r.product_raw"
+    },
+    {
+      "path": "/files/{fid}/finalize",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.finalize_file"
+    },
+    {
+      "path": "/my/perf",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.my_perf"
+    },
+    {
+      "path": "/dashboard",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.dashboard"
+    },
+    {
+      "path": "/dashboard/staff",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.dashboard_staff_module"
+    },
+    {
+      "path": "/dashboard/analysis",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.dashboard_analysis"
+    },
+    {
+      "path": "/config",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.sys_config_page"
+    },
+    {
+      "path": "/config/save",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.sys_config_save"
+    },
+    {
+      "path": "/v3/perf",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.perf"
+    },
+    {
+      "path": "/perf",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.perf"
+    },
+    {
+      "path": "/perf/per-point",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.v3_set_per_point"
+    },
+    {
+      "path": "/v3/perf/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.perf_export"
+    },
+    {
+      "path": "/perf/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.perf_export"
+    },
+    {
+      "path": "/v3/recon",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_page"
+    },
+    {
+      "path": "/recon",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_page"
+    },
+    {
+      "path": "/v3/recon/upload2",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.recon_upload2"
+    },
+    {
+      "path": "/recon/upload2",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.recon_upload2"
+    },
+    {
+      "path": "/v3/recon/{task_id}/interpret",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.recon_interpret"
+    },
+    {
+      "path": "/recon/{task_id}/interpret",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.recon_interpret"
+    },
+    {
+      "path": "/v3/recon/{task_id}/adjust/{code}",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.recon_adjust"
+    },
+    {
+      "path": "/recon/{task_id}/adjust/{code}",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.recon_adjust"
+    },
+    {
+      "path": "/v3/recon/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_export"
+    },
+    {
+      "path": "/recon/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_export"
+    },
+    {
+      "path": "/v3/recon/report",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_report"
+    },
+    {
+      "path": "/recon/report",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_report"
+    },
+    {
+      "path": "/v3/recon/result",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_result"
+    },
+    {
+      "path": "/recon/result",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.recon_result"
+    },
+    {
+      "path": "/v3/month/rebuild",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.month_rebuild"
+    },
+    {
+      "path": "/month/rebuild",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.month_rebuild"
+    },
+    {
+      "path": "/payroll-settle",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.payroll_settle_page"
+    },
+    {
+      "path": "/payroll-settle/generate",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.payroll_settle_generate"
+    },
+    {
+      "path": "/payroll-settle/{month}/{person_code}/update",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.settle_r.payroll_settle_update"
+    },
+    {
+      "path": "/payroll-settle/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.settle_r.payroll_settle_export"
+    },
+    {
+      "path": "/staff-admin/{uid}/tokens/issue",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.tokens_r.staff_admin_tokens_issue"
+    },
+    {
+      "path": "/staff-admin/{uid}/tokens/{tid}/revoke",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.tokens_r.staff_admin_tokens_revoke"
+    },
+    {
+      "path": "/.well-known/oauth-protected-resource",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.oauth_r.oauth_protected_resource"
+    },
+    {
+      "path": "/.well-known/oauth-authorization-server",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.oauth_r.oauth_authorization_server"
+    },
+    {
+      "path": "/oauth/register",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.oauth_r.oauth_register"
+    },
+    {
+      "path": "/oauth/authorize",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.oauth_r.oauth_authorize_page"
+    },
+    {
+      "path": "/oauth/authorize",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.oauth_r.oauth_authorize_submit"
+    },
+    {
+      "path": "/oauth/token",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.oauth_r.oauth_token"
+    },
+    {
+      "path": "/my/report",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.report_r.my_report_page"
+    },
+    {
+      "path": "/my/report",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.my_report_submit"
+    },
+    {
+      "path": "/staff-reports/compare/analyze",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.staff_reports_analyze"
+    },
+    {
+      "path": "/staff-reports/analysis/{aid}/retry",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.staff_reports_analysis_retry"
+    },
+    {
+      "path": "/my/report/update",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.my_report_update"
+    },
+    {
+      "path": "/my/report/feedback",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.report_r.my_report_feedback"
+    },
+    {
+      "path": "/staff-reports",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.report_r.staff_reports_page"
+    },
+    {
+      "path": "/staff-reports/report/save",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.staff_report_save"
+    },
+    {
+      "path": "/staff-reports/report/delete",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.staff_report_delete"
+    },
+    {
+      "path": "/staff-reports/analysis/{aid}/delete",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.report_r.staff_reports_analysis_delete"
+    },
+    {
+      "path": "/staff-reports/compare",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.report_r.staff_reports_compare"
+    },
+    {
+      "path": "/staff-reports/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.report_r.staff_reports_export"
+    },
+    {
+      "path": "/my/plan",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.plan_r.my_plan_page"
+    },
+    {
+      "path": "/my/plan",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.plan_r.my_plan_submit"
+    },
+    {
+      "path": "/staff-plans",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.plan_r.staff_plans_page"
+    },
+    {
+      "path": "/staff-plans/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.plan_r.staff_plans_export"
+    },
+    {
+      "path": "/my/leave",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.plan_r.my_leave_start"
+    },
+    {
+      "path": "/my/leave/end",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.plan_r.my_leave_end"
+    },
+    {
+      "path": "/teams",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.teams_page"
+    },
+    {
+      "path": "/teams/{team_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.team_detail"
+    },
+    {
+      "path": "/teams/create",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.team_create"
+    },
+    {
+      "path": "/teams/{team_id}/edit",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.team_edit"
+    },
+    {
+      "path": "/teams/{team_id}/members",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.team_members_save"
+    },
+    {
+      "path": "/stations",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.stations_page"
+    },
+    {
+      "path": "/stations/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.stations_export"
+    },
+    {
+      "path": "/stations/{station_id}/edit",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.station_edit"
+    },
+    {
+      "path": "/tasks",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_page"
+    },
+    {
+      "path": "/tasks/new",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.task_new_page"
+    },
+    {
+      "path": "/tasks/new",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.task_new_create"
+    },
+    {
+      "path": "/tasks/import",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.task_import_page"
+    },
+    {
+      "path": "/tasks/import",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.task_import_preview"
+    },
+    {
+      "path": "/tasks/import/apply",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.task_import_apply"
+    },
+    {
+      "path": "/tasks/{task_id}/progress",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.task_progress_admin"
+    },
+    {
+      "path": "/tasks/ai-suggest",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_ai_suggest"
+    },
+    {
+      "path": "/tasks/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_assign"
+    },
+    {
+      "path": "/tasks/export",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_export"
+    },
+    {
+      "path": "/tasks/reassign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_reassign"
+    },
+    {
+      "path": "/tasks/ai-summary",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_ai_summary"
+    },
+    {
+      "path": "/tasks/return-pool",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.tasks_return_pool"
+    },
+    {
+      "path": "/tasks/reviews",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.task_reviews_page"
+    },
+    {
+      "path": "/tasks/reviews/reject",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.task_reviews_reject"
+    },
+    {
+      "path": "/my/tasks",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_page"
+    },
+    {
+      "path": "/my/tasks/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_assign"
+    },
+    {
+      "path": "/my/tasks/assign-bulk",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_assign_bulk"
+    },
+    {
+      "path": "/my/tasks/reject",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.task_reject"
+    },
+    {
+      "path": "/my/self-report",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_self_report"
+    },
+    {
+      "path": "/my/tasks/progress",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_progress"
+    },
+    {
+      "path": "/tasks/{task_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.task_detail"
+    },
+    {
+      "path": "/logs",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_r.logs_page"
+    },
+    {
+      "path": "/my/tasks/confirm-bulk",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_confirm_bulk"
+    },
+    {
+      "path": "/my/tasks/transfer",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_transfer"
+    },
+    {
+      "path": "/my/tasks/progress-bulk",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_progress_bulk"
+    },
+    {
+      "path": "/my/tasks/return",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_return"
+    },
+    {
+      "path": "/my/tasks/confirm-day",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_confirm_day"
+    },
+    {
+      "path": "/my/tasks/confirm",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_r.my_tasks_confirm"
+    },
+    {
+      "path": "/zones",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zones_r.page"
+    },
+    {
+      "path": "/zones/preview",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zones_r.generate"
+    },
+    {
+      "path": "/zones/review.csv",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zones_r.merchant_review"
+    },
+    {
+      "path": "/my/work/batches/{task_id}/logs",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_logs"
+    },
+    {
+      "path": "/zone-tasks",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.task_list"
+    },
+    {
+      "path": "/zone-tasks/map",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.task_picker_map"
+    },
+    {
+      "path": "/zone-tasks",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.task_create"
+    },
+    {
+      "path": "/zone-tasks/{task_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.task_detail"
+    },
+    {
+      "path": "/my/work/batches/{task_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.work_batch"
+    },
+    {
+      "path": "/zone-tasks/{task_id}/disable",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_disable"
+    },
+    {
+      "path": "/zone-tasks/regions/{identity}/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_region_assign"
+    },
+    {
+      "path": "/my/work/batch-grids/{identity}/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_grid_assign"
+    },
+    {
+      "path": "/my/work/batch-grids/{identity}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_grid_page"
+    },
+    {
+      "path": "/my/work/batch-stores/{identity}/complete",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_store_complete"
+    },
+    {
+      "path": "/my/work/batch-stores/{identity}/location",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.batch_store_location"
+    },
+    {
+      "path": "/zones/manage",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.manage"
+    },
+    {
+      "path": "/zones/grid-merge-preview",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.grid_merge_preview"
+    },
+    {
+      "path": "/zones/grids/enable",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.enable_grid"
+    },
+    {
+      "path": "/zones/split",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.split_zone"
+    },
+    {
+      "path": "/zones/merge-grids",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.grid_merge"
+    },
+    {
+      "path": "/zones/{zone_id}/panel",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.zone_panel"
+    },
+    {
+      "path": "/zones/{zone_id}/rename",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.zone_rename"
+    },
+    {
+      "path": "/zones/formal-generate",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.generate"
+    },
+    {
+      "path": "/zones/{zone_id}/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.zone_assign"
+    },
+    {
+      "path": "/zones/{zone_id}/recall",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.zone_recall"
+    },
+    {
+      "path": "/my/work",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_zone_ops_r.work"
+    },
+    {
+      "path": "/my/work/zones/{zone_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_legacy_r.retired_page"
+    },
+    {
+      "path": "/my/work/grids/{grid_id}/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_legacy_r.retired_page"
+    },
+    {
+      "path": "/my/work/grids/{grid_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_legacy_r.retired_page"
+    },
+    {
+      "path": "/my/work/grids/{grid_id}/visit",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_legacy_r.retired_page"
+    },
+    {
+      "path": "/my/work/batches/{task_id}/regions/{region_id}",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.region_page"
+    },
+    {
+      "path": "/my/work/batch-regions/{region_id}/assign",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.bulk_assign"
+    },
+    {
+      "path": "/my/work/batch-regions/{region_id}/auto-preview",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.auto_assign_preview"
+    },
+    {
+      "path": "/my/work/batch-regions/{region_id}/auto-apply",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.auto_assign_apply"
+    },
+    {
+      "path": "/my/work/batch-grids/{grid_id}/new-store",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.new_store_page"
+    },
+    {
+      "path": "/my/work/batch-grids/{grid_id}/new-store",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.new_store"
+    },
+    {
+      "path": "/my/work/batches/{task_id}/new-stores",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.proposal_list"
+    },
+    {
+      "path": "/my/work/new-stores/{identity}/photo",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.photo"
+    },
+    {
+      "path": "/my/work/batches/{task_id}/new-stores/review",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.bd_batch_review_r.review"
+    },
+    {
+      "path": "/merchant-map",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_merchant_map_r.page"
+    },
+    {
+      "path": "/merchant-map/data",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_merchant_map_r.data"
+    },
+    {
+      "path": "/merchant-map/detail",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.bd_merchant_map_r.detail"
+    },
+    {
+      "path": "/messages",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.msg_r.messages_page"
+    },
+    {
+      "path": "/messages/send",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.msg_r.messages_send"
+    },
+    {
+      "path": "/messages/{message_id}/read",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.msg_r.messages_read"
+    },
+    {
+      "path": "/messages/{message_id}/go",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.routers.msg_r.messages_go"
+    },
+    {
+      "path": "/messages/read-all",
+      "methods": [
+        "POST"
+      ],
+      "endpoint": "app.routers.msg_r.messages_read_all"
+    },
+    {
+      "path": "/healthz",
+      "methods": [
+        "GET"
+      ],
+      "endpoint": "app.main.healthz"
+    }
+  ]
+}

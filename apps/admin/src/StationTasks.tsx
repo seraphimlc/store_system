@@ -1,0 +1,3 @@
+import {Button} from '@appica/ui-react/button';import {AdminStationTasks as View,type TaskButtonProps} from './AdminStationTasks';import type {Session} from '../../../packages/contracts/src';import {api} from './api';
+function TaskButton({children,disabled,onClick,primary}:TaskButtonProps){return <Button type="button" variant={primary?undefined:'outline'} disabled={disabled} onClick={onClick}>{children}</Button>;}
+export function StationTasks({session,language}:{session:Session;language:string}){return <View session={session} language={language} request={api} Button={TaskButton} base="/admin/station-tasks"/>;}

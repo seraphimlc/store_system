@@ -1,0 +1,1 @@
+{"name":"@store/client","version":"0.1.0","private":true,"scripts":{"typecheck":"tsc --noEmit","build":"tsc"},"dependencies":{"react":"19.3.1"},"devDependencies":{"@types/google.maps":"3.66.10","@types/react":"^19.0.0"}}

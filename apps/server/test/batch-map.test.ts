@@ -1,0 +1,44 @@
+import {spawnLegacyPython} from '../../../scripts/legacy-python.mjs';
+import 'reflect-metadata';import test from 'node:test';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {randomUUID} from 'node:crypto';import {hash} from '@node-rs/argon2';import request from '../node_modules/supertest';
+import {createApp} from '../src/main';import {Database} from '../src/database';import {BatchWorkService} from '../src/batch-work';import {seedBatchWork,clearBatchWork} from '../../../scripts/batch-work-fixture.mjs';
+const url=process.env.NEXT_TEST_DATABASE_URL;
+test('batch map respects frozen bounds, shared coordinate precedence, current scope and location edits preserve completed facts',{skip:!url},async()=>{
+ assert.match(new URL(url!).pathname,/_refactor_p1$/);const app=await createApp({databaseUrl:url!,sessionSecret:'batch-map-test-at-least-40-character-secret-value',cookieSecure:false,host:'127.0.0.1',port:0}),db=app.get(Database),service=app.get(BatchWorkService);let f:any;
+ try{
+  f=await seedBatchWork(db,'P5-BM-'+Date.now().toString(36),await hash('fixture-batch-map'));const worker=f.users[2],grid=f.grids[0][0],store=f.stores[0][0][0],source=f.prefix+'-source-0-0',other=f.stores[1][0][0];
+  await db.query("INSERT INTO public.kanto_merchants_v20261029(place_id,name,lat,lon,location_accuracy,target_en,target_zh,sources,overture_id,osm_id,phone,website,address,region,prefecture,municipality) VALUES($1,$2,35.2,139.2,$3,'','','fixture','','','','','','','','')",[source,'synthetic map merchant','doubtful']);
+  const frozen=(await db.query('SELECT snapshot FROM bd_grid_task WHERE id=$1',[grid])).rows[0].snapshot.geometry;
+  await db.query("UPDATE bd_work_grid SET geometry=$1 WHERE id=$2",[JSON.stringify({type:'Polygon',coordinates:[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}),f.baseGrids[0]]);
+  let page=await service.map(worker,grid,{});assert.deepEqual(page.boundary,frozen);assert.equal(page.items[0].lat,35.2);assert.equal(page.items[0].accuracy,'doubtful');assert.equal(page.canExecute,true);
+  assert.equal((await service.stores(worker,grid,{focus:store})).items[0].id,store);
+  const legacyCode=`import json\nfrom app.db import SessionLocal\nfrom app.models import User,BdStoreTask,BdMerchantDetail\nfrom app.services.bd_hierarchical_tasks import update_location_accuracy\nfrom app.services import bd_merchant_media as media\nmedia.lookup_place_id=lambda *args:{'google_place_id':None,'place_lookup_state':'unconfigured'}\ns=SessionLocal()\ntry:\n result=update_location_accuracy(s,s.get(User,${worker}),${store},'doubtful',35.6,139.6)\n s.flush()\n row=s.get(BdStoreTask,${store})\n profile=s.get(BdMerchantDetail,${JSON.stringify(source)})\n print(json.dumps({'snapshot':row.snapshot,'revision':row.revision,'lat':profile.lat,'lon':profile.lon,'profileRevision':profile.revision,'lookup':profile.place_lookup_state}))\nfinally:\n s.rollback()\n s.close()`;
+  const legacy=spawnLegacyPython(['-c',legacyCode],{encoding:'utf8',env:{...process.env,DATABASE_URL:url!.replace(/^postgres(?:ql)?:/,'postgresql+psycopg2:')}});assert.equal(legacy.status,0,legacy.stderr);const expected=JSON.parse(legacy.stdout);
+  await assert.rejects(()=>service.location(f.users[0],store,{revision:0,profileRevision:0,accuracy:'accurate'}),{code:'FORBIDDEN'});
+  await assert.rejects(()=>service.location(worker,store,{revision:0,profileRevision:0,accuracy:'accurate',lat:91,lon:139}),{code:'VALIDATION'});
+  await assert.rejects(()=>service.location(worker,store,{revision:0,profileRevision:0,accuracy:'accurate',lat:35}),{code:'VALIDATION'});
+  await assert.rejects(()=>service.location(worker,store,{revision:9,profileRevision:0,accuracy:'accurate'}),{code:'TASK_CHANGED'});
+  const saved=await service.location(worker,store,{revision:0,profileRevision:0,accuracy:'doubtful',lat:35.6,lon:139.6});assert.equal(saved.accuracy,'accurate');assert.equal(saved.placeLookupState,'unconfigured');
+  const actual=(await db.query('SELECT snapshot,revision FROM bd_store_task WHERE id=$1',[store])).rows[0],profile=(await db.query('SELECT lat,lon,revision,place_lookup_state FROM bd_merchant_detail WHERE store_id=$1',[source])).rows[0];assert.deepEqual({...actual,lat:profile.lat,lon:profile.lon,profileRevision:profile.revision,lookup:profile.place_lookup_state},expected);
+  assert.equal((await service.map(worker,f.grids[1][0],{})).items[0].lat,35.6);assert.equal((await db.query('SELECT snapshot FROM bd_store_task WHERE id=$1',[other])).rows[0].snapshot.lat,35);
+  await service.complete(worker,store,{revision:1,requestId:randomUUID(),status:'normal',note:'complete'});const completed=(await db.query('SELECT snapshot,result,revision,request_id FROM bd_store_task WHERE id=$1',[store])).rows[0];
+  await service.location(worker,store,{revision:2,profileRevision:1,accuracy:'accurate',lat:35.7,lon:139.7});assert.deepEqual((await db.query('SELECT snapshot,result,revision,request_id FROM bd_store_task WHERE id=$1',[store])).rows[0],completed);
+  assert.equal((await service.map(worker,grid,{})).items[0].lat,35.7);assert.equal((await db.query("SELECT count(*)::int AS n FROM bd_task_event WHERE main_task_id=$1 AND event_type='verify_store_location'",[f.mains[0]])).rows[0].n,2);
+  await assert.rejects(()=>service.location(worker,other,{revision:0,profileRevision:1,accuracy:'accurate'}),{code:'LOCATION_CHANGED'});
+  const connect=db.pool.connect.bind(db.pool),mutable=db.pool as unknown as {connect:()=>Promise<unknown>};mutable.connect=async()=>{const client=await connect(),query=client.query.bind(client),release=client.release.bind(client);client.query=((sql:any,...args:any[])=>{if(typeof sql==='string'&&sql.includes('INSERT INTO bd_task_event'))throw Error('synthetic location audit failure');return(query as any)(sql,...args);}) as any;client.release=()=>{client.query=query;release();};return client;};
+  try{await assert.rejects(()=>service.location(worker,other,{revision:0,profileRevision:2,accuracy:'accurate',lat:35.8,lon:139.8}),/synthetic location audit failure/);}finally{mutable.connect=connect;}
+  assert.equal((await service.map(worker,grid,{})).items[0].lat,35.7);
+  const agent=request.agent(app.getHttpServer());const login=(await agent.post('/api/auth/login').send({username:f.codes[2],password:'fixture-batch-map'}).expect(201)).body;
+  await agent.get(`/api/batch-work/grids/${grid}/map`).expect(200);await agent.post(`/api/batch-work/stores/${store}/location`).send({revision:2,profileRevision:2,accuracy:'accurate'}).expect(403);
+  await db.query('UPDATE bd_grid_task SET assignee_id=$1 WHERE id=$2',[f.users[3],grid]);await agent.get(`/api/batch-work/grids/${grid}/map`).expect(403);await agent.post(`/api/batch-work/stores/${store}/location`).set('X-CSRF-Token',login.csrfToken).send({revision:2,profileRevision:2,accuracy:'accurate'}).expect(403);
+  const missing=f.stores[0][1][0],missingSnapshot=(await db.query('SELECT snapshot FROM bd_store_task WHERE id=$1',[missing])).rows[0].snapshot;
+  await service.complete(worker,missing,{revision:0,requestId:randomUUID(),status:'normal',note:'source missing'});
+  await service.location(worker,missing,{revision:1,profileRevision:0,accuracy:'nonexistent'});
+  assert.deepEqual((await db.query('SELECT snapshot FROM bd_store_task WHERE id=$1',[missing])).rows[0].snapshot,missingSnapshot);
+  assert.equal((await service.map(worker,f.grids[0][1],{})).items.find(row=>row.id===missing)!.accuracy,'nonexistent');
+  assert.equal((await service.map(worker,f.grids[1][1],{})).items.find(row=>row.storeId===f.prefix+'-source-1-0')!.accuracy,'nonexistent');
+  assert.deepEqual((await db.query('SELECT lat,lon,location_accuracy FROM public.kanto_merchants_v20261029 WHERE place_id=$1',[source])).rows[0],{lat:35.2,lon:139.2,location_accuracy:'doubtful'});
+  const many=f.grids[0][1];for(let i=0;i<201;i++)f.stores[0][1].push((await db.query("INSERT INTO bd_store_task(grid_task_id,store_id,snapshot,status,result,updated_at,revision) VALUES($1,$2,$3,'pending','{}',now(),0) RETURNING id",[many,f.prefix+'-map-extra-'+i,JSON.stringify({name:'extra',lat:35,lon:139})])).rows[0].id);
+  const first=await service.map(worker,many,{limit:200}),next=await service.map(worker,many,{after:first.nextCursor,limit:200});assert.equal(first.items.length,200);assert.equal(next.items.length,4);assert.equal(next.boundary,null);assert.equal(new Set([...first.items,...next.items].map(row=>row.id)).size,204);
+  await db.query("UPDATE bd_main_task SET status='disabled' WHERE id=$1",[f.mains[1]]);await assert.rejects(()=>service.location(worker,other,{revision:0,profileRevision:2,accuracy:'accurate'}),{code:'BATCH_DISABLED'});
+ }finally{if(f){await db.query('DELETE FROM bd_merchant_detail WHERE store_id=ANY($1::text[])',[[f.prefix+'-source-0-0',f.prefix+'-source-1-0']]);await db.query('DELETE FROM public.kanto_merchants_v20261029 WHERE place_id=$1',[f.prefix+'-source-0-0']);await clearBatchWork(db,f);}await app.close();}
+});

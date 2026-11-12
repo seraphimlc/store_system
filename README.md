@@ -1,106 +1,20 @@
-# 巡店数据结算系统（store_system）
+# 巡店结算与作业系统
 
-> **状态**：活文档（现状）｜**最后更新**：2026-10-17
-> **一句话**：项目说明与快速上手（给人和 AI 的总入口是 `AGENTS.md`）
+当前系统采用 React 19 前端与 NestJS API/Worker，管理端和员工H5独立构建，保留既有数据库和业务口径。
 
-面向巡店业务的**数据结算 Web 系统**：从原始巡店 Excel 到员工薪资结算的完整闭环——文件导入 → 自动判定 → 申诉/绩效确认 → 正式表 → 绩效工资（月内两期发薪）→ 月度对账（归因 + AI 分析）→ 薪资找平（找平执行 / 上月余量递延）。
-
-生产环境：https://store.visitworld.me
-
-## 功能特性
-
-- **巡店文件处理**：多分卷上传、自动清洗判定（有效 / 同店跨日 / 从档 / 重复导入 / 空白，逐行写明原因）、跨文件判重（同店同月取最早）、店铺主/从档归并
-- **申诉与绩效确认**：员工对被滤记录申诉，管理员认可/驳回，全程留痕；存在未决申诉的文件不能入正式表
-- **绩效与工资**：月绩效物化；**月内两期发薪**（上半月 1-15 · 20 日发 / 下半月 16-月末 · 次月 5 日发）；发薪表按「总金额 / 找平金额 / 应该付金额」照表发薪；单价按月可配
-- **月度对账**：上传对账文件（自动识别表头，必要时 AI）、按员工×天比对、差异自动归因、反向名单、AI 大白话分析、结果 Excel 下载、同月重传版本化
-- **薪资找平**：偏差（系统参考，自动刷）与找平（人工执行，增量累计）双轨；上月未找平余量 × 上月单价自动递延下月；一键全找平
-- **权限与安全**：管理员/员工角色隔离（中间件 + 路由双层）、申诉归属校验、CSRF、强制改密
-- **Agent 友好**：页面注入 `window.__PAGE_STATE__`（结构化状态）与 `data-testid`，浏览器自动化可直接读取，无需截图 OCR
-
-## 技术栈
-
-FastAPI · SQLAlchemy 2 · Alembic · Jinja2 · htmx · openpyxl · PostgreSQL（生产）/ SQLite（本地）
-
-## 快速开始
-
-```bash
-# 依赖
-./.venv/bin/pip install -r requirements.txt -r requirements-web.txt
-
-# 本地配置（AI key 等，见 app/config.py 环境变量清单）
-cp .env.example .env
-
-# 启动本地服务（自动加载 .env）
-./scripts/dev_server.sh
-
-# 运行测试
-./.venv/bin/python -m pytest tests tests_web -q
-```
-
-默认账号：管理员 `admin`（密码见环境变量 `ADMIN_PASSWORD`；本地默认 `demo123`）。
-
-## 核心业务规则
-
-| 规则 | 说明 |
+| 目录 | 内容 |
 |---|---|
-| 工资 | 每点 × 当月单价（默认 250円，按月可配 per_point） |
-| 奖金 | **每满 68 点奖 3,000円**（整月滚动、不跨月；上半月余数带向下半月；门槛/奖额由 `BONUS_GROUP`/`BONUS_AMOUNT` 配置） |
-| 判重 | 窗口 = 结算月；键 = (店名 trim, 月)；组内最早时间戳行有效；跨月不互压 |
-| 对账 | 系统正式表 vs 对账文件按人比对；差异归因（一致/仅系统有/仅对账有） |
-| 找平 | 偏差 = 系统参考值（自动刷）；找平 = 人工执行值（输入框 = 剩余 = 偏差−已找平，保存为增量累计）；上月修正 = 上月未找平余量 × 上月单价 递延 |
+| `apps/admin` | 管理端：React、Tailwind CSS、Appica |
+| `apps/staff` | 员工H5：React、Ant Design Mobile |
+| `apps/server` / `apps/worker` | NestJS API与异步任务 |
+| `packages` | 共享契约、业务逻辑与客户端 |
+| `scripts` | 新系统开发、隔离验收、发布及Python对照适配器 |
+| `deploy-next` | 当前Docker/CDN发布 |
+| `legacy` | 完整旧Python项目、迁移、测试、MCP与旧部署脚本 |
+| `docs` | 共享规格、记录与交接 |
 
-## 目录结构
+开发运行 `pnpm dev`，管理端8001、员工端8002、API3000。本地Docker入口8000；数据库连接与发布步骤见 [deploy-next/README.md](deploy-next/README.md)。
 
-```
-app/
-  routers/     # 路由（auth_r/files_r/flow_r/perf_r/settle_r/recon_r/plan_r/report_r/msg_r/bd_r/oauth_r/tokens_r）
-  services/    # 业务逻辑（flow 判定入表 / perf 绩效工资 / period 薪资找平 / recon 对账 / importer 导入 / ai_chat AI；bd_* 作业域）
-  templates/   # Jinja2 页面（perf 发薪表 / payroll_settle 找平 / recon 对账 / bd_* 团队车站任务等）
-  models.py    # SQLAlchemy 模型
-  config.py    # 环境变量配置（含奖金规则配置项）
-store_settle/  # 核心引擎：Excel 解析 / 判重 / 点数规则（纯 Python 可复用）
-migrations/    # Alembic 迁移
-scripts/       # 运维脚本（dev_server 本地服务 / reset_* 数据重置 / restore 恢复）
-tests/ tests_web/  # 单元测试（引擎 + Web 流程/接口）
-docs/          # 产品说明 / 使用手册 / 技术方案 / 测试用例 / 索引
-```
+开始修改前读 [AGENTS.md](AGENTS.md) 与 [当前交接](docs/交接-当前状态.md)。旧项目从 `legacy/` 查阅，参考 [旧项目说明](legacy/README.md) 和 [旧操作手册](legacy/AGENTS.md)。
 
-## 文档
-
-**文档入口：`AGENTS.md`（给 AI/新人）→ `docs/README.md`（文档地图）**
-
-- `AGENTS.md`：冷启动手册（功能 → 读什么 对照表；**保持短**）
-- `docs/README.md`：文档地图（什么情况读哪份）
-- `docs/产品设计-系统逻辑全览.md`：业务逻辑与设计全览
-- `docs/技术方案.md`：系统架构与技术决策
-- `docs/结算主流程设计-v3.md`：结算主流程（与万总确认版）
-- `docs/specs-*.md`：各期设计规格（团队/车站任务/日期计划/作业域/消息/MCP）
-- `docs/记录-*.md`：按功能拆的实施记录（口径/踩坑/实测）
-- `docs/文件索引.tsv`：全仓文件索引（`./.venv/bin/python scripts/idx.py <关键词>` 查）
-
-## 部署
-
-生产使用 Docker Compose（web + MCP + PostgreSQL）和宿主机 Nginx。**发布分阶段执行；不要把等待阶段误认为“部署卡住”，也不要因为等待而重复切换/重跑迁移。**标准 release 流程唯一权威为 [`AGENTS.md`](AGENTS.md) §发布流程；本节说明各阶段做什么、为什么可能耗时，以及如何汇报进度。
-
-### 发布阶段与检查点
-
-| 阶段 | 做什么 / 完成标志 | 仅在什么情况下需要 |
-|---|---|---|
-| 1. 变更验收 | 跑适用测试、模板/i18n检查；确认分支、提交和未提交改动范围。测试完成后才提交/推送。 | 每次发布。全量套件按项目说明约2分钟；实际时间受机器/依赖影响，应报告真实耗时。 |
-| 2. 创建 release | 新建 `/opt/store-settle/releases/$TS`，`rsync` 代码，不带数据、密钥、虚拟环境或本地 `.env`；安装生产配置到 `<release>/deploy/.env`。**完成标志：目标提交和配置文件在新目录中，`current` 尚未切换。** | 每次发布。 |
-| 3. 迁移前备份与彩排 | 有 schema/data migration 时先 `pg_dump` 并验证归档；按风险在备份恢复出的临时 PG 上运行同一迁移并核对计数/数据不变量。**完成标志：备份可读、彩排成功、当前服务仍运行。** | 有迁移时；生产首次/高风险迁移必须执行。纯代码发布不做整库恢复彩排。 |
-| 4. 构建镜像 | 在新 release 同时构建 `web` 和 `mcp`。**完成标志：两个镜像均构建成功，尚未停止旧服务。**MCP 与 web 共用源码，漏建任一容器会造成版本不一致。 | 每次发布；依赖或 Dockerfile 变化时可能较慢。 |
-| 5. 切换与迁移 | 若迁移需要维护窗口，先明确停止写入；生成最终备份；由 web entrypoint 执行 `alembic upgrade head`；核对版本成功后将 `current` 指向新 release，再启动 web/MCP。**迁移失败停止切换并恢复旧代码；迁移已经成功后不可盲目降级代码，须确认新旧代码与新 schema 兼容或执行经审查的回退迁移。** | 每次发布切换；SQL迁移仅有迁移时。 |
-| 6. 上线验收 | 检查 `/healthz`、web/MCP容器、Alembic版本、关键页面/API、核心数据不变量；最后汇报 release/commit、迁移版本、备份和结果。**完成标志：验收通过并记录。** | 每次发布。 |
-
-### 为什么上次用了约 41 分钟
-
-2026-11-09 的 P1 发布从开始到验收约 **41 分钟**。这不是普通纯代码发布的基准；各子阶段没有分别计时，不能把总时长精确拆分。已确认的耗时环节包括：
-
-- 全量测试本身约 **6 分钟**；随后还需处理并复核已有守门失败，不能把失败当通过。
-- 这是带数据库迁移的发布：制作约 **133 MB** 生产备份，并恢复到临时 PostgreSQL 彩排迁移/计数回填；这是保障步骤，不是每次小 UI 发布都要做。
-- 正式迁移期间 SSH 会话在“数据库迁移已成功、release 尚未切换”处中断，需要先启动旧服务、确认当前版本与迁移状态，再继续切换并复验。
-
-因此，之后应按阶段播报“当前步骤 + 已完成检查 + 是否影响线上 + 下一检查点”，不能只说“正在部署”。无迁移的小改动跳过备份恢复彩排，但仍需测试、双镜像构建、切换和健康/冒烟验收；有迁移时不要跳过备份、彩排和计数/数据验证。必要时记录每阶段起止时间，逐步建立真实耗时基线，不预先编造分钟数。
-
-> ⚠️ **命令与配置细节以 [`AGENTS.md`](AGENTS.md) §发布流程为准**：生产配置必须 `install -m600 /opt/store-settle/deploy.env <release>/deploy/.env`；构建 `web` 和 `mcp`；不要用 `| tail` 吞掉退出码。本地开发 `.env` 与生产配置不是同一份，不能互相覆盖。详细运维速查见 [`deploy/README.md`](deploy/README.md)。
+数据库、`data/`、现有环境文件、`.venv/`、`.release/` 保持根目录原位；目录归档不会执行迁移或更新正在运行的Docker。

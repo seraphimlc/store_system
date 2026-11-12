@@ -1,0 +1,4 @@
+import {BatchCreate} from './BatchCreate';
+import {Button} from '@appica/ui-react/button';import {BatchWork as View} from '../../../packages/client/src/BatchWork';import type {TaskButtonProps} from '../../../packages/client/src/StationTasks';import type {Session} from '../../../packages/contracts/src';import {api} from './api';
+function Action({children,disabled,onClick,primary}:TaskButtonProps){return <Button type="button" variant={primary?undefined:'outline'} disabled={disabled} onClick={onClick}>{children}</Button>;}
+export function BatchWork({session,language}:{session:Session;language:string}){return <View session={session} language={language} request={api} Button={Action} base="/admin/zone-tasks" gridBase="/admin/batch-grids" renderCreate={onCreated=><BatchCreate session={session} language={language} onCreated={onCreated}/>}/>;}

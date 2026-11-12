@@ -1,0 +1,2 @@
+import {Children,type ReactNode} from 'react';import {Pagination,PaginationList,PaginationItem} from '@appica/ui-react/pagination';
+export function AdminPagination({children,className}:{children:ReactNode;className?:string}){return <Pagination size="sm" className={className}><PaginationList>{Children.toArray(children).map((child,index)=><PaginationItem key={index}>{child}</PaginationItem>)}</PaginationList></Pagination>;}

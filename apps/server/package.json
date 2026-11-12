@@ -1,0 +1,39 @@
+{
+  "name": "@store/server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start": "node dist/apps/server/src/main.js"
+  },
+  "dependencies": {
+    "@fast-csv/parse": "4.3.6",
+    "@nestjs/common": "12.4.2",
+    "@nestjs/core": "12.4.2",
+    "@nestjs/platform-express": "12.4.2",
+    "@node-rs/argon2": "2.2.2",
+    "archiver": "7.0.1",
+    "exceljs": "4.4.0",
+    "geos-wasm": "3.1.1",
+    "multer": "2.5.0",
+    "pg": "8.23.1",
+    "pinyin-pro": "3.29.5",
+    "proj4": "2.22.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "sharp": "0.34.5",
+    "unzipper": "0.12.5",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "6.0.4",
+    "@types/express": "^5.0.0",
+    "@types/multer": "2.3.0",
+    "@types/pg": "^8.15.0",
+    "@types/supertest": "^6.0.0",
+    "@types/unzipper": "0.10.11",
+    "supertest": "^7.1.0"
+  }
+}

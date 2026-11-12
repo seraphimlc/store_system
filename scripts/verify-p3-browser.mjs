@@ -1,0 +1,47 @@
+import { createRequire } from 'node:module';
+import { chromium } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+const require=createRequire(new URL('../apps/server/package.json',import.meta.url));
+const {Pool}=require('pg');const {hash}=require('@node-rs/argon2');
+const url=process.env.NEXT_TEST_DATABASE_URL;
+if(!url||!new URL(url).pathname.endsWith('_refactor_p1'))throw new Error('Explicitly isolated database required');
+const db=new Pool({connectionString:url});const code='P3-BROWSER-001';const prefix='p3-browser-';
+const password='Browser-p3-2026';const nextPassword='next06';let browser;
+const adminBase=process.env.NEXT_BROWSER_BASE_URL?process.env.NEXT_BROWSER_BASE_URL+'/admin/':'http://127.0.0.1:8001/admin/';
+const staffBase=process.env.NEXT_BROWSER_BASE_URL?process.env.NEXT_BROWSER_BASE_URL+'/':'http://127.0.0.1:8002/';
+try{
+ const passwordHash=await hash(password);
+ await db.query(`INSERT INTO users(username,password_hash,display_name,role,status,is_active,must_change_password,lang,created_at) VALUES($1,$2,'浏览器验收管理员','admin','active',true,false,'zh',now())`,[prefix+'admin',passwordHash]);
+ browser=await chromium.launch({headless:true,...(process.env.NEXT_BROWSER_EXECUTABLE?{executablePath:process.env.NEXT_BROWSER_EXECUTABLE}:{channel:'chrome'})});
+ const errors=[];
+ const desktop=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});const admin=await desktop.newPage();admin.on('pageerror',error=>errors.push(error.message));
+ await admin.goto(adminBase);
+ await admin.getByLabel('账号',{exact:true}).fill(prefix+'admin');await admin.getByLabel('密码',{exact:true}).fill(password);await admin.getByRole('button',{name:'登录',exact:true}).click();
+ await admin.getByRole('heading',{name:'工作概览',exact:true}).waitFor();
+ await admin.getByRole('button',{name:'员工管理',exact:true}).click();await admin.getByRole('heading',{name:'员工管理',exact:true}).waitFor();
+ await admin.getByRole('button',{name:'新建员工',exact:true}).click();let dialog=admin.getByRole('dialog');
+ await dialog.getByLabel('人员编号',{exact:true}).fill(code);await dialog.getByLabel('姓名',{exact:true}).fill('浏览器验收员工');await dialog.getByLabel('登录名',{exact:true}).fill(prefix+'employee');await dialog.getByLabel('初始口令',{exact:true}).fill(password);await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
+ await admin.getByRole('cell',{name:'浏览器验收员工',exact:false}).waitFor();
+ const [download]=await Promise.all([admin.waitForEvent('download'),admin.getByRole('link',{name:'导出账号',exact:true}).click()]);if(!download.suggestedFilename().endsWith('.xlsx'))throw new Error('Account export did not download XLSX');
+ const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});const staff=await mobile.newPage();staff.on('pageerror',error=>errors.push(error.message));
+ await staff.goto(staffBase);await staff.getByLabel('账号',{exact:true}).fill(prefix+'employee');await staff.getByLabel('密码',{exact:true}).fill(password);await staff.getByRole('button',{name:'登录',exact:true}).click();
+ await staff.getByRole('heading',{name:'设置新密码',exact:true}).waitFor();await staff.getByLabel('当前密码',{exact:true}).fill(password);await staff.getByLabel('新密码',{exact:true}).fill(nextPassword);await staff.getByRole('button',{name:'保存并继续',exact:true}).click();
+ await staff.getByRole('heading',{name:'我的巡店批次',exact:true}).waitFor();
+ await staff.getByText('我的日报',{exact:true}).click();await staff.getByRole('heading',{name:'我的日报',exact:true}).waitFor();
+ await staff.getByLabel('担当区域',{exact:true}).fill('新宿验收区域');await staff.getByLabel('1点店数',{exact:true}).fill('6');await staff.getByLabel('2点店数',{exact:true}).fill('2');await staff.getByRole('button',{name:'提交今日日报',exact:true}).click();
+ await staff.getByRole('button',{name:'修改今日日报',exact:true}).waitFor();await staff.getByText('10 点数',{exact:true}).waitFor();
+ await staff.getByLabel('1点店数',{exact:true}).fill('7');await staff.getByRole('button',{name:'修改今日日报',exact:true}).click();await staff.getByText('11 点数',{exact:true}).waitFor();
+ await admin.getByRole('button',{name:'员工日报',exact:true}).click();await admin.getByRole('heading',{name:'员工日报',exact:true}).waitFor();
+ const row=admin.locator('table').first().getByRole('row').filter({hasText:'浏览器验收员工'});await row.waitFor();await row.getByRole('button',{name:'编辑',exact:true}).click();dialog=admin.getByRole('dialog');await dialog.getByLabel('1点店数',{exact:true}).fill('8');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
+ await staff.getByText('我的账号',{exact:true}).click();await staff.getByText('我的日报',{exact:true}).click();await staff.getByText('12 点数',{exact:true}).waitFor();
+ await staff.getByRole('button',{name:'中文 / 日本語'}).click();await staff.getByRole('heading',{name:'マイ日報',exact:true}).waitFor();
+ await admin.getByRole('button',{name:'员工管理',exact:true}).click();const employee=admin.locator('table').first().getByRole('row').filter({hasText:'浏览器验收员工'});await employee.getByRole('button',{name:'重置口令',exact:true}).click();dialog=admin.getByRole('dialog');await dialog.getByLabel('新口令',{exact:true}).fill('reset06');await dialog.getByRole('button',{name:'保存',exact:true}).click();await dialog.waitFor({state:'hidden'});
+ await staff.reload();await staff.getByRole('heading',{name:'巡回ワークスペース',exact:true}).waitFor();
+ const overflow={admin:await admin.evaluate(()=>document.documentElement.scrollWidth>innerWidth),staff:await staff.evaluate(()=>document.documentElement.scrollWidth>innerWidth)};
+ if(errors.length||overflow.admin||overflow.staff)throw new Error(JSON.stringify({errors,overflow}));
+ const result={accountCreated:true,firstLoginPasswordChanged:true,accountExport:true,reportSubmitted:true,reportUpdated:true,adminReportEdit:true,japanese:true,passwordResetInvalidatedSession:true,pageErrors:errors,overflow,target:process.env.NEXT_BROWSER_BASE_URL??'vite-dev'};
+ await mkdir('data/refactor',{recursive:true});await writeFile('data/refactor/p3-browser.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
+}finally{
+ if(browser)await browser.close();
+ await db.query('DELETE FROM staff_daily_reports WHERE person_code=$1',[code]);await db.query('DELETE FROM staff_date_plans WHERE person_code=$1',[code]);await db.query('DELETE FROM users WHERE username LIKE $1 OR person_code=$2',[prefix+'%',code]);await db.query('DELETE FROM persons WHERE code=$1',[code]);await db.end();
+}

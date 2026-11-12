@@ -1,0 +1,222 @@
+/* Gray / Base / Blue / Large tokens from @appica/ui-react 1.4.0/styles.css.
+ * Only design tokens are reused; H5 continues to use Ant Design Mobile. */
+:root,
+.light{
+  --foreground: oklch(0.446 0.03 256.802);
+  --foreground-subtle: oklch(0.707 0.022 261.325);
+  --foreground-muted: oklch(0.551 0.027 264.364);
+  --foreground-strong: oklch(0.373 0.034 259.733);
+  --foreground-emphasis: oklch(0.278 0.033 256.848);
+  --foreground-intense: oklch(0.21 0.034 264.665);
+  --foreground-inverse: oklch(1 0 0);
+
+  --background: oklch(1 0 0);
+  --background-subtle: oklch(0.985 0.002 247.839);
+  --background-muted: oklch(0.967 0.003 264.542);
+  --background-strong: oklch(0.928 0.006 264.531);
+  --background-inverse: oklch(0.13 0.028 261.692);
+
+  --border: oklch(0.928 0.006 264.531);
+  --border-muted: oklch(0.967 0.003 264.542);
+  --border-strong: oklch(0.872 0.01 258.338);
+  --border-emphasis: oklch(0.707 0.022 261.325);
+  --border-intense: oklch(0.551 0.027 264.364);
+  --border-inverse: oklch(0.278 0.033 256.848);
+  --border-overlay: oklch(0.967 0.003 264.542);
+
+  --primary: oklch(0.21 0.034 264.665);
+  --primary-subtle: oklch(0.967 0.003 264.542);
+  --primary-soft: oklch(0.928 0.006 264.531);
+  --primary-muted: oklch(0.373 0.034 259.733);
+  --primary-strong: oklch(0.13 0.028 261.692);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.809 0.105 251.813);
+  --secondary-subtle: oklch(0.623 0.214 259.815 / 10%);
+  --secondary-soft: oklch(0.623 0.214 259.815 / 20%);
+  --secondary-muted: oklch(0.882 0.059 254.128);
+  --secondary-strong: oklch(0.707 0.165 254.624);
+  --secondary-emphasis: oklch(0.623 0.214 259.815);
+  --secondary-intense: oklch(0.546 0.245 262.881);
+  --secondary-foreground: oklch(0.13 0.028 261.692);
+
+  --error: oklch(0.808 0.114 19.571);
+  --error-subtle: oklch(0.637 0.237 25.331 / 10%);
+  --error-soft: oklch(0.637 0.237 25.331 / 20%);
+  --error-muted: oklch(0.885 0.062 18.334);
+  --error-strong: oklch(0.704 0.191 22.216);
+  --error-emphasis: oklch(0.637 0.237 25.331);
+  --error-intense: oklch(0.577 0.245 27.325);
+  --error-foreground: oklch(0.13 0.028 261.692);
+
+  --success: oklch(0.845 0.143 164.978);
+  --success-subtle: oklch(0.696 0.17 162.48 / 10%);
+  --success-soft: oklch(0.696 0.17 162.48 / 20%);
+  --success-muted: oklch(0.905 0.093 164.15);
+  --success-strong: oklch(0.765 0.177 163.223);
+  --success-emphasis: oklch(0.696 0.17 162.48);
+  --success-intense: oklch(0.596 0.145 163.225);
+  --success-foreground: oklch(0.13 0.028 261.692);
+
+  --warning: oklch(0.837 0.128 66.29);
+  --warning-subtle: oklch(0.705 0.213 47.604 / 10%);
+  --warning-soft: oklch(0.705 0.213 47.604 / 20%);
+  --warning-muted: oklch(0.901 0.076 70.697);
+  --warning-strong: oklch(0.75 0.183 55.934);
+  --warning-emphasis: oklch(0.705 0.213 47.604);
+  --warning-intense: oklch(0.646 0.222 41.116);
+  --warning-foreground: oklch(0.13 0.028 261.692);
+
+  --info: oklch(0.828 0.111 230.318);
+  --info-subtle: oklch(0.685 0.169 237.323 / 10%);
+  --info-soft: oklch(0.685 0.169 237.323 / 20%);
+  --info-muted: oklch(0.901 0.058 230.902);
+  --info-strong: oklch(0.746 0.16 232.661);
+  --info-emphasis: oklch(0.685 0.169 237.323);
+  --info-intense: oklch(0.588 0.158 241.966);
+  --info-foreground: oklch(0.13 0.028 261.692);
+
+  --font-sans:
+    ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+  --focus-ring: oklch(0.872 0.01 258.338);
+  --focus-ring-input: oklch(0.928 0.006 264.531);
+  --focus-ring-primary: oklch(0.872 0.01 258.338);
+  --focus-ring-secondary: oklch(0.623 0.214 259.815 / 30%);
+  --focus-ring-error: oklch(0.637 0.237 25.331 / 30%);
+  --focus-ring-success: oklch(0.696 0.17 162.48 / 30%);
+  --focus-ring-warning: oklch(0.705 0.213 47.604 / 30%);
+  --focus-ring-info: oklch(0.685 0.169 237.323 / 30%);
+  --focus-ring-light: oklch(1 0 0 / 25%);
+
+  --border-width: 1px;
+
+  --radius: 0.875rem;
+  --radius-4xs: calc(var(--radius) * 2 / 7);
+  --radius-3xs: calc(var(--radius) * 3 / 7);
+  --radius-2xs: calc(var(--radius) * 4 / 7);
+  --radius-xs: calc(var(--radius) * 5 / 7);
+  --radius-sm: calc(var(--radius) * 6 / 7);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 8 / 7);
+  --radius-xl: calc(var(--radius) * 9 / 7);
+  --radius-2xl: calc(var(--radius) * 12 / 7);
+  --radius-3xl: calc(var(--radius) * 16 / 7);
+  --radius-4xl: calc(var(--radius) * 20 / 7);
+
+  --shadow-color: oklch(0.551 0.027 264.364 / 18%);
+  --selection-color: oklch(0.13 0.028 261.692 / 10%);
+
+  --opacity-disabled: 0.65;
+
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.5);
+}
+.dark{
+  --foreground: oklch(0.872 0.01 258.338);
+  --foreground-subtle: oklch(0.551 0.027 264.364);
+  --foreground-muted: oklch(0.707 0.022 261.325);
+  --foreground-strong: oklch(0.928 0.006 264.531);
+  --foreground-emphasis: oklch(0.967 0.003 264.542);
+  --foreground-intense: oklch(1 0 0);
+  --foreground-inverse: oklch(0.21 0.034 264.665);
+
+  --background: oklch(0.13 0.028 261.692);
+  --background-subtle: oklch(0.551 0.027 264.364 / 8%);
+  --background-muted: oklch(0.21 0.034 264.665);
+  --background-strong: oklch(0.278 0.033 256.848);
+  --background-inverse: oklch(1 0 0);
+
+  --border: oklch(0.278 0.033 256.848);
+  --border-muted: oklch(0.21 0.034 264.665);
+  --border-strong: oklch(0.373 0.034 259.733);
+  --border-emphasis: oklch(0.446 0.03 256.802);
+  --border-intense: oklch(0.551 0.027 264.364);
+  --border-inverse: oklch(0.928 0.006 264.531);
+  --border-overlay: oklch(0.278 0.033 256.848);
+
+  --primary: oklch(1 0 0);
+  --primary-subtle: oklch(0.21 0.034 264.665);
+  --primary-soft: oklch(0.278 0.033 256.848);
+  --primary-muted: oklch(0.928 0.006 264.531);
+  --primary-strong: oklch(1 0 0);
+  --primary-foreground: oklch(0.21 0.034 264.665);
+
+  --secondary: oklch(0.707 0.165 254.624);
+  --secondary-subtle: oklch(0.623 0.214 259.815 / 10%);
+  --secondary-soft: oklch(0.623 0.214 259.815 / 20%);
+  --secondary-muted: oklch(0.809 0.105 251.813);
+  --secondary-strong: oklch(0.707 0.165 254.624);
+  --secondary-emphasis: oklch(0.623 0.214 259.815);
+  --secondary-intense: oklch(0.546 0.245 262.881);
+  --secondary-foreground: oklch(0.13 0.028 261.692);
+
+  --error: oklch(0.704 0.191 22.216);
+  --error-subtle: oklch(0.637 0.237 25.331 / 10%);
+  --error-soft: oklch(0.637 0.237 25.331 / 20%);
+  --error-muted: oklch(0.808 0.114 19.571);
+  --error-strong: oklch(0.704 0.191 22.216);
+  --error-emphasis: oklch(0.637 0.237 25.331);
+  --error-intense: oklch(0.577 0.245 27.325);
+  --error-foreground: oklch(0.13 0.028 261.692);
+
+  --success: oklch(0.765 0.177 163.223);
+  --success-subtle: oklch(0.696 0.17 162.48 / 10%);
+  --success-soft: oklch(0.696 0.17 162.48 / 20%);
+  --success-muted: oklch(0.845 0.143 164.978);
+  --success-strong: oklch(0.765 0.177 163.223);
+  --success-emphasis: oklch(0.696 0.17 162.48);
+  --success-intense: oklch(0.596 0.145 163.225);
+  --success-foreground: oklch(0.13 0.028 261.692);
+
+  --warning: oklch(0.75 0.183 55.934);
+  --warning-subtle: oklch(0.705 0.213 47.604 / 10%);
+  --warning-soft: oklch(0.705 0.213 47.604 / 20%);
+  --warning-muted: oklch(0.837 0.128 66.29);
+  --warning-strong: oklch(0.75 0.183 55.934);
+  --warning-emphasis: oklch(0.705 0.213 47.604);
+  --warning-intense: oklch(0.646 0.222 41.116);
+  --warning-foreground: oklch(0.13 0.028 261.692);
+
+  --info: oklch(0.746 0.16 232.661);
+  --info-subtle: oklch(0.685 0.169 237.323 / 10%);
+  --info-soft: oklch(0.685 0.169 237.323 / 20%);
+  --info-muted: oklch(0.828 0.111 230.318);
+  --info-strong: oklch(0.746 0.16 232.661);
+  --info-emphasis: oklch(0.685 0.169 237.323);
+  --info-intense: oklch(0.588 0.158 241.966);
+  --info-foreground: oklch(0.13 0.028 261.692);
+
+  --focus-ring: oklch(0.373 0.034 259.733);
+  --focus-ring-input: oklch(0.278 0.033 256.848);
+  --focus-ring-primary: oklch(0.373 0.034 259.733);
+  --focus-ring-secondary: oklch(0.623 0.214 259.815 / 50%);
+  --focus-ring-error: oklch(0.637 0.237 25.331 / 50%);
+  --focus-ring-success: oklch(0.696 0.17 162.48 / 50%);
+  --focus-ring-warning: oklch(0.705 0.213 47.604 / 50%);
+  --focus-ring-info: oklch(0.685 0.169 237.323 / 50%);
+  --focus-ring-light: oklch(1 0 0 / 25%);
+
+  --shadow-color: oklch(0 0 0 / 30%);
+  --selection-color: oklch(1 0 0 / 15%);
+}
+:root{--font-sans:"Geist Variable","PingFang SC","Hiragino Sans",system-ui,sans-serif}
+:root,html[data-prefers-color-scheme]{
+ --adm-color-primary:var(--primary);--adm-color-success:var(--success-emphasis);--adm-color-warning:var(--warning-emphasis);--adm-color-danger:var(--error-emphasis);--adm-color-wathet:var(--secondary-subtle);
+ --adm-color-text:var(--foreground-intense);--adm-color-text-secondary:var(--foreground);--adm-color-weak:var(--foreground-muted);--adm-color-light:var(--foreground-subtle);--adm-color-border:var(--border);--adm-border-color:var(--border);
+ --adm-color-background:var(--background);--adm-color-background-body:var(--background-subtle);--adm-color-box:var(--background-muted);--adm-color-fill-content:var(--background-subtle);
+ --adm-color-text-light-solid:var(--primary-foreground);--adm-font-family:var(--font-sans);--adm-radius-s:var(--radius-xs);--adm-radius-m:var(--radius-md);--adm-radius-l:var(--radius-lg);
+ font-family:var(--font-sans);color:var(--foreground-intense);background:var(--background-subtle);color-scheme:light;
+}
+html.dark{color-scheme:dark}body{font-family:var(--font-sans);color:var(--foreground-intense);background:var(--background-subtle)}
+.staff-shell,.staff-content{color:var(--foreground-intense)}
+.staff-shell :is(.message-center,.station-tasks,.batch-work) :is(input:not([type=checkbox],[type=radio],[type=hidden]),select,textarea,button){background-color:var(--background);color:var(--foreground);border-color:var(--border-strong)}
+.staff-shell :is(.message-tabs .active,.message-center .message-primary,.batch-work .primary){background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.staff-shell :is(.message-list li,.station-detail,.batch-region,.batch-grid,.message-tabs){border-color:var(--border)}
+.staff-shell :is(.message-open,.message-open strong,.batch-grid-open){color:var(--foreground-intense)}
+.staff-shell :is(.message-open small,.message-choice small,.message-center .muted,.station-tasks .muted,.batch-work .muted){color:var(--foreground-muted)}
+.staff-shell :is(.message-empty,.batch-work .empty-state){background:var(--background-muted);color:var(--foreground-muted)}
+.staff-shell :is(.message-notice,.success-notice){background:var(--success-subtle);color:var(--success-emphasis)}
+.staff-shell :is(.message-error,.error){background:var(--error-subtle);color:var(--error-emphasis)}
+.staff-shell .adm-button-primary,.adm-popup .adm-button-primary{--color:var(--primary);--text-color:var(--primary-foreground);--border-color:var(--primary)}
+.staff-shell select,.adm-popup select{background-color:var(--background);color:var(--foreground);border-color:var(--border-strong)}

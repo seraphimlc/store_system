@@ -1,0 +1,36 @@
+import {ScrollMore} from './ScrollMore';
+import {UISelect,UIForm,UIInput,UIButton} from './ui-controls';
+import {useEffect,useState,type FormEvent} from 'react';
+import type {Session} from '../../contracts/src';
+
+type Option={id:number;label:string};
+type Result={items:{id:number;event_type:string;actor_label:string;team_label:string;region_label:string;grid_label:string;store_label:string;created_at:string;old_value:unknown;new_value:unknown}[];
+ total:number;limit:number;actors:Option[];teams:Option[];regions:Option[];grids:Option[];eventTypes:string[];
+ metrics:{firstCompleted:number;completionEvents:number;currentDone:number;currentTotal:number;performers:{actor_id:number|null;actor_label:string;actor_role:string;team_label:string;count:number}[]}};
+const legacy={kw:'keyword',actor_id:'actorId',team_id:'teamId',region_task_id:'regionId',grid_task_id:'gridId',event_type:'eventType',dfrom:'from',dto:'to',page:'page'};
+function initial(){const params=new URLSearchParams(location.search),result=new URLSearchParams();for(const [source,target] of Object.entries(legacy)){const value=params.get(source);if(value)result.set(target,value);}return result;}
+const labels:Record<string,[string,string]>={create_batch:['创建批次','バッチ作成'],disable_batch:['禁用批次','バッチ無効化'],assign_region_task:['片区派发','地域割当'],assign_grid_task:['网格派发','グリッド割当'],complete_store_task:['商户完成','店舗完了'],update_store_result:['商户结果修订','店舗結果修正'],grid_status_changed:['网格状态变化','グリッド状態変更'],region_status_changed:['片区状态变化','地域状態変更'],batch_status_changed:['批次状态变化','バッチ状態変更'],grid_auto_completed_empty:['空网格自动完成','空グリッド自動完了'],region_auto_completed_empty:['空片区自动完成','空地域自動完了'],batch_auto_completed_empty:['空批次自动完成','空バッチ自動完了']};
+export function BatchEvents({id,session,language,request,mobile=false}:{id:number;session:Session;language:string;request:<T>(path:string,session?:Session|null)=>Promise<T>;mobile?:boolean}){
+ const ja=language.startsWith('ja'),t=(zh:string,jp:string)=>ja?jp:zh,label=(event:string)=>labels[event]?.[ja?1:0]??event;
+ const [params,setParams]=useState(initial),[result,setResult]=useState<Result>(),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ const page=Number(params.get('page')??1);
+ useEffect(()=>{let ignore=false;setLoading(true);setError('');request<Result>(`/batch-work/batches/${id}/events?${params}`,session).then(value=>{if(!ignore)setResult(previous=>mobile&&page>1&&previous?{...value,items:[...previous.items,...value.items.filter(row=>!previous.items.some(p=>p.id===row.id))]}:value);},cause=>{if(!ignore)setError(cause.message);}).finally(()=>{if(!ignore)setLoading(false);});return()=>{ignore=true;};},[id,params,request,session]);
+ function navigate(next:URLSearchParams){const query=new URLSearchParams(location.search);for(const [key,value] of Object.entries(legacy)){query.delete(key);const item=next.get(value);if(item)query.set(key,item);}history.replaceState({},'',location.pathname+(query.size?'?'+query:''));setParams(next);}
+ function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();const next=new URLSearchParams();for(const [key,value] of new FormData(event.currentTarget)){if(String(value).trim())next.set(key,String(value).trim());}navigate(next);}
+ function go(delta:number){const next=new URLSearchParams(params);next.set('page',String(page+delta));navigate(next);}
+ function select(name:string,title:string,options:Option[]=[]){return <label>{title}<UISelect name={name} defaultValue={params.get(name)??''}><option value="">{t('全部','すべて')}</option>{options.map(option=><option key={`${option.id}:${option.label}`} value={option.id}>{option.label||option.id}</option>)}</UISelect></label>;}
+ return <section className={"batch-region batch-events"+(mobile?" batch-events-mobile":"")}>{!mobile&&<h3>{t('批次日志与统计','バッチ履歴と集計')}</h3>}{error&&<p role="alert">{error}</p>}
+ <UIForm className={mobile?"batch-log-filters":"batch-assignment"} onSubmit={submit} key={result?'ready':'initial'}>
+ <div className={mobile?"batch-log-search":undefined} style={mobile?undefined:{display:'contents'}}><label><span className={mobile?"batch-log-sr-label":""}>{t('关键字','キーワード')}</span><UIInput name="keyword" aria-label={t('关键字','キーワード')} placeholder={mobile?t('搜索日志','履歴を検索'):undefined} maxLength={120} defaultValue={params.get('keyword')??''}/></label>{mobile&&<UIButton disabled={loading}>{t('搜索','検索')}</UIButton>}</div>
+ <details className="batch-log-advanced" open={mobile?undefined:true} style={mobile?undefined:{display:'contents'}}><summary hidden={!mobile}>{t('更多筛选','詳細フィルター')}{mobile&&params.size>0?' · '+t('已筛选','適用中'):''}</summary><div className="batch-log-filter-fields" style={mobile?undefined:{display:'contents'}}>
+ {select('actorId',t('操作人','操作者'),result?.actors)}{select('teamId',t('团队','チーム'),result?.teams)}{select('regionId',t('片区','地域'),result?.regions)}{select('gridId',t('网格','グリッド'),result?.grids)}
+ <label>{t('事件类型','イベント種別')}<UISelect name="eventType" defaultValue={params.get('eventType')??''}><option value="">{t('全部','すべて')}</option>{result?.eventTypes.map(event=><option key={event} value={event}>{label(event)}</option>)}</UISelect></label>
+ <label>{t('起始日（含，日本时间）','開始日（当日含む、日本時間）')}<UIInput name="from" type="date" defaultValue={params.get('from')??''}/></label>
+ <label>{t('截止日（不含，日本时间）','終了日（当日を除く、日本時間）')}<UIInput name="to" type="date" defaultValue={params.get('to')??''}/></label></div><UIButton disabled={loading}>{t('筛选日志','履歴を絞り込む')}</UIButton></details></UIForm>
+ {loading&&<p role="status">{t('正在读取日志…','履歴を読み込み中…')}</p>}
+ {(mobile||!loading&&!error)&&result&&<><dl className={mobile?"batch-log-metrics":"batch-assignment"}><div><dt>{t('期间首次完成','期間内の初回完了')}</dt><dd>{result.metrics.firstCompleted}</dd></div><div><dt>{t('期间完成操作','期間内の完了操作')}</dt><dd>{result.metrics.completionEvents}</dd></div><div><dt>{t('当前完成 / 总数','現在の完了 / 総数')}</dt><dd>{result.metrics.currentDone} / {result.metrics.currentTotal}</dd></div></dl>
+ {result.metrics.performers.length>0&&<details><summary>{t('按操作人统计','操作者別の集計')}</summary><ul>{result.metrics.performers.map((row,i)=><li key={i}>{[row.actor_label,row.team_label,row.actor_role].filter(Boolean).join(' · ')}：{row.count}</li>)}</ul></details>}
+ {result.items.map(row=><article className="batch-store batch-log-entry" key={row.id}><strong>{label(row.event_type)}</strong><p>{[row.actor_label,row.team_label,row.region_label,row.grid_label,row.store_label].filter(Boolean).join(' · ')}</p><time dateTime={`${row.created_at}Z`}>{new Date(`${row.created_at}Z`).toLocaleString(ja?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo'})}</time><details><summary>{t('变更详情','変更の詳細')}</summary><pre>{JSON.stringify(row.old_value,null,2)}{'\n→\n'}{JSON.stringify(row.new_value,null,2)}</pre></details></article>)}
+ {result.total===0&&<p>{t('没有匹配的日志','該当する履歴はありません')}</p>}{mobile?<ScrollMore hasMore={result.items.length<result.total} loading={loading} error={error} language={language} onLoad={()=>{if(loading)return;if(error)setParams(v=>new URLSearchParams(v));else go(1);}}/>:<div className="batch-assignment"><UIButton disabled={page<=1} onClick={()=>go(-1)}>{t('上一页','前へ')}</UIButton><span>{page} / {Math.max(1,Math.ceil(result.total/result.limit))}</span><UIButton disabled={page*result.limit>=result.total} onClick={()=>go(1)}>{t('下一页','次へ')}</UIButton></div>}</>}
+ </section>;
+}

@@ -1,193 +1,31 @@
-# 巡店结算系统 — Agent 冷启动手册（入口 · 保持短）
+# 巡店系统 — 当前项目入口
 
-> **只读你要改的那块**：本文件（入口）→ 下表对应行的记录文档 → 那几个源码文件。
-> 别把 `docs/` 整套读进来（300KB+，纯浪费）。文档地图见 `docs/README.md`。
-> 找文件：`./.venv/bin/python scripts/idx.py <关键词>`；改完更新对应记录文档（别往本文件堆细节）。
+## 目录与状态
 
-## 功能 → 读什么
+- **当前系统**：`apps/admin/`（React 19 + Appica）、`apps/staff/`（React 19 + Ant Design Mobile）、`apps/server/`（NestJS API）、`apps/worker/`（任务）、`packages/`（共享逻辑/契约/客户端）。
+- **旧项目集中在 `legacy/`**：Python `app/`、`store_settle/`、`migrations/`、Python测试、`mcp_service/`、旧 `deploy/`、Python/Shell脚本和脚本资料。完整历史操作手册见 `legacy/AGENTS.md`，旧说明见 `legacy/README.md`。
+- `docs/` 保留共享业务规格与交接记录；历史文档里的 `app/...`、`tests_web/...`、旧 `deploy/...`、Python脚本路径均相对于 `legacy/`。不要把旧发布流程套用到新系统。
+- 根目录 `.env`、`.env.next.local`、`.env.next.docker.local`、`.venv/`、`data/`、数据库文件和 `.release/` 是现有本地配置/运行资产，本次收敛没有移动、覆盖或迁移。
+- 当前状态先读 `docs/交接-当前状态.md`，文档地图 `docs/README.md`；仅按需读相关记录，修改后更新对应记录。
 
-| 功能 | 记录 / 规格（按需） | 主要源码 | 测试 |
-|---|---|---|---|
-| 结算主流程（判定→申诉→正式表→点/工资） | `docs/结算主流程设计-v3.md`、`docs/技术方案.md` | `app/services/{flow,perf,formal,payroll,period}.py` | `tests_web/test_*.py` |
-| 月度对账 / 薪资找平 | `docs/产品设计-系统逻辑全览.md` | `app/services/{recon,payroll_adjust}.py` | `tests_web/test_recon*.py` |
-| 员工每日填报 + 对比 + AI 报告 | **`docs/记录-员工填报.md`** | `app/services/{daily_report,report_compare,report_ai,report_export}.py` | `test_daily_report.py`、`test_report_robustness.py` |
-| 日期计划（半月出勤登记） | **`docs/记录-日期计划.md`** | `app/services/{date_plan,plan_leave}.py` | `test_date_plan.py` |
-| **团队 / 车站 / 任务（作业域）** | **`docs/记录-作业域.md`**（只改这块才读） | `app/services/bd_*.py` | `test_team_task.py` |
-| 站内消息 | `docs/记录-作业域.md` §消息 | `app/services/bd_msg.py` | 同上 |
-| MCP 服务（WorkBuddy 接入） | `docs/MCP对接手册.md` | `mcp_service/**` | `mcp_service/tests` |
-| 多语言 / 导航 / H5 | `app/i18n.py`、`app/templates/base.html`、`app/static/app.css` | — | `test_templates.py`、`test_i18n.py` |
-| 部署 / 发布 | §发布流程 + `deploy/README.md` | `scripts/deploy*.sh`、`deploy/**` | — |
-| **当前状态 / 交接** | **`docs/交接-当前状态.md`**（先读这个：线上有什么、还欠什么） | — | — |
+## 开发、验收与发布
 
-## 常用命令（cwd = 项目根）
+- `pnpm dev`：管理端8001、员工端8002、API3000及Worker。开发连接 `store_settle_refactor_p1`；保留用户现有配置。
+- 本地Docker统一入口8000（管理端 `/admin/`，员工端 `/`），显式连接基准库 `store_settle`。部署见 `deploy-next/README.md`，使用独立 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL`，不能修改开发连接。
+- 当前模块检查：`pnpm --filter @store/admin typecheck` / `pnpm --filter @store/staff typecheck` / `pnpm --filter @store/server typecheck`；构建用对应模块 `build`。
+- `pnpm test` 使用已有隔离运行器，PostgreSQL写测试只在随机schema-only临时库执行；不得向基准库或开发完整副本写fixture、清表或覆盖密码。
+- 浏览器验收使用 `scripts/test-isolated.mjs --browser` 的相关分组；只重跑受本次变更影响的检查。静态文案/样式不新增业务测试。
+- 新栈Python对照调用通过 `scripts/legacy-python.mjs`，仅用于验收并显式添加 `legacy/` 导入路径。不要在根目录恢复 `app/` 兼容包或符号链接。
+- 旧项目检查从 `legacy/` 执行，如 `cd legacy && ../.venv/bin/python -m pytest tests tests_web -q`。旧应用如需连接数据库，必须显式指定正确DATABASE_URL；不能因路径变化创建空库。
+- 不自动执行旧迁移/发布/MCP启动，不操作生产。Docker/CDN发布需要任务范围明确授权。
 
-```bash
-./.venv/bin/python -m pytest tests_web/test_xxx.py -q     # 单测（小改只跑相关）
-./.venv/bin/python -m pytest tests tests_web -q           # 全量（约 2 分钟）
-./scripts/dev_server.sh                                    # 本地服务（自动加载 .env 含 AI key）
-DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/xxx.py
-./.venv/bin/python scripts/idx.py 车站 任务                 # 按关键词找文件
-# 任务重建（删光重派，默认干跑；见 docs/记录-作业域.md「任务重建」）：
-#   DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python scripts/bd_rebuild_tasks.py \
-#       --src "/Users/liuchang/Desktop/万总/team_task" [--apply]
-./.venv/bin/python scripts/check_templates.py              # 模板结构自检（改完模板跑）
-./.venv/bin/python scripts/i18n_audit.py                   # 日文缺失/死键（要 0/0）
-scripts/mcp_restart.sh                                     # 改完 mcp_service 必须重启（自校验 27 工具）
-```
+## 业务与数据约束
 
-- 账号：`admin/demo123`；员工 `demo123`（测试里是 `pw123456`）。线上 `store.visitworld.me`。
-- **heredoc `python3 <<EOF` 偶发静默失败**（尤其中文/反引号）→ 一律写 `scripts/*.py` 或 `/tmp/*.py` 再执行。
-- AI：`.env` 的 `AI_API_KEY/AI_BASE_URL/AI_MODEL`；`ai_chat.chat()` 自动重试 2 次，**默认直连**（`AI_PROXY` 才走代理）。
-- MCP：独立 venv（`mcp_service/.venv`，Py3.12）；启动前 **`DATABASE_URL` 必须显式设置**
-  （`app/db.py` import 时固化缓存，不设会静默连空库）。细节见 `docs/MCP对接手册.md`。
-
-## 铁律
-
-1. **结算域与作业域分开**：作业域只写 `bd_*` 表，**绝不向结算域四表加列**
-   （`formal_records`/`person_daily_stats`/`month_perf_records`/`payroll_period_rows`），结算域永不读作业域。
-   守门测试：`test_station_tasks_does_not_touch_settlement_tables` /
-   `test_settlement_code_never_reads_ops_domain` / `test_progress_submission_only_writes_bd_tables`。
-2. **不读 `raw_records`**（隐私）；`data/uploads/` 与线上数据不进仓库。
-   **唯一例外**：`app/services/bd_store.py`（门店宇宙，作业域地基）**只读**它的
-   `store_id_raw` / `store_name_local_raw` / `modified_raw` / `submitter_code` / `original_row`
-   用来建 `bd_store`，**不写结算域任何表**（模块注释里也写明了）。
-3. **业务逻辑只在服务层**（`app/services/`）；路由只做鉴权+取参+渲染，模板不含口径判断。
-4. **别跨 session 传 ORM 对象**（中间件 session 已关闭 → 对象 detach → 路由改属性再 commit
-   **静默不生效**，实测把"改密码"改坏了）；中间件要数据就传列值快照。
-5. **列表 SQL 要常数条**，别在循环里调 `can_*`（实测 76 行 = 188 条 SQL）；批量权限用
-   `bd_tasks.can_reject_maps`。
-6. 新增 POST 表单必须 `{{ form_token() }}` + `csrf_token`；表格 `class="grid-tbl"` + 外层 `.tbl-wrap`；
-   文案 `t('中文')`（i18n 键**不能含双引号**，引用词用「」）。
-7. **`users.role` 只用于「能不能进哪个端」（授权/落点），不用来判断"是不是员工/有没有账号"**。
-   判重/建号一律按 **`person_code`**（一个编号只能一个账号）；要"所有员工"就用
-   `role in ("staff", "leader")`。⚠️ 原来只查 `role == "staff"` 造成的线上事故：**队长每次导入
-   多一个账号**（2026-10-24 清掉 6 个）、批量重置口令漏队长、队长领不到 Token、改完密码被弹回
-   登录 —— 清单见 `docs/交接-当前状态.md` §5.10。另注：`bd_team_member.role`（leader/member）
-   是**团队角色**，与 `users.role` 是两个概念，别混。
-
-## 关键基准（系统实测，非手工文件）
-
-> 2026-09-25 用户明确：手工基准文件已作废删除。验收 = **与同一份库的 SQL 直查一致**，不钉死数字。
-> 下表只是**某次快照**（2026-10-17 实测），**会随导入而变** —— 别拿它当断言，要核对就跑 SQL。
-
-| 项（`month_perf_records`） | 2026-07 | 2026-08 | 2026-09 | 2026-10 |
-|---|---|---|---|---|
-| 人数 | 15 | 34 | 35 | 56 |
-| 1点 / 2点 | 1413 / 763 | 8226 / 4280 | 10640 / 4403 | 22124 / 592 |
-| 总点数 | 2939 | 16786 | 19446 | 23308 |
-| 工资（円） | 845,750 | 4,895,500 | 5,165,250 | 6,184,500 |
-
-（`formal_records` 按 `japan_date` 的年月：07 **2176** / 08 **12506** / 09 **15043** / 10 **22716**，全库 52441。）
-
-```bash
-# 现成核对（只读）：
-DATABASE_URL="sqlite:///./store_settle_live.db" ./.venv/bin/python -c "
-from sqlalchemy import create_engine, text
-with create_engine('sqlite:///./store_settle_live.db').connect() as c:
-    for r in c.execute(text('SELECT month, COUNT(*), SUM(p1), SUM(p2), SUM(points), SUM(salary) FROM month_perf_records GROUP BY month ORDER BY month')): print(r)"
-```
-
-- **判重口径**：窗口=结算月，键=(店名, 月)。**归一化分两档**：结算月 **≥ 2026-09** 用 `flow._norm_name()`
-  （NFKC 全角→半角 + 去半/全角空格 + lower，`WineShop Sommelier` 与 `Wine shop sommelier` 算一家）；
-  **< 2026-09** 用原始字串。⚠️ 但**店铺主档归并**（`promote_or_link_entities`）**故意只用原始 trim** ——
-  归一化会把「ざくろ銀座店」与「ざくろ 銀座店」误并成一家（8 月基准证明是两家，别顺手"修"它）。
-  组内取 ① deploy=YES（→2点）② 非 AUDIT_FAILED（→1点）
-  ③ 纯 AUDIT_FAILED 无投放（→0点，不入正式表）；同级取 modified 最早；跨月不互压。
-- **工资**：每点 250 円（可配），每满门槛点奖 3000（默认 68，`BONUS_GROUP_SCHEDULE` 按月可配）。
-- **找平**：偏差 = 对账金额 − 系统已发（负=扣/正=补），自动写表；发薪时上期扣补→下期→递延下月。
-- **员工可见起始月**：`staff_visible_from`（/config 页），未配置回退 env（默认 `2026-10`）。
-- **H5**：≤860px 顶栏折叠为汉堡；宽表 `.tbl-wrap` 横滑，≤760px 首列吸附。
-- **多语言**：`t('中文')` + `app/i18n.py`；解析顺序 `?lang=` → cookie → 账号 `User.lang` → 浏览器 → zh；
-  模板循环变量**不可用 `t`** 命名（会覆盖全局 `t()`）。
-
-## 发布流程（生产 = 新机，ssh 别名 store-prod）
-
-1. 本地全量测试过 → commit → `git push origin main`。
-2. `TS=$(date +%Y%m%d_%H%M%S)`；`ssh store-prod "mkdir -p /opt/store-settle/releases/$TS"`；
-   `rsync -a --delete -e ssh --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '*.db' --exclude 'data/' --exclude '.pytest_cache' --exclude '.DS_Store' --exclude '.env' ./ store-prod:/opt/store-settle/releases/$TS/`
-3. `ssh store-prod "install -m600 /opt/store-settle/deploy.env /opt/store-settle/releases/$TS/deploy/.env; rm -f /opt/store-settle/current; ln -s /opt/store-settle/releases/$TS /opt/store-settle/current"`
-   **生产配置 = `<release>/deploy/.env`**（compose 写的是 `env_file: .env`，相对 `deploy/` 解析），
-   **标准副本 = `/opt/store-settle/deploy.env`**（2026-10-17 起建）。
-   ⚠️ **仓库根目录那份 `.env` 是本地开发配置**（`DATABASE_URL=sqlite`、**另一个 AI key**）——
-   rsync 会把旧版带上服务器，但**容器根本不读它**（所以第 2 步直接 `--exclude '.env'`）。
-   ⚠️ 漏放 `deploy/.env` 时 `docker compose up` 会**直接报错**（这是好事：失败而非静默用错 key）。
-   2026-10-17 踩到：老文档写 `cp /opt/store-settle/current/deploy/.env`，而当时那个 release
-   **恰好没这份文件** → `cp` 失败。**核对容器真实配置**要
-   `docker exec deploy-web-1 printenv AI_API_KEY`（和文件比对，别只看文件）。
-4. `ssh store-prod "cd /opt/store-settle/current/deploy && docker compose build web mcp && docker compose up -d --no-deps web mcp"`
-   （entrypoint 自动 `alembic upgrade`）。**⚠️ 必须同时建 `mcp`**：只建 `web` 的话 MCP 容器还是旧代码，
-   新工具不会生效（2026-10-06 实测踩到）。`mcp` 容器**不跑迁移**（迁移统一由 `web` 负责）。
-   ⚠️ **别用 `| tail` 接在 compose 后面**：管道会吃掉退出码，`set -e` 也拦不住
-   （2026-10-17 因此误判 `up` 成功）。要么不加管道，要么 `set -o pipefail`。
-5. 公网走查（健康/绩效/找平/对账/产品页）。改数据前先 `pg_dump` 备份。
-6. 旧机（`ssh store-old`）只留数据供回滚，不参与发布。
-7. **nginx 改动不走发布**：宿主机 `/etc/nginx/conf.d/store.conf` 手工改（改前 `cp -a` 备份、`nginx -t` 通过再
-   `nginx -s reload`）；仓库里的 `deploy/nginx.store-settle.conf` 是它的镜像，改完要同步回来。
-   现有：全站 gzip + `/static/` 一年长缓存（靠模板 `?v={{ static_ver(...) }}` 自动失效）。
-
-> 首次在新机跑作业域迁移前，**务必先在生产备份上彩排**（见下"已知坑"最后一条）。
-
-## 已知坑（踩过的，别重踩）
-
-- **店铺主档自动化**：上传后台自动 建候选对 → 合并 exact → 受影响月重算；历史坑是"候选对从未生成"
-  → 同店不同写法各算一家（8 月多 4 条）。测试 `tests_web/test_store_auto.py`。
-- **找平债务跨月**：「**还欠多少**」和「**该月要扣/补多少**」是**两个数**，别混（混了就是钱付错）：
-  - 「还欠多少」= `period.prior_debt_map()`（读 `payroll_adjusts.remaining`，只含**未回收**）→
-    **登记发薪**扣钱用它（`record_payment`）。某人某月无工资行时结转必须从找平表读，
-    只读"上月找平行"会丢债务（实测 11 人 / -89,750 收不回）。
-  - 「该月要扣/补多少」= `period.carry_map()` = `payroll_settlement_links`（**本月已实扣**）
-    **+** `prior_debt_map()`（仍未回收）→ **绩效页 / 发薪表导出**用它。
-    ⚠️ **2026-10-17 踩到**：这两处原来只读 `prior_debt_map`，可欠款一旦被**本月的发放**回收，
-    `remaining` 就归 0/`settled` → **已经扣掉的那部分从「应付」里消失** → 应付虚增回毛额。
-    实测 2026-10：9 月偏差 −1,386,250 = 已实扣 −966,750 + 未回收 −419,500；页面/导出应付合计
-    显示 **5,891,000**，台账实付 **5,069,250** → **虚增 821,750**（王俊岩 262,750 应显 259,500）。
-  - 也别读 `payroll_period_rows.prev_adjust_amount`（**生成时快照**，不反映此后实际回收，
-    会把**已经扣过的**再结转一次：9 月链子 −1,889,000 vs 账表 −1,296,500 → **10 月多扣 ¥592,500**）。
-  - **两期发薪规则唯一实现 = `period.pay_plan()`**（绩效页 `settle_r` 与发薪表导出 `report` 共用）：
-    上半月不够扣 → 本期发 0、余数转下半月。⚠️ 导出原来**不夹取**（会出负工资）、
-    **下半月不显示找平**（余数凭空消失，可 `record_payment` 照扣）。
-  - ⚠️ **`adjust_records` 不是钱的口径**：它只由对账页「手工确认找平」写入，**线上长期 0 行**，
-    只是对账任务的确认留痕。页面/报告别读它（2026-10-17 修掉两处：`/my/perf` 应付合计、
-    对账报告应付合计 —— 员工端因此曾显示**毛额**）。外部《薪资公式终稿》的拍板 #6
-    `carry_in = Σ remaining WHERE status='in_progress'` 会丢「本月已实扣」→
-    **落地必须写 `carry_in := carry_map()`**（该终稿是提案：`apply_half_offset`/`carry_in` 全仓不存在）。
-  守门测试：`tests_web/test_period.py` 的 `test_carry_map_keeps_amount_already_recovered_this_month`
-  / `test_pay_plan_is_the_single_rule_for_both_halves` / `test_payroll_export_matches_ledger`
-  / `test_my_perf_shows_same_adjust_as_admin`。
-- **薪资四表**：`payroll_period_rows`（应发，可重算）/ `payroll_payments`（实发台账，不可改写，
-  **导出发薪表即登记**）/ `payroll_adjusts`（进度）/ `payroll_settlement_links`（发放↔找平）。
-- **数据自洽**：`scripts/verify_payroll_logic.py`（或 MCP `visit_verify`）9 项互证（A1–A9）；对线上用 `scripts/compare_with_prod.py`。
-- **迁移必须真跑**：`tests_web/test_migrations.py` 在临时库 `alembic upgrade head` 并核对 ORM 列；
-  本地库不跑 alembic（`create_all` + 手工 `ALTER`），新增表/列两边都要补。
-- **导出文件名含中文**：`filename=` 必须 ASCII、中文走 `filename*`（否则响应头 latin-1 报错）。
-- **i18n 键不能含 `"`**（会破坏 `app/i18n.py` 字典 → 页面 500）；引用词用「」。
-- MySQL TEXT 默认值要 `sa.text("('')")`，唯一键含 TEXT 用 VARCHAR(255)。
-- 线上演示期间别做写操作（删文件/重算/重传对账/重置口令）。
-- **`batch_alter_table(recreate="always")` 在 PG 上也重建表**：`bd_station` 被 `bd_task` 外键引用 →
-  `DROP CONSTRAINT bd_station_pkey` 直接失败（`DependentObjectsStillExist`）。SQLite 没这限制，单测永远绿 ✗
-  → 迁移里按方言决定：`"always" if sqlite else "never"`。**首次上生产的迁移必须先在
-  生产 `pg_dump` 还原出的临时 PG 上彩排**（`docker compose run --rm --entrypoint alembic web upgrade head`，
-  ⚠️ 干跑 `--sql` 离线模式读不到当前版本、且遇到 `sa.inspect()` 会直接报错，只能在线彩排）。
-- **新页面必须自己渲染结果提示横幅**：`msg`/`err` 是路由塞进上下文的（没有服务端 flash），
-  模板要照抄别的页面那句 `{% if msg %}<div class="msg ok">…` —— 否则**提交成功却页面毫无提示**
-  （2026-10-07 新增「进展复核」页时踩到：单测只断言跳转 URL 里的 `msg=`，查不出"页面没渲染"，
-  是**真浏览器实测**抓到的）。
-- **结果提示用 `?msg=` / `?err=` 挂在跳转 URL 上**（没有服务端 flash）：跳完由 `base.html` 里的一小段脚本
-  从地址栏清掉（保留 `#hash`）。新写路由回跳请用 `_with_msg()`（自动判断 `?`/`&`），别硬拼；
-  白名单见 `bd_r.py::_safe_back`（只允许本站 `/tasks`、`/my/*`）。
-- **静态资源改完不用管缓存**：模板写 `?v={{ static_ver('app.css') }}`（文件 mtime+size），
-  文件一改版本号就变 → 生产 nginx 敢给 `immutable` 一年缓存。⚠️ 因此**别删 `app/static/` 里的文件**。
-
-## 文档地图
-
-| 文件 | 作用 |
-|---|---|
-| `docs/README.md` | **文档地图**（"我要干什么 → 读哪份"） |
-| `docs/交接-当前状态.md` | **当前状态 / 交接**：线上实况 + 还欠什么 + 发布记录 + backlog |
-| `docs/文件索引.tsv` | 全仓 400+ 文件的索引（`./.venv/bin/python scripts/idx.py 关键词` 查） |
-| `docs/记录-*.md` | 按功能拆的**实施记录**（口径、踩坑、实测数据）——只读要改的那一个 |
-| `docs/MCP对接手册.md` | 对接其它系统时读（协议 / OAuth / **§4.6 工具设计规范** / 发布验收） |
-| `docs/发布清单-作业域.md` | 作业域特有的发布前核对；**总流程以本文件 §发布流程 为准** |
-
-> 各期 `specs-*.md`（设计规格）已于 2026-10-17 并入上面的实施记录与手册后删除；
-> 需要时 `git show <commit>^:docs/<文件>` 从历史取回。
+1. 结算域与作业域隔离：作业写入仅限 `bd_*`，结算四表不加列，不互相读写口径；迁移保持现有数据库结构、ID与历史快照。
+2. 不读取真实 `raw_records` 隐私数据；旧 `legacy/app/services/bd_store.py` 的既有只读门店宇宙例外限原指定字段。`data/`、上传原件、凭证不入仓库。
+3. 业务逻辑在服务层，页面不另造工资/找平口径。验收与同库SQL及旧实现对齐，不用历史快照数字当固定断言。
+4. 找平必须区分未回收余额与本月应扣补；后者含本月已实扣＋仍未回收。两期应付沿用 `pay_plan`，实发台账不可覆盖，导出发薪表会登记发放。
+5. 列表查询保持常数条，避免逐行权限SQL；账号按 `person_code` 判重，`users.role`（端权限）与团队角色分开。
+6. 业务写操作保留CSRF、权限、封账、版本冲突及快照保护。未知值不能伪造为0，不因页面展示重新生成正式地图。
+7. 管理端采用Appica默认主题；员工端Ant Design Mobile同步主题。导航使用真实a链接，成功反馈仅Toast；错误、风险和结果明细保留。
+8. 用户/其他agent未提交改动必须保留。目录收敛保留原字节与新文件，不reset、不清理运行资产。

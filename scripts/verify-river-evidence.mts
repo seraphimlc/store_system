@@ -1,0 +1,6 @@
+import {spawnLegacyPython} from './legacy-python.mjs';
+import {spawnSync} from 'node:child_process';import {mkdir,writeFile} from 'node:fs/promises';import assert from 'node:assert/strict';
+import {riverEvidence} from '../apps/server/src/river-evidence';import {gridCoverageDifference,type GridGeometry} from '../packages/domain/src/grid-geometry';
+const root=process.env.NEXT_ZONE_DATA_DIRECTORY??'data/bd_zones',legacy=spawnLegacyPython(['legacy/scripts/river-evidence-oracle.py',root],{encoding:'utf8',maxBuffer:24*1024*1024});assert.equal(legacy.status,0,legacy.stderr);
+const expected=JSON.parse(legacy.stdout),evidence=await riverEvidence(),combined:GridGeometry={type:'MultiPolygon',coordinates:evidence.faces.flatMap(g=>g.type==='Polygon'?[g.coordinates]:g.coordinates)},differenceM2=await gridCoverageDifference(combined,expected.geometry);assert.ok(differenceM2<=.01);
+const result={ok:true,readOnly:true,databaseAccess:false,files:evidence.files,fingerprint:evidence.fingerprint,parts:evidence.faces.length,legacyAreaM2:expected.area,coverageDifferenceM2:differenceM2};await mkdir('data/refactor',{recursive:true});await writeFile('data/refactor/p5-river-evidence.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));

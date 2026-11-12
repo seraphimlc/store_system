@@ -1,0 +1,15 @@
+import {Controller,Get,Inject,Injectable,Query,Req} from '@nestjs/common';import type {Request} from 'express';import {z} from 'zod';import {Database} from './database';import {AuthService} from './auth';import {BusinessError} from './errors';
+const day=z.string().refine(value=>value===''||/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(new Date(value+'T00:00:00Z').getTime())&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value);
+const schema=z.object({source:z.enum(['operations','visits']).default('operations'),domain:z.string().trim().max(32).default(''),q:z.string().trim().max(200).default(''),actor:z.string().trim().max(128).default(''),from:day.default(''),to:day.default(''),page:z.coerce.number().int().min(1).max(10000).default(1)}).strict();
+@Injectable()export class OperationsLogsService{
+ constructor(@Inject(Database)private readonly db:Database){}
+ async list(value:unknown){const parsed=schema.safeParse(value);if(!parsed.success||parsed.data.from&&parsed.data.to&&parsed.data.from>parsed.data.to)throw new BusinessError('VALIDATION','日志筛选条件或日期无效',400);const input=parsed.data;
+  const entries=input.source==='operations'?`SELECT id,domain,action,ref_id AS "refId",ref_label AS label,field,old_value AS old,new_value AS next,actor,actor_name AS "actorName",note,created_at AS at FROM bd_log`:`SELECT id,'batch'::text AS domain,event_type AS action,main_task_id AS "refId",concat_ws(' / ',nullif(main_label,''),nullif(region_label,''),nullif(grid_label,''),nullif(store_label,'')) AS label,'operations'::text AS field,old_value::text AS old,new_value::text AS next,actor_id::text AS actor,actor_label AS "actorName",''::text AS note,created_at AS at FROM bd_task_event`;
+  const from=input.from?new Date(input.from+'T00:00:00+09:00').toISOString():null,to=input.to?new Date(new Date(input.to+'T00:00:00+09:00').getTime()+86400000).toISOString():null;
+  return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');const {rows:[result]}=await client.query(`WITH entries AS (${entries}),matching AS(SELECT * FROM entries WHERE ($1='' OR domain=$1) AND ($2='' OR label ILIKE $3 OR note ILIKE $3 OR action ILIKE $3 OR field ILIKE $3) AND ($4='' OR actor ILIKE $5 OR "actorName" ILIKE $5) AND ($6::timestamp IS NULL OR at>=$6::timestamp) AND ($7::timestamp IS NULL OR at<$7::timestamp)),paged AS(SELECT * FROM matching ORDER BY at DESC,id DESC LIMIT 50 OFFSET $8) SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(p) FROM paged p),'[]') AS items`,[input.domain,input.q,'%'+input.q+'%',input.actor,'%'+input.actor+'%',from,to,(input.page-1)*50]);return {...result,page:input.page,pageSize:50,source:input.source};});
+ }
+}
+@Controller('operations/logs')export class OperationsLogsController{
+ constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(OperationsLogsService)private readonly service:OperationsLogsService){}
+ @Get()async list(@Req()req:Request,@Query()query:unknown){await this.auth.require(req,{admin:true});return this.service.list(query);}
+}

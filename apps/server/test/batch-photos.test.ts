@@ -1,0 +1,21 @@
+import 'reflect-metadata';import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {mkdtemp,rm,stat} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import sharp from 'sharp';import {hash} from '@node-rs/argon2';import request from '../node_modules/supertest';import {createApp} from '../src/main';import {Database} from '../src/database';import {seedBatchWork,clearBatchWork} from '../../../scripts/batch-work-fixture.mjs';
+const url=process.env.NEXT_TEST_DATABASE_URL;
+test('multipart visit stores sanitized photos, protects access and keeps progress consistent on replay and conflict',{skip:!url},async()=>{
+ assert.match(new URL(url!).pathname,/_refactor_p1$/);const directory=await mkdtemp(join(tmpdir(),'batch-photo-test-')),previous=process.env.NEXT_UPLOAD_DIRECTORY;process.env.NEXT_UPLOAD_DIRECTORY=directory;
+ const app=await createApp({databaseUrl:url!,sessionSecret:'private-photo-test-at-least-40-character-secret',cookieSecure:false,port:0,host:'127.0.0.1'}),db=app.get(Database);let f:any;
+ try{
+  const password='photo-fixture-2026';f=await seedBatchWork(db,'P5-PHOTO',await hash(password));const id=f.stores[0][0][0],other=f.stores[0][1][0],sameSource=f.stores[1][0][0];
+  const worker=request.agent(app.getHttpServer()),outsider=request.agent(app.getHttpServer());
+  const login=async(agent:any,index:number)=>(await agent.post('/api/auth/login').send({username:f.codes[index],password}).expect(201)).body.csrfToken;
+  const csrf=await login(worker,2),foreign=await login(outsider,4),image=await sharp({create:{width:2000,height:1000,channels:3,background:'#123456'}}).withMetadata({orientation:6}).jpeg().toBuffer();
+  const payload={requestId:randomUUID(),revision:0,photoRevision:0,status:'normal',note:'Visit with photo',photoUrls:[]};const target=`/api/batch-work/stores/${id}/photos`;
+  const post=(value:any,file?:Buffer)=>{const req=worker.post(target).set('X-CSRF-Token',csrf).field('result',JSON.stringify(value));return file?req.attach('photos',file,'visit.jpg'):req;};
+  await outsider.post(target).set('X-CSRF-Token',foreign).field('result',JSON.stringify(payload)).attach('photos',image,'visit.jpg').expect(403);
+  await post(payload,Buffer.from('not a photo')).expect(400);assert.equal((await db.query('SELECT progress FROM bd_main_task WHERE id=$1',[f.mains[0]])).rows[0].progress,0);await assert.rejects(stat(join(directory,'batch-photos')),{code:'ENOENT'});
+  await post(payload,image).expect(201);const {rows:[task]}=await db.query('SELECT store_id,result FROM bd_store_task WHERE id=$1',[id]);const [photo]=task.result.photo_urls;
+  assert.match(photo,/^\/api\/batch-work\/photos\/[a-f0-9]{64}\/[a-f0-9]{64}$/);const bytes=(await worker.get(photo+'?taskId='+id).expect(200).expect('Cache-Control','private, no-store')).body;const meta=await sharp(bytes).metadata();assert.equal(meta.exif,undefined);assert.equal(meta.height,1920);assert.equal(meta.width,960);
+  await request(app.getHttpServer()).get(photo+'?taskId='+id).expect(401);await outsider.get(photo+'?taskId='+id).expect(403);await worker.get(photo+'?taskId='+other).expect(404);
+  assert.equal((await post(payload,image).expect(201)).body.reused,true);const {rows:[profile]}=await db.query('SELECT revision FROM bd_merchant_detail WHERE store_id=$1',[task.store_id]);assert.equal(profile.revision,1);assert.equal((await db.query('SELECT completed_stores FROM bd_grid_task WHERE id=$1',[f.grids[0][0]])).rows[0].completed_stores,1);
+  await post({...payload,requestId:randomUUID(),revision:1}).expect(409);const removal={...payload,requestId:randomUUID(),revision:1,photoRevision:1};await post(removal).expect(201);await worker.get(photo+'?taskId='+id).expect(404);await worker.get(photo+'?taskId='+sameSource).expect(404);assert.equal((await db.query('SELECT completed_stores FROM bd_grid_task WHERE id=$1',[f.grids[0][0]])).rows[0].completed_stores,1);
+ }finally{if(f){await db.query('DELETE FROM bd_merchant_detail WHERE store_id=$1',[f.prefix+'-source-0-0']);await clearBatchWork(db,f);}await app.close();if(previous===undefined)delete process.env.NEXT_UPLOAD_DIRECTORY;else process.env.NEXT_UPLOAD_DIRECTORY=previous;await rm(directory,{recursive:true,force:true});}
+});

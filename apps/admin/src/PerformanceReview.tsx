@@ -1,0 +1,6 @@
+import {useEffect,useState} from 'react';
+import {Alert} from '@appica/ui-react/alert';
+import {Table,TableHeader,TableRow,TableHead,TableBody,TableCell} from '@appica/ui-react/table';
+import type {Session} from '../../../packages/contracts/src';
+import {api} from './api';
+export function PerformanceReview({session,language}:{session:Session;language:string}){const t=(zh:string,ja:string)=>language==='ja'?ja:zh;const [data,setData]=useState<any>(null);const [error,setError]=useState('');useEffect(()=>{api<any>('/station-tasks?tab=pending&page=1').then(setData).catch(e=>setError(e.message));},[]);return <section className="performance-review">{error&&<Alert role="alert">{error}</Alert>}{data?.items?.length?<div className="table-scroll"><Table><TableHeader><TableRow><TableHead>{t('任务','タスク')}</TableHead><TableHead>{t('队员报告','メンバー報告')}</TableHead><TableHead>{t('当前进度','現在の進捗')}</TableHead><TableHead>{t('状态','状態')}</TableHead></TableRow></TableHeader><TableBody>{data.items.map((row:any)=><TableRow key={row.id}><TableCell>{row.label}</TableCell><TableCell>{row.reportedPct??'—'}%</TableCell><TableCell>{row.pct??0}%</TableCell><TableCell>{row.state||'—'}</TableCell></TableRow>)}</TableBody></Table></div>:<p>{t('暂无待复核记录','確認待ちの記録はありません')}</p>}</section>}

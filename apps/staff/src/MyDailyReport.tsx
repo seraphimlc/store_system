@@ -1,0 +1,21 @@
+import {useEffect,useRef,useState} from 'react';
+import {Button} from 'antd-mobile';
+import type {DailyReportList,TeamDailyReportList,Session} from '../../../packages/contracts/src';
+import {api} from './api';
+import {ScrollMore,useProgressiveItems} from './scrollList';
+import {TodayReport} from './TodayReport';
+function monthNow(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);}
+export function MyDailyReport({session,language}:{session:Session;language:string}){
+ const t=(zh:string,ja:string)=>language==='ja'?ja:zh,current=monthNow();const [month,setMonth]=useState(current),[data,setData]=useState<DailyReportList|null>(null),[team,setTeam]=useState<TeamDailyReportList|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[version,setVersion]=useState(0),[teamLoading,setTeamLoading]=useState(false);const generation=useRef(0),teamGen=useRef(0);
+ useEffect(()=>{const id=++generation.current;teamGen.current++;setTeam(null);setLoading(true);api<DailyReportList>('/reports/mine?month='+month).then(v=>{if(id===generation.current){setData(v);setError('');}}).catch(e=>{if(id===generation.current)setError(e.message);}).finally(()=>{if(id===generation.current)setLoading(false);});return()=>{generation.current++;teamGen.current++;};},[month,version]);
+ async function loadTeam(code=''){const id=++teamGen.current;setTeamLoading(true);try{const v=await api<TeamDailyReportList>('/reports/team?'+new URLSearchParams({month,personCode:code}));if(id===teamGen.current)setTeam(v);}catch(e){if(id===teamGen.current)setError((e as Error).message);}finally{if(id===teamGen.current)setTeamLoading(false);}}
+ const historyList=useProgressiveItems(data?.items??[]);const teamList=useProgressiveItems(team?.items??[]);
+ const sorted=[...(data?.items??[])].sort((a,b)=>a.date.localeCompare(b.date)),max=Math.max(1,...sorted.map(d=>d.points));
+ return <section className="h5-daily-page"><label className="h5-month">{t('月份','月')}<input type="month" value={month} onChange={e=>setMonth(e.target.value)}/></label>{error&&<p className="error" role="alert">{error}</p>}
+ {month===current?<TodayReport session={session} language={language} onSaved={()=>setVersion(v=>v+1)}/>:<p className="h5-card">{t('历史月份仅可查看，回到当前月份填写今日数据。','過去月は参照のみです。今月を選んで本日分を入力してください。')}</p>}
+ {loading?<p role="status">{t('正在读取…','読込中…')}</p>:<><section className="h5-card"><h2>{t('自报趋势','申告の推移')}</h2>{sorted.length?<><div className="h5-trend" role="img" aria-label={t('已填报日期的每日点数，未填日期不计为0','申告済み日のポイント。未申告日は0としません')}>
+ {sorted.map(d=><div key={d.id} title={d.date+' · '+d.points}><span>{d.points}</span><div className="h5-trend-track"><i style={{height:Math.max(2,100*d.points/max)+'%'}}/></div><small>{d.date.slice(8)}</small></div>)}</div><p className="h5-help">{t('只展示已填报日期；未填报不作为0点。','申告済み日のみ表示。未申告日は0点としません。')}</p></>:<p>{t('暂无日报记录','日報はまだありません')}</p>}</section>
+ <section className="report-history h5-card"><h2>{t('历史日报','日報履歴')}</h2><p className="h5-help">{t('本月合计','月合計')}：{data?.summary.total??0} {t('店数','店舗数')} / {data?.summary.points??0} {t('点数','ポイント')}</p><ul>{historyList.items.map(d=><li key={d.id}><div><strong>{d.date}</strong><p>{d.area||'—'}</p></div><div><strong>{d.points} {t('点数','ポイント')}</strong><p>{d.p1} + {d.p2} × 2</p></div></li>)}</ul><ScrollMore hasMore={historyList.hasMore} onLoad={historyList.loadMore} language={language}/></section></>}
+ {data?.canViewTeam&&<section className="h5-card team-reports"><Button block fill="outline" loading={teamLoading} onClick={()=>void loadTeam()}>{t('本队日报','チームの日報')}</Button>{team&&<><label>{t('员工','スタッフ')}<select disabled={teamLoading} value={team.selected} onChange={e=>void loadTeam(e.target.value)}>{team.people.map(p=><option key={p.code} value={p.code}>{p.name} · {p.code}</option>)}</select></label><p className="h5-help">{t('仅可查看，不能代改队员填报。','参照のみ。メンバーの申告は編集できません。')}</p><ul className="daily-data-list">{teamList.items.map(d=><li key={d.id}><h3>{d.date}</h3><p>{d.area||'—'}</p><div className="h5-row"><span>{d.total} {t('家店','店舗')}</span><strong>{d.points} {t('点','ポイント')}</strong></div></li>)}</ul><ScrollMore hasMore={teamList.hasMore} onLoad={teamList.loadMore} language={language}/></>}</section>}
+ </section>;
+}

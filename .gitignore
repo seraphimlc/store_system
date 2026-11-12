@@ -18,7 +18,7 @@ data/real/
 # 地图网格原始/生成数据体积大，存放在仓库外，不提交
 data/grid/
 *.xlsx
-!tests/fixtures/**/*.xlsx
+!legacy/tests/fixtures/**/*.xlsx
 
 # Scratch（学习阶段的临时脚本）
 _learn_tmp/
@@ -50,7 +50,7 @@ data/*.txt
 
 # MCP 服务（mcp_service/）：证据日志为 jsonl，不在上条 *.log 覆盖范围内
 # 注：mcp_service/.venv/ 已由上面的 .venv/ 规则覆盖（无前导斜杠，任意层级生效）
-mcp_service/logs/
+legacy/mcp_service/logs/
 
 # 旧仓库历史备份/本地残留
 .git.orig/
@@ -71,3 +71,18 @@ __key__
 
 # 本地作业域地理快照（公开来源，但含大体积坐标数据）
 data/bd_zones/
+# Local refactor database evidence (schema + aggregate snapshots)
+data/refactor/
+
+# TypeScript workspace and local releases
+node_modules/
+apps/*/dist/
+packages/*/dist/
+.playwright/
+.release/
+
+!.env.next.example
+
+# Archived Python runtime data remains private if legacy tools are run explicitly.
+legacy/data/
+legacy/*.pid
