@@ -22,7 +22,7 @@ export class EmployeesController {
   const {search,status,page}=parse(querySchema,query);
   const result=await this.db.query(`WITH matching AS (
     SELECT id,username,display_name,person_code,role,status,is_active,lang,must_change_password
-    FROM users WHERE role IN ('staff','leader') AND ($1='' OR username ILIKE $1 OR display_name ILIKE $1 OR person_code ILIKE $1) AND ($2::text IS NULL OR status=$2)
+    FROM users WHERE role IN ('staff','leader') AND status<>'deleted' AND ($1='' OR username ILIKE $1 OR display_name ILIKE $1 OR person_code ILIKE $1) AND ($2::text IS NULL OR status=$2)
    ), paged AS (SELECT id,username,display_name AS "displayName",person_code AS "personCode",role,status,is_active AS "isActive",lang AS language,must_change_password AS "mustChangePassword" FROM matching ORDER BY ${employeeOrder} LIMIT 30 OFFSET $3)
    SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items`,[search?'%'+search+'%':'',status??null,(page-1)*30]);
   return {...result.rows[0],page,pageSize:30};
@@ -51,11 +51,16 @@ export class EmployeesController {
  @Post(':id/reset') async reset(@Req() req:Request,@Param('id') id:string,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});const input=parse(z.object({password:z.string().min(6).max(128)}).strict(),body);return this.service.reset(identity(id),input.password);
  }
+ @Post(':id/delete') async remove(@Req() req:Request,@Param('id') value:string,@Body() body:unknown){
+  await this.auth.require(req,{admin:true,write:true});
+  const input=parse(z.object({confirm:z.literal('DELETE_EMPLOYEE'),expectedStatus:state}).strict(),body);
+  return this.service.remove(identity(value),input.expectedStatus);
+ }
  @Post(':id/status') async status(@Req() req:Request,@Param('id') value:string,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});
   const id=identity(value),input=parse(z.object({status:state,expectedStatus:state}).strict(),body);
   return this.db.transaction(async client=>{
-   const target=(await client.query("SELECT id,status,role FROM users WHERE id=$1 AND role IN ('staff','leader') FOR UPDATE",[id])).rows[0];
+   const target=(await client.query("SELECT id,status,role FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE",[id])).rows[0];
    if(!target)throw new BusinessError('NOT_FOUND','员工不存在',404);
    if(target.status!==input.expectedStatus)throw new BusinessError('CONFLICT','员工状态已更新，请刷新后重试',409);
    const active=['active','leave'].includes(input.status);

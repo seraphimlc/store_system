@@ -84,7 +84,7 @@ export class EmployeeService {
     const passwordHash = input.password ? await passwordWork.run(() => hash(input.password)) : null;
     try {
       return await this.db.transaction(async client => {
-        const target = (await client.query<EmployeeRow>(`SELECT * FROM users WHERE id=$1 AND role IN ('staff','leader') FOR UPDATE`, [id])).rows[0];
+        const target = (await client.query<EmployeeRow>(`SELECT * FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE`, [id])).rows[0];
         if (!target) throw new BusinessError('NOT_FOUND', '员工不存在', 404);
         const expected = input.expected;
         if (target.username !== expected.username || target.display_name !== expected.name || target.status !== expected.status || (target.lang || '') !== expected.language || target.role !== expected.role) {
@@ -101,16 +101,25 @@ export class EmployeeService {
       });
     } catch (error) { conflict(error); }
   }
+  async remove(id: number, expectedStatus: EmployeeState) {
+    return this.db.transaction(async client => {
+      const target = (await client.query("SELECT status FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE", [id])).rows[0];
+      if (!target) throw new BusinessError('NOT_FOUND', '员工不存在或已删除', 404);
+      if (target.status !== expectedStatus) throw new BusinessError('CONFLICT', '员工状态已更新，请刷新后重试', 409);
+      await client.query("UPDATE users SET status='deleted',is_active=false WHERE id=$1", [id]);
+      return { id, deleted: true };
+    });
+  }
   async reset(id: number | null, password: string) {
     const passwordHash = await passwordWork.run(() => hash(password));
     const result = await this.db.query(`UPDATE users SET password_hash=$1,must_change_password=true
-      WHERE role IN ('staff','leader') AND ($2::int IS NULL OR id=$2) RETURNING id`, [passwordHash, id]);
+      WHERE role IN ('staff','leader') AND status<>'deleted' AND ($2::int IS NULL OR id=$2) RETURNING id`, [passwordHash, id]);
     if (id !== null && !result.rowCount) throw new BusinessError('NOT_FOUND', '员工不存在', 404);
     return { count: result.rowCount };
   }
   async export(onlyActive: boolean, origin: string) {
     const rows = (await this.db.query<EmployeeRow>(`SELECT id,username,display_name,person_code,status,role,lang,is_active,must_change_password
-      FROM users WHERE role IN ('staff','leader') ${onlyActive ? "AND status='active' AND is_active=true" : ''} ORDER BY ${order}`)).rows;
+      FROM users WHERE role IN ('staff','leader') AND status<>'deleted' ${onlyActive ? "AND status='active' AND is_active=true" : ''} ORDER BY ${order}`)).rows;
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('员工登录名');
     sheet.addRow(['登录名','姓名','员工编号','在职状态','账号启用','首次登录需改密','初始口令','界面语言','登录地址']);

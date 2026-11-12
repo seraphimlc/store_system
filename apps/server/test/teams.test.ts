@@ -11,6 +11,17 @@ test('teams preserve membership history, one-team concurrency, roles, candidate 
   await db.query('INSERT INTO persons(code,display_name,created_at) SELECT code,code,now() FROM unnest($1::text[]) code',[codes]);const pw=await hash('teams-fixture');for(const [name,role,code]of [['admin','admin',codes[3]],['staff','staff',codes[0]],['member','staff',codes[1]]]as const)users.push((await db.query(`INSERT INTO users(username,password_hash,display_name,role,person_code,status,is_active,must_change_password,lang,created_at) VALUES($1,$2,$1,$3,$4,'active',true,false,'zh',now()) RETURNING id`,['p5-teams-'+name,pw,role,code])).rows[0].id);
   const admin=request.agent(app.getHttpServer()),staff=request.agent(app.getHttpServer());const login=(await admin.post('/api/auth/login').send({username:'p5-teams-admin',password:'teams-fixture'}).expect(201)).body;await staff.post('/api/auth/login').send({username:'p5-teams-staff',password:'teams-fixture'}).expect(201);const post=(path:string,value:unknown)=>admin.post(path).set('X-CSRF-Token',login.csrfToken).send(value);const before=await financial();await request(app.getHttpServer()).get('/api/teams').expect(401);await staff.get('/api/teams').expect(403);await admin.post('/api/teams').send({name:'CSRF'}).expect(403);
   for(const [name,code]of [['P5团队甲',' ｔｅａｍ ５ '],['P5团队乙','TEAM6']]){const result=await post('/api/teams',{name,code}).expect(201);teams.push(result.body.id);}await post('/api/teams',{name:'P5团队甲'}).expect(409);await post('/api/teams',{name:'不同名称',code:'TEAM5'}).expect(409);assert.equal((await service.detail(teams[0])).team.code,'TEAM5');await staff.get(`/api/teams/${teams[0]}`).expect(403);await staff.get(`/api/teams/${teams[0]}/candidates`).expect(403);
+  const candidatePath=`/api/teams/${teams[1]}/candidates?q=${encodeURIComponent(codes[1])}`;
+  assert.equal((await admin.get(candidatePath).expect(200)).body.total,1);
+  await db.query("UPDATE users SET status='leave' WHERE id=$1",[users[2]]);
+  assert.equal((await admin.get(candidatePath).expect(200)).body.total,0);
+  assert.equal((await admin.get(candidatePath+'&status=leave').expect(200)).body.total,1);
+  assert.equal((await admin.get(candidatePath+'&status=').expect(200)).body.total,1);
+  await db.query("UPDATE users SET status='active',is_active=false WHERE id=$1",[users[2]]);
+  assert.equal((await admin.get(candidatePath).expect(200)).body.total,0);
+  await db.query("UPDATE users SET status='deleted' WHERE id=$1",[users[2]]);
+  assert.equal((await admin.get(candidatePath+'&status=').expect(200)).body.total,0);
+  await db.query("UPDATE users SET status='active',is_active=true WHERE id=$1",[users[2]]);
   const save=async(id:number,entries:{code:string;role:string}[],token?:string)=>post(`/api/teams/${id}/members`,{entries,token:token??(await service.detail(id)).token});
   let state=await service.detail(teams[0]);await save(teams[0],[{code:codes[0],role:'leader'},{code:codes[1],role:'member'},{code:codes[3],role:'member'}],state.token).then(result=>assert.equal(result.status,201));assert.equal((await db.query('SELECT role FROM users WHERE id=$1',[users[1]])).rows[0].role,'leader');assert.equal((await db.query('SELECT role FROM users WHERE id=$1',[users[0]])).rows[0].role,'admin');await save(teams[0],[],state.token).then(result=>assert.equal(result.status,409));
   assert.equal((await service.candidates(teams[1],codes[0],1)).total,0);assert.ok((await service.candidates(teams[1],'',1)).elsewhere>=3);await save(teams[1],[{code:codes[0],role:'member'}]).then(result=>assert.equal(result.status,409));

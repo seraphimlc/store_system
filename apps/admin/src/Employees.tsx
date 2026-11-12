@@ -14,6 +14,8 @@ import { api } from './api';
 
 const statusLabels = { active: '在岗', leave: '请假', disabled: '停用', resigned: '离职' };
 const ja: Record<string, string> = {
+  '删除':'削除','删除员工':'スタッフを削除','确认删除':'削除する','正在删除…':'削除中…','员工已删除':'スタッフを削除しました',
+  '确认删除此员工？删除后账号立即停用，员工不再显示在列表和账号导出中，历史业务记录保留。':'このスタッフを削除しますか？アカウントは直ちに無効になり、一覧とアカウント出力から除外されます。過去の業務記録は保持されます。',
   '搜索姓名、账号或人员编号':'氏名・アカウント・番号を検索','搜索':'検索','全部状态':'すべての状態',
   '在岗':'在籍','请假':'休暇','停用':'無効','离职':'退職','姓名 / 账号':'氏名 / アカウント',
   '人员编号':'スタッフ番号','账号角色':'アカウント権限','状态':'状態','操作':'操作','队长端权限':'リーダー権限',
@@ -29,7 +31,7 @@ const ja: Record<string, string> = {
   '包括队长和停用、离职账号；不会修改管理员。':'リーダー・無効・退職アカウントを含みます。管理者は変更しません。',
   '输入 RESET_ALL_STAFF 确认':'確認として RESET_ALL_STAFF を入力','账号清单仅向管理员提供，请妥善交付。':'アカウント一覧は管理者専用です。適切に配布してください。',
 };
-type Mode = 'create' | 'edit' | 'reset' | 'reset-all';
+type Mode = 'create' | 'edit' | 'reset' | 'reset-all' | 'delete';
 interface Editor { mode: Mode; employee?: Employee }
 
 export function Employees({ session, language }: { session: Session; language: string }) {
@@ -88,13 +90,15 @@ export function Employees({ session, language }: { session: Session; language: s
       }
       if (editor.mode === 'reset') await api(`/employees/${editor.employee!.id}/reset`, session, values);
       if (editor.mode === 'reset-all') await api('/employees/reset-all', session, values);
-      setEditor(null); setNotice(t('已保存员工资料')); await load();
+      if (editor.mode === 'delete') await api(`/employees/${editor.employee!.id}/delete`, session, {confirm:'DELETE_EMPLOYEE',expectedStatus:editor.employee!.status});
+      setEditor(null); setNotice(t(editor.mode === 'delete' ? '员工已删除' : '已保存员工资料'));
+      if (editor.mode === 'delete' && page > 1 && data?.items.length === 1) setPage(page - 1); else await load();
     } catch (error) { setError((error as Error).message); }
     finally { writing.current = false; setSaving(false); }
   }
   const employee = editor?.employee;
   const isAccount = editor?.mode === 'create' || editor?.mode === 'edit';
-  const title = editor?.mode === 'create' ? '新建员工' : editor?.mode === 'edit' ? '编辑员工' : editor?.mode === 'reset-all' ? '重置全部员工口令' : '重置口令';
+  const title = editor?.mode === 'delete' ? '删除员工' : editor?.mode === 'create' ? '新建员工' : editor?.mode === 'edit' ? '编辑员工' : editor?.mode === 'reset-all' ? '重置全部员工口令' : '重置口令';
   return <section className="employee-section">
     
     <Form className="employee-filters admin-filter-panel" onSubmit={filter}>
@@ -111,7 +115,7 @@ export function Employees({ session, language }: { session: Session; language: s
     <div className="employee-result-count">{language === 'ja' ? `${data?.total ?? 0} 名` : `共 ${data?.total ?? 0} 位员工`}</div>
     {loading ? <p role="status">{t('正在读取员工…')}</p> : !data?.items.length ? <div className="empty-state"><h3>{t('没有符合条件的员工')}</h3></div> :
       <div className="table-scroll"><Table><TableHeader><TableRow>{['姓名 / 账号','人员编号','账号角色','状态','操作'].map(label => <TableHead key={label}>{t(label)}</TableHead>)}</TableRow></TableHeader><TableBody>{data.items.map(employee =>
-        <TableRow key={employee.id}><TableCell><strong>{employee.displayName || employee.username}</strong><span className="row-id">{employee.username}</span></TableCell><TableCell>{employee.personCode || '—'}</TableCell><TableCell>{t(employee.role === 'leader' ? '队长端权限' : '员工端权限')}</TableCell><TableCell><span className={'status-label state-' + employee.status}>{t(statusLabels[employee.status])}</span></TableCell><TableCell><div className="row-actions"><Button variant="outline" onClick={() => open('edit', employee)}>{t('编辑')}</Button><Button variant="outline" onClick={() => open('reset', employee)}>{t('重置口令')}</Button></div></TableCell></TableRow>)}</TableBody></Table></div>}
+        <TableRow key={employee.id}><TableCell><strong>{employee.displayName || employee.username}</strong><span className="row-id">{employee.username}</span></TableCell><TableCell>{employee.personCode || '—'}</TableCell><TableCell>{t(employee.role === 'leader' ? '队长端权限' : '员工端权限')}</TableCell><TableCell><span className={'status-label state-' + employee.status}>{t(statusLabels[employee.status])}</span></TableCell><TableCell><div className="row-actions"><Button variant="outline" onClick={() => open('edit', employee)}>{t('编辑')}</Button><Button variant="outline" onClick={() => open('reset', employee)}>{t('重置口令')}</Button><Button variant="outline" onClick={() => open('delete', employee)}>{t('删除')}</Button></div></TableCell></TableRow>)}</TableBody></Table></div>}
     <AdminPagination className="pagination"><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage(page - 1)}>{t('上一页')}</Button><span>{page} / {Math.max(1, Math.ceil((data?.total ?? 0) / 30))}</span><Button variant="outline" disabled={loading || page * 30 >= (data?.total ?? 0)} onClick={() => setPage(page + 1)}>{t('下一页')}</Button></AdminPagination>
     <p className="muted">{t('账号清单仅向管理员提供，请妥善交付。')}</p>
     <Dialog open={!!editor} onOpenChange={open=>{if(!open&&!saving)setEditor(null);}}><DialogContent className="management-dialog employee-editor-dialog" frame={false} closeButton={false}>
@@ -130,10 +134,11 @@ export function Employees({ session, language }: { session: Session; language: s
           </>}
           <p className="muted full-width">{t('人员编号创建后不能修改。')}{t('请假可登录；停用或离职后不能登录，历史数据始终保留。')}</p>
         </>}
-        {!isAccount && <><label>{t('新口令')}<Input name="password" type="password" required minLength={6} maxLength={128} autoComplete="new-password"/></label><p className="muted full-width">{t('至少6位；重置后旧会话失效，下次登录必须改密。')}</p></>}
+        {editor.mode === 'delete' && <Alert className="full-width" role="alert">{t('确认删除此员工？删除后账号立即停用，员工不再显示在列表和账号导出中，历史业务记录保留。')}</Alert>}
+        {!isAccount && editor.mode !== 'delete' && <><label>{t('新口令')}<Input name="password" type="password" required minLength={6} maxLength={128} autoComplete="new-password"/></label><p className="muted full-width">{t('至少6位；重置后旧会话失效，下次登录必须改密。')}</p></>}
         {editor.mode === 'reset-all' && <><p className="full-width">{t('包括队长和停用、离职账号；不会修改管理员。')}</p><label>{t('输入 RESET_ALL_STAFF 确认')}<Input name="confirm" value={confirmation} onChange={event => setConfirmation(event.target.value)} autoComplete="off" required/></label></>}
         {error && <Alert className="error full-width" role="alert">{error}</Alert>}
-        <div className="dialog-actions"><Button variant="outline" type="button" disabled={saving} onClick={() => setEditor(null)}>{t('取消')}</Button><Button type="submit" disabled={saving || (editor.mode === 'reset-all' && confirmation !== 'RESET_ALL_STAFF')}>{t(saving ? '正在保存…' : '保存')}</Button></div>
+        <div className="dialog-actions"><Button variant="outline" type="button" disabled={saving} onClick={() => setEditor(null)}>{t('取消')}</Button><Button type="submit" disabled={saving || (editor.mode === 'reset-all' && confirmation !== 'RESET_ALL_STAFF')}>{t(editor.mode === 'delete' ? (saving ? '正在删除…' : '确认删除') : (saving ? '正在保存…' : '保存'))}</Button></div>
       </Form>}
     </DialogContent></Dialog>
   </section>;

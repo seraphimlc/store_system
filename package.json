@@ -41,7 +41,8 @@
     "assets:cors": "node --env-file-if-exists=.env --env-file-if-exists=.env.next.local scripts/verify-gcs-cors.mjs",
     "test:browser:management": "node scripts/test-isolated.mjs --browser --management",
     "test:browser:map-workspace": "node scripts/test-isolated.mjs --browser --map-workspace",
-    "test:browser:messages-isolated": "node scripts/test-isolated.mjs --browser --messages"
+    "test:browser:messages-isolated": "node scripts/test-isolated.mjs --browser --messages",
+    "release:bundle": "node --env-file-if-exists=.env --env-file-if-exists=.env.next.local scripts/release-bundle.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1165.0",

@@ -1,3 +1,45 @@
+> **当前日常发布手册（2026-11-13）**：[生产部署与回滚](生产部署与回滚.md)。镜像统一打为单个 ZIP，通过 Google Cloud Storage 上传；下文集团云分卷与首次旧系统迁移仅作历史记录。
+
+## 镜像集团云归档（2026-11-12）
+
+通过用户指定的frontend-tools / front-demo / aliyun_default（集团云）上传。完整ZIP为231,917,744字节（约221.2MiB），单次上传失败后分为14卷，均已上传并核对公开HTTP状态和大小。
+
+- [下载清单与还原脚本ZIP](https://static.xyb2b.com/files/f2e97b4c6150a2c259a533b4e7f06d46.zip)（这是下载工具包，镜像由脚本从14个分卷还原）。
+- 解压后运行`python3 restore-images.py`；逐卷SHA256、整体ZIP SHA256及CRC验证完成后生成`images.tar.gz`。已用本地已校验分卷完整演练还原；未重新下载全部221MiB。
+- 导入：`docker load -i images.tar.gz`；镜像为`store-next-api:prod-20261112`与`store-next-gateway:prod-20261112`，linux/amd64。下载脚本不会执行Docker或修改数据库。
+- 完整镜像ZIP SHA256：`e1217be2748e34d600c03e7b3c4da6de2efa94fa57686739a4438ab4c2c43f25`。
+- 下载工具包SHA256：`ca2213bbb17b364957fbf812e303d8aabbf257ef8c722a743d10de2d7d6683d7`。
+- 归档只含镜像、公开资源及manifest，不含运行凭证或数据库备份。分卷URL及校验清单位于工具包`cloud-download.json`。
+
+## 生产目标：visitworld（2026-11-12）
+
+生产使用独立的 `deploy-next/production-release.py` 编排器，不复用本地数据库白名单或HTTP豁免。执行方式为通过SSH将该文件安装到 `/opt/store-next/production-release.py`，所有生产操作固定经 `ssh visitworld`。现有 `scripts/release.mjs` 仍为本地目标，`--env production` 继续拒绝，不能删除guard来发布。
+
+生产目录：
+
+- `/opt/store-next/releases/<release>/`：amd64镜像归档、manifest、Compose、私有运行配置和验收证明。
+- `/opt/store-next/backups/<release>/`：数据库备份、旧容器配置、Nginx原配置、原件归档；仅root可读。
+- `/opt/store-next/production-state.json`：正式运行状态。
+- `/opt/store-next/legacy-static/`：保留旧页面静态资源。
+
+分阶段命令（prepare不可盲目重跑，先status核对）：
+
+```bash
+ssh visitworld 'python3 /opt/store-next/production-release.py status <release>'
+# prepare：备份并恢复到临时库；candidate：只读恢复库，生产入口不变。
+ssh visitworld 'python3 /opt/store-next/production-release.py prepare <release>'
+ssh visitworld 'python3 /opt/store-next/production-release.py candidate <release>'
+# 切流前完成候选浏览器和同库回滚演练，再执行授权的cutover。
+ssh visitworld 'python3 /opt/store-next/production-release.py cutover <release>'
+# 应用回滚保留同一现库数据，不恢复旧数据库备份。
+ssh visitworld 'python3 /opt/store-next/production-release.py rollback <release>'
+```
+
+生产API使用Secure Cookie、现有`deploy_default`网络的生产`store_settle`，不启用本地HTTP例外。切换窗口有全站维护、事务排空、旧应用暂停、最终备份及只读验证；新Worker使用独立`store-next-prod-jobs`，历史补投关闭。旧Web/MCP暂停并禁止自动重启，DB持续运行；回滚恢复旧策略并unpause，避免旧entrypoint执行迁移。不要手动unpause旧应用造成双写。
+
+原件卷只读挂载，后续新文件写新任务卷；回滚前必须保留/核对新卷里的合法文件及新任务，不能删卷或全库回灌。回滚只对本次首次Python→Node切换实现；后续生产新栈版本升级应另行扩展带当前release校验、任务兼容检查和相同数据卷交接的流程。
+
+
 > **生产迁移计划**：[生产迁移与回滚](../docs/计划-生产迁移与回滚.md)。本手册现有CLI只支持本地；生产切换须先完成该计划P0。应用回滚保留同库数据，全库恢复属于单独事故决策。
 
 > **2026-11-12端口更新**：本地Docker统一入口改为 http://localhost:8000/admin/ （管理端）和 http://localhost:8000/ （员工端）。开发态仍使用8001/8002，API3000，Docker基准库store_settle与开发临时库store_settle_refactor_p1不变。只重新创建edge端口映射，不重建或切换业务release。下文8080为历史记录。

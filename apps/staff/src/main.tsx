@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { Badge, Button, ConfigProvider, List, NavBar, Popup } from 'antd-mobile';
 import zhCN from 'antd-mobile/es/locales/zh-CN';
 import jaJP from 'antd-mobile/es/locales/ja-JP';
-import { ClipboardList, UserRound, ChevronRight, Globe2, LogOut, LockKeyhole, FileText, CalendarDays, Mail, Menu, ChartNoAxesColumn, MapPinned } from 'lucide-react';
+import { ClipboardList, UserRound, ChevronRight, Globe2, LogOut, LockKeyhole, FileText, CalendarDays, Mail, Menu, MapPinned } from 'lucide-react';
 import type { Session } from '../../../packages/contracts/src';
 import { api, ApiFailure, SESSION_EXPIRED_EVENT } from './api';
 import './style.css';
@@ -21,7 +21,7 @@ import { MessageCenter } from '../../../packages/client/src/MessageCenter';
 import { useAppLanguage } from '../../../packages/client/src/language';
 import './theme.css';
 const ja: Record<string,string> = {
-  '巡店工作台':'巡回ワークスペース','登录':'ログイン','账号':'アカウント','密码':'パスワード','使用现有员工账号继续':'既存のアカウントでログインしてください',
+  '欢迎回来':'おかえりなさい','登录':'ログイン','账号':'アカウント','密码':'パスワード',
   '正在连接…':'接続中…','登录中…':'ログイン中…','巡店任务':'巡回タスク','我的账号':'マイアカウント','退出登录':'ログアウト',
   '设置新密码':'新しいパスワードを設定','初始密码需要更新后才能继续':'初期パスワードを変更してください','当前密码':'現在のパスワード','新密码':'新しいパスワード',
   '至少6个字符':'6文字以上','保存并继续':'保存して続ける','正在保存…':'保存中…','你好':'こんにちは','今天的工作，从这里开始。':'今日の仕事をここから。',
@@ -91,7 +91,7 @@ function App() {
   const localeButton = <button className="language-button" aria-label="中文 / 日本語" onClick={() => setLanguage(language === 'zh' ? 'ja' : 'zh')}><Globe2 size={17}/>{language === 'zh' ? '日本語' : '中文'}</button>;
   if (loading) return <div className="mobile-loading" role="status">{t('正在连接…')}</div>;
   return <ConfigProvider locale={language === 'ja' ? jaJP : zhCN}>
-    {!session || session.user.mustChangePassword ? <main className="auth-page"><header className="auth-header"><span className="wordmark">巡店</span>{localeButton}</header><section className="auth-content"><LockKeyhole size={28} className="auth-icon"/><h1>{t(session ? '设置新密码' : '巡店工作台')}</h1><p className="muted">{t(session ? '初始密码需要更新后才能继续' : '使用现有员工账号继续')}</p>{session ? passwordForm() : <form onSubmit={submit} className="auth-form"><label>{t('账号')}<input name="username" autoComplete="username" autoCapitalize="none" required maxLength={128}/></label><label>{t('密码')}<input name="password" type="password" autoComplete="current-password" required maxLength={512}/></label>{error && <p className="error" role="alert">{error}</p>}<Button color="primary" block size="large" type="submit" loading={pending}>{t(pending ? '登录中…' : '登录')}</Button></form>}</section><footer className="auth-footer">{t('日本业务时间')} · JST</footer></main> : <div className={"staff-shell"+((mapPage||batchPage||regionPage)?" is-grid-screen":"")}>
+    {!session || session.user.mustChangePassword ? <main className="auth-page"><header className="auth-header"><span className="wordmark">巡店</span>{localeButton}</header><section className="auth-content">{session && <LockKeyhole size={28} className="auth-icon"/>}<h1>{t(session ? '设置新密码' : '欢迎回来')}</h1>{session && <p className="muted">{t('初始密码需要更新后才能继续')}</p>}{session ? passwordForm() : <form onSubmit={submit} className="auth-form"><label>{t('账号')}<input name="username" autoComplete="username" autoCapitalize="none" required maxLength={128}/></label><label>{t('密码')}<input name="password" type="password" autoComplete="current-password" required maxLength={512}/></label>{error && <p className="error" role="alert">{error}</p>}<Button color="primary" block size="large" type="submit" loading={pending}>{t(pending ? '登录中…' : '登录')}</Button></form>}</section><footer className="auth-footer">{t('日本业务时间')} · JST</footer></main> : <div className={"staff-shell"+((mapPage||batchPage||regionPage)?" is-grid-screen":"")}>
       <NavBar backIcon={pageHeader?.back||['messages','feedback','account','settlement'].includes(tab)?<LeftIcon size={22} aria-label={t('返回')}/>:false} onBack={() => {const path=pageHeader?.back||'/my/work';history.pushState({},'',path);window.dispatchEvent(new PopStateEvent('popstate'));window.scrollTo({top:0});}} right={<button className="staff-menu-trigger" type="button" aria-label={t('菜单')} aria-expanded={menuOpen} aria-controls="staff-menu" onClick={() => setMenuOpen(true)}><Menu size={22}/>{unread > 0 && <span className="menu-unread" aria-label={t('站内消息') + ': ' + unread}>{unread}</span>}</button>}>
         <h1>{pageHeader?.title||t(tab === 'station' ? session.user.role === 'leader' ? '任务分派' : '我的任务' : tab === 'tasks' ? '巡店任务' : tab === 'report' ? '每日填报' : tab === 'plan' ? '出勤计划' : tab === 'messages' ? '站内消息' : tab === 'feedback' ? '核对结果' : tab === 'performance' ? '我的绩效' : tab === 'settlement' ? '判定与申诉' : '我的账号')}</h1>
       </NavBar>
@@ -110,7 +110,6 @@ function App() {
           <List>
             <List.Item prefix={<MapPinned size={20}/>} onClick={()=>navigate('tasks')}>{t('巡店任务')}</List.Item>
             <List.Item prefix={<ClipboardList size={20}/>} onClick={()=>navigate('station')}>{t(session.user.role==='leader'?'任务分派':'我的任务')}</List.Item>
-            <List.Item prefix={<ChartNoAxesColumn size={20}/>} onClick={()=>navigate('performance')}>{t('我的绩效')}</List.Item>
             <List.Item prefix={<FileText size={20}/>} onClick={()=>navigate('report')}>{t('每日填报')}</List.Item>
             <List.Item prefix={<CalendarDays size={20}/>} extra={planPending?<Badge content={Badge.dot}/>:undefined} onClick={()=>navigate('plan')}>{t('出勤计划')}</List.Item>
             <List.Item prefix={<Mail size={20}/>} extra={unread || undefined} onClick={() => navigate('messages')}>{t('站内消息')}</List.Item><List.Item prefix={<ClipboardList size={20}/>} onClick={() => navigate('feedback')}>{t('核对结果')}</List.Item><List.Item prefix={<LockKeyhole size={20}/>} onClick={() => {navigate('account');setPasswordOpen(true);}}>{t('修改密码')}</List.Item><List.Item prefix={<UserRound size={20}/>} onClick={() => navigate('account')}>{t('我的账号')}</List.Item></List>

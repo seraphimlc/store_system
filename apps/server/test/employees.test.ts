@@ -24,6 +24,31 @@ test('employee state changes preserve history, permit leave login, invalidate wo
   await admin.post(`/api/employees/${staffId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'resigned',expectedStatus:'leave'}).expect(201);
   await staff.get('/api/auth/session').expect(401);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM users WHERE id=$1',[staffId])).rows[0].n,1);
+  const deletion=()=>admin.post(`/api/employees/${staffId}/delete`).set('X-CSRF-Token',login.body.csrfToken);
+  await staff.post(`/api/employees/${staffId}/delete`).send({confirm:'DELETE_EMPLOYEE',expectedStatus:'resigned'}).expect(401);
+  await admin.post(`/api/employees/${staffId}/delete`).send({confirm:'DELETE_EMPLOYEE',expectedStatus:'resigned'}).expect(403);
+  await deletion().send({expectedStatus:'resigned'}).expect(400);
+  await deletion().send({confirm:'DELETE_EMPLOYEE',expectedStatus:'active'}).expect(409);
+  await admin.post(`/api/employees/${adminId}/delete`).set('X-CSRF-Token',login.body.csrfToken).send({confirm:'DELETE_EMPLOYEE',expectedStatus:'active'}).expect(404);
+  await admin.post(`/api/employees/${staffId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'active',expectedStatus:'resigned'}).expect(201);
+  await staff.post('/api/auth/login').send({username:'employee-p3-staff',password}).expect(201);
+  const before=(await db.query('SELECT username,display_name,password_hash,person_code FROM users WHERE id=$1',[staffId])).rows[0];
+  await deletion().send({confirm:'DELETE_EMPLOYEE',expectedStatus:'active'}).expect(201);
+  await staff.get('/api/auth/session').expect(401);
+  await staff.post('/api/auth/login').send({username:'employee-p3-staff',password}).expect(401);
+  const removed=(await db.query('SELECT username,display_name,password_hash,person_code,status,is_active FROM users WHERE id=$1',[staffId])).rows[0];
+  assert.deepEqual(removed,{...before,status:'deleted',is_active:false});
+  assert.equal((await admin.get('/api/employees?search=employee-p3').expect(200)).body.total,0);
+  await deletion().send({confirm:'DELETE_EMPLOYEE',expectedStatus:'active'}).expect(404);
+  await admin.post(`/api/employees/${staffId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'active',expectedStatus:'active'}).expect(404);
+  await admin.post(`/api/employees/${staffId}/edit`).set('X-CSRF-Token',login.body.csrfToken).send({name:'恢复',username:before.username,status:'active',language:'ja',role:'leader',password:'',expected:{username:before.username,name:before.display_name,status:'active',language:'ja',role:'leader'}}).expect(404);
+  await admin.post(`/api/employees/${staffId}/reset`).set('X-CSRF-Token',login.body.csrfToken).send({password:'new-password'}).expect(404);
+  await admin.post('/api/employees/reset-all').set('X-CSRF-Token',login.body.csrfToken).send({password:'new-password',confirm:'RESET_ALL_STAFF'}).expect(201);
+  assert.equal((await db.query('SELECT password_hash FROM users WHERE id=$1',[staffId])).rows[0].password_hash,before.password_hash);
+  const exported=await admin.get('/api/employees/accounts-export').buffer(true).parse((res,done)=>{const chunks:Buffer[]=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>done(null,Buffer.concat(chunks)));}).expect(200);
+  const {default:ExcelJS}=await import('exceljs');const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(exported.body);
+  assert.ok(!workbook.worksheets[0].getColumn(1).values.includes(before.username));
+
   await admin.post(`/api/employees/${adminId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'disabled',expectedStatus:'active'}).expect(404);
  }finally{await db.query('DELETE FROM users WHERE id=ANY($1::int[])',[[adminId,staffId].filter(Boolean)]);await app.close();}
 });
