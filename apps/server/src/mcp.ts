@@ -1,3 +1,5 @@
+import {BusinessError} from './errors';
+import {withExportGuard} from './export-security';
 import {McpExportFiles} from './mcp-export-files';
 import { McpPayrollExportService,mcpPayrollExportTool } from './mcp-payroll-export';import { McpReconExportService,mcpReconExportTool } from './mcp-recon-export';
 import { McpRebuildService, mcpRebuildTool } from './mcp-rebuild';
@@ -90,6 +92,13 @@ export class McpService {
   }
 
   private async read(raw: string, initial: McpActor, tool: string, args: Record<string, unknown>, clientInfo: string | null) {
+    if(initial.role==='admin'&&['visit_recon_export','visit_payroll_export'].includes(tool)){
+      try{return await withExportGuard(this.db,initial.uid,tool,String(args.task_id??args.month??''),()=>this.readTool(raw,initial,tool,args,clientInfo),result=>result.ok);}
+      catch(error){return error instanceof BusinessError?mcpError(error.code,error.message):mcpError('INTERNAL','导出暂时不可用');}
+    }
+    return this.readTool(raw,initial,tool,args,clientInfo);
+  }
+  private async readTool(raw: string, initial: McpActor, tool: string, args: Record<string, unknown>, clientInfo: string | null) {
     // Persist only an allowlisted parameter shape. Arbitrary arguments may contain credentials or private data.
     const audit = (await this.db.query<{ id: number }>(`INSERT INTO mcp_audit_log
       (token_id,user_id,tool,params_json,ok,client_info,created_at) VALUES($1,$2,$3,'{}',NULL,$4,now()) RETURNING id`,

@@ -78,6 +78,10 @@ export async function createApp(config: AppConfig) {
     res.setHeader('X-Request-ID', requestId);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options','DENY');
+    res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
+    res.setHeader('Content-Security-Policy',"frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+    if(config.cookieSecure)res.setHeader('Strict-Transport-Security','max-age=31536000');
     res.on('finish', () => console.log(JSON.stringify({ event: 'request_end', requestId, method: req.method, path: req.path,
       status: res.statusCode, durationMs: Math.round(performance.now() - started), rss: process.memoryUsage().rss })));
     next();

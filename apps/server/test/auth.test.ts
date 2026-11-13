@@ -56,7 +56,9 @@ test('original PostgreSQL schema: auth, must-change, CSRF, role boundary and ses
     assert.equal((await client.get('/api/dashboard')).status, 403);
     assert.equal((await client.get('/api/work/batches')).status, 200);
     assert.equal((await client.post('/api/auth/logout').send({})).status, 403);
+    const logoutCookie=changed.headers['set-cookie'];
     assert.equal((await client.post('/api/auth/logout').set('X-CSRF-Token', changed.body.csrfToken).send({})).status, 201);
+    assert.equal((await request(app.getHttpServer()).get('/api/auth/session').set('Cookie',logoutCookie)).status,401);
     assert.equal((await client.get('/api/auth/session')).status, 401);
     const admin = await client.post('/api/auth/login').send({ username: 'refactor-p1-admin', password });
     assert.equal(admin.status, 201);

@@ -1,3 +1,4 @@
+import {withExportGuard} from './export-security';
 import { Body, Controller, Get, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
@@ -34,22 +35,23 @@ export class EmployeesController {
  }
  @Post('create') async create(@Req() req:Request,@Body() body:unknown){await this.auth.require(req,{admin:true,write:true});return this.service.create(parse(createSchema,body));}
  @Get('accounts-export') async export(@Req() req:Request,@Query() query:unknown,@Res() response:Response){
-  await this.auth.require(req,{admin:true});
+  const {user}=await this.auth.require(req,{admin:true});
+  return withExportGuard(this.db,user.id,'employee-accounts','',async()=>{
   const input=parse(z.object({onlyActive:z.enum(['true','false']).default('false')}).strict(),query);
   const origin=(process.env.NEXT_PUBLIC_ORIGIN || '').replace(/\/$/,'');
   const bytes=await this.service.export(input.onlyActive==='true',origin);
   response.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   response.setHeader('Content-Disposition',`attachment; filename="staff-accounts.xlsx"; filename*=UTF-8''${encodeURIComponent('员工登录名.xlsx')}`);
   response.send(bytes);
+  });
  }
  @Post('reset-all') async resetAll(@Req() req:Request,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});
-  const input=parse(z.object({password:z.string().min(6).max(128),confirm:z.literal('RESET_ALL_STAFF')}).strict(),body);
-  return this.service.reset(null,input.password);
+  throw new BusinessError('BULK_PASSWORD_RESET_DISABLED','请逐账号重置为独立临时口令',410);
  }
  @Post(':id/edit') async edit(@Req() req:Request,@Param('id') id:string,@Body() body:unknown){await this.auth.require(req,{admin:true,write:true});return this.service.edit(identity(id),parse(editSchema,body));}
  @Post(':id/reset') async reset(@Req() req:Request,@Param('id') id:string,@Body() body:unknown){
-  await this.auth.require(req,{admin:true,write:true});const input=parse(z.object({password:z.string().min(6).max(128)}).strict(),body);return this.service.reset(identity(id),input.password);
+  await this.auth.require(req,{admin:true,write:true});const input=parse(z.object({password:password.default('')}).strict(),body);return this.service.reset(identity(id),input.password);
  }
  @Post(':id/delete') async remove(@Req() req:Request,@Param('id') value:string,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});

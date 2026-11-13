@@ -1,6 +1,8 @@
+import {rejectDefaultPassword} from './password-policy';
 import {aiLoginCandidates} from './login-name-model';import type {ReportModel} from './report-model';
 import { Inject, Injectable } from '@nestjs/common';
 import { hash } from '@node-rs/argon2';
+import { randomBytes } from 'node:crypto';
 import { pinyin } from 'pinyin-pro';
 import ExcelJS from 'exceljs';
 import type { PoolClient, QueryResultRow } from 'pg';
@@ -40,7 +42,10 @@ function conflict(error: unknown): never {
 @Injectable()
 export class EmployeeService {
   constructor(@Inject(Database) private readonly db: Database) {}
-  private defaultPassword() { return process.env.NEXT_DEFAULT_STAFF_PASSWORD || 'demo123'; }
+  private temporaryPassword(value='') {
+    rejectDefaultPassword(value);
+    return value || randomBytes(18).toString('base64url');
+  }
   async suggest(name: string, code: string, preferred = '', client?: PoolClient) {
     const base = cleanUsername(preferred) || nameCandidate(name, code);
     const sql = 'SELECT username FROM users WHERE username LIKE $1';
@@ -63,7 +68,8 @@ export class EmployeeService {
     if (!code || code.length > 32) throw new BusinessError('VALIDATION', '员工编号必填且不超过32位', 400);
     if((await this.db.query('SELECT code FROM persons WHERE code=$1 UNION ALL SELECT person_code FROM users WHERE person_code=$1',[code])).rowCount)throw new BusinessError('CODE_EXISTS','该编号已存在',409);
     const preferred=cleanUsername(input.username)||(await aiLoginCandidates([input.name],model)).get(input.name.trim())||'';
-    const passwordHash = await passwordWork.run(() => hash(input.password || this.defaultPassword()));
+    const temporaryPassword=this.temporaryPassword(input.password);
+    const passwordHash = await passwordWork.run(() => hash(temporaryPassword));
     try {
       return await this.db.transaction(async client => {
         if ((await client.query('SELECT code FROM persons WHERE code=$1 UNION ALL SELECT person_code FROM users WHERE person_code=$1', [code])).rowCount) {
@@ -74,14 +80,14 @@ export class EmployeeService {
         const row = (await client.query(`INSERT INTO users(username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang,created_at)
           VALUES($1,$2,$3,$4,$5,'active',true,true,'',now()) RETURNING id,username,person_code AS "personCode"`,
           [username, passwordHash, input.name.trim(), code, input.role])).rows[0];
-        return row;
+        return {...row,temporaryPassword};
       });
     } catch (error) { conflict(error); }
   }
   async edit(id: number, input: EmployeeEdit) {
     const username = cleanUsername(input.username);
     if (!username) throw new BusinessError('VALIDATION', '登录名只能用字母、数字和连字符', 400);
-    const passwordHash = input.password ? await passwordWork.run(() => hash(input.password)) : null;
+    const passwordHash = input.password ? await passwordWork.run(() => hash(this.temporaryPassword(input.password))) : null;
     try {
       return await this.db.transaction(async client => {
         const target = (await client.query<EmployeeRow>(`SELECT * FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE`, [id])).rows[0];
@@ -96,6 +102,11 @@ export class EmployeeService {
         await client.query(`UPDATE users SET display_name=$1,username=$2,status=$3,is_active=$4,lang=$5,role=$6,
           password_hash=coalesce($7,password_hash),must_change_password=CASE WHEN $7::text IS NULL THEN must_change_password ELSE true END WHERE id=$8`,
           [input.name.trim(), username, input.status, ['active', 'leave'].includes(input.status), input.language, input.role, passwordHash, id]);
+        if(passwordHash||!['active','leave'].includes(input.status)){
+          await client.query('UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',[id]);
+          await client.query("UPDATE api_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE user_id=$1",[id]);
+          await client.query("UPDATE oauth_refresh_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE user_id=$1",[id]);
+        }
         if (target.person_code) await client.query('UPDATE persons SET display_name=$1 WHERE code=$2', [input.name.trim(), target.person_code]);
         return { id, username, passwordReset: !!passwordHash };
       });
@@ -107,6 +118,7 @@ export class EmployeeService {
     if (!target) throw new BusinessError('NOT_FOUND', '员工不存在', 404);
     if (target.status !== expectedStatus) throw new BusinessError('CONFLICT', '员工状态已更新，请刷新后重试', 409);
     const active = ['active', 'leave'].includes(status);
+    if(!active)await client.query('UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',[id]);
     await client.query('UPDATE users SET status=$1,is_active=$2 WHERE id=$3', [status, active, id]);
     return { id, status, isActive: active, tokenUsable: status === 'active' };
   }
@@ -119,24 +131,30 @@ export class EmployeeService {
       return { id, deleted: true };
     });
   }
-  async reset(id: number | null, password: string) {
-    const passwordHash = await passwordWork.run(() => hash(password));
-    const result = await this.db.query(`UPDATE users SET password_hash=$1,must_change_password=true
-      WHERE role IN ('staff','leader') AND status<>'deleted' AND ($2::int IS NULL OR id=$2) RETURNING id`, [passwordHash, id]);
-    if (id !== null && !result.rowCount) throw new BusinessError('NOT_FOUND', '员工不存在', 404);
-    return { count: result.rowCount };
+  async reset(id: number | null, password = '') {
+    if(id===null)throw new BusinessError('BULK_PASSWORD_RESET_DISABLED','请逐账号重置为独立临时口令',410);
+    const temporaryPassword=this.temporaryPassword(password),passwordHash=await passwordWork.run(()=>hash(temporaryPassword));
+    return this.db.transaction(async client=>{
+      const result=await client.query(`UPDATE users SET password_hash=$1,must_change_password=true
+        WHERE role IN ('staff','leader') AND status<>'deleted' AND id=$2 RETURNING id,username`,[passwordHash,id]);
+      if(!result.rowCount)throw new BusinessError('NOT_FOUND','员工不存在',404);
+      await client.query('UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',[id]);
+      await client.query("UPDATE api_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE user_id=$1",[id]);
+      await client.query("UPDATE oauth_refresh_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE user_id=$1",[id]);
+      return {...result.rows[0],count:1,temporaryPassword};
+    });
   }
   async export(onlyActive: boolean, origin: string) {
     const rows = (await this.db.query<EmployeeRow>(`SELECT id,username,display_name,person_code,status,role,lang,is_active,must_change_password
       FROM users WHERE role IN ('staff','leader') AND status<>'deleted' ${onlyActive ? "AND status='active' AND is_active=true" : ''} ORDER BY ${order}`)).rows;
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('员工登录名');
-    sheet.addRow(['登录名','姓名','员工编号','在职状态','账号启用','首次登录需改密','初始口令','界面语言','登录地址']);
-    for (const row of rows) sheet.addRow([row.username,row.display_name,row.person_code || '',row.status,row.is_active ? '是' : '否',row.must_change_password ? '是' : '',row.must_change_password ? this.defaultPassword() : '',row.lang || '自动',origin + '/login']);
-    sheet.columns.forEach((column, index) => { column.width = [18,18,24,12,12,18,18,12,38][index]; });
+    sheet.addRow(['登录名','姓名','员工编号','在职状态','账号启用','首次登录需改密','界面语言','登录地址']);
+    for (const row of rows) sheet.addRow([row.username,row.display_name,row.person_code || '',row.status,row.is_active ? '是' : '否',row.must_change_password ? '是' : '',row.lang || '自动',origin + '/login']);
+    sheet.columns.forEach((column, index) => { column.width = [18,18,24,12,12,18,12,38][index]; });
     sheet.getRow(1).font = { bold: true };
     const instructions = workbook.addWorksheet('使用说明');
-    instructions.addRows([['项目','说明'],['登录地址',origin + '/login'],['初始口令',this.defaultPassword() + '（仅用于首次登录）'],['首次登录','系统强制要求改为自己的密码'],['自定义重置口令','导出的初始口令为系统默认值；管理员自定义的口令请单独交付'],['忘记密码','请联系管理员重置']]);
+    instructions.addRows([['项目','说明'],['登录地址',origin + '/login'],['首次登录','系统强制要求改为自己的密码'],['临时口令','仅在创建或重置成功时显示一次，请单独安全交付；账号导出不包含口令'],['忘记密码','请联系管理员重置']]);
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 }

@@ -2,7 +2,8 @@ import {Inject,Injectable} from '@nestjs/common';
 import type {PoolClient} from 'pg';
 import {createHash} from 'node:crypto';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
-import {join,basename} from 'node:path';
+import {join} from 'node:path';
+import {safeUploadName} from './private-files';
 import {tmpdir} from 'node:os';
 import ExcelJS from 'exceljs';
 import {z} from 'zod';
@@ -22,11 +23,11 @@ export class McpTaskImportService{
  private async source(actor:McpActor,input:z.infer<typeof schema>){
   if(input.path)throw new McpReadError('FORBIDDEN_TOOL','服务器路径模式未开启','请使用content_base64传入文件内容');
   if(input.blob_sha&&input.content_base64)throw new McpReadError('BAD_REQUEST','blob_sha与content_base64只选一种来源');
-  const directory=this.directory();let sha=input.blob_sha,content:Buffer,name=input.filename??null;
+  const directory=this.directory();let sha=input.blob_sha,content:Buffer,name=input.filename?safeUploadName(input.filename):null;
   if(input.content_base64){const raw=input.content_base64;if(raw.length>24*1024*1024||raw.length%4||!/^[A-Za-z0-9+/]+={0,2}$/.test(raw))throw new McpReadError('BAD_REQUEST','文件base64无效或超过限制');content=Buffer.from(raw,'base64');if(!content.length||content.length>16*1024*1024||content.toString('base64')!==raw)throw new McpReadError('BAD_REQUEST','文件base64无效或超过16MiB');if(name&&!name.toLowerCase().endsWith('.xlsx'))throw new McpReadError('BAD_REQUEST','计划文件必须是.xlsx');sha=createHash('sha256').update(content).digest('hex');await mkdir(directory,{recursive:true,mode:0o700});
    try{await writeFile(join(directory,sha+'.xlsx'),content,{mode:0o600,flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
-   await writeFile(join(directory,sha+'.'+actor.uid+'.owner'),JSON.stringify({filename:name?basename(name):null}),{mode:0o600});
-  }else if(sha){try{const owner=JSON.parse(await readFile(join(directory,sha+'.'+actor.uid+'.owner'),'utf8'));name=name??owner.filename;content=await readFile(join(directory,sha+'.xlsx'));}catch{throw new McpReadError('NOT_FOUND','文件不存在或不属于当前账号','请重新上传计划文件');}}
+   await writeFile(join(directory,sha+'.'+actor.uid+'.owner'),JSON.stringify({filename:name}),{mode:0o600});
+  }else if(sha){try{const owner=JSON.parse(await readFile(join(directory,sha+'.'+actor.uid+'.owner'),'utf8'));name=name??(owner.filename?safeUploadName(owner.filename):null);content=await readFile(join(directory,sha+'.xlsx'));}catch{throw new McpReadError('NOT_FOUND','文件不存在或不属于当前账号','请重新上传计划文件');}}
   else throw new McpReadError('BAD_REQUEST','需要content_base64或blob_sha');
   const file=join(directory,sha!+'.xlsx');const bytes=await readFile(file);if(createHash('sha256').update(bytes).digest('hex')!==sha)throw new McpReadError('BAD_REQUEST','文件摘要不匹配，请重新上传');return {sha:sha!,file,filename:name};
  }

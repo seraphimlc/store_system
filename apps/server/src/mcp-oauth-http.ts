@@ -1,4 +1,4 @@
-import {Body,Controller,Get,Inject,Injectable,Post,Query,Req} from '@nestjs/common';
+import {Body,Controller,Get,Inject,Injectable,Param,Post,Query,Req} from '@nestjs/common';
 import type {Request,Response,NextFunction} from 'express';
 import {z} from 'zod';
 import {AuthService} from './auth';
@@ -13,6 +13,12 @@ function parameters(query:unknown){
 @Controller('mcp-oauth')
 export class McpOAuthController{
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(McpOAuthService)private readonly oauth:McpOAuthService){}
+ @Get('clients')async clients(@Req()req:Request){await this.auth.require(req,{admin:true});return {items:await this.oauth.clients()};}
+ @Post('clients/:id')async approve(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){
+  await this.auth.require(req,{admin:true,write:true});const input=z.object({approved:z.boolean(),scope:z.enum(['read','read,write'])}).strict().safeParse(body);
+  if(!input.success||!/^[A-Za-z0-9_-]{24}$/.test(id))throw new BusinessError('VALIDATION','客户端审批信息无效',400);
+  try{return await this.oauth.approve(id,input.data.approved,input.data.scope);}catch(error){if(error instanceof OAuthError)throw new BusinessError(error.code,error.message,error.status);throw error;}
+ }
  @Get('context')async context(@Req()req:Request,@Query()query:unknown){
   const {user}=await this.auth.require(req);
   try{const current=await this.oauth.authorization(parameters(query));

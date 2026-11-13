@@ -2,7 +2,7 @@ import {aiLoginCandidates} from './login-name-model';
 import 'reflect-metadata';
 import {Body,CanActivate,Controller,ExecutionContext,Get,Inject,Injectable,Param,Post,Req,Res,UploadedFile,UseGuards,UseInterceptors} from '@nestjs/common';
 import {FileInterceptor} from '@nestjs/platform-express';import {diskStorage} from 'multer';import type {Request,Response} from 'express';import type {PoolClient} from 'pg';
-import {z} from 'zod';import {randomUUID} from 'node:crypto';import {mkdir,readFile,unlink,open,access} from 'node:fs/promises';import {createReadStream} from 'node:fs';import {createInterface} from 'node:readline';import {resolve,join} from 'node:path';
+import {z} from 'zod';import {randomUUID,randomBytes} from 'node:crypto';import {mkdir,readFile,unlink,open,access} from 'node:fs/promises';import {createReadStream} from 'node:fs';import {createInterface} from 'node:readline';import {resolve,join} from 'node:path';
 import {assertMonthsOpen} from './financial-control';
 import {AuthService} from './auth';import {Database} from './database';import {BusinessError} from './errors';import {uploadRoot,privateUploadPath,readUploadPath,safeUploadName,storeUpload} from './private-files';import {parseVisitWorkbookAdaptive} from './visit-layout-model';
 import {parseVisitWorkbook,VisitParseError,parseSubmitter,type ParsedVisit,type VisitLayout,type WorkbookResult} from './visit-workbook';
@@ -111,7 +111,7 @@ export class VisitImportsService{
    if(!(await this.db.query("SELECT id FROM users WHERE id=$1 AND role='admin' AND status IN ('active','leave') AND is_active=true",[task.actor])).rowCount)throw new BusinessError('FORBIDDEN','管理员权限已变化，文件未导入',403);
    const passwordHashes=new Map<string,string>();const existing=new Set((await this.db.query<{person_code:string}>('SELECT person_code FROM users WHERE person_code=ANY($1::text[])',[[...result.people.keys()]])).rows.map(row=>row.person_code));
    const candidates=await aiLoginCandidates([...result.people].filter(([code])=>!existing.has(code)).map(([,name])=>name),nameModel);
-   for(const [code]of result.people)if(!existing.has(code))passwordHashes.set(code,await passwordWork.run(()=>hash(process.env.NEXT_DEFAULT_STAFF_PASSWORD||'demo123')));
+   for(const [code]of result.people)if(!existing.has(code))passwordHashes.set(code,await passwordWork.run(()=>hash(randomBytes(32).toString('base64url'))));
    const written=await this.db.transaction(async client=>{
     const user=(await client.query("SELECT id FROM users WHERE id=$1 AND role='admin' AND status IN ('active','leave') AND is_active=true FOR SHARE",[task.actor])).rows[0];if(!user)throw new BusinessError('FORBIDDEN','管理员权限已变化，文件未导入',403);
     await client.query("SELECT pg_advisory_xact_lock(hashtext('settlement-write'),0)");

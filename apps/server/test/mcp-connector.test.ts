@@ -15,7 +15,7 @@ import {Database} from '../src/database';
 const databaseUrl=process.env.NEXT_TEST_DATABASE_URL;
 test('schema-only official OAuth client: connector discovery/registration/PKCE/refresh, role-scoped tools and representative staff write', {skip:!databaseUrl},async()=>{
  assert.match(new URL(databaseUrl!).pathname,/^\/store_test_[0-9]{13}_[a-f0-9]{12}_refactor_p1$/);
- const config={databaseUrl:databaseUrl!,sessionSecret:'x'.repeat(40),cookieSecure:false,host:'127.0.0.1',port:3000,mcpPublicUrl:'http://127.0.0.1:3000/mcp'};
+ const config={databaseUrl:databaseUrl!,sessionSecret:'x'.repeat(40),cookieSecure:false,host:'127.0.0.1',port:3000,mcpPublicUrl:'http://127.0.0.1:3000/mcp',oauthTrustedRedirectUris:['http://127.0.0.1:47211/callback']};
  const app=await createApp(config),db=app.get(Database),users:number[]=[],codes=['MCP-CONNECTOR-STAFF','MCP-CONNECTOR-LEADER'],clientIds:string[]=[],connected:Client[]=[];
  const read=async(client:Client,name:string,args:Record<string,unknown>={})=>{const result=await client.callTool({name,arguments:args});return JSON.parse((result.content as {text:string}[])[0].text);};
  try{

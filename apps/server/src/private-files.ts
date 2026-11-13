@@ -9,7 +9,7 @@ export async function storeUpload(path:string){
 }
 export function safeUploadName(value:string){
  let text=value;if([...value].every(character=>character.charCodeAt(0)<=255)){const bytes=Buffer.from(value,'latin1'),decoded=bytes.toString('utf8');if(!decoded.includes('\uFFFD')&&Buffer.from(decoded,'utf8').equals(bytes))text=decoded;}
- const name=basename(text.replaceAll('\\','/'));return name.replace(/[\u0000-\u001f\u007f]/g,'').slice(0,255);
+ const name=basename(text.replaceAll('\\','/')).replace(/[\u0000-\u001f\u007f]/g,'').slice(0,255);return !name||name==='.'||name==='..'?'upload.xlsx':name;
 }
 
 /** Resolve only owned uploads or the explicitly-mounted legacy /data/uploads tree for reads. */

@@ -1,3 +1,4 @@
+import {withExportGuard} from './export-security';
 import type {Writable} from 'node:stream';
 import {ReconciliationInsightService} from './reconciliation-insight';
 import {Controller,Get,Inject,Injectable,Param,Req,Res} from '@nestjs/common';import type {Request,Response} from 'express';import {z} from 'zod';import ExcelJS from 'exceljs';import {AuthService} from './auth';import {Database} from './database';import {BusinessError} from './errors';
@@ -35,10 +36,12 @@ export class ReconciliationExportService{
 export class ReconciliationExportController{
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(Database)private readonly db:Database,@Inject(ReconciliationExportService)private readonly service:ReconciliationExportService){}
  @Get(':id/export')async export(@Req()req:Request,@Param('id')value:string,@Res()res:Response){
-  await this.auth.require(req,{admin:true});const parsed=z.coerce.number().int().positive().safeParse(value);if(!parsed.success)throw new BusinessError('VALIDATION','对账任务编号无效',400);const id=parsed.data;
+  const {user}=await this.auth.require(req,{admin:true});const parsed=z.coerce.number().int().positive().safeParse(value);if(!parsed.success)throw new BusinessError('VALIDATION','对账任务编号无效',400);const id=parsed.data;
+  return withExportGuard(this.db,user.id,'reconciliation',String(id),async()=>{
   const task=(await this.db.query<{status:string;params:{month:string}}>('SELECT status,params FROM recon_tasks WHERE id=$1',[id])).rows[0];
   if(!task)throw new BusinessError('NOT_FOUND','对账任务不存在',404);if(task.status!=='done')throw new BusinessError('RECON_NOT_DONE','对账尚未完成，无法导出',409);
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="reconciliation.xlsx"; filename*=UTF-8''${encodeURIComponent(`对账结果_${task.params.month}_${id}.xlsx`)}`);
-  try{await this.service.write(this.db,id,res);}catch{res.destroy();}
+  try{await this.service.write(this.db,id,res);}catch(error){res.destroy();throw error;}
+   });
  }
 }

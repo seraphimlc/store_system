@@ -35,6 +35,10 @@ export function gatewayConfig(release) {
  resolver 127.0.0.11 valid=10s ipv6=off;
  add_header X-Store-Release "${release}" always;
  add_header X-Content-Type-Options nosniff always;
+ add_header X-Frame-Options DENY always;
+ add_header Referrer-Policy strict-origin-when-cross-origin always;
+ add_header Strict-Transport-Security "max-age=31536000" always;
+ add_header Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always;
  gzip on; gzip_types text/css application/javascript application/json image/svg+xml;
  location ^~ /api/ {
    set $api_upstream http://api:3000;
@@ -82,7 +86,11 @@ export function gatewayConfig(release) {
    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
    return 308 /admin/zones$is_args$args;
  }
- location ^~ /r/ { try_files $uri =404; add_header Cache-Control "public,max-age=31536000,immutable" always; add_header X-Store-Release "${release}" always; }
+ location ^~ /r/ { try_files $uri =404; add_header X-Content-Type-Options nosniff always;
+ add_header X-Frame-Options DENY always;
+ add_header Referrer-Policy strict-origin-when-cross-origin always;
+ add_header Strict-Transport-Security "max-age=31536000" always;
+ add_header Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always; add_header Cache-Control "public,max-age=31536000,immutable" always; add_header X-Store-Release "${release}" always; }
  location = /mcp {
    set $protocol_upstream http://api:3000;
    proxy_pass $protocol_upstream; proxy_http_version 1.1;
@@ -127,9 +135,17 @@ export function gatewayConfig(release) {
  location = /oauth { default_type application/json; return 404 '{"code":"NOT_FOUND"}'; }
  location ^~ /.well-known/ { default_type application/json; return 501 '{"code":"MIGRATION_PENDING"}'; }
  location = /admin { return 308 /admin/; }
- location /admin/ { try_files $uri /admin/index.html; add_header Cache-Control no-cache always; add_header X-Store-Release "${release}" always; }
+ location /admin/ { try_files $uri /admin/index.html; add_header X-Content-Type-Options nosniff always;
+ add_header X-Frame-Options DENY always;
+ add_header Referrer-Policy strict-origin-when-cross-origin always;
+ add_header Strict-Transport-Security "max-age=31536000" always;
+ add_header Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always; add_header Cache-Control no-cache always; add_header X-Store-Release "${release}" always; }
  location ~ \\.(?:js|css|woff2?|png|jpe?g|svg|webp|map)$ { return 404; }
- location / { try_files $uri /index.html; add_header Cache-Control no-cache always; add_header X-Store-Release "${release}" always; }
+ location / { try_files $uri /index.html; add_header X-Content-Type-Options nosniff always;
+ add_header X-Frame-Options DENY always;
+ add_header Referrer-Policy strict-origin-when-cross-origin always;
+ add_header Strict-Transport-Security "max-age=31536000" always;
+ add_header Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" always; add_header Cache-Control no-cache always; add_header X-Store-Release "${release}" always; }
 }`;
 }
 export function edgeConfig(release) {

@@ -1,3 +1,4 @@
+import {OAuthClients} from './OAuthClients';
 import {McpCredentials} from './McpCredentials';
 import {SuccessNotice} from './SuccessNotice';
 import {AdminPagination} from './AdminPagination';
@@ -23,16 +24,14 @@ const ja: Record<string, string> = {
   '员工端权限':'スタッフ権限','编辑':'編集','重置口令':'パスワード再設定','没有符合条件的员工':'該当するスタッフがいません',
   '正在读取员工…':'読み込み中…','上一页':'前へ','下一页':'次へ','取消':'キャンセル','保存':'保存',
   '正在保存…':'保存中…','已保存员工资料':'スタッフ情報を保存しました','新建员工':'スタッフ追加','编辑员工':'スタッフ編集',
-  '姓名':'氏名','登录名':'ログイン名','初始口令':'初期パスワード','留空使用系统默认口令':'空欄の場合は既定のパスワード',
+  '姓名':'氏名','登录名':'ログイン名','初始口令':'初期パスワード','留空生成独立临时口令':'空欄で個別の一時パスワードを生成',
   '生成登录名':'ログイン名を生成','语言':'言語','自动':'自動','中文':'中国語','队员':'メンバー','队长':'リーダー',
   '人员编号创建后不能修改。':'スタッフ番号は作成後に変更できません。','账号角色决定端权限，团队职务由团队管理维护。':'アカウント権限とチーム内役割は別に管理されます。',
   '请假可登录；停用或离职后不能登录，历史数据始终保留。':'休暇中もログインできます。無効・退職時はログインできません。履歴は保持されます。',
   '新口令':'新しいパスワード','至少6位；重置后旧会话失效，下次登录必须改密。':'6文字以上。再設定すると既存セッションは失効し、次回ログイン時に変更が必要です。',
-  '导出账号':'アカウント出力','批量重置':'一括再設定','重置全部员工口令':'全スタッフのパスワード再設定',
-  '包括队长和停用、离职账号；不会修改管理员。':'リーダー・無効・退職アカウントを含みます。管理者は変更しません。',
-  '输入 RESET_ALL_STAFF 确认':'確認として RESET_ALL_STAFF を入力','账号清单仅向管理员提供，请妥善交付。':'アカウント一覧は管理者専用です。適切に配布してください。',
+  '导出账号':'アカウント出力','账号清单仅向管理员提供，请妥善交付。':'アカウント一覧は管理者専用です。適切に配布してください。',
 };
-type Mode = 'create' | 'edit' | 'reset' | 'reset-all' | 'delete';
+type Mode = 'create' | 'edit' | 'reset' | 'delete';
 interface Editor { mode: Mode; employee?: Employee }
 
 export function Employees({ session, language }: { session: Session; language: string }) {
@@ -47,7 +46,7 @@ export function Employees({ session, language }: { session: Session; language: s
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [credentialUser,setCredentialUser]=useState<Employee|null>(null);
-  const [confirmation, setConfirmation] = useState('');
+  const [temporaryCredential,setTemporaryCredential]=useState<{username:string;temporaryPassword:string}|null>(null);
   
   const form = useRef<HTMLFormElement>(null);
   const writing = useRef(false);
@@ -65,7 +64,7 @@ export function Employees({ session, language }: { session: Session; language: s
   }
   useEffect(() => { void load(); return () => { requestGeneration.current++; }; }, [page, search, status]);
   
-  function open(mode: Mode, employee?: Employee) { setError(''); setConfirmation(''); setEditor({ mode, employee }); }
+  function open(mode: Mode, employee?: Employee) { setError(''); setEditor({ mode, employee }); }
   function filter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const values = new FormData(event.currentTarget);
     setSearch(String(values.get('search') ?? '')); setStatus(String(values.get('status') ?? '')); setPage(1);
@@ -84,14 +83,14 @@ export function Employees({ session, language }: { session: Session; language: s
     writing.current = true; setSaving(true); setError('');
     const values = Object.fromEntries(new FormData(event.currentTarget));
     try {
-      if (editor.mode === 'create') await api('/employees/create', session, values);
+      if (editor.mode === 'create') setTemporaryCredential(await api<{username:string;temporaryPassword:string}>('/employees/create', session, values));
       if (editor.mode === 'edit') {
         const employee = editor.employee!;
         await api(`/employees/${employee.id}/edit`, session, { ...values,
           expected: { username: employee.username, name: employee.displayName, status: employee.status, language: employee.language || '', role: employee.role } });
       }
-      if (editor.mode === 'reset') await api(`/employees/${editor.employee!.id}/reset`, session, values);
-      if (editor.mode === 'reset-all') await api('/employees/reset-all', session, values);
+      if (editor.mode === 'reset') setTemporaryCredential(await api<{username:string;temporaryPassword:string}>(`/employees/${editor.employee!.id}/reset`, session, values));
+
       if (editor.mode === 'delete') await api(`/employees/${editor.employee!.id}/delete`, session, {confirm:'DELETE_EMPLOYEE',expectedStatus:editor.employee!.status});
       setEditor(null); setNotice(t(editor.mode === 'delete' ? '员工已删除' : '已保存员工资料'));
       if (editor.mode === 'delete' && page > 1 && data?.items.length === 1) setPage(page - 1); else await load();
@@ -100,8 +99,15 @@ export function Employees({ session, language }: { session: Session; language: s
   }
   const employee = editor?.employee;
   const isAccount = editor?.mode === 'create' || editor?.mode === 'edit';
-  const title = editor?.mode === 'delete' ? '删除员工' : editor?.mode === 'create' ? '新建员工' : editor?.mode === 'edit' ? '编辑员工' : editor?.mode === 'reset-all' ? '重置全部员工口令' : '重置口令';
+  const title = editor?.mode === 'delete' ? '删除员工' : editor?.mode === 'create' ? '新建员工' : editor?.mode === 'edit' ? '编辑员工' : '重置口令';
   return <section className="employee-section">
+    <OAuthClients session={session} language={language}/>
+    <Dialog open={!!temporaryCredential} onOpenChange={open=>{if(!open)setTemporaryCredential(null);}}><DialogContent>
+      <DialogTitle>{language==='ja'?'一時パスワードを安全に渡す':'请安全交付临时口令'}</DialogTitle>
+      <p>{language==='ja'?'この画面を閉じると再表示できません。初回ログイン時に変更が必要です。':'关闭后无法再次查看。请单独交付给本人，首次登录必须修改。'}</p>
+      <p>{temporaryCredential?.username}</p><code>{temporaryCredential?.temporaryPassword}</code>
+      <Button onClick={()=>setTemporaryCredential(null)}>{language==='ja'?'保存しました':'已记录，关闭'}</Button>
+    </DialogContent></Dialog>
     {credentialUser&&<McpCredentials session={session} userId={credentialUser.id} username={credentialUser.username} language={language} onClose={()=>setCredentialUser(null)}/>}
     
     <Form className="employee-filters admin-filter-panel" onSubmit={filter}>
@@ -111,7 +117,7 @@ export function Employees({ session, language }: { session: Session; language: s
     <div className="admin-filter-submit"><Button type="submit">{t('搜索')}</Button>
       <Button onClick={() => open('create')}><Plus size={16}/>{t('新建员工')}</Button>
       <a className="toolbar-download" href="/api/employees/accounts-export" download><Download size={16}/>{t('导出账号')}</a>
-      <Button variant="outline" onClick={() => open('reset-all')}>{t('批量重置')}</Button>
+
     </div></Form>
     {notice && <SuccessNotice className="success-notice" role="status">{notice}</SuccessNotice>}
     {error && !editor && <Alert className="error" role="alert">{error}</Alert>}
@@ -131,17 +137,16 @@ export function Employees({ session, language }: { session: Session; language: s
           <div className="employee-login-field full-width"><label>{t('登录名')}<Input name="username" defaultValue={employee?.username} maxLength={64} required={editor.mode === 'edit'} autoCapitalize="none" autoComplete="off"/></label>{editor.mode === 'create' && <Button variant="outline" type="button" onClick={suggest}>{t('生成登录名')}</Button>}</div>
           <label>{t('账号角色')}<AdminSelect name="role" defaultValue={employee?.role ?? 'staff'}><option value="staff">{t('队员')}</option><option value="leader">{t('队长')}</option></AdminSelect></label>
           <p className="muted full-width">{t('账号角色决定端权限，团队职务由团队管理维护。')}</p>
-          {editor.mode === 'create' ? <label>{t('初始口令')}<Input name="password" aria-label={t('初始口令')} type="password" minLength={6} maxLength={128} autoComplete="new-password"/><small>{t('留空使用系统默认口令')}</small></label> : <>
+          {editor.mode === 'create' ? <label>{t('初始口令')}<Input name="password" aria-label={t('初始口令')} type="password" minLength={6} maxLength={128} autoComplete="new-password"/><small>{t('留空生成独立临时口令')}</small></label> : <>
             <label>{t('状态')}<AdminSelect name="status" defaultValue={employee!.status}>{Object.entries(statusLabels).map(([key,label]) => <option value={key} key={key}>{t(label)}</option>)}</AdminSelect></label>
             <label>{t('语言')}<AdminSelect name="language" defaultValue={employee?.language || ''}><option value="">{t('自动')}</option><option value="zh">{t('中文')}</option><option value="ja">日本語</option></AdminSelect></label>
           </>}
           <p className="muted full-width">{t('人员编号创建后不能修改。')}{t('请假可登录；停用或离职后不能登录，历史数据始终保留。')}</p>
         </>}
         {editor.mode === 'delete' && <Alert className="full-width" role="alert">{t('确认删除此员工？删除后账号立即停用，员工不再显示在列表和账号导出中，历史业务记录保留。')}</Alert>}
-        {!isAccount && editor.mode !== 'delete' && <><label>{t('新口令')}<Input name="password" type="password" required minLength={6} maxLength={128} autoComplete="new-password"/></label><p className="muted full-width">{t('至少6位；重置后旧会话失效，下次登录必须改密。')}</p></>}
-        {editor.mode === 'reset-all' && <><p className="full-width">{t('包括队长和停用、离职账号；不会修改管理员。')}</p><label>{t('输入 RESET_ALL_STAFF 确认')}<Input name="confirm" value={confirmation} onChange={event => setConfirmation(event.target.value)} autoComplete="off" required/></label></>}
+        {!isAccount && editor.mode !== 'delete' && <><label>{t('新口令')}<Input name="password" type="password" minLength={6} maxLength={128} autoComplete="new-password"/></label><p className="muted full-width">{t('留空生成独立临时口令')}。{t('至少6位；重置后旧会话失效，下次登录必须改密。')}</p></>}
         {error && <Alert className="error full-width" role="alert">{error}</Alert>}
-        <div className="dialog-actions"><Button variant="outline" type="button" disabled={saving} onClick={() => setEditor(null)}>{t('取消')}</Button><Button type="submit" disabled={saving || (editor.mode === 'reset-all' && confirmation !== 'RESET_ALL_STAFF')}>{t(editor.mode === 'delete' ? (saving ? '正在删除…' : '确认删除') : (saving ? '正在保存…' : '保存'))}</Button></div>
+        <div className="dialog-actions"><Button variant="outline" type="button" disabled={saving} onClick={() => setEditor(null)}>{t('取消')}</Button><Button type="submit" disabled={saving}>{t(editor.mode === 'delete' ? (saving ? '正在删除…' : '确认删除') : (saving ? '正在保存…' : '保存'))}</Button></div>
       </Form>}
     </DialogContent></Dialog>
   </section>;

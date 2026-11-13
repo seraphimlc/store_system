@@ -1,3 +1,5 @@
+> **安全迁移（2026-11-13）**：当前源码需要先执行 `deploy-next/migrations/001-auth-security.sql`，详见[生产部署与回滚](生产部署与回滚.md)开头的安全整改门槛。新增认证/审计表，不改结算表。旧会话失效；OAuth 客户端需管理员准入。镜像包必须使用独立私有 `NEXT_RELEASE_BUCKET`，不能复用公开前端资源桶。开发库和生产库均不在构建/启动时自动迁移。
+
 > **2026-11-13 MCP 本地阶段验收**：源码支持27工具与OAuth，`local-mcp-m6-20261113-a` 已完成独立随机库Docker候选/浏览器/SDK/Worker/回退验收，验收容器已清理；默认8000仍为旧版，生产未动。候选manifest为 `acceptanceOnly`，不能直接切流。详见 [补充计划](../docs/计划-MCP-OAuth与Skill恢复补充.md#21-m6-阶段检查与独立-docker-候选验收2026-11-13)。
 >
 > 当前网关生成器已支持原生MCP/OAuth路径、外部Host端口、300秒长调用及私有导出；本地正常部署将配置 `NEXT_MCP_PUBLIC_URL=http://127.0.0.1:8000/mcp` 和 `NEXT_MCP_AUTHORIZATION_UI_URL=http://127.0.0.1:8000/admin/mcp-authorize`。`build --reuse-staff <release>` 可复用已部署员工HTML/资源，按摘要校验；不代表其他组件的所有改动都自动获准发布。

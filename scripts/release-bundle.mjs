@@ -24,7 +24,7 @@ export async function packBundle(id,base=resolve('.release')){
  const original=JSON.parse(await readFile(join(dir,'manifest.json'),'utf8'));
  if(original.id!==id||original.platform!=='linux/amd64')throw Error('Bundle must match an existing linux/amd64 release manifest');
  if(!original.images?.api||!original.images?.gateway)throw Error('Manifest must declare API and gateway images');
- // Whitelist fields: runtime.env, private JSON, database dumps and contexts never enter the public ZIP.
+ // Whitelist fields: runtime.env, private JSON, database dumps and contexts never enter the release ZIP.
  const manifest={};
  for(const key of ['id','commit','dirty','createdAt','platform','assetsMode','images','imageDigests','html','assets','lockSha256','supportedTaskKinds','sourceRelease']){
   if(original[key]!==undefined)manifest[key]=original[key];
@@ -45,16 +45,24 @@ export async function packBundle(id,base=resolve('.release')){
 }
 export function bundleTarget(bundle,env){
  releaseName(bundle.release);
- const config=storageSettings(env);
+ const publicConfig=storageSettings(env);
+ if(!env.NEXT_RELEASE_BUCKET||env.NEXT_RELEASE_BUCKET===publicConfig.bucket)throw Error('NEXT_RELEASE_BUCKET must name a separate private release bucket');
+ if(!/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(env.NEXT_RELEASE_BUCKET))throw Error('Invalid private release bucket');
+ const config={...publicConfig,bucket:env.NEXT_RELEASE_BUCKET,accessKeyId:env.NEXT_RELEASE_ACCESS_KEY_ID||publicConfig.accessKeyId,secretAccessKey:env.NEXT_RELEASE_SECRET_ACCESS_KEY||publicConfig.secretAccessKey};
  if(config.provider!=='gcs'||config.endpoint!=='https://storage.googleapis.com')throw Error('Image bundles require the official Google Cloud Storage endpoint');
  if(!config.bucket||!config.region||!config.accessKeyId||!config.secretAccessKey)throw Error('GCS bucket, region and HMAC credentials are required');
  if(!/^[a-f0-9]{64}$/.test(bundle.sha256))throw Error('Invalid bundle digest');
  const key=`store-next/releases/${bundle.release}/${bundle.sha256}/${bundle.file}`;
  const url=`https://storage.googleapis.com/${encodeURIComponent(config.bucket)}/${key.split('/').map(encodeURIComponent).join('/')}`;
- return {config,key,url};
+ return {config,key,url,uri:`gs://${config.bucket}/${key}`};
 }
-export async function publishBundle(bundle,file,env,client,commands){
- const {config,key,url}=bundleTarget(bundle,env);
+export function verifyReleaseBucket(bucket){
+ const result=spawnSync('gcloud',['storage','buckets','describe',`gs://${bucket}`,'--format=value(public_access_prevention)'],{encoding:'utf8',timeout:30000});
+ if(result.status!==0||result.stdout.trim()!=='enforced')throw Error('Private release bucket must have enforced public access prevention; verify gcloud permissions');
+}
+export async function publishBundle(bundle,file,env,client,commands,verifyPrivate=verifyReleaseBucket){
+ const {config,key,uri}=bundleTarget(bundle,env);
+ await verifyPrivate(config.bucket);
  if((await regular(file)).size!==bundle.size||await fileDigest(file)!==bundle.sha256)throw Error('Local bundle changed; package it again');
  let existing;
  try{existing=await client.send(new commands.HeadObjectCommand({Bucket:config.bucket,Key:key}));}
@@ -66,14 +74,14 @@ export async function publishBundle(bundle,file,env,client,commands){
   let uploaded=false;
   for(let attempt=0;attempt<2&&!uploaded;attempt++){
    const stream=createReadStream(file);
-   try{await client.send(new commands.PutObjectCommand({Bucket:config.bucket,Key:key,Body:stream,ContentLength:bundle.size,ContentMD5:await fileDigest(file,'md5'),ContentType:'application/zip',CacheControl:'public,max-age=31536000,immutable',Metadata:{sha256:bundle.sha256}}));uploaded=true;}
+   try{await client.send(new commands.PutObjectCommand({Bucket:config.bucket,Key:key,Body:stream,ContentLength:bundle.size,ContentMD5:await fileDigest(file,'md5'),ContentType:'application/zip',CacheControl:'private,no-store,max-age=0',Metadata:{sha256:bundle.sha256}}));uploaded=true;}
    catch{if(attempt===1)throw Error('GCS bundle upload failed');}
    finally{stream.destroy();}
   }
  }
  const check=await client.send(new commands.HeadObjectCommand({Bucket:config.bucket,Key:key}));
  if(check.Metadata?.sha256!==bundle.sha256||Number(check.ContentLength)!==bundle.size)throw Error('GCS bundle verification failed');
- return {...bundle,bucket:config.bucket,key,url};
+ return {...bundle,bucket:config.bucket,key,uri};
 }
 export async function publishAssets(id,env,storage,request=fetch,base=resolve('.release')){
  releaseName(id);const dir=join(base,id),manifest=JSON.parse(await readFile(join(dir,'manifest.json'),'utf8'));

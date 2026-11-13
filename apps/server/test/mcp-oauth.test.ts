@@ -17,7 +17,7 @@ test('OAuth redirect validation accepts exact web/native/loopback URIs and exclu
 const databaseUrl=process.env.NEXT_TEST_DATABASE_URL;
 test('schema-only OAuth HTTP/PKCE: CSRF consent, rotation/replay revocation, legacy table compatibility, live account and credential management', {skip:!databaseUrl},async()=>{
  assert.match(new URL(databaseUrl!).pathname,/^\/store_test_[0-9]{13}_[a-f0-9]{12}_refactor_p1$/);
- const app=await createApp({databaseUrl:databaseUrl!,sessionSecret:'x'.repeat(40),cookieSecure:false,host:'127.0.0.1',port:3000,mcpPublicUrl:'https://store.fixture.test/mcp',mcpAuthorizationUiUrl:'http://127.0.0.1:8001/admin/mcp-authorize'}),db=app.get(Database),oauth=app.get(McpOAuthService);
+ const app=await createApp({databaseUrl:databaseUrl!,sessionSecret:'x'.repeat(40),cookieSecure:false,host:'127.0.0.1',port:3000,mcpPublicUrl:'https://store.fixture.test/mcp',mcpAuthorizationUiUrl:'http://127.0.0.1:8001/admin/mcp-authorize',oauthTrustedRedirectUris:['http://127.0.0.1:47111/callback']}),db=app.get(Database),oauth=app.get(McpOAuthService);
  const users:number[]=[],clients:string[]=[];const agents=new Map<string,ReturnType<typeof request.agent>>(),csrf=new Map<string,string>();
  const callback='http://127.0.0.1:47111/callback';const password='oauth-fixture-password';
  const authorize=async(role:string,clientId:string,scope='read write')=>{const v=verifier(),payload={response_type:'code',client_id:clientId,redirect_uri:callback,code_challenge:challenge(v),code_challenge_method:'S256',scope,state:'fixture-state-✓',resource:'https://store.fixture.test/mcp'};
@@ -31,7 +31,7 @@ test('schema-only OAuth HTTP/PKCE: CSRF consent, rotation/replay revocation, leg
   const metadata=await request(app.getHttpServer()).get('/.well-known/oauth-authorization-server').expect(200);assert.equal(metadata.body.token_endpoint,'https://store.fixture.test/oauth/token');assert.deepEqual(metadata.body.code_challenge_methods_supported,['S256']);assert.equal(metadata.headers['cache-control'],'no-store');
   const resource=await request(app.getHttpServer()).get('/.well-known/oauth-protected-resource').expect(200);assert.deepEqual(resource.body.authorization_servers,['https://store.fixture.test']);
   await request(app.getHttpServer()).post('/oauth/register').send({redirect_uris:['javascript:alert(1)']}).expect(400);
-  const reg=await request(app.getHttpServer()).post('/oauth/register').send({client_name:'fixture client <script>',redirect_uris:[callback],token_endpoint_auth_method:'none'}).expect(201);const clientId=reg.body.client_id;clients.push(clientId);assert.equal(reg.body.client_secret,undefined);
+  const reg=await request(app.getHttpServer()).post('/oauth/register').send({scope:'read write',client_name:'fixture client <script>',redirect_uris:[callback],token_endpoint_auth_method:'none'}).expect(201);const clientId=reg.body.client_id;clients.push(clientId);assert.equal(reg.body.client_secret,undefined);
   const otherReg=await request(app.getHttpServer()).post('/oauth/register').send({redirect_uris:[callback]}).expect(201);clients.push(otherReg.body.client_id);
   const auth=await authorize('staff',clientId);assert.ok(auth.code);
   const authorizeGet=await request(app.getHttpServer()).get('/oauth/authorize').query(auth.payload).expect(303);assert.ok(authorizeGet.headers.location.startsWith('http://127.0.0.1:8001/admin/mcp-authorize?'));

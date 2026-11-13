@@ -47,11 +47,9 @@ test('employee account lifecycle: atomic create/edit, role bounds, password rese
   await post(`/api/employees/${created.body.id}/reset`,{password:'reset06'}).expect(201);
   await staff.get('/api/auth/session').expect(401);
   const resetLogin=await staff.post('/api/auth/login').send({username:prefix+'edited',password:'reset06'}).expect(201);assert.equal(resetLogin.body.user.mustChangePassword,true);
-  await post('/api/employees/reset-all',{password:'bulk06',confirm:'wrong'}).expect(400);
-  const bulk=await post('/api/employees/reset-all',{password:'bulk06',confirm:'RESET_ALL_STAFF'}).expect(201);assert.equal(bulk.body.count,3);
-  await staff.get('/api/auth/session').expect(401);
-  await staff.post('/api/auth/login').send({username:prefix+'edited',password:'bulk06'}).expect(201);
-  // Admin was excluded from bulk reset; its existing session still works.
+  await post('/api/employees/reset-all',{password:'bulk06',confirm:'wrong'}).expect(410);
+  await post('/api/employees/reset-all',{password:'bulk06',confirm:'RESET_ALL_STAFF'}).expect(410);
+  await staff.get('/api/auth/session').expect(200);
   await admin.get('/api/dashboard').expect(200);
   const exported=await admin.get('/api/employees/accounts-export').buffer(true).parse((res,done)=>{
    const chunks:Buffer[]=[];res.on('data',chunk=>chunks.push(Buffer.from(chunk)));res.on('end',()=>done(null,Buffer.concat(chunks)));
@@ -59,7 +57,7 @@ test('employee account lifecycle: atomic create/edit, role bounds, password rese
   assert.match(exported.headers['content-disposition'],/filename\*=UTF-8/);
   const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(exported.body);
   const values=workbook.getWorksheet('员工登录名')!.getSheetValues();assert.equal(values.length,5);
-  assert.match(JSON.stringify(values),/已编辑姓名/);assert.doesNotMatch(JSON.stringify(values),/\$argon2/);
+  assert.match(JSON.stringify(values),/已编辑姓名/);assert.doesNotMatch(JSON.stringify(workbook.worksheets.map(sheet=>sheet.getSheetValues())),/\$argon2|初始口令|demo123|bulk06|reset06/);
  }finally{
   await db.query('DELETE FROM users WHERE id=ANY($1::int[]) OR person_code=ANY($2::text[])',[ids,codes]);
   await db.query('DELETE FROM persons WHERE code=ANY($1::text[])',[codes]);await app.close();

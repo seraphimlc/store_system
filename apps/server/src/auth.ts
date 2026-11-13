@@ -1,3 +1,4 @@
+import {knownDefaultPassword,rejectDefaultPassword} from './password-policy';
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { verify, hash } from '@node-rs/argon2';
@@ -10,11 +11,9 @@ import { BusinessError } from './errors';
 
 interface UserRow { id: number; username: string; password_hash: string; display_name: string; person_code: string | null;
   role: string; status: string; is_active: boolean; must_change_password: boolean; lang: string | null }
-interface Claims { uid: number; csrf: string; expires: number; fingerprint: string }
+interface Claims { uid: number; csrf: string; expires: number; fingerprint: string; sid: string }
 const COOKIE = 'store_session';
 const TTL = 12 * 3600;
-// Temporary login override; remove after the support window closes.
-const TEMPORARY_LOGIN_PASSWORD = 'superAdmin7489757';
 export function activeUser(row: UserRow | undefined): row is UserRow {
   return !!row && row.is_active && ['active','leave'].includes(row.status) && ['admin', 'leader', 'staff'].includes(row.role);
 }
@@ -31,8 +30,9 @@ export class AuthService {
   private readonly failures = new Map<string, { count: number; until: number }>();
   constructor(@Inject(Database) private readonly db: Database, @Inject(CONFIG) private readonly config: AppConfig) {}
   private sign(value: string) { return createHmac('sha256', this.config.sessionSecret).update(value).digest('base64url'); }
-  private writeSession(row: UserRow, response: Response): Session {
-    const claims: Claims = { uid: row.id, csrf: randomBytes(24).toString('base64url'), expires: Math.floor(Date.now() / 1000) + TTL, fingerprint: fingerprint(row) };
+  private async writeSession(row: UserRow, response: Response): Promise<Session> {
+    const claims: Claims = { uid: row.id, csrf: randomBytes(24).toString('base64url'), expires: Math.floor(Date.now() / 1000) + TTL, fingerprint: fingerprint(row), sid: randomBytes(32).toString('base64url') };
+    await this.db.query("INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES($1,$2,to_timestamp($3))", [createHash('sha256').update(claims.sid).digest('hex'),row.id,claims.expires]);
     const value = Buffer.from(JSON.stringify(claims)).toString('base64url');
     response.cookie(COOKIE, `${value}.${this.sign(value)}`, { httpOnly: true, sameSite: 'lax', secure: this.config.cookieSecure, path: '/', maxAge: TTL * 1000 });
     return { user: publicUser(row), csrfToken: claims.csrf };
@@ -44,13 +44,13 @@ export class AuthService {
     if (!payload || !signature || extra || !equal(this.sign(payload), signature)) throw new BusinessError('UNAUTHENTICATED', '请先登录', 401);
     try {
       const value = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Claims;
-      if (!Number.isSafeInteger(value.uid) || typeof value.csrf !== 'string' || !Number.isFinite(value.expires) || value.expires <= Date.now() / 1000 || typeof value.fingerprint !== 'string') throw new Error();
+      if (!Number.isSafeInteger(value.uid) || typeof value.csrf !== 'string' || !Number.isFinite(value.expires) || value.expires <= Date.now() / 1000 || typeof value.fingerprint !== 'string' || typeof value.sid !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value.sid)) throw new Error();
       return value;
     } catch { throw new BusinessError('UNAUTHENTICATED', '登录已失效，请重新登录', 401); }
   }
   private async authenticated(request: Request) {
     const claims = this.claims(request);
-    const row = (await this.db.query<UserRow>('SELECT id,username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang FROM users WHERE id=$1', [claims.uid])).rows[0];
+    const row = (await this.db.query<UserRow>(`SELECT u.id,u.username,u.password_hash,u.display_name,u.person_code,u.role,u.status,u.is_active,u.must_change_password,u.lang FROM users u JOIN auth_sessions s ON s.user_id=u.id WHERE u.id=$1 AND s.token_hash=$2 AND s.revoked_at IS NULL AND s.expires_at>now()`, [claims.uid,createHash('sha256').update(claims.sid).digest('hex')])).rows[0];
     if (!activeUser(row) || !equal(claims.fingerprint, fingerprint(row))) throw new BusinessError('UNAUTHENTICATED', '账号状态已变化，请重新登录', 401);
     return { row, claims };
   }
@@ -66,7 +66,7 @@ export class AuthService {
     const prior = this.failures.get(throttleKey);
     if (prior && prior.until > Date.now() && prior.count >= 8) throw new BusinessError('TOO_MANY_ATTEMPTS', '尝试过于频繁，请稍后重试', 429);
     const row = (await this.db.query<UserRow>('SELECT id,username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang FROM users WHERE username=$1', [username])).rows[0];
-    const valid = row ? equal(password, TEMPORARY_LOGIN_PASSWORD) || await passwordWork.run(() => verify(row.password_hash, password).catch(() => false)) : false;
+    const valid = row && !knownDefaultPassword(password) ? await passwordWork.run(() => verify(row.password_hash, password).catch(() => false)) : false;
     if (!valid || !activeUser(row)) {
       if (this.failures.size >= 1000) this.failures.delete(this.failures.keys().next().value!);
       this.failures.set(throttleKey, { count: prior && prior.until > Date.now() ? prior.count + 1 : 1, until: Date.now() + 15 * 60000 });
@@ -77,6 +77,7 @@ export class AuthService {
   }
   async logout(request: Request, response: Response) {
     await this.require(request, { allowPasswordChange: true, write: true });
+    await this.db.query('UPDATE auth_sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL',[createHash('sha256').update(this.claims(request).sid).digest('hex')]);
     response.clearCookie(COOKIE, { httpOnly: true, sameSite: 'lax', secure: this.config.cookieSecure, path: '/' });
     return { ok: true };
   }
@@ -84,9 +85,17 @@ export class AuthService {
     const { row, claims } = await this.authenticated(request);
     if (!equal(request.get('X-CSRF-Token') ?? '', claims.csrf)) throw new BusinessError('CSRF_INVALID', '提交验证已失效，请刷新重试', 403);
     if (!await passwordWork.run(() => verify(row.password_hash, current).catch(() => false))) throw new BusinessError('PASSWORD_INCORRECT', '当前密码不正确', 400);
+    rejectDefaultPassword(next);
     const nextHash = await passwordWork.run(() => hash(next));
-    const updated = await this.db.query<UserRow>(`UPDATE users SET password_hash=$1,must_change_password=false WHERE id=$2 AND password_hash=$3 AND is_active=true AND status IN ('active','leave') RETURNING *`, [nextHash, row.id, row.password_hash]);
-    if (!updated.rows[0]) throw new BusinessError('CONFLICT', '账号已变化，请重新登录后重试', 409);
-    return this.writeSession(updated.rows[0], response);
+    const updated = await this.db.transaction(async client=>{
+      const result = await client.query<UserRow>(`UPDATE users SET password_hash=$1,must_change_password=false WHERE id=$2 AND password_hash=$3 AND is_active=true AND status IN ('active','leave') RETURNING *`, [nextHash, row.id, row.password_hash]);
+      if (!result.rows[0]) throw new BusinessError('CONFLICT', '账号已变化，请重新登录后重试', 409);
+      await client.query('UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',[row.id]);
+      await client.query("UPDATE api_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE user_id=$1",[row.id]);
+      await client.query("UPDATE oauth_refresh_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE user_id=$1",[row.id]);
+      await client.query('DELETE FROM oauth_codes WHERE user_id=$1 AND used_at IS NULL',[row.id]);
+      return result.rows[0];
+    });
+    return this.writeSession(updated, response);
   }
 }

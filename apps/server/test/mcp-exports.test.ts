@@ -40,7 +40,10 @@ test('schema-only SDK exports: private XLSX contents, preflight/commit/audit rol
  const originalBuild=exports.buildInTransaction.bind(exports);
  // Avoid calling any provider. Existing interpretation is a stored text snapshot.
  insight.start=async()=>{throw Error('No AI generation allowed');};let insightReads=0;const originalInsight=insight.readInTransaction.bind(insight);insight.readInTransaction=async(client,id)=>{insightReads++;return originalInsight(client,id);};
- const call=async(role:string,tool:string,args:Record<string,unknown>)=>{const result=await clients.get(role)!.callTool({name:tool,arguments:args});return JSON.parse((result.content as {text:string}[])[0].text);};
+ const call=async(role:string,tool:string,args:Record<string,unknown>)=>{
+  // These content/rollback scenarios represent separate export windows; dedicated security tests cover quotas.
+  await db.query("UPDATE security_export_events SET created_at=now()-interval '6 minutes' WHERE user_id=ANY($1::int[]) AND finished_at IS NOT NULL",[users]);
+  const result=await clients.get(role)!.callTool({name:tool,arguments:args});return JSON.parse((result.content as {text:string}[])[0].text);};
  const snapshot=async()=>{const hashes:Record<string,string>={};for(const table of ['payroll_payments','payroll_adjusts','payroll_settlement_links','payroll_paid_marks','payroll_period_rows','recon_tasks','recon_data_rows','recon_results','recon_day_rows'])hashes[table]=(await db.query(`SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY ${table==='payroll_paid_marks'?'month,half':'id'}),'')) AS value FROM ${table} t`)).rows[0].value;return hashes;};
  const artifactNames=async()=>await readdir(join(root,'mcp-exports')).catch(()=>[]as string[]);
  const decode=async(data:any)=>{assert.ok(data.content_base64);const bytes=Buffer.from(data.content_base64,'base64');assert.equal(bytes.length,data.size_bytes);assert.equal(createHash('sha256').update(bytes).digest('hex'),data.sha256);assert.ok(!JSON.stringify({...data,content_base64:undefined}).includes(root));const wb=new ExcelJS.Workbook();await wb.xlsx.load(bytes as any);return {bytes,wb};};

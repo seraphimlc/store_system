@@ -43,7 +43,7 @@ test('employee state changes preserve history, permit leave login, invalidate wo
   await admin.post(`/api/employees/${staffId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'active',expectedStatus:'active'}).expect(404);
   await admin.post(`/api/employees/${staffId}/edit`).set('X-CSRF-Token',login.body.csrfToken).send({name:'恢复',username:before.username,status:'active',language:'ja',role:'leader',password:'',expected:{username:before.username,name:before.display_name,status:'active',language:'ja',role:'leader'}}).expect(404);
   await admin.post(`/api/employees/${staffId}/reset`).set('X-CSRF-Token',login.body.csrfToken).send({password:'new-password'}).expect(404);
-  await admin.post('/api/employees/reset-all').set('X-CSRF-Token',login.body.csrfToken).send({password:'new-password',confirm:'RESET_ALL_STAFF'}).expect(201);
+  await admin.post('/api/employees/reset-all').set('X-CSRF-Token',login.body.csrfToken).send({password:'new-password',confirm:'RESET_ALL_STAFF'}).expect(410);
   assert.equal((await db.query('SELECT password_hash FROM users WHERE id=$1',[staffId])).rows[0].password_hash,before.password_hash);
   const exported=await admin.get('/api/employees/accounts-export').buffer(true).parse((res,done)=>{const chunks:Buffer[]=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>done(null,Buffer.concat(chunks)));}).expect(200);
   const {default:ExcelJS}=await import('exceljs');const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(exported.body);

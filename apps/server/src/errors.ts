@@ -8,6 +8,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
     const request = host.switchToHttp().getRequest<Request>();
+    if(response.headersSent||response.destroyed)return;
     const status = error instanceof HttpException ? error.getStatus() : 500;
     const payload = error instanceof BusinessError ? { code: error.code, message: error.message }
       : { code: status === 404 ? 'NOT_FOUND' : status === 500 ? 'INTERNAL' : 'BAD_REQUEST',
