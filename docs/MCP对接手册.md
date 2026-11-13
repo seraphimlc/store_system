@@ -1,3 +1,5 @@
+> **2026-11-13 新栈入口**：当前27工具、OAuth和凭据界面以 [恢复补充计划](计划-MCP-OAuth与Skill恢复补充.md) 为准；当前连接器/Skill见 [连接器说明](../deploy-next/connector/visit-settle/README.md)。本文的旧Python路径、计数、默认发放/授权语义为历史参考；新版确认/版本/下载规则以当前Skill和工具schema为准，源码通过不表示Docker/生产已发布或WorkBuddy实机已验收。
+
 # MCP 对接手册（可复用）
 
 > **状态**：活文档（可复用）｜**最后更新**：2026-10-17

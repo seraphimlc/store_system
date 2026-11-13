@@ -59,13 +59,6 @@ export class EmployeesController {
  @Post(':id/status') async status(@Req() req:Request,@Param('id') value:string,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});
   const id=identity(value),input=parse(z.object({status:state,expectedStatus:state}).strict(),body);
-  return this.db.transaction(async client=>{
-   const target=(await client.query("SELECT id,status,role FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE",[id])).rows[0];
-   if(!target)throw new BusinessError('NOT_FOUND','员工不存在',404);
-   if(target.status!==input.expectedStatus)throw new BusinessError('CONFLICT','员工状态已更新，请刷新后重试',409);
-   const active=['active','leave'].includes(input.status);
-   await client.query('UPDATE users SET status=$1,is_active=$2 WHERE id=$3',[input.status,active,id]);
-   return {id,status:input.status,isActive:active,tokenUsable:input.status==='active'};
-  });
+  return this.db.transaction(client=>this.service.setStatus(client,id,input.status,input.expectedStatus));
  }
 }

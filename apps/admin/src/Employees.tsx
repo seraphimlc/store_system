@@ -1,3 +1,4 @@
+import {McpCredentials} from './McpCredentials';
 import {SuccessNotice} from './SuccessNotice';
 import {AdminPagination} from './AdminPagination';
 import {Dialog,DialogContent,DialogTitle} from '@appica/ui-react/dialog';
@@ -45,6 +46,7 @@ export function Employees({ session, language }: { session: Session; language: s
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [credentialUser,setCredentialUser]=useState<Employee|null>(null);
   const [confirmation, setConfirmation] = useState('');
   
   const form = useRef<HTMLFormElement>(null);
@@ -100,6 +102,7 @@ export function Employees({ session, language }: { session: Session; language: s
   const isAccount = editor?.mode === 'create' || editor?.mode === 'edit';
   const title = editor?.mode === 'delete' ? '删除员工' : editor?.mode === 'create' ? '新建员工' : editor?.mode === 'edit' ? '编辑员工' : editor?.mode === 'reset-all' ? '重置全部员工口令' : '重置口令';
   return <section className="employee-section">
+    {credentialUser&&<McpCredentials session={session} userId={credentialUser.id} username={credentialUser.username} language={language} onClose={()=>setCredentialUser(null)}/>}
     
     <Form className="employee-filters admin-filter-panel" onSubmit={filter}>
       <label className="search-field admin-search-field"><Search size={17} aria-hidden="true"/><Input name="search" aria-label={t('搜索姓名、账号或人员编号')} placeholder={t('搜索姓名、账号或人员编号')} maxLength={80}/></label>
@@ -115,7 +118,7 @@ export function Employees({ session, language }: { session: Session; language: s
     <div className="employee-result-count">{language === 'ja' ? `${data?.total ?? 0} 名` : `共 ${data?.total ?? 0} 位员工`}</div>
     {loading ? <p role="status">{t('正在读取员工…')}</p> : !data?.items.length ? <div className="empty-state"><h3>{t('没有符合条件的员工')}</h3></div> :
       <div className="table-scroll"><Table><TableHeader><TableRow>{['姓名 / 账号','人员编号','账号角色','状态','操作'].map(label => <TableHead key={label}>{t(label)}</TableHead>)}</TableRow></TableHeader><TableBody>{data.items.map(employee =>
-        <TableRow key={employee.id}><TableCell><strong>{employee.displayName || employee.username}</strong><span className="row-id">{employee.username}</span></TableCell><TableCell>{employee.personCode || '—'}</TableCell><TableCell>{t(employee.role === 'leader' ? '队长端权限' : '员工端权限')}</TableCell><TableCell><span className={'status-label state-' + employee.status}>{t(statusLabels[employee.status])}</span></TableCell><TableCell><div className="row-actions"><Button variant="outline" onClick={() => open('edit', employee)}>{t('编辑')}</Button><Button variant="outline" onClick={() => open('reset', employee)}>{t('重置口令')}</Button><Button variant="outline" onClick={() => open('delete', employee)}>{t('删除')}</Button></div></TableCell></TableRow>)}</TableBody></Table></div>}
+        <TableRow key={employee.id}><TableCell><strong>{employee.displayName || employee.username}</strong><span className="row-id">{employee.username}</span></TableCell><TableCell>{employee.personCode || '—'}</TableCell><TableCell>{t(employee.role === 'leader' ? '队长端权限' : '员工端权限')}</TableCell><TableCell><span className={'status-label state-' + employee.status}>{t(statusLabels[employee.status])}</span></TableCell><TableCell><div className="row-actions"><Button variant="outline" onClick={() => open('edit', employee)}>{t('编辑')}</Button><Button variant="outline" onClick={() => open('reset', employee)}>{t('重置口令')}</Button><Button variant="outline" onClick={()=>setCredentialUser(employee)}>{language==='ja'?'MCP 認証情報':'MCP 凭据'}</Button><Button variant="outline" onClick={() => open('delete', employee)}>{t('删除')}</Button></div></TableCell></TableRow>)}</TableBody></Table></div>}
     <AdminPagination className="pagination"><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage(page - 1)}>{t('上一页')}</Button><span>{page} / {Math.max(1, Math.ceil((data?.total ?? 0) / 30))}</span><Button variant="outline" disabled={loading || page * 30 >= (data?.total ?? 0)} onClick={() => setPage(page + 1)}>{t('下一页')}</Button></AdminPagination>
     <p className="muted">{t('账号清单仅向管理员提供，请妥善交付。')}</p>
     <Dialog open={!!editor} onOpenChange={open=>{if(!open&&!saving)setEditor(null);}}><DialogContent className="management-dialog employee-editor-dialog" frame={false} closeButton={false}>

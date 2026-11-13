@@ -10,7 +10,7 @@ const inputSchema=z.object({id:z.number().int().positive(),jobId:z.string().uuid
 export class ReconciliationInsightService{
  readonly queue:DurableQueue;
  constructor(@Inject(Database)private readonly db:Database){this.queue=new DurableQueue(resolve(process.env.NEXT_TASK_DIRECTORY||'data/refactor/jobs'));}
- private async facts(client:PoolClient,id:number,lock=false){
+ private async facts(client:Pick<Database,'query'>,id:number,lock=false){
   if(lock)await client.query("SELECT pg_advisory_xact_lock(hashtext('payroll-financial-write'),0)");
   const task=(await client.query<Task>(`SELECT id,status,params,summary FROM recon_tasks WHERE id=$1 AND kind='monthly_v3'${lock?' FOR UPDATE':''}`,[id])).rows[0];if(!task)throw new BusinessError('NOT_FOUND','对账任务不存在',404);if(task.status!=='done')throw new BusinessError('RECON_NOT_DONE','对账尚未成功，不能生成解读',409);
   const {ai_interpret,ai_interpret_job,...summary}=task.summary;
@@ -22,7 +22,8 @@ export class ReconciliationInsightService{
   const value={taskId:id,params,summary,companyMonthly:company,reportMonthly:actual,differencePeopleOnly:totals,problemDaySample:days};
   return {task,facts:value,fingerprint:digest(value)};
  }
- async read(id:number){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');const current=await this.facts(client,id);const insight=current.task.summary.ai_interpret??null,job=current.task.summary.ai_interpret_job??null;return {id,insight,job,stale:!!insight&&insight.fingerprint!==current.fingerprint,fingerprint:current.fingerprint};});}
+ async read(id:number){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');return this.readInTransaction(client,id);});}
+ async readInTransaction(client:Pick<Database,'query'>,id:number){const current=await this.facts(client,id);const insight=current.task.summary.ai_interpret??null,job=current.task.summary.ai_interpret_job??null;return {id,insight,job,stale:!!insight&&insight.fingerprint!==current.fingerprint,fingerprint:current.fingerprint};}
  private async publish(id:number,job:Job){const jobId='recon-insight-'+job.id;const payload={id,jobId:job.id,actor:job.actor,fingerprint:job.fingerprint,requestId:job.requestId};try{await this.queue.enqueue('reconciliation.insight',payload,jobId);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw new BusinessError('RECON_INSIGHT_QUEUE_FAILED','解读任务入队失败，请重试',503);}return jobId;}
  async start(id:number,actor:number,force=false){
   if(process.env.AI_RECON_INTERPRET==='0')throw new BusinessError('RECON_INSIGHT_DISABLED','对账AI解读已关闭，数字结果仍可使用',409);

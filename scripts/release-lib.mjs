@@ -4,7 +4,7 @@ export function parseArgs(argv) {
   const command = args.shift();
   if (!['build', 'deploy', 'rollback'].includes(command)) throw new Error('Expected build, deploy or rollback');
   const options = { command, env: 'local', assets: 'local', config: '.env.next.local' };
-  const allowed = new Set(['env', 'assets', 'release', 'config', 'platform']);
+  const allowed = new Set(['env', 'assets', 'release', 'config', 'platform', 'reuse-staff']);
   while (args.length) {
     const key = args.shift()?.replace(/^--/, ''); const value = args.shift();
     if (!allowed.has(key) || !value || value.startsWith('--')) throw new Error('Invalid release arguments');
@@ -15,6 +15,7 @@ export function parseArgs(argv) {
   if (options.release && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(options.release)) throw new Error('Invalid release ID');
   if (command !== 'build' && !options.release) throw new Error('--release is required');
   if (options.platform && !/^linux\/(arm64|amd64)$/.test(options.platform)) throw new Error('Unsupported platform');
+  if(options['reuse-staff']&&(!/^[a-z0-9][a-z0-9-]{0,62}$/.test(options['reuse-staff'])||command!=='build'))throw new Error('--reuse-staff requires build and an existing release ID');
   return options;
 }
 export function digest(value) { return createHash('sha256').update(value).digest('hex'); }
@@ -82,10 +83,48 @@ export function gatewayConfig(release) {
    return 308 /admin/zones$is_args$args;
  }
  location ^~ /r/ { try_files $uri =404; add_header Cache-Control "public,max-age=31536000,immutable" always; add_header X-Store-Release "${release}" always; }
- location ^~ /mcp { default_type application/json; return 404 '{"code":"MCP_NOT_SUPPORTED"}'; }
- location ^~ /oauth/ { default_type application/json; return 404 '{"code":"OAUTH_NOT_SUPPORTED"}'; }
- location = /.well-known/oauth-authorization-server { default_type application/json; return 404 '{"code":"OAUTH_NOT_SUPPORTED"}'; }
- location = /.well-known/oauth-protected-resource { default_type application/json; return 404 '{"code":"MCP_NOT_SUPPORTED"}'; }
+ location = /mcp {
+   set $protocol_upstream http://api:3000;
+   proxy_pass $protocol_upstream; proxy_http_version 1.1;
+   proxy_set_header Host $http_host; proxy_set_header X-Forwarded-Proto $scheme;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   proxy_connect_timeout 3s; proxy_read_timeout 300s; proxy_send_timeout 300s;
+   proxy_buffering off; client_max_body_size 25m;
+ }
+ location ^~ /mcp/ {
+   set $protocol_upstream http://api:3000;
+   proxy_pass $protocol_upstream; proxy_http_version 1.1;
+   proxy_set_header Host $http_host; proxy_set_header X-Forwarded-Proto $scheme;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   proxy_connect_timeout 3s; proxy_read_timeout 300s; proxy_send_timeout 300s;
+   proxy_buffering off; client_max_body_size 25m;
+ }
+ location ^~ /oauth/ {
+   set $protocol_upstream http://api:3000;
+   proxy_pass $protocol_upstream; proxy_http_version 1.1;
+   proxy_set_header Host $http_host; proxy_set_header X-Forwarded-Proto $scheme;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   proxy_connect_timeout 3s; proxy_read_timeout 300s; proxy_send_timeout 300s;
+   proxy_buffering off; client_max_body_size 25m;
+ }
+ location = /.well-known/oauth-authorization-server {
+   set $protocol_upstream http://api:3000;
+   proxy_pass $protocol_upstream; proxy_http_version 1.1;
+   proxy_set_header Host $http_host; proxy_set_header X-Forwarded-Proto $scheme;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   proxy_connect_timeout 3s; proxy_read_timeout 300s; proxy_send_timeout 300s;
+   proxy_buffering off; client_max_body_size 25m;
+ }
+ location = /.well-known/oauth-protected-resource {
+   set $protocol_upstream http://api:3000;
+   proxy_pass $protocol_upstream; proxy_http_version 1.1;
+   proxy_set_header Host $http_host; proxy_set_header X-Forwarded-Proto $scheme;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   proxy_connect_timeout 3s; proxy_read_timeout 300s; proxy_send_timeout 300s;
+   proxy_buffering off; client_max_body_size 25m;
+ }
+ location ^~ /mcp { default_type application/json; return 404 '{"code":"NOT_FOUND"}'; }
+ location = /oauth { default_type application/json; return 404 '{"code":"NOT_FOUND"}'; }
  location ^~ /.well-known/ { default_type application/json; return 501 '{"code":"MIGRATION_PENDING"}'; }
  location = /admin { return 308 /admin/; }
  location /admin/ { try_files $uri /admin/index.html; add_header Cache-Control no-cache always; add_header X-Store-Release "${release}" always; }
@@ -97,8 +136,15 @@ export function edgeConfig(release) {
   if (!/^[a-z0-9-]+$/.test(release)) throw new Error('Invalid release');
   return `server { listen 80; server_name _;
     resolver 127.0.0.11 valid=5s ipv6=off;
+    location ~ ^/(mcp(/|$)|oauth/|[.]well-known/oauth-(authorization-server|protected-resource)$) {
+      set $protocol_candidate http://next-${release}:80;
+      proxy_pass $protocol_candidate; proxy_http_version 1.1;
+      proxy_set_header Host $http_host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme; proxy_connect_timeout 3s;
+      proxy_read_timeout 300s; proxy_send_timeout 300s; proxy_buffering off; client_max_body_size 25m;
+    }
     location / { set $candidate http://next-${release}:80; proxy_pass $candidate; proxy_http_version 1.1;
-      proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header Host $http_host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto $scheme; proxy_connect_timeout 3s; proxy_read_timeout 35s;
     }
   }`;
@@ -127,4 +173,14 @@ export function localDeploymentDatabase(env){
  if(name!=='store_settle_refactor_p1'&&!(explicit&&name==='store_settle'))throw Error('Baseline requires explicit NEXT_DOCKER_DATABASE_URL');
  if(['127.0.0.1','localhost','[::1]'].includes(url.hostname))url.hostname='host.docker.internal';
  return {url,jobsVolume:name==='store_settle'?'store-next-jobs-store-settle':'store-next-jobs',baseline:name==='store_settle'};
+}
+
+/** OAuth origins must name the actual local gateway, never Docker's internal api host. */
+export function localMcpEnvironment(){
+ return {NEXT_MCP_PUBLIC_URL:'http://127.0.0.1:8000/mcp',NEXT_MCP_AUTHORIZATION_UI_URL:'http://127.0.0.1:8000/admin/mcp-authorize'};
+}
+
+/** Broad source snapshots may be exercised in isolation but must not become a traffic switch by accident. */
+export function assertDeployableManifest(manifest){
+ if(manifest.acceptanceOnly)throw new Error('This release is an isolated acceptance snapshot; prepare a scoped deployment candidate before switching local traffic');
 }

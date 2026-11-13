@@ -24,16 +24,16 @@ export class VisitImportsService{
  readonly queue:DurableQueue;
  constructor(@Inject(Database)private readonly db:Database,@Inject(EmployeeService)private readonly employees:EmployeeService,@Inject(SettlementService)private readonly settlement:SettlementService){this.queue=new DurableQueue(resolve(process.env.NEXT_TASK_DIRECTORY||'data/refactor/jobs'));}
  async enqueue(task:ImportTask){const jobId=`import-${task.id}-${task.requestId}`;try{await this.queue.enqueue('import.visit',task,jobId);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST'){await this.db.query("UPDATE imports SET status='failed',errors=$1 WHERE id=$2 AND status='uploaded'",[JSON.stringify(['后台任务入队失败，请重试解析']),task.id]);throw new BusinessError('IMPORT_QUEUE_FAILED','解析任务未能入队，请重试解析',503);}const saved=JSON.parse(await readFile(join(this.queue.directory,jobId+'.identity'),'utf8'));if(JSON.stringify(saved.payload)!==JSON.stringify(task))throw new BusinessError('REQUEST_ID_CONFLICT','提交标识已被其他解析参数使用',409);}return {jobId};}
- async upload(filename:string,path:string,actor:number){
+ async upload(filename:string,path:string,actor:number){const prepared=await this.db.transaction(client=>this.uploadInTransaction(client,filename,path,actor));return {id:prepared.id,...await this.enqueue(prepared.task)};}
+ async uploadInTransaction(client:PoolClient,filename:string,path:string,actor:number){
   const name=safeUploadName(filename);if(!name.toLowerCase().endsWith('.xlsx'))throw new BusinessError('UPLOAD_EXTENSION','仅支持.xlsx文件',400);
-  const stored=await storeUpload(path),requestId=randomUUID();let identity:number;
-  try{identity=await this.db.transaction(async client=>{
-   await client.query("SELECT pg_advisory_xact_lock(hashtext('import-sha'),hashtext($1))",[stored.sha]);
-   const old=(await client.query('SELECT id FROM imports WHERE file_sha256=$1',[stored.sha])).rows[0];if(old)throw new BusinessError('DUPLICATE_UPLOAD','该文件已存在（同内容SHA256）',409);
-   const user=(await client.query("SELECT id FROM users WHERE id=$1 AND role='admin' AND status IN ('active','leave') AND is_active=true FOR SHARE",[actor])).rows[0];if(!user)throw new BusinessError('FORBIDDEN','管理员权限已变化',403);
-   return (await client.query<{id:number}>(`INSERT INTO imports(file_name,file_sha256,file_size,stored_path,uploaded_by,uploaded_at,parsed_sheets,ignored_sheets,total_rows,parsed_rows,status,warnings,errors,created_at,layout) VALUES($1,$2,$3,$4,$5,now(),'[]','[]',0,0,'uploaded','[]','[]',now(),$6) RETURNING id`,[name,stored.sha,stored.size,stored.path,actor,JSON.stringify({upload_request:requestId})])).rows[0].id;
-  });}catch(error){if((error as {code?:string}).code==='23505')throw new BusinessError('DUPLICATE_UPLOAD','该文件已存在（同内容SHA256）',409);throw error;}
-  return {id:identity,...await this.enqueue({id:identity,actor,requestId,reparse:false})};
+  const stored=await storeUpload(path),requestId=randomUUID();
+  await client.query("SELECT pg_advisory_xact_lock(hashtext('import-sha'),hashtext($1))",[stored.sha]);
+  const old=(await client.query('SELECT id FROM imports WHERE file_sha256=$1',[stored.sha])).rows[0];if(old)throw new BusinessError('DUPLICATE_UPLOAD','该文件已存在（同内容SHA256）',409);
+  const user=(await client.query("SELECT id FROM users WHERE id=$1 AND role='admin' AND status IN ('active','leave') AND is_active=true FOR SHARE",[actor])).rows[0];if(!user)throw new BusinessError('FORBIDDEN','管理员权限已变化',403);
+  try{const identity=(await client.query<{id:number}>(`INSERT INTO imports(file_name,file_sha256,file_size,stored_path,uploaded_by,uploaded_at,parsed_sheets,ignored_sheets,total_rows,parsed_rows,status,warnings,errors,created_at,layout) VALUES($1,$2,$3,$4,$5,now(),'[]','[]',0,0,'uploaded','[]','[]',now(),$6) RETURNING id`,[name,stored.sha,stored.size,stored.path,actor,JSON.stringify({upload_request:requestId})])).rows[0].id;
+   return {id:identity,task:{id:identity,actor,requestId,reparse:false}};
+  }catch(error){if((error as {code?:string}).code==='23505')throw new BusinessError('DUPLICATE_UPLOAD','该文件已存在（同内容SHA256）',409);throw error;}
  }
  async reparse(id:number,actor:number,layout:VisitLayout|undefined,requestId:string){
   const file=(await this.db.query<ImportFile>('SELECT id,status,stored_path,layout,file_name,uploaded_by FROM imports WHERE id=$1',[id])).rows[0];if(!file)throw new BusinessError('NOT_FOUND','文件不存在',404);

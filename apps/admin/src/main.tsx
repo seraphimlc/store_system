@@ -1,3 +1,4 @@
+import {OAuthAuthorize} from './OAuthAuthorize';
 import '@fontsource-variable/geist';
 import {ThemeProvider} from '@appica/ui-react/providers/theme-provider';
 import {ToastProvider,Toaster} from '@appica/ui-react/toast';
@@ -148,4 +149,4 @@ function App() {
       
     </Suspense></main></div>;
 }
-createRoot(document.getElementById('root')!).render(<StrictMode><ThemeProvider defaultTheme="system" storageKey="store-admin-theme" disableTransitionOnChange><ToastProvider><ClientControlsProvider components={adminClientControls}><App/><Toaster position="top-right"/></ClientControlsProvider></ToastProvider></ThemeProvider></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><ThemeProvider defaultTheme="system" storageKey="store-admin-theme" disableTransitionOnChange><ToastProvider><ClientControlsProvider components={adminClientControls}>{location.pathname==='/admin/mcp-authorize'?<OAuthAuthorize/>:<App/>}<Toaster position="top-right"/></ClientControlsProvider></ToastProvider></ThemeProvider></StrictMode>);

@@ -16,7 +16,7 @@ test('browser runtime cannot inherit live database, provider secrets or shared j
 
 test('browser suite selection covers core and operations without arbitrary script execution',async()=>{
  const {browserSuites,isolatedBrowser,browserRelease}=await import('./test-isolation-lib.mjs');
- const core=browserSuites('core'),ops=browserSuites('ops');assert.equal(core.length,4);assert.equal(ops.length,6);const maps=browserSuites('maps');assert.equal(maps.length,6);assert.ok(maps.includes('scripts/verify-p5-zone-assets-browser.mjs'));assert.deepEqual(browserSuites(),[...core,...ops,...maps]);assert.equal(new Set(browserSuites()).size,16);assert.throws(()=>browserSuites('../../script'));
+ const core=browserSuites('core'),ops=browserSuites('ops');assert.equal(core.length,4);assert.equal(ops.length,6);const maps=browserSuites('maps');assert.equal(maps.length,6);assert.ok(maps.includes('scripts/verify-p5-zone-assets-browser.mjs'));assert.deepEqual(browserSuites(),[...core,...ops,...maps,...browserSuites('oauth')]);assert.equal(new Set(browserSuites()).size,17);assert.throws(()=>browserSuites('../../script'));
  const url='postgresql://u:p@127.0.0.1/'+temporaryDatabaseName(),env={NEXT_DATABASE_URL:url,NEXT_TEST_DATABASE_URL:url,NEXT_TEST_ISOLATED:'1',NEXT_BROWSER_ISOLATED_RUNTIME:'1',NEXT_BROWSER_BASE_URL:'http://127.0.0.1:12345',NEXT_TASK_DIRECTORY:'/tmp/store-browser-test'};
  assert.equal(isolatedBrowser(env),true);assert.deepEqual(await browserRelease(env),{current:'isolated-source'});
  assert.throws(()=>isolatedBrowser({...env,NEXT_DATABASE_URL:'postgresql://u:p@localhost/store_settle_refactor_p1'}));assert.throws(()=>isolatedBrowser({...env,NEXT_BROWSER_BASE_URL:'https://production/'}));assert.equal(isolatedBrowser({}),false);
@@ -36,3 +36,24 @@ test('map workspace uses a bounded dedicated suite',()=>{assert.deepEqual(browse
 test('messages use the existing disposable browser runtime',()=>{assert.deepEqual(browserSuites('messages'),['scripts/verify-p3-messages-browser.mjs']);});
 
 test('H5 grid controls use the dedicated mocked acceptance suite',()=>{assert.deepEqual(browserSuites('h5-grid'),['scripts/verify-h5-grid-controls-browser.mjs']);});
+
+test('file selection accepts only discovered tests and rejects ambiguous/browser selections',async()=>{
+ const {selectTestFiles}=await import('./test-isolation-lib.mjs');
+ const files=['apps/server/test/auth.test.ts','apps/server/test/mcp.test.ts'];
+ assert.deepEqual(selectTestFiles(files,[]),files);
+ assert.deepEqual(selectTestFiles(files,['--integration','--file=apps/server/test/mcp.test.ts']),[files[1]]);
+ for(const args of [['--file='],['--file=../outside.test.ts'],['--file='+files[0],'--file='+files[1]],['--browser','--file='+files[1]]])assert.throws(()=>selectTestFiles(files,args));
+});
+
+test('test name selection requires a discovered-file request and valid bounded regex',async()=>{
+ const {testNameArguments}=await import('./test-isolation-lib.mjs');
+ assert.deepEqual(testNameArguments([]),[]);
+ assert.deepEqual(testNameArguments(['--file=apps/server/test/mcp-task-read.test.ts','--name=schema-only SDK']),['--test-name-pattern','schema-only SDK']);
+ for(const args of [['--name=case'],['--file=x','--name='],['--file=x','--name=['],['--file=x','--name=a','--name=b'],['--browser','--file=x','--name=a']])assert.throws(()=>testNameArguments(args));
+});
+
+test('OAuth browser suite uses the existing disposable runtime',async()=>{
+ const {browserSuites}=await import('./test-isolation-lib.mjs');
+ assert.deepEqual(browserSuites('oauth'),['scripts/verify-mcp-oauth-browser.mjs']);
+ assert.ok(browserSuites('all').includes('scripts/verify-mcp-oauth-browser.mjs'));
+});

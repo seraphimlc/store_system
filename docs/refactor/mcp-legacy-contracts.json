@@ -1,0 +1,1842 @@
+{
+  "date": "2026-11-13",
+  "status": "27 tool/OAuth/connector source validated; final 246 tests and isolated Docker/rollback accepted; WorkBuddy real import pending; default 8000 and production unchanged",
+  "roles": {
+    "staff": 6,
+    "leader": 10,
+    "admin": 27
+  },
+  "tools": [
+    {
+      "name": "visit_whoami",
+      "minimumRole": "staff",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 195,
+      "parameters": [],
+      "description": "我是谁：账号/角色/绑定人员/权限/可用能力（员工与管理员均可用）。",
+      "targets": [
+        {
+          "path": "apps/server/src/auth.ts",
+          "classes": [
+            "AuthService"
+          ],
+          "asyncMethods": [
+            "authenticated",
+            "require",
+            "login",
+            "logout",
+            "changePassword"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M1; SDK and schema-only PostgreSQL passed",
+      "gap": "Implemented in apps/server/src/mcp.ts; Docker and client integration remain M6."
+    },
+    {
+      "name": "visit_my_perf",
+      "minimumRole": "staff",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 215,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "view",
+          "annotation": "str",
+          "required": false,
+          "default": "'month'"
+        }
+      ],
+      "description": "我的绩效：view=month 月汇总（默认）/ view=daily 逐日明细。",
+      "targets": [
+        {
+          "path": "apps/server/src/payroll.ts",
+          "classes": [
+            "PayrollService",
+            "PayrollController"
+          ],
+          "asyncMethods": [
+            "months",
+            "configuration",
+            "carry",
+            "read",
+            "adjust",
+            "generate",
+            "myMonths",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/performance-daily.ts",
+          "classes": [
+            "PerformanceDailyService",
+            "PerformanceDailyController"
+          ],
+          "asyncMethods": [
+            "read",
+            "admin",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and schema-only legacy parity passed",
+      "gap": "Docker and target-client stage acceptance remain M6; no OAuth connection yet.",
+      "implementation": {
+        "path": "apps/server/src/mcp-read.ts",
+        "method": "performance"
+      }
+    },
+    {
+      "name": "visit_my_pay",
+      "minimumRole": "staff",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 286,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "我的找平与发放：找平进度 + 发放台账 + 回收轨迹（一次给全）。",
+      "targets": [
+        {
+          "path": "apps/server/src/payroll.ts",
+          "classes": [
+            "PayrollService",
+            "PayrollController"
+          ],
+          "asyncMethods": [
+            "months",
+            "configuration",
+            "carry",
+            "read",
+            "adjust",
+            "generate",
+            "myMonths",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/payroll-payments.ts",
+          "classes": [
+            "PayrollPaymentsService",
+            "PayrollPaymentsController"
+          ],
+          "asyncMethods": [
+            "snapshot",
+            "preview",
+            "record",
+            "register"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and schema-only legacy parity passed",
+      "gap": "Docker and target-client stage acceptance remain M6; no OAuth connection yet.",
+      "implementation": {
+        "path": "apps/server/src/mcp-read.ts",
+        "method": "pay"
+      }
+    },
+    {
+      "name": "visit_my_tasks",
+      "minimumRole": "staff",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1261,
+      "parameters": [],
+      "description": "**我的任务**：今天派给我的 ∪ 之前派给我但还没做完的（自动延续）+ 今天已填点数。",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and 90 schema-only task legacy parity cases passed",
+      "gap": "Docker and target-client acceptance remain M6; legacy stale-only cutoff difference is recorded in the plan.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-read.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_self_report",
+      "minimumRole": "staff",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1275,
+      "parameters": [
+        {
+          "name": "area",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        },
+        {
+          "name": "p1_cnt",
+          "annotation": "int",
+          "required": false,
+          "default": "0"
+        },
+        {
+          "name": "p2_cnt",
+          "annotation": "int",
+          "required": false,
+          "default": "0"
+        },
+        {
+          "name": "items",
+          "annotation": "list[dict[str, Any]] | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "**提交今日自报**：点数（1点/2点店数）+ 当天若干任务的进度，**一次提交同一事务**。\n\nitems = [{\"task_id\": 123, \"pct\": 40, \"note\": \"可空\"}, ...]；\n进度没变又没写备注的会被跳过（不会产生多余待确认）。",
+      "targets": [
+        {
+          "path": "apps/server/src/self-report.ts",
+          "classes": [
+            "SelfReportService",
+            "SelfReportController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "report",
+            "rows",
+            "view",
+            "submit",
+            "day",
+            "saveDay"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, transaction rollback, existing operation regressions and day-view parity passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_task_report",
+      "minimumRole": "staff",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1291,
+      "parameters": [
+        {
+          "name": "task_id",
+          "annotation": "int",
+          "required": true
+        },
+        {
+          "name": "pct",
+          "annotation": "int",
+          "required": true
+        },
+        {
+          "name": "note",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        },
+        {
+          "name": "store_count",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "**上报单条任务进展**（0–100）。队员报自己的、队长调整本队的都走它。\n\n- 队长**随时**可以调本队任何任务的进度（不受\"确认后锁定\"限制）\n- **未分配的任务**：队长直接 `pct=100` 就是\"标识完成\"（不用先派人）\n- 队员那边：队长确认过的**当天**那条会被锁住\n- **`store_count`**（店铺数）：队员报到 **100% 时必填**（允许 0）；\n  队长/管理员调整或批量补录时可省（用户 2026-10-06）",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, transaction rollback, existing operation regressions and day-view parity passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_day_report",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1309,
+      "parameters": [
+        {
+          "name": "person",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "date",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "action",
+          "annotation": "str",
+          "required": false,
+          "default": "'view'"
+        },
+        {
+          "name": "area",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "p1_cnt",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "p2_cnt",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "items",
+          "annotation": "list[dict[str, Any]] | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "**管理员改 / 查某员工某天的自报**（点数 + 当天该员工的任务进展）。\n\n- `action=\"view\"`（默认）：那天已有自报 → 点数 + 那天的进展行（含\"能不能改\"）；\n- `action=\"save\"`：**那天已有自报** → 点数 + `items`（`[{task_id,pct,note}]`，只写真改了的）\n  一次保存（同一事务）；**那天没有自报** → 只能补录点数，带 items 会被拒\n  （用户 2026-10-10 口径：管理员可以改自报，但补录只能补点数）。",
+      "targets": [
+        {
+          "path": "apps/server/src/self-report.ts",
+          "classes": [
+            "SelfReportService",
+            "SelfReportController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "report",
+            "rows",
+            "view",
+            "submit",
+            "day",
+            "saveDay"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, transaction rollback, existing operation regressions and day-view parity passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_team_tasks",
+      "minimumRole": "leader",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1336,
+      "parameters": [
+        {
+          "name": "tab",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        },
+        {
+          "name": "kw",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        },
+        {
+          "name": "line_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "**本队任务**（队长视角）：tab 计数 + 任务行 + 待确认队列。\n\ntab：空=全部 / `unassigned`=待派（没分人）/ `doing`=已分人 / `done`=已完成。",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and 90 schema-only task legacy parity cases passed",
+      "gap": "Docker and target-client acceptance remain M6; legacy stale-only cutoff difference is recorded in the plan.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-read.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_task_transfer",
+      "minimumRole": "leader",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1386,
+      "parameters": [
+        {
+          "name": "task_ids",
+          "annotation": "list[int]",
+          "required": true
+        },
+        {
+          "name": "to_team_id",
+          "annotation": "int",
+          "required": true
+        }
+      ],
+      "description": "**转给别的队**（队长之间私下换活）：未分配/进行中都能转，已完成不转。\n\n只能转**自己当队长**的那个队的任务；转出会移出原担当（**已上报进度保留**），\n并给对方队长与被移出的担当各发一条站内消息。想\"互换\"就各自转一条。",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, permissions, batch rollback, version and notification regressions passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6; preserved current operation guards.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "manage"
+      }
+    },
+    {
+      "name": "visit_task_assign",
+      "minimumRole": "leader",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1376,
+      "parameters": [
+        {
+          "name": "task_id",
+          "annotation": "int",
+          "required": true
+        },
+        {
+          "name": "person_codes",
+          "annotation": "list[str] | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "**派工 / 改派 / 回收（空置）**：`person_codes` 传 `[]` 就是回收（进度保留）。",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, permissions, batch rollback, version and notification regressions passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6; preserved current operation guards.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "manage"
+      }
+    },
+    {
+      "name": "visit_task_confirm",
+      "minimumRole": "leader",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1400,
+      "parameters": [
+        {
+          "name": "task_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "all_today",
+          "annotation": "bool",
+          "required": false,
+          "default": "False"
+        },
+        {
+          "name": "reject",
+          "annotation": "bool",
+          "required": false,
+          "default": "False"
+        },
+        {
+          "name": "pct",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "note",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        }
+      ],
+      "description": "**确认 / 一键全确认 / 驳回**（队长）：\n\n- `task_id` + 默认 → 确认这一条（认可队员上报的原值）\n- `all_today=True` → **一键确认当天全部**待确认\n- `reject=True` + `pct` → 驳回（把 100% 退回成 pct；队员原值保留）",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, permissions, batch rollback, version and notification regressions passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6; preserved current operation guards.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "manage"
+      }
+    },
+    {
+      "name": "visit_task_return",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1425,
+      "parameters": [
+        {
+          "name": "task_ids",
+          "annotation": "list[int]",
+          "required": true
+        }
+      ],
+      "description": "**撤回任务到车站池**（管理员）：只撤\"已派队但没分到人\"的（有进展也行）。",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; SDK, permissions, batch rollback, version and notification regressions passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6; preserved current operation guards.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-write.ts",
+        "method": "manage"
+      }
+    },
+    {
+      "name": "visit_task_board",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1433,
+      "parameters": [
+        {
+          "name": "tab",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        },
+        {
+          "name": "line_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "kw",
+          "annotation": "str",
+          "required": false,
+          "default": "''"
+        },
+        {
+          "name": "stale_only",
+          "annotation": "bool",
+          "required": false,
+          "default": "False"
+        },
+        {
+          "name": "page",
+          "annotation": "int",
+          "required": false,
+          "default": "1"
+        },
+        {
+          "name": "per",
+          "annotation": "int",
+          "required": false,
+          "default": "20"
+        }
+      ],
+      "description": "**任务总表**（管理员）：tab 计数 + 任务行 + 按队汇总 + 停滞口径。\n\ntab：空=全部 / `unassigned`=车站池 / `assigned`=已派队未完成 / `done`=已完成。\n`stale_only=True` → 只看\"已分到人但 ≥N 天没提交\"的。",
+      "targets": [
+        {
+          "path": "apps/server/src/station-tasks.ts",
+          "classes": [
+            "StationTasksService",
+            "StationTasksController"
+          ],
+          "asyncMethods": [
+            "actor",
+            "caps",
+            "snapshot",
+            "permission",
+            "log",
+            "list",
+            "detail",
+            "places",
+            "fromPlaces",
+            "notifyMovement",
+            "notify",
+            "movementQueue",
+            "notifyBatchMovement",
+            "uniformProgress",
+            "movementBatch",
+            "reviewQueue",
+            "reviewRecord",
+            "initialReviewTokens",
+            "confirmBatch",
+            "reviewSummary",
+            "reopenBatch",
+            "reportForSelfReport",
+            "reportInTransaction",
+            "change",
+            "changeTransaction",
+            "reviews",
+            "confirm",
+            "reopen",
+            "movement",
+            "move",
+            "create",
+            "progressBatch"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and 90 schema-only task legacy parity cases passed",
+      "gap": "Docker and target-client acceptance remain M6; legacy stale-only cutoff difference is recorded in the plan.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-read.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_upload",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 321,
+      "parameters": [
+        {
+          "name": "filename",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "content_base64",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "path",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "kind",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "dry_run",
+          "annotation": "bool",
+          "required": false,
+          "default": "False"
+        }
+      ],
+      "description": "统一上传入口：自动识别巡店/对账文件；dry_run=true 只预估不写入。",
+      "targets": [
+        {
+          "path": "apps/server/src/visit-imports.ts",
+          "classes": [
+            "AdminUploadGuard",
+            "VisitImportsService",
+            "VisitImportsController"
+          ],
+          "asyncMethods": [
+            "canActivate",
+            "enqueue",
+            "upload",
+            "reparse",
+            "reconcile",
+            "detail",
+            "original",
+            "status",
+            "writeRows",
+            "buildPeople",
+            "buildStores",
+            "complete",
+            "process"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/reconciliation.ts",
+          "classes": [
+            "ReconciliationService",
+            "ReconciliationController"
+          ],
+          "asyncMethods": [
+            "enqueue",
+            "upload",
+            "retry",
+            "reconcile",
+            "process",
+            "list",
+            "detail"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; legacy dry-run parity, actual processing, commit/queue boundary and recovery guards passed",
+      "gap": "Defaults to waiting up to 30 seconds; incomplete Worker processing returns accepted/pending explicitly. Path input disabled. M4–M6 remain.",
+      "implementation": {
+        "path": "apps/server/src/mcp-upload.ts",
+        "services": [
+          "VisitImportsService.uploadInTransaction/enqueue/process",
+          "ReconciliationService.uploadInTransaction/enqueue/process"
+        ]
+      }
+    },
+    {
+      "name": "visit_task_import",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 370,
+      "parameters": [
+        {
+          "name": "content_base64",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "path",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "filename",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "action",
+          "annotation": "str",
+          "required": false,
+          "default": "'preview'"
+        },
+        {
+          "name": "blob_sha",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "header_row",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "cols",
+          "annotation": "dict[str, Any] | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "skip_rows",
+          "annotation": "list[Any] | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "批量导入车站任务（线路执行计划表）——「预览 → 确认」两步，不猜、不覆盖。",
+      "targets": [
+        {
+          "path": "apps/server/src/mcp-task-import.ts",
+          "status": "dedicated task-plan importer; RailImportService is railway JSON assets and is not a replacement"
+        }
+      ],
+      "status": "source validated in M3; Excel plan preview legacy parity, safe blob, versions, atomic apply and repeat guards passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6; path source intentionally disabled.",
+      "implementation": {
+        "path": "apps/server/src/mcp-task-import.ts",
+        "planner": "packages/domain/src/task-plan-import.ts",
+        "service": "StationTasksService.fromPlacesInTransaction/changeInTransaction"
+      }
+    },
+    {
+      "name": "visit_overview",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 511,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "view",
+          "annotation": "str",
+          "required": false,
+          "default": "'summary'"
+        },
+        {
+          "name": "limit",
+          "annotation": "int",
+          "required": false,
+          "default": "10"
+        }
+      ],
+      "description": "公司级总览：view=summary 某月汇总（默认）/ months 有哪些月 / ranking 排行。",
+      "targets": [
+        {
+          "path": "apps/server/src/dashboard.ts",
+          "classes": [
+            "DashboardService",
+            "DashboardController"
+          ],
+          "asyncMethods": [
+            "monthly",
+            "overview",
+            "staff",
+            "facts",
+            "readPointer",
+            "jobState",
+            "insight",
+            "start",
+            "process",
+            "reconcile"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/payroll.ts",
+          "classes": [
+            "PayrollService",
+            "PayrollController"
+          ],
+          "asyncMethods": [
+            "months",
+            "configuration",
+            "carry",
+            "read",
+            "adjust",
+            "generate",
+            "myMonths",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and schema-only legacy parity passed",
+      "gap": "Docker and target-client stage acceptance remain M6; no OAuth connection yet.",
+      "implementation": {
+        "path": "apps/server/src/mcp-read.ts",
+        "method": "overview"
+      }
+    },
+    {
+      "name": "visit_person",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 581,
+      "parameters": [
+        {
+          "name": "person",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "name",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "某个人：月汇总（点数/工资/对账偏差）+ 逐日明细。person 或 name 二选一。",
+      "targets": [
+        {
+          "path": "apps/server/src/payroll.ts",
+          "classes": [
+            "PayrollService",
+            "PayrollController"
+          ],
+          "asyncMethods": [
+            "months",
+            "configuration",
+            "carry",
+            "read",
+            "adjust",
+            "generate",
+            "myMonths",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/performance-daily.ts",
+          "classes": [
+            "PerformanceDailyService",
+            "PerformanceDailyController"
+          ],
+          "asyncMethods": [
+            "read",
+            "admin",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and schema-only legacy parity passed",
+      "gap": "Docker and target-client stage acceptance remain M6; no OAuth connection yet.",
+      "implementation": {
+        "path": "apps/server/src/mcp-read.ts",
+        "method": "person"
+      }
+    },
+    {
+      "name": "visit_payroll",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 599,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "view",
+          "annotation": "str",
+          "required": false,
+          "default": "'rows'"
+        }
+      ],
+      "description": "薪资找平：view=rows 两期明细（默认）/ adjusts 找平状态 / trace 双向轨迹。",
+      "targets": [
+        {
+          "path": "apps/server/src/payroll.ts",
+          "classes": [
+            "PayrollService",
+            "PayrollController"
+          ],
+          "asyncMethods": [
+            "months",
+            "configuration",
+            "carry",
+            "read",
+            "adjust",
+            "generate",
+            "myMonths",
+            "mine"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/payroll-payments.ts",
+          "classes": [
+            "PayrollPaymentsService",
+            "PayrollPaymentsController"
+          ],
+          "asyncMethods": [
+            "snapshot",
+            "preview",
+            "record",
+            "register"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and 54 schema-only finance legacy parity cases passed",
+      "gap": "Docker and target-client acceptance remain M6; previews never replace materialized payroll or payment ledgers.",
+      "implementation": {
+        "path": "apps/server/src/mcp-finance-read.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_payroll_export",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 656,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "seq",
+          "annotation": "int",
+          "required": true
+        },
+        {
+          "name": "dry_run",
+          "annotation": "bool",
+          "required": false,
+          "default": "False"
+        }
+      ],
+      "description": "导出发薪表 Excel（写）：seq=1 上半月 / 2 下半月；导出=登记已发。",
+      "targets": [
+        {
+          "path": "apps/server/src/payroll-payments.ts",
+          "classes": [
+            "PayrollPaymentsService",
+            "PayrollPaymentsController"
+          ],
+          "asyncMethods": [
+            "snapshot",
+            "preview",
+            "record",
+            "register"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/payroll-export.ts",
+          "classes": [
+            "PayrollExportService",
+            "PayrollExportController"
+          ],
+          "asyncMethods": [
+            "prepare",
+            "file",
+            "download"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; actual XLSX content, private bearer download, authorization and financial transaction regressions passed",
+      "gap": "M4 OAuth/credential UI, M5 connector/Skill and M6 local Docker/client stage acceptance remain; source checks do not mean deployed.",
+      "implementation": {
+        "path": "apps/server/src/mcp-payroll-export.ts",
+        "files": "apps/server/src/mcp-export-files.ts",
+        "sharedService": "PayrollExportService.buildInTransaction / PayrollPaymentsService.registerInTransaction"
+      }
+    },
+    {
+      "name": "visit_recon",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 692,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "task_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "view",
+          "annotation": "str",
+          "required": false,
+          "default": "'status'"
+        }
+      ],
+      "description": "对账：view=status 任务列表 / diff 差异明细 / interpret 已有 AI 解读。",
+      "targets": [
+        {
+          "path": "apps/server/src/reconciliation.ts",
+          "classes": [
+            "ReconciliationService",
+            "ReconciliationController"
+          ],
+          "asyncMethods": [
+            "enqueue",
+            "upload",
+            "retry",
+            "reconcile",
+            "process",
+            "list",
+            "detail"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/reconciliation-insight.ts",
+          "classes": [
+            "ReconciliationInsightService",
+            "ReconciliationInsightController"
+          ],
+          "asyncMethods": [
+            "facts",
+            "read",
+            "publish",
+            "start",
+            "fail",
+            "process",
+            "reconcile"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and 54 schema-only finance legacy parity cases passed",
+      "gap": "Docker and target-client acceptance remain M6; previews never replace materialized payroll or payment ledgers.",
+      "implementation": {
+        "path": "apps/server/src/mcp-finance-read.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_recon_export",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 746,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "task_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "kind",
+          "annotation": "str",
+          "required": false,
+          "default": "'report'"
+        }
+      ],
+      "description": "导出对账文件：kind=report 月度报告 / detail 原始产物 / diff 差异清单。",
+      "targets": [
+        {
+          "path": "apps/server/src/reconciliation-export.ts",
+          "classes": [
+            "ReconciliationExportController"
+          ],
+          "asyncMethods": [
+            "export"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; actual XLSX content, private bearer download, authorization and financial transaction regressions passed",
+      "gap": "M4 OAuth/credential UI, M5 connector/Skill and M6 local Docker/client stage acceptance remain; source checks do not mean deployed.",
+      "implementation": {
+        "path": "apps/server/src/mcp-recon-export.ts",
+        "files": "apps/server/src/mcp-export-files.ts",
+        "sharedService": "ReconciliationExportService.write"
+      }
+    },
+    {
+      "name": "visit_files",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 774,
+      "parameters": [
+        {
+          "name": "view",
+          "annotation": "str",
+          "required": false,
+          "default": "'list'"
+        },
+        {
+          "name": "import_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "month",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "kind",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "status",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "文件与任务：view=list 文件列表 / layout 解析布局 / report 判定明细 / tasks 任务列表。",
+      "targets": [
+        {
+          "path": "apps/server/src/visit-imports.ts",
+          "classes": [
+            "AdminUploadGuard",
+            "VisitImportsService",
+            "VisitImportsController"
+          ],
+          "asyncMethods": [
+            "canActivate",
+            "enqueue",
+            "upload",
+            "reparse",
+            "reconcile",
+            "detail",
+            "original",
+            "status",
+            "writeRows",
+            "buildPeople",
+            "buildStores",
+            "complete",
+            "process"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/import-report.ts",
+          "classes": [
+            "ImportReportService",
+            "ImportReportController"
+          ],
+          "asyncMethods": [
+            "read"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M2; SDK and schema-only legacy parity passed",
+      "gap": "Docker and target-client acceptance remain M6.",
+      "implementation": {
+        "path": "apps/server/src/mcp-management-read.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_rebuild",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 806,
+      "parameters": [
+        {
+          "name": "month",
+          "annotation": "str",
+          "required": true
+        },
+        {
+          "name": "action",
+          "annotation": "str",
+          "required": false,
+          "default": "'preview'"
+        },
+        {
+          "name": "preview_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "confirm_text",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "月度重算：action=preview 只读预演（拿 preview_id）/ run 正式重算（需确认语）。",
+      "targets": [
+        {
+          "path": "apps/server/src/settlement-jobs.ts",
+          "classes": [
+            "SettlementJobsService",
+            "SettlementJobsController"
+          ],
+          "asyncMethods": [
+            "preflight",
+            "enqueue",
+            "status",
+            "process"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; preview/use-once/fingerprint/sealed/source/rollback SDK and settlement regressions passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6.",
+      "implementation": {
+        "path": "apps/server/src/mcp-rebuild.ts",
+        "service": "SettlementService.rebuildTransaction"
+      }
+    },
+    {
+      "name": "visit_staff",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 840,
+      "parameters": [
+        {
+          "name": "view",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "action",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "username",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "status",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "confirm_text",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "员工账号：view=list 列表（默认）/ action=set_status 改状态（写，需确认语）。",
+      "targets": [
+        {
+          "path": "apps/server/src/employees.ts",
+          "classes": [
+            "EmployeesController"
+          ],
+          "asyncMethods": [
+            "list",
+            "suggest",
+            "create",
+            "export",
+            "resetAll",
+            "edit",
+            "reset",
+            "remove",
+            "status"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        },
+        {
+          "path": "apps/server/src/employee-service.ts",
+          "classes": [
+            "EmployeeService"
+          ],
+          "asyncMethods": [
+            "suggest",
+            "propose",
+            "create",
+            "edit",
+            "remove",
+            "reset",
+            "export"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; read/write scope, confirmation, conflicts and rollback SDK tests passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6.",
+      "implementation": {
+        "read": "apps/server/src/mcp-management-read.ts",
+        "write": "apps/server/src/mcp-management-write.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_config",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 873,
+      "parameters": [
+        {
+          "name": "view",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "action",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "per_point",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "bonus_group",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "bonus_amount",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "staff_visible_from",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "confirm_text",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "系统配置：view=get 当前配置（默认）/ action=set 保存配置（写，需确认语）。",
+      "targets": [
+        {
+          "path": "apps/server/src/configuration.ts",
+          "classes": [
+            "ConfigurationService",
+            "ConfigurationController"
+          ],
+          "asyncMethods": [
+            "read",
+            "save",
+            "seal",
+            "perPoint",
+            "unseal",
+            "price"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; read/write scope, confirmation, conflicts and rollback SDK tests passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6.",
+      "implementation": {
+        "read": "apps/server/src/mcp-management-read.ts",
+        "write": "apps/server/src/mcp-management-write.ts",
+        "method": "run"
+      }
+    },
+    {
+      "name": "visit_store",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 951,
+      "parameters": [
+        {
+          "name": "view",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "action",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "q",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "limit",
+          "annotation": "int",
+          "required": false,
+          "default": "20"
+        },
+        {
+          "name": "pair_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "keep",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "entity_id",
+          "annotation": "int | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "kind",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "note",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        },
+        {
+          "name": "confirm_text",
+          "annotation": "str | None",
+          "required": false,
+          "default": "None"
+        }
+      ],
+      "description": "店铺主档：view=search 检索 / pairs 候选对；action=merge|split|apply|skip（写）。",
+      "targets": [
+        {
+          "path": "apps/server/src/store-master.ts",
+          "classes": [
+            "StoreMasterService",
+            "StoreMasterController"
+          ],
+          "asyncMethods": [
+            "catalog",
+            "pairs",
+            "state",
+            "preview",
+            "enqueue",
+            "lock",
+            "affected",
+            "rebuild",
+            "link",
+            "process",
+            "build",
+            "automatic",
+            "status",
+            "logs",
+            "change"
+          ],
+          "status": "candidate; semantic adapter not implemented"
+        }
+      ],
+      "status": "source validated in M3; merge/split/skip/apply, dry-run, versions, idempotency and audit rollback passed",
+      "gap": "OAuth, target client and Docker acceptance remain M4–M6; synchronous execution uses current guarded business service.",
+      "implementation": {
+        "read": "apps/server/src/mcp-management-read.ts",
+        "write": "apps/server/src/mcp-store-write.ts",
+        "sharedService": "apps/server/src/store-master.ts"
+      }
+    },
+    {
+      "name": "visit_verify",
+      "minimumRole": "admin",
+      "source": "legacy/mcp_service/scenario_ops.py",
+      "line": 1023,
+      "parameters": [],
+      "description": "数据自洽检查（只读）：找平表/台账/关联/找平行 四表互相印证。",
+      "targets": [],
+      "status": "source validated in M2; SDK and schema-only legacy parity passed",
+      "gap": "Docker and target-client acceptance remain M6.",
+      "implementation": {
+        "path": "apps/server/src/mcp-integrity-read.ts",
+        "method": "run"
+      }
+    }
+  ]
+}

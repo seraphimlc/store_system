@@ -9,7 +9,7 @@ export class SelfReportService{
  private async actor(client:PoolClient,id:number,write=false){const row=(await client.query(`SELECT id,person_code AS code,role,username FROM users WHERE id=$1 AND is_active=true AND status IN('active','leave') ${write?'FOR SHARE':''}`,[id])).rows[0];if(!row)throw new BusinessError('FORBIDDEN','账号状态已变化',403);return row;}
  private async report(client:PoolClient,code:string,day:string){const report=(await client.query('SELECT id,area,p1_cnt AS p1,p2_cnt AS p2,source,submitted_at::text AS submitted FROM staff_daily_reports WHERE person_code=$1 AND report_date=$2',[code,day])).rows[0]??null;return {report,token:stamp({code,day,report})};}
  private async rows(client:PoolClient,code:string,day:string,admin:boolean){
-  const result=await client.query(`SELECT t.id AS "taskId",coalesce(place.name,s.name,'#'||t.id::text) AS label,t.pct AS "currentPct",p.pct AS "dayPct",p.reported_pct AS "reportedPct",p.review_status AS review,p.note,p.reported_by AS "reportedBy",p.submitted_by AS "submittedBy",t.store_count AS "storeCount",a.dispatch_date::text AS "dispatchDate",
+  const result=await client.query(`SELECT t.id AS "taskId",coalesce(place.name,s.name,'#'||t.id::text) AS label,coalesce(nullif(place.name,''),s.name,'') AS station,coalesce(nullif(place.lines_text,''),s.line,'') AS line,t.pct AS "currentPct",p.pct AS "dayPct",p.reported_pct AS "reportedPct",p.review_status AS review,p.note,p.reported_by AS "reportedBy",p.submitted_by AS "submittedBy",t.store_count AS "storeCount",a.dispatch_date::text AS "dispatchDate",
    md5(jsonb_build_object('task',to_jsonb(t),'progress',to_jsonb(p),'assigned',(SELECT coalesce(jsonb_agg(to_jsonb(ta) ORDER BY ta.person_code),'[]') FROM bd_task_assign ta WHERE ta.task_id=t.id))::text) AS token
    FROM bd_task t LEFT JOIN bd_station_place place ON place.id=t.place_id LEFT JOIN bd_station s ON s.id=t.station_id LEFT JOIN bd_task_progress p ON p.task_id=t.id AND p.progress_date=$2 LEFT JOIN bd_task_assign a ON a.task_id=t.id AND a.person_code=$1
    WHERE CASE WHEN $3 THEN p.id IS NOT NULL AND (a.id IS NOT NULL OR EXISTS(SELECT 1 FROM users u WHERE u.person_code=$1 AND (u.username=p.reported_by OR u.username=p.submitted_by)))
@@ -17,10 +17,16 @@ export class SelfReportService{
   return result.rows.map(row=>({...row,token:stamp(row.token),pct:admin?row.dayPct:row.currentPct,editable:admin?['confirmed','adjusted','rejected'].includes(row.review):row.review!=='confirmed'}));
  }
  async view(actorId:number,personCode?:string,day=jstToday()){
-  return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');const actor=await this.actor(client,actorId),admin=personCode!==undefined;if(admin&&actor.role!=='admin')throw new BusinessError('FORBIDDEN','仅管理员可编辑他人日报',403);const code=personCode??actor.code;if(!code)throw new BusinessError('PERSON_NOT_FOUND','账号未绑定员工编号',400);const report=await this.report(client,code,day),coverage=await this.reports.coverage(client);return {...report,date:day,personCode:code,backfill:report.report===null,locked:!!coverage.end&&day<=coverage.end,items:admin&&!report.report?[]:await this.rows(client,code,day,admin)};});
+  return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');return this.viewInTransaction(client,actorId,personCode,day);});
+ }
+ async viewInTransaction(client:PoolClient,actorId:number,personCode?:string,day=jstToday()){
+  const actor=await this.actor(client,actorId),admin=personCode!==undefined;if(admin&&actor.role!=='admin')throw new BusinessError('FORBIDDEN','仅管理员可编辑他人日报',403);const code=personCode??actor.code;if(!code)throw new BusinessError('PERSON_NOT_FOUND','账号未绑定员工编号',400);const report=await this.report(client,code,day),coverage=await this.reports.coverage(client);return {...report,date:day,personCode:code,backfill:report.report===null,locked:!!coverage.end&&day<=coverage.end,items:admin&&!report.report?[]:await this.rows(client,code,day,admin)};
  }
  async submit(actorId:number,value:unknown,personCode?:string,day=jstToday()){
-  const input=parse(fields,value);return this.db.transaction(async client=>{
+  return this.db.transaction(client=>this.submitInTransaction(client,actorId,value,personCode,day));
+ }
+ async submitInTransaction(client:PoolClient,actorId:number,value:unknown,personCode?:string,day=jstToday()){
+  const input=parse(fields,value);
    await client.query("SELECT pg_advisory_xact_lock(hashtext('teams-write'),0)");const actor=await this.actor(client,actorId,true),admin=personCode!==undefined;if(admin&&actor.role!=='admin')throw new BusinessError('FORBIDDEN','仅管理员可编辑他人日报',403);const code=personCode??actor.code;if(!code)throw new BusinessError('PERSON_NOT_FOUND','账号未绑定员工编号',400);
    await client.query('SELECT pg_advisory_xact_lock(hashtext($1),hashtext($2))',[code,day]);const before=await this.report(client,code,day);if(before.token!==input.token)throw new BusinessError('SELF_REPORT_CHANGED','日报已变化，请重新读取后保存',409);if(admin&&!before.report&&input.items.length)throw new BusinessError('BACKFILL_POINTS_ONLY','这天没有日报，只能补点数，不能补任务进展',409);
    const candidates=await this.rows(client,code,day,admin),byId=new Map(candidates.map(row=>[row.taskId,row]));
@@ -38,7 +44,6 @@ export class SelfReportService{
     await this.tasks.reportForSelfReport(client,item.taskId,actorId,{pct:item.pct,note:item.note,storeCount:item.storeCount},day,admin);changed++;
    }
    await this.reports.synchronize(client,code,day,true);return {ok:true,date:day,tasks:changed,skipped,created:before.report===null};
-  });
  }
 }
 @Controller('self-report')

@@ -7,6 +7,8 @@ test('release arguments prevent target confusion and path traversal', () => {
   assert.throws(()=>parseArgs(['deploy','--release','r1','--env','production']),/P7/);
   assert.throws(()=>parseArgs(['rollback']),/required/);
   assert.throws(()=>parseArgs(['build','--assets','remote']),/assets/);
+  assert.equal(parseArgs(['build','--reuse-staff','old-release'])['reuse-staff'],'old-release');
+  assert.throws(()=>parseArgs(['build','--reuse-staff','../old']));assert.throws(()=>parseArgs(['deploy','--release','r1','--reuse-staff','old']));
 });
 test('resource base is independent from the application route and frozen by release', () => {
   assert.equal(assetBase('r1','admin','local',{}),'/r/r1/admin/');
@@ -55,14 +57,19 @@ test('legacy direct execution is proxied internally, read aliases preserve queri
  assert.doesNotMatch(config,/rewrite.*batch-grids/);
 });
 
-test('MCP and OAuth endpoints are excluded from the new gateway',()=>{
- const config=gatewayConfig('excluded-tools-test');
- for(const path of ['/mcp','/oauth/','/.well-known/oauth-authorization-server','/.well-known/oauth-protected-resource']) {
-  const line=config.split('\n').find(line=>line.includes('location ') && line.includes(path+' '));
-  assert.ok(line,path); assert.ok(line.includes('return 404'),path);
+test('MCP/OAuth gateway forwards native paths, original host port and long calls without SPA fallback',()=>{
+ const config=gatewayConfig('mcp-local-test');
+ for(const route of ['location = /mcp {','location ^~ /mcp/ {','location ^~ /oauth/ {','location = /.well-known/oauth-authorization-server {','location = /.well-known/oauth-protected-resource {']){
+  const start=config.indexOf(route);assert.ok(start>=0,route);const block=config.slice(start,config.indexOf('}',start)+1);
+  assert.ok(block.includes('proxy_pass $protocol_upstream'));assert.ok(block.includes('proxy_set_header Host $http_host'));
+  assert.ok(block.includes('proxy_read_timeout 300s'));assert.ok(block.includes('proxy_buffering off'));assert.ok(block.includes('client_max_body_size 25m'));assert.ok(!block.includes('try_files'));
  }
- assert.ok(config.includes('location ^~ /mcp '));
- assert.doesNotMatch(config,/mcp_upstream|api\/mcp|modelcontextprotocol/);
+ assert.ok(config.includes('location ^~ /mcp { default_type application/json; return 404'));
+ assert.doesNotMatch(config,/MCP_NOT_SUPPORTED|OAUTH_NOT_SUPPORTED|rewrite.*api\/mcp/);
+});
+
+test('local OAuth environment uses the same gateway origin as the connector',async()=>{
+ const {localMcpEnvironment}=await import('./release-lib.mjs');assert.deepEqual(localMcpEnvironment(),{NEXT_MCP_PUBLIC_URL:'http://127.0.0.1:8000/mcp',NEXT_MCP_AUTHORIZATION_UI_URL:'http://127.0.0.1:8000/admin/mcp-authorize'});
 });
 
 test('Docker baseline is explicit, local and separated from development and task queues',async()=>{
@@ -72,4 +79,12 @@ test('Docker baseline is explicit, local and separated from development and task
  assert.equal(selected.url.pathname,'/store_settle');assert.equal(selected.url.hostname,'host.docker.internal');assert.equal(selected.jobsVolume,'store-next-jobs-store-settle');assert.equal(selected.baseline,true);assert.equal(env.NEXT_DATABASE_URL,dev);
  assert.equal(localDeploymentDatabase({NEXT_DATABASE_URL:dev}).jobsVolume,'store-next-jobs');
  assert.throws(()=>localDeploymentDatabase({NEXT_DATABASE_URL:baseline}));assert.throws(()=>localDeploymentDatabase({NEXT_DOCKER_DATABASE_URL:baseline.replace('127.0.0.1','production.example')}));assert.throws(()=>localDeploymentDatabase({NEXT_DOCKER_DATABASE_URL:baseline.replace('/store_settle','/postgres')}));
+});
+
+test('entry proxy also retains MCP/OAuth port, body limit and long-call behavior',()=>{const config=edgeConfig('mcp-entry');assert.match(config,/location ~ \^\/\(mcp/);assert.match(config,/proxy_set_header Host \$http_host/);assert.ok(config.includes('proxy_read_timeout 300s'));assert.ok(config.includes('client_max_body_size 25m'));assert.ok(config.includes('proxy_buffering off'));});
+
+test('isolated acceptance snapshots cannot accidentally replace current local traffic',async()=>{
+ const {assertDeployableManifest}=await import('./release-lib.mjs');
+ assert.throws(()=>assertDeployableManifest({acceptanceOnly:true}),/isolated acceptance/);
+ assert.doesNotThrow(()=>assertDeployableManifest({id:'reviewed-release'}));
 });

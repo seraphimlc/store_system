@@ -1,0 +1,16 @@
+{
+  "auth_mode": "oauth",
+  "discovery": {
+    "protected_resource_metadata": "${VISIT_BASE_URL}/.well-known/oauth-protected-resource",
+    "authorization_server_metadata": "${VISIT_BASE_URL}/.well-known/oauth-authorization-server"
+  },
+  "flow": "authorization_code + PKCE(S256)",
+  "notes": [
+    "在客户端点击连接，通过浏览器登录并确认read或read/write，不需手工复制OAuth Token。",
+    "access token为24小时，refresh token为90天并轮换；旧刷新凭据重用会使关联授权失效，重新连接。",
+    "员工6、队长10、管理员27个工具；工具发现不等于有写权限。read/write仍受角色、当前人员绑定和团队关系限制。",
+    "授权页支持首次改密、切换账号、同意和拒绝；回调需精确注册。",
+    "请假/停用/离职/删除或首次密码未修改时，凭据与刷新均不可用。",
+    "只连接已验收环境；当前包不表示生产已发布。"
+  ]
+}

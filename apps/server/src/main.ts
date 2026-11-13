@@ -1,3 +1,21 @@
+import {McpCredentialsController,McpCredentialsService} from './mcp-credentials';
+import {McpOAuthService} from './mcp-oauth';
+import {McpOAuthController,McpOAuthHttp} from './mcp-oauth-http';
+import {McpExportFiles} from './mcp-export-files';
+import { McpPayrollExportService } from './mcp-payroll-export';
+import { McpReconExportService } from './mcp-recon-export';
+import { McpRebuildService } from './mcp-rebuild';
+import { McpUploadService } from './mcp-upload';
+import { McpTaskImportService } from './mcp-task-import';
+import { McpStoreWriteService } from './mcp-store-write';
+import { McpTaskWriteService } from './mcp-task-write';
+import { McpManagementWriteService } from './mcp-management-write';
+import { McpIntegrityReadService } from './mcp-integrity-read';
+import { McpManagementReadService } from './mcp-management-read';
+import { McpFinanceReadService } from './mcp-finance-read';
+import { McpTaskReadService } from './mcp-task-read';
+import { McpReadService } from './mcp-read';
+import { McpService } from './mcp';
 import {OperationsLogsController,OperationsLogsService} from './operations-logs';
 import {MerchantMapController,MerchantMapService} from './merchant-map';
 import {LegacyWorkController} from './legacy-work';
@@ -38,7 +56,7 @@ import { SettlementJobsController, SettlementJobsService } from './settlement-jo
 import { AdminUploadGuard, VisitImportsController, VisitImportsService } from './visit-imports';
 import { ReconciliationController, ReconciliationService } from './reconciliation';
 import { PayrollExportController, PayrollExportService } from './payroll-export';
-import { ReconciliationExportController } from './reconciliation-export';
+import { ReconciliationExportController, ReconciliationExportService } from './reconciliation-export';
 import { ConfigurationController, ConfigurationService } from './configuration';
 import { ImportDeletionController, ImportDeletionService } from './import-deletion';
 import { StoreMasterController, StoreMasterService } from './store-master';
@@ -49,7 +67,7 @@ import { ReconciliationConfirmationController, ReconciliationConfirmationService
 import { ApiExceptionFilter } from './errors';
 
 export async function createApp(config: AppConfig) {
-  @Module({ controllers: [OperationsLogsController,MerchantMapController,LegacyWorkController,ZoneAssetsController,AuthController, ReadController, EmployeesController, DailyReportsController, PlansController, MessagesController, ReportAnalysisController, ReportExportController, DashboardController, PayrollController, PayrollPaymentsController, SettlementController, SettlementJobsController, VisitImportsController, ReconciliationController, PayrollExportController, ReconciliationExportController, ConfigurationController, ReconciliationConfirmationController, ImportDeletionController, StoreMasterController, PerformanceDailyController, ReconciliationInsightController, StoreAiController,ImportReportController,TeamsController,StationTasksController,SelfReportController,StationExportController,StationAssetsController,StationRebuildController,RailImportController,StationSequenceController,BatchWorkController], providers: [OperationsLogsService,MerchantMapService,ZoneAssetsService,Database, AuthService, EmployeeService, DailyReportsService, ReportComparisonService, PlansService, MessagesService, ReportAnalysisService, DashboardService, PayrollService, PayrollPaymentsService, SettlementService, SettlementSyncService, SettlementJobsService,VisitImportsService,AdminUploadGuard,ReconciliationService,PayrollExportService,ConfigurationService,ReconciliationConfirmationService,ImportDeletionService,StoreMasterService,PerformanceDailyService,ReconciliationInsightService,StoreAiService,ImportReportService,TeamsService,StationTasksService,SelfReportService,StationExportService,StationAssetsService,StationRebuildService,RailImportService,StationSequenceService,BatchWorkService,BatchPhotoUploadGuard,{provide:'SETTLEMENT_JOBS',useExisting:SettlementJobsService}, { provide: CONFIG, useValue: config }] })
+  @Module({ controllers: [McpCredentialsController,McpOAuthController,OperationsLogsController,MerchantMapController,LegacyWorkController,ZoneAssetsController,AuthController, ReadController, EmployeesController, DailyReportsController, PlansController, MessagesController, ReportAnalysisController, ReportExportController, DashboardController, PayrollController, PayrollPaymentsController, SettlementController, SettlementJobsController, VisitImportsController, ReconciliationController, PayrollExportController, ReconciliationExportController, ConfigurationController, ReconciliationConfirmationController, ImportDeletionController, StoreMasterController, PerformanceDailyController, ReconciliationInsightController, StoreAiController,ImportReportController,TeamsController,StationTasksController,SelfReportController,StationExportController,StationAssetsController,StationRebuildController,RailImportController,StationSequenceController,BatchWorkController], providers: [McpCredentialsService,McpOAuthService,McpOAuthHttp,ReconciliationExportService,McpExportFiles,McpPayrollExportService,McpReconExportService,McpRebuildService,McpUploadService,McpTaskImportService,McpStoreWriteService,McpTaskWriteService,McpManagementWriteService,McpIntegrityReadService,McpManagementReadService,McpFinanceReadService,McpTaskReadService,McpReadService,McpService,OperationsLogsService,MerchantMapService,ZoneAssetsService,Database, AuthService, EmployeeService, DailyReportsService, ReportComparisonService, PlansService, MessagesService, ReportAnalysisService, DashboardService, PayrollService, PayrollPaymentsService, SettlementService, SettlementSyncService, SettlementJobsService,VisitImportsService,AdminUploadGuard,ReconciliationService,PayrollExportService,ConfigurationService,ReconciliationConfirmationService,ImportDeletionService,StoreMasterService,PerformanceDailyService,ReconciliationInsightService,StoreAiService,ImportReportService,TeamsService,StationTasksService,SelfReportService,StationExportService,StationAssetsService,StationRebuildService,RailImportService,StationSequenceService,BatchWorkService,BatchPhotoUploadGuard,{provide:'SETTLEMENT_JOBS',useExisting:SettlementJobsService}, { provide: CONFIG, useValue: config }] })
   class AppModule {}
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'], bodyParser: true });
   app.setGlobalPrefix('api');
@@ -64,6 +82,10 @@ export async function createApp(config: AppConfig) {
       status: res.statusCode, durationMs: Math.round(performance.now() - started), rss: process.memoryUsage().rss })));
     next();
   });
+  const oauth=app.get(McpOAuthHttp);
+  app.use((req:Request,res:Response,next:NextFunction)=>{void oauth.handle(req,res,next).catch(()=>{if(!res.headersSent)res.status(500).json({error:'server_error',error_description:'授权服务暂不可用'});});});
+  const mcp = app.get(McpService);
+  app.use((req: Request, res: Response, next: NextFunction) => { void mcp.handle(req, res, next).catch(() => { if (!res.headersSent) res.status(500).json({ ok: false, error: { code: 'INTERNAL', message: 'MCP 请求处理失败', retryable: true, hint: '稍后重试' } }); }); });
   app.enableShutdownHooks();
   await app.init();
   return app;

@@ -14,15 +14,15 @@ const querySchema=z.object({month:z.string().refine(validMonth)}).strict();
 export class PayrollService{
  constructor(@Inject(Database)private readonly db:Database){}
  async months(onlyCode?:string){return (await this.db.query<{month:string}>('SELECT month FROM month_perf_records WHERE ($1::text IS NULL OR person_code=$1) UNION SELECT month FROM payroll_period_rows WHERE ($1::text IS NULL OR person_code=$1) ORDER BY month',[onlyCode??null])).rows.map(row=>row.month);}
- async configuration(month:string){
-  const row=(await this.db.query<{per_point:number;bonus_group:number;bonus_amount:number;staff_visible_from:string}>('SELECT per_point,bonus_group,bonus_amount,staff_visible_from FROM sys_configs ORDER BY id DESC LIMIT 1')).rows[0];
-  const recorded=(await this.db.query<{per_point:number}>('SELECT per_point FROM month_perf_records WHERE month=$1 ORDER BY id LIMIT 1',[month])).rows[0];
+ async configuration(month:string,client:Pick<Database,'query'>=this.db){
+  const row=(await client.query<{per_point:number;bonus_group:number;bonus_amount:number;staff_visible_from:string}>('SELECT per_point,bonus_group,bonus_amount,staff_visible_from FROM sys_configs ORDER BY id DESC LIMIT 1')).rows[0];
+  const recorded=(await client.query<{per_point:number}>('SELECT per_point FROM month_perf_records WHERE month=$1 ORDER BY id LIMIT 1',[month])).rows[0];
   const fallback={group:Number(process.env.BONUS_GROUP)||68,amount:Number(process.env.BONUS_AMOUNT)||3000,perPoint:recorded?.per_point||250,groupSchedule:process.env.BONUS_GROUP_SCHEDULE,amountSchedule:process.env.BONUS_AMOUNT_SCHEDULE};
   return {bonus:bonusConfig(month,fallback,row?{group:row.bonus_group,amount:row.bonus_amount,perPoint:row.per_point}:undefined),staffVisibleFrom:row?.staff_visible_from||process.env.STAFF_VISIBLE_FROM||'2026-10'};
  }
- async carry(month:string){
+ async carry(month:string,client:Pick<Database,'query'>=this.db){
   if(!validMonth(month))throw new BusinessError('VALIDATION','结算月份格式无效',400);
-  const rows=(await this.db.query<{code:string;points:number;amount:string;remaining:string;recovered:string}>(`WITH remaining AS (
+  const rows=(await client.query<{code:string;points:number;amount:string;remaining:string;recovered:string}>(`WITH remaining AS (
     SELECT person_code,sum(coalesce(remaining,0)) AS amount FROM payroll_adjusts WHERE source_month<$1 AND status='in_progress' GROUP BY person_code
    ),recovered AS (
     SELECT person_code,sum(coalesce(amount,0)) AS amount FROM payroll_settlement_links WHERE month=$1 GROUP BY person_code
@@ -32,10 +32,10 @@ export class PayrollService{
    FROM codes c LEFT JOIN remaining r USING(person_code) LEFT JOIN recovered s USING(person_code) LEFT JOIN points p USING(person_code) WHERE coalesce(r.amount,0)+coalesce(s.amount,0)<>0 ORDER BY c.person_code`,[month,previousMonth(month)])).rows;
   return rows.map(row=>({...row,amount:Number(row.amount),remaining:Number(row.remaining),recovered:Number(row.recovered)})) as CarryRow[];
  }
- async read(month:string,onlyCode?:string){
-  const configuration=await this.configuration(month);const carry=await this.carry(month);const carryMap=new Map(carry.map(row=>[row.code,row]));
-  const period=(await this.db.query<PeriodRow>(`SELECT r.*,r.updated_at::text AS version,coalesce(p.display_name,r.person_code) AS name FROM payroll_period_rows r LEFT JOIN persons p ON p.code=r.person_code WHERE r.month=$1 AND ($2::text IS NULL OR r.person_code=$2) ORDER BY r.person_code`,[month,onlyCode??null])).rows;
-  const payments=(await this.db.query<{id:number;person_code:string;seq:number;amount:number;points:number;bonus:number;adjust_applied:number;paid_at:Date;adjust_leftover:number|null}>(`SELECT id,person_code,seq,amount,points,bonus,adjust_applied,paid_at,adjust_leftover FROM payroll_payments WHERE month=$1 AND ($2::text IS NULL OR person_code=$2) ORDER BY person_code,seq,id`,[month,onlyCode??null])).rows;
+ async read(month:string,onlyCode?:string,client:Pick<Database,'query'>=this.db){
+  const configuration=await this.configuration(month,client);const carry=await this.carry(month,client);const carryMap=new Map(carry.map(row=>[row.code,row]));
+  const period=(await client.query<PeriodRow>(`SELECT r.*,r.updated_at::text AS version,coalesce(p.display_name,r.person_code) AS name FROM payroll_period_rows r LEFT JOIN persons p ON p.code=r.person_code WHERE r.month=$1 AND ($2::text IS NULL OR r.person_code=$2) ORDER BY r.person_code`,[month,onlyCode??null])).rows;
+  const payments=(await client.query<{id:number;person_code:string;seq:number;amount:number;points:number;bonus:number;adjust_applied:number;paid_at:Date;adjust_leftover:number|null}>(`SELECT id,person_code,seq,amount,points,bonus,adjust_applied,paid_at,adjust_leftover FROM payroll_payments WHERE month=$1 AND ($2::text IS NULL OR person_code=$2) ORDER BY person_code,seq,id`,[month,onlyCode??null])).rows;
   const registered=new Map<string,number>();const byPerson=new Map<string,typeof payments>();
   for(const payment of payments){if(payment.seq===1)registered.set(payment.person_code,payment.adjust_applied||0);const list=byPerson.get(payment.person_code)??[];list.push(payment);byPerson.set(payment.person_code,list);}
   const rows=period.map(row=>{
@@ -43,8 +43,8 @@ export class PayrollService{
    const plan=payPlan(row.half1_amount||0,row.half2_amount||0,adjustment.amount,registered.get(row.person_code));
    return {code:row.person_code,name:row.name,version:row.version as string|null,adjustedAmount:Number(row.adjust_amount||0),half1:{points:row.half1_points,amount:row.half1_amount,bonus:row.half1_bonus,records:row.half1_records,p1:row.half1_p1,p2:row.half1_p2,adjustment:plan.h1[0],payable:plan.h1[1]},half2:{points:row.half2_points,amount:row.half2_amount,bonus:row.half2_bonus,records:row.half2_records,p1:row.half2_p1,p2:row.half2_p2,adjustment:plan.h2[0],payable:plan.h2[1]},settlePoints:row.settle_points,settleAmount:row.settle_amount,diffPoints:row.diff_points,diffAmount:row.diff_amount,carryPoints:adjustment.points,carryAmount:adjustment.amount,unrecovered:adjustment.remaining,recoveredThisMonth:adjustment.recovered,payments:byPerson.get(row.person_code)??[]};
   });
-  const performance=(await this.db.query(`SELECT m.person_code AS code,coalesce(p.display_name,m.person_code) AS name,m.records,m.p1,m.p2,m.points,m.salary,m.per_point AS "perPoint",m.rate37,m.pass37 FROM month_perf_records m LEFT JOIN persons p ON p.code=m.person_code WHERE m.month=$1 AND ($2::text IS NULL OR m.person_code=$2) ORDER BY m.person_code`,[month,onlyCode??null])).rows;
-  const cached=(await this.db.query<{payload:string|null}>("SELECT payload FROM dash_metrics WHERE month=$1 AND metric='dup_map' AND person IS NULL ORDER BY id DESC LIMIT 1",[month])).rows[0]?.payload;
+  const performance=(await client.query(`SELECT m.person_code AS code,coalesce(p.display_name,m.person_code) AS name,m.records,m.p1,m.p2,m.points,m.salary,m.per_point AS "perPoint",m.rate37,m.pass37 FROM month_perf_records m LEFT JOIN persons p ON p.code=m.person_code WHERE m.month=$1 AND ($2::text IS NULL OR m.person_code=$2) ORDER BY m.person_code`,[month,onlyCode??null])).rows;
+  const cached=(await client.query<{payload:string|null}>("SELECT payload FROM dash_metrics WHERE month=$1 AND metric='dup_map' AND person IS NULL ORDER BY id DESC LIMIT 1",[month])).rows[0]?.payload;
   let duplicates:Record<string,number>|null=null;try{if(cached){const value=typeof cached==='string'?JSON.parse(cached):cached;if(value&&typeof value==='object'&&!Array.isArray(value))duplicates=value;}}catch{}
   return {month,configuration,rows,performance,duplicates,carry:onlyCode?carry.filter(row=>row.code===onlyCode):carry,summary:{people:rows.length,half1Payable:rows.reduce((sum,row)=>sum+row.half1.payable,0),half2Payable:rows.reduce((sum,row)=>sum+row.half2.payable,0),registeredAmount:payments.reduce((sum,row)=>sum+row.amount,0),carryAmount:(onlyCode?carry.filter(row=>row.code===onlyCode):carry).reduce((sum,row)=>sum+row.amount,0)}};
  }

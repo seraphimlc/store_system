@@ -63,3 +63,5 @@ export interface SettlementRecordPage {total:number;items:SettlementRecordView[]
 export interface PerformanceDay {code:string|null;name:string|null;date:string;records:number;p1:number;p2:number;points:number}
 export interface PerformanceTotals {records:number;p1:number;p2:number;points:number}
 export interface PerformanceDaily {month:string;source:'formal_records'|'person_daily_stats';total:number;items:PerformanceDay[];summary:PerformanceTotals;monthSummary:PerformanceTotals;dates:string[];selectedDate:string|null;page:number;pageSize:number;people:{code:string;name:string}[]}
+
+export type GridReadOnlyReason='batch_disabled'|'batch_completed'|'account_role'|'unassigned'|'not_assignee'|'team_membership'|'leader_identity';

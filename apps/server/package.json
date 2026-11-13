@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fast-csv/parse": "4.3.6",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@nestjs/common": "12.4.2",
     "@nestjs/core": "12.4.2",
     "@nestjs/platform-express": "12.4.2",

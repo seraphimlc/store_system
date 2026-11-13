@@ -1,0 +1,9 @@
+{
+  "name": "visit-settle",
+  "display_name": "巡店结算",
+  "description": "按账号权限查询巡店绩效、工资找平及任务；提交作业、导入文件、导出及受保护的财务操作。",
+  "auth_mode": "oauth",
+  "auth_note": "通过浏览器登录巡店系统并确认权限；客户端保存自己的凭据。read/write不提升账号角色，账号失效或凭据撤销后需重新连接。",
+  "icon": "icon.svg",
+  "version": "0.3.0"
+}

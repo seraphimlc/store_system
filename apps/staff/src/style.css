@@ -339,3 +339,5 @@
 .work-search-preview button>em{font-style:normal;flex-shrink:0;color:var(--foreground-muted);font-size:11px;white-space:nowrap}
 .work-bottom-bar .work-search-feedback{padding:0 4px;font-size:11px;min-height:30px}
 .work-bottom-bar .work-search-feedback>button{font-size:11px;padding:0 4px}
+
+.grid-detail>.work-grid-readonly-label{position:absolute;top:12px;left:16px;z-index:4;max-width:calc(100% - 96px);padding:8px 12px;border-radius:var(--radius-sm);background:var(--background);color:var(--foreground-muted);font-size:12px;line-height:20px;pointer-events:none;box-shadow:0 1px 4px rgb(0 0 0 / 12%)}

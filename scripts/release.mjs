@@ -6,7 +6,7 @@ import { createWriteStream } from 'node:fs';
 import { resolve, join, relative, isAbsolute } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
-import { parseArgs, localDeploymentDatabase, digest, assetBase, gatewayConfig, edgeConfig, taskCompatibilityProbe, retiredReleaseNetworks } from './release-lib.mjs';
+import { parseArgs, localDeploymentDatabase, digest, assetBase, gatewayConfig, edgeConfig, taskCompatibilityProbe, retiredReleaseNetworks, localMcpEnvironment, assertDeployableManifest } from './release-lib.mjs';
 const root = process.cwd();
 const base = resolve(root, '.release');
 const opts = parseArgs(process.argv.slice(2));
@@ -53,7 +53,19 @@ async function build() {
   const gateway = join(dir, 'gateway-context'); const api = join(dir, 'api-context');
   await mkdir(join(gateway, 'html', 'admin'), { recursive: true });
   const assets = [];
+  let reusedStaff=null;
+  if(opts['reuse-staff']){
+    const previousDir=join(base,opts['reuse-staff']),previous=await json(join(previousDir,'manifest.json'));
+    if(previous.id!==opts['reuse-staff']||previous.env!=='local')throw new Error('Staff reuse must reference an existing local release');
+    const htmlBytes=await readFile(join(previousDir,'gateway-context/html/index.html'));
+    if(digest(htmlBytes)!==previous.html['index.html'])throw new Error('Previous staff HTML checksum mismatch');
+    await writeFile(join(gateway,'html/index.html'),htmlBytes);
+    const staffAssets=previous.assets.filter(asset=>asset.app==='staff');if(!staffAssets.length)throw new Error('Previous staff assets missing');
+    for(const asset of staffAssets){const source=join(previousDir,'assets/staff',asset.path),bytes=await readFile(source);if(digest(bytes)!==asset.sha256||bytes.length!==asset.size)throw new Error('Previous staff asset checksum mismatch');const staged=join(dir,'assets/staff',asset.path);await mkdir(resolve(staged,'..'),{recursive:true});await writeFile(staged,bytes);assets.push(asset);}
+    reusedStaff={release:previous.id,htmlSha256:digest(htmlBytes),assetCount:staffAssets.length};
+  }
   for (const app of ['admin', 'staff']) {
+    if(app==='staff'&&reusedStaff){progress('retain previous staff HTML/assets without rebuilding');continue;}
     progress(`build ${app} (${opts.assets} assets)`);
     const url = assetBase(id, app, opts.assets, process.env);
     run('pnpm', ['--filter', `@store/${app}`, 'build'], { env: { ...process.env, ASSET_BASE_URL: url } });
@@ -100,7 +112,7 @@ async function build() {
   const html = {};
   for (const name of ['index.html', 'admin/index.html']) html[name] = digest(await readFile(join(gateway, 'html', name)));
   const manifest = { id, commit, dirty, createdAt: new Date().toISOString(), env: opts.env, assetsMode: opts.assets, platform,
-    supportedTaskKinds:['system.check','report.analysis','dashboard.analysis','settlement.judge','settlement.finalize','settlement.rebuild','import.visit','import.delete','reconciliation.monthly','store.master','reconciliation.insight','store.ai'],zoneEvidence,lockSha256: digest(await readFile('pnpm-lock.yaml')), images, imageDigests, html, assets };
+    componentScope:{api:'rebuild',worker:'rebuild-shared-image',admin:'rebuild',gateway:'rebuild',staff:reusedStaff??'rebuild'},supportedTaskKinds:['system.check','report.analysis','dashboard.analysis','settlement.judge','settlement.finalize','settlement.rebuild','import.visit','import.delete','reconciliation.monthly','store.master','reconciliation.insight','store.ai'],zoneEvidence,lockSha256: digest(await readFile('pnpm-lock.yaml')), images, imageDigests, html, assets };
   await writeJson(join(dir, 'manifest.json'), manifest);
   await rm(join(dir, 'building.json'));
   console.log(JSON.stringify({ release: id, manifest: relative(root, join(dir, 'manifest.json')), deploy: `pnpm release:deploy -- --env local --release ${id}` }, null, 2));
@@ -175,6 +187,7 @@ async function reclaimRetiredNetworks(target){
 async function deploy() {
   const dir = join(base, opts.release); const manifest = await json(join(dir, 'manifest.json'));
   if (manifest.id !== opts.release || manifest.env !== opts.env) throw new Error('Manifest target mismatch');
+  assertDeployableManifest(manifest);
   progress('verify release checksums and assets');
   for (const name of ['index.html', 'admin/index.html']) if (digest(await readFile(join(dir, 'gateway-context/html', name))) !== manifest.html[name]) throw new Error('HTML checksum mismatch');
   await verifyAssets(manifest, dir, opts.command === 'deploy');
@@ -207,7 +220,7 @@ async function deploy() {
     const uploadVolumes=['jobs:/data/jobs',...(legacyHost?[{type:'bind',source:resolve(legacyHost),target:'/data/legacy-uploads',read_only:true,bind:{create_host_path:false}}]:[])];
     const extraKeys=['GOOGLE_PUBLIC_API_KEY','AI_API_KEY','AI_BASE_URL','AI_MODEL','VISIT_REPORT_AI','VISIT_LAYOUT_AI','RECON_LAYOUT_AI','LOGIN_NAME_AI','AI_AUTO_INTERPRET','AI_RECON_INTERPRET','VISIT_REPORT_LANGS','NEXT_REPORT_AI_TIMEOUT_MS','NEXT_REPORT_AI_MAX_TOKENS','NEXT_DEFAULT_STAFF_PASSWORD','BONUS_GROUP','BONUS_AMOUNT','BONUS_GROUP_SCHEDULE','BONUS_AMOUNT_SCHEDULE','STAFF_VISIBLE_FROM','DEDUP_SUB_STORES','STORE_AUTO_MERGE_EXACT','STORE_AI_BATCH','DEFAULT_VISIBLE_MAP','DEFAULT_DEPLOY_MAP','DEFAULT_POINT_RULES'];
     const extra=extraKeys.filter(key=>process.env[key]).map(key=>{const value=process.env[key];if(/[\r\n]/.test(value))throw new Error('Invalid multiline runtime configuration');return key+'='+value;}).join('\n');
-    await writeFile(join(dir, 'runtime.env'), `NEXT_DATABASE_URL=${url.href}\nNEXT_SESSION_SECRET=${process.env.NEXT_SESSION_SECRET}\nNEXT_COOKIE_SECURE=false\nNEXT_HOST=0.0.0.0\nNEXT_TASK_DIRECTORY=/data/jobs\nNEXT_UPLOAD_DIRECTORY=/data/jobs/uploads\nNODE_ENV=production\nNEXT_LOCAL_HTTP=true\n${deployment.baseline?'NEXT_LOCAL_BASELINE=true\nNEXT_WORKER_RECONCILE=false\n':''}${legacyHost?'NEXT_LEGACY_UPLOAD_DIRECTORY=/data/legacy-uploads\n':''}${extra}\n`, { mode: 0o600 });
+    await writeFile(join(dir, 'runtime.env'), `NEXT_DATABASE_URL=${url.href}\nNEXT_SESSION_SECRET=${process.env.NEXT_SESSION_SECRET}\nNEXT_COOKIE_SECURE=false\nNEXT_HOST=0.0.0.0\n${Object.entries(localMcpEnvironment()).map(([key,value])=>key+'='+value).join('\n')}\nNEXT_TASK_DIRECTORY=/data/jobs\nNEXT_UPLOAD_DIRECTORY=/data/jobs/uploads\nNODE_ENV=production\nNEXT_LOCAL_HTTP=true\n${deployment.baseline?'NEXT_LOCAL_BASELINE=true\nNEXT_WORKER_RECONCILE=false\n':''}${legacyHost?'NEXT_LEGACY_UPLOAD_DIRECTORY=/data/legacy-uploads\n':''}${extra}\n`, { mode: 0o600 });
     const compose = { services: {
       api: { image: manifest.images.api, env_file: ['./runtime.env'], restart: 'unless-stopped', mem_limit: '512m', cpus: 1,volumes:uploadVolumes,depends_on:{jobsInit:{condition:'service_completed_successfully'}},
         networks: ['private'], healthcheck: { test: ['CMD', 'node', '-e', 'fetch("http://127.0.0.1:3000/api/health/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'], interval: '5s', timeout: '3s', retries: 12 }, stop_grace_period: '30s' },

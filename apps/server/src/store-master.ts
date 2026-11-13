@@ -6,7 +6,7 @@ const id=z.number().int().positive();const selection=z.discriminatedUnion('actio
  z.object({action:z.literal('merge-pair'),pairId:id,keepId:id}),z.object({action:z.literal('skip-pair'),pairId:id}),z.object({action:z.literal('split'),entityId:id}),z.object({action:z.literal('merge-group'),nameNorm:z.string().min(1).max(2000),keepId:id}),z.object({action:z.literal('skip-group'),nameNorm:z.string().min(1).max(2000)}),
 ]);export type StoreSelection=z.infer<typeof selection>;
 const aiDecision=z.object({decision:z.enum(['same','diff','unknown']),confidence:z.enum(['high','medium','low']),reason:z.string().max(500)}).strict();
-const task=z.object({origin:z.literal('ai').optional(),ai:aiDecision.optional(),requestId:z.string().uuid(),actor:id,selection,token:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+const task=z.object({note:z.string().max(4000).optional(),origin:z.literal('ai').optional(),ai:aiDecision.optional(),requestId:z.string().uuid(),actor:id,selection,token:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 const fields='id,store_id_raw,name_local,name_norm,city,master_id,address_local,raw_data_id';
 function parse<T>(schema:z.ZodType<T>,value:unknown){const parsed=schema.safeParse(value);if(!parsed.success)throw new BusinessError('VALIDATION','店铺主档参数无效',400);return parsed.data;}
 @Injectable()
@@ -35,7 +35,7 @@ export class StoreMasterService{
   const token=createHash('sha256').update(JSON.stringify({selection:input,entities,pair:pair??null,pairs})).digest('hex');
   return {entities,pair,pairs,token,crossCity:new Set(entities.map(e=>e.city).filter(Boolean)).size>1};
  }
- async preview(input:StoreSelection){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');const state=await this.state(client,input);return {selection:input,token:state.token,entityCount:state.entities.length,entities:state.entities.slice(0,100).map(e=>({id:e.id,storeId:e.store_id_raw,name:e.name_local,city:e.city,masterId:e.master_id})),crossCity:state.crossCity};});}
+ async preview(input:StoreSelection){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');return this.previewInTransaction(client,input);});}
  async enqueue(input:StoreSelection,token:string,actor:number,requestId:string){const jobId='store-master-'+requestId,payload={requestId,actor,selection:input,token};try{const old=JSON.parse(await readFile(join(this.queue.directory,jobId+'.identity'),'utf8'));if(JSON.stringify(old.payload)!==JSON.stringify(payload))throw new BusinessError('REQUEST_ID_CONFLICT','提交标识已被其他主档操作使用',409);return {jobId,reused:true};}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
   const current=await this.preview(input);if(current.token!==token)throw new BusinessError('STORE_MASTER_CHANGED','主档或候选已变化，请重新预览',409);
   try{await this.queue.enqueue('store.master',payload,jobId);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;const old=JSON.parse(await readFile(join(this.queue.directory,jobId+'.identity'),'utf8'));if(JSON.stringify(old.payload)!==JSON.stringify(payload))throw new BusinessError('REQUEST_ID_CONFLICT','提交标识已被其他操作使用',409);}return {jobId,reused:false};
@@ -46,8 +46,11 @@ export class StoreMasterService{
  private async link(client:PoolClient,entity:Entity,keeper:Entity,basis:string,note:string,actor:number){
   if(entity.id===keeper.id)return;await client.query('UPDATE store_entities SET master_id=$1,master_store_id=$2,master_raw_data_id=$3,updated_at=now() WHERE id=$4',[keeper.id,keeper.store_id_raw,keeper.raw_data_id,entity.id]);await client.query('INSERT INTO store_merge_logs(entity_id,from_master,to_master,basis,note,decided_by,created_at) VALUES($1,$2,$3,$4,$5,$6,now())',[entity.id,entity.master_id,keeper.id,basis,note,actor]);
  }
- async process(value:unknown){const payload=task.safeParse(value);if(!payload.success)return {ok:false,code:'STORE_TASK_INVALID',message:'主档任务参数无效'};const input=payload.data;
-  try{return await this.db.transaction(async client=>{await this.lock(client,input.actor);const marker='[request:'+input.requestId+']';const replay=(await client.query("SELECT id FROM store_merge_logs WHERE decided_by=$1 AND strpos(coalesce(note,''),$2)>0 UNION ALL SELECT id FROM store_pairs WHERE decided_by=$1 AND strpos(coalesce(note,''),$2)>0 LIMIT 1",[input.actor,marker])).rows[0];if(replay)return {ok:true,reused:true};const state=await this.state(client,input.selection);if(state.token!==input.token)throw new BusinessError('STORE_MASTER_CHANGED','主档或候选已变化，任务未执行，请重新预览',409);
+
+ async previewInTransaction(client:PoolClient,input:StoreSelection){const state=await this.state(client,input);return {selection:input,token:state.token,entityCount:state.entities.length,entities:state.entities.slice(0,100).map(e=>({id:e.id,storeId:e.store_id_raw,name:e.name_local,city:e.city,masterId:e.master_id})),crossCity:state.crossCity};
+ }
+
+ async processInTransaction(client:PoolClient,input:z.infer<typeof task>){const checked=task.safeParse(input);if(!checked.success)throw new BusinessError('STORE_TASK_INVALID','主档任务参数无效',400);input=checked.data;await this.lock(client,input.actor);const marker='[request:'+input.requestId+']';const replay=(await client.query("SELECT id FROM store_merge_logs WHERE decided_by=$1 AND strpos(coalesce(note,''),$2)>0 UNION ALL SELECT id FROM store_pairs WHERE decided_by=$1 AND strpos(coalesce(note,''),$2)>0 LIMIT 1",[input.actor,marker])).rows[0];if(replay)return {ok:true,reused:true};const state=await this.state(client,input.selection);if(state.token!==input.token)throw new BusinessError('STORE_MASTER_CHANGED','主档或候选已变化，任务未执行，请重新预览',409);
    if(input.origin==='ai'){
     if(!state.pair||!input.ai)throw new BusinessError('AI_DECISION_INVALID','模型采纳参数无效',400);
     if(input.selection.action==='merge-pair'&&state.crossCity)throw new BusinessError('AI_CITY_CONFLICT','模型判同但城市不同，保留人工核对',409);
@@ -56,19 +59,22 @@ export class StoreMasterService{
    if(input.selection.action==='build')return {ok:true,action:'build',...await this.build(client,state.entities.map(e=>e.id)),recomputed:[] as string[],skippedSealed:[] as string[]};
    if(input.selection.action==='recommended'){
     const pendingIds=new Set(state.pairs.filter(p=>p.kind==='exact'&&p.status==='pending').flatMap(p=>[p.entity_a,p.entity_b]));const groups=new Map<string,Entity[]>();for(const entity of state.entities)if(pendingIds.has(entity.id)){const group=groups.get(entity.name_norm)??[];group.push(entity);groups.set(entity.name_norm,group);}
-    const affected:number[]=[];let merged=0,left=0;
-    for(const [norm,members]of groups){if(members.length<2)continue;if(new Set(members.map(e=>e.city).filter(Boolean)).size>1){left++;continue;}const group=state.entities.filter(e=>e.name_norm===norm);const keeper=group[0];for(const entity of group)if(entity.id!==keeper.id){await this.link(client,entity,keeper,'program_exact','整批推荐(最早主档) '+marker,input.actor);merged++;}affected.push(...group.map(e=>e.id));await client.query("UPDATE store_pairs SET status='merged',decided_by=$1 WHERE kind='exact' AND status='pending' AND entity_a=ANY($2::int[]) AND entity_b=ANY($2::int[])",[input.actor,group.map(e=>e.id)]);}
-    return {ok:true,action:'recommended',mergedEntities:merged,leftGroups:left,...await this.rebuild(client,await this.affected(client,affected),input.actor)};
+    const affected:number[]=[];let merged=0,left=0,groupsApplied=0;
+    for(const [norm,members]of groups){if(members.length<2)continue;if(new Set(members.map(e=>e.city).filter(Boolean)).size>1){left++;continue;}const group=state.entities.filter(e=>e.name_norm===norm);const keeper=group[0];for(const entity of group)if(entity.id!==keeper.id){await this.link(client,entity,keeper,'program_exact',(input.note||'整批推荐(最早主档)')+' '+marker,input.actor);merged++;}groupsApplied++;affected.push(...group.map(e=>e.id));await client.query("UPDATE store_pairs SET status='merged',decided_by=$1 WHERE kind='exact' AND status='pending' AND entity_a=ANY($2::int[]) AND entity_b=ANY($2::int[])",[input.actor,group.map(e=>e.id)]);}
+    return {ok:true,action:'recommended',groupsApplied,mergedEntities:merged,leftGroups:left,...await this.rebuild(client,await this.affected(client,affected),input.actor)};
    }
    const ids=state.entities.map(e=>e.id);await client.query('SELECT id FROM store_entities WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE',[ids]);const beforeMonths=await this.affected(client,ids);
-   if(input.selection.action==='skip-pair')await client.query("UPDATE store_pairs SET status='skip',decided_by=$1,note=$3 WHERE id=$2",[input.actor,input.selection.pairId,(input.origin==='ai'?'AI(high): '+input.ai!.reason:'人工跳过')+' '+marker]);
+   if(input.selection.action==='skip-pair')await client.query("UPDATE store_pairs SET status='skip',decided_by=$1,note=$3 WHERE id=$2",[input.actor,input.selection.pairId,(input.origin==='ai'?'AI(high): '+input.ai!.reason:(input.note||'人工跳过'))+' '+marker]);
    else if(input.selection.action==='skip-group')await client.query("UPDATE store_pairs SET status='skip',decided_by=$1,note=$3 WHERE kind='exact' AND status='pending' AND entity_a=ANY($2::int[]) AND entity_b=ANY($2::int[])",[input.actor,ids,'人工整组跳过 '+marker]);
-   else if(input.selection.action==='split'){const entity=state.entities[0];await client.query('UPDATE store_entities SET master_id=id,master_store_id=store_id_raw,master_raw_data_id=NULL,updated_at=now() WHERE id=$1',[entity.id]);await client.query("INSERT INTO store_merge_logs(entity_id,from_master,to_master,basis,note,decided_by,created_at) VALUES($1,$2,$1,'manual',$4,$3,now())",[entity.id,entity.master_id,input.actor,'拆分回主档 '+marker]);}
-   else{const chosen=input.selection;const keeper=state.entities.find(e=>e.id===chosen.keepId)!;for(const entity of state.entities)if(entity.id!==keeper.id)await this.link(client,entity,keeper,input.origin==='ai'?'ai':chosen.action==='merge-group'?'program_exact':'manual',(input.origin==='ai'?'AI(high): '+input.ai!.reason:chosen.action==='merge-group'?'人工同名归并':'人工候选合并')+' '+marker,input.actor);
+   else if(input.selection.action==='split'){const entity=state.entities[0];await client.query('UPDATE store_entities SET master_id=id,master_store_id=store_id_raw,master_raw_data_id=NULL,updated_at=now() WHERE id=$1',[entity.id]);await client.query("INSERT INTO store_merge_logs(entity_id,from_master,to_master,basis,note,decided_by,created_at) VALUES($1,$2,$1,'manual',$4,$3,now())",[entity.id,entity.master_id,input.actor,(input.note||'拆分回主档')+' '+marker]);}
+   else{const chosen=input.selection;const keeper=state.entities.find(e=>e.id===chosen.keepId)!;for(const entity of state.entities)if(entity.id!==keeper.id)await this.link(client,entity,keeper,input.origin==='ai'?'ai':chosen.action==='merge-group'?'program_exact':'manual',(input.origin==='ai'?'AI(high): '+input.ai!.reason:input.note||(chosen.action==='merge-group'?'人工同名归并':'人工候选合并'))+' '+marker,input.actor);
     if(chosen.action==='merge-pair')await client.query("UPDATE store_pairs SET status='merged',decided_by=$1 WHERE id=$2",[input.actor,chosen.pairId]);else await client.query("UPDATE store_pairs SET status='merged',decided_by=$1 WHERE kind='exact' AND status='pending' AND entity_a=ANY($2::int[]) AND entity_b=ANY($2::int[])",[input.actor,ids]);
    }
    const change=!input.selection.action.startsWith('skip');const result=change?await this.rebuild(client,[...new Set([...beforeMonths,...await this.affected(client,ids)])].sort(),input.actor):{recomputed:[] as string[],skippedSealed:[] as string[]};return {ok:true,action:input.selection.action,...result};
-  });}catch(error){if(error instanceof BusinessError)return {ok:false,code:error.code,message:error.message};throw error;}
+
+ }
+async process(value:unknown){const payload=task.safeParse(value);if(!payload.success)return {ok:false,code:'STORE_TASK_INVALID',message:'主档任务参数无效'};const input=payload.data;
+  try{return await this.db.transaction(client=>this.processInTransaction(client,input));}catch(error){if(error instanceof BusinessError)return {ok:false,code:error.code,message:error.message};throw error;}
  }
  async build(client:PoolClient,targets:number[]){
   const entities=(await client.query<Entity>(`SELECT ${fields} FROM store_entities WHERE master_id=id ORDER BY id`)).rows;

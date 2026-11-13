@@ -101,6 +101,15 @@ export class EmployeeService {
       });
     } catch (error) { conflict(error); }
   }
+  async setStatus(client: PoolClient, id: number, status: EmployeeState, expectedStatus: EmployeeState) {
+    if (!employeeStates.includes(status) || !employeeStates.includes(expectedStatus)) throw new BusinessError('VALIDATION', '员工状态无效', 400);
+    const target = (await client.query("SELECT id,status,role FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE", [id])).rows[0];
+    if (!target) throw new BusinessError('NOT_FOUND', '员工不存在', 404);
+    if (target.status !== expectedStatus) throw new BusinessError('CONFLICT', '员工状态已更新，请刷新后重试', 409);
+    const active = ['active', 'leave'].includes(status);
+    await client.query('UPDATE users SET status=$1,is_active=$2 WHERE id=$3', [status, active, id]);
+    return { id, status, isActive: active, tokenUsable: status === 'active' };
+  }
   async remove(id: number, expectedStatus: EmployeeState) {
     return this.db.transaction(async client => {
       const target = (await client.query("SELECT status FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE", [id])).rows[0];

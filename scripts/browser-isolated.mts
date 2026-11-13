@@ -8,6 +8,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {browserEnvironment,browserSuites} from './test-isolation-lib.mjs';
 const temporary=await mkdtemp(join(tmpdir(),'store-browser-'));
 const env=browserEnvironment(process.env,process.env.NEXT_TEST_DATABASE_URL,temporary);
+const oauthSuite=process.argv[2]==='oauth'||process.argv[2]==='all';
 for(const key of Object.keys(process.env))delete process.env[key];Object.assign(process.env,env);
 let worker:ChildProcess|undefined,fixture:ChildProcess|undefined,workerExit:Promise<unknown>|undefined,app:any,gateway:ReturnType<typeof createServer>|undefined,interrupted=false;
 const stop=()=>{interrupted=true;fixture?.kill('SIGTERM');worker?.kill('SIGTERM');};
@@ -20,7 +21,7 @@ async function terminate(child:ChildProcess|undefined,exit:Promise<unknown>|unde
 try{
  await mkdir('data/refactor',{recursive:true});
  const {createApp}=await import('../apps/server/src/main');
- app=await createApp({databaseUrl:env.NEXT_DATABASE_URL,sessionSecret:env.NEXT_SESSION_SECRET,cookieSecure:false,host:'127.0.0.1',port:0});
+ const runtimeConfig:any={databaseUrl:env.NEXT_DATABASE_URL,sessionSecret:env.NEXT_SESSION_SECRET,cookieSecure:false,host:'127.0.0.1',port:0};app=await createApp(runtimeConfig);
  await app.listen(0,'127.0.0.1');const api=new URL(await app.getUrl());
  worker=spawn(process.execPath,['--import','tsx','apps/worker/src/main.ts'],{env,stdio:['ignore','inherit','inherit']});
  workerExit=new Promise((resolve,reject)=>{worker!.once('exit',resolve);worker!.once('error',reject);});
@@ -34,7 +35,7 @@ try{
  gateway=createServer(async(req,res)=>{
   try{
    const url=new URL(req.url!,'http://localhost');
-   if(url.pathname.startsWith('/api/')){
+   if(url.pathname.startsWith('/api/')||oauthSuite&&(url.pathname.startsWith('/mcp')||url.pathname.startsWith('/oauth')||url.pathname.startsWith('/.well-known/'))){
     const upstream=proxyRequest(new URL(req.url!,api),{method:req.method,headers:{...req.headers,host:api.host}},response=>{res.writeHead(response.statusCode??502,response.headers);response.pipe(res);});
     upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end();});req.on('aborted',()=>upstream.destroy());req.pipe(upstream);return;
    }
@@ -50,6 +51,7 @@ try{
  });
  await new Promise<void>(resolve=>gateway!.listen(0,'127.0.0.1',resolve));
  const base=`http://127.0.0.1:${(gateway.address() as any).port}`;
+ if(oauthSuite){runtimeConfig.mcpPublicUrl=base+'/mcp';runtimeConfig.mcpAuthorizationUiUrl=base+'/admin/mcp-authorize';}
  const browserEnv={...env,NEXT_BROWSER_BASE_URL:base,NEXT_BROWSER_ISOLATED_RUNTIME:'1'};
  for(const file of browserSuites(process.argv[2]??'all')){
   if(interrupted)throw Error('Disposable browser run interrupted');

@@ -36,10 +36,11 @@ export class PayrollPaymentsService{
    return {personCode:row.person_code,name:row.name,points:row[`${p}_points`],grossAmount:row[`${p}_amount`],bonus:row[`${p}_bonus`],adjustment:half===1?plan.h1[0]:plan.h2[0],payable:half===1?plan.h1[1]:plan.h2[1],registered:!!existing,paymentId:existing?.id??null,registeredAmount:existing?.amount??null,registeredAdjustment:existing?.adjust_applied??null};
   });
  }
- async preview(month:string,half:number){return this.db.transaction(async client=>{
-  await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');const state=await this.snapshot(client,month);
+  async preview(month:string,half:number){return this.db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');return this.previewInTransaction(client,month,half);});}
+ async previewInTransaction(client:PoolClient,month:string,half:number){
+  const state=await this.snapshot(client,month);
   return {month,half,token:this.fingerprint(month,half,state),rows:this.previewRows(month,half,state),registrationSemantics:'legacy-gross-amount-with-separate-adjustment'};
- });}
+ }
  private async record(client:PoolClient,month:string,half:number,row:Period,state:Snapshot,actor:number){
   const existing=state.payments.find(payment=>payment.person_code===row.person_code&&payment.seq===half);if(existing)return {id:existing.id,created:false};
   const key=half===1?'half1':'half2';const gross=row[`${key}_amount`]||0;
@@ -64,8 +65,8 @@ export class PayrollPaymentsService{
   }
   return {id:inserted.id,created:true};
  }
- async register(month:string,half:number,actor:number,expectedToken:string){
-  return this.db.transaction(async client=>{
+  async register(month:string,half:number,actor:number,expectedToken:string){return this.db.transaction(client=>this.registerInTransaction(client,month,half,actor,expectedToken));}
+ async registerInTransaction(client:PoolClient,month:string,half:number,actor:number,expectedToken:string){
    const admin=(await client.query("SELECT id FROM users WHERE id=$1 AND role='admin' AND status IN ('active','leave') AND is_active=true FOR SHARE",[actor])).rows[0];if(!admin)throw new BusinessError('FORBIDDEN','管理员状态已变化，请重新登录',403);
    await client.query("SELECT pg_advisory_xact_lock(hashtext('payroll-financial-write'),0)");
    await client.query("SELECT pg_advisory_xact_lock(hashtext('payroll-month'),hashtext($1))",[month]);
@@ -76,8 +77,7 @@ export class PayrollPaymentsService{
    const result=[];for(const row of state.periods)result.push(await this.record(client,month,half,row,state,actor));
    await client.query('INSERT INTO payroll_paid_marks(month,half,marked_by,marked_at) VALUES($1,$2,$3,now()) ON CONFLICT(month,half) DO NOTHING',[month,half,actor]);
    return {month,half,created:result.filter(row=>row.created).length,reused:result.filter(row=>!row.created).length,paymentIds:result.map(row=>row.id)};
-  });
- }
+  }
 }
 @Controller('payroll/payments')
 export class PayrollPaymentsController{
