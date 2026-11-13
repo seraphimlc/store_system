@@ -72,12 +72,13 @@ test('local OAuth environment uses the same gateway origin as the connector',asy
  const {localMcpEnvironment}=await import('./release-lib.mjs');assert.deepEqual(localMcpEnvironment(),{NEXT_MCP_PUBLIC_URL:'http://127.0.0.1:8000/mcp',NEXT_MCP_AUTHORIZATION_UI_URL:'http://127.0.0.1:8000/admin/mcp-authorize'});
 });
 
-test('Docker baseline is explicit, local and separated from development and task queues',async()=>{
+test('Docker shares the unified local database but requires an explicit URL and its own task queue',async()=>{
  const {localDeploymentDatabase}=await import('./release-lib.mjs');
- const dev='postgresql://tester:fixture@127.0.0.1:5433/store_settle_refactor_p1';const baseline='postgresql://tester:fixture@127.0.0.1:5433/store_settle';
+ const dev='postgresql://tester:fixture@127.0.0.1:5433/store_settle';const baseline='postgresql://tester:fixture@127.0.0.1:5433/store_settle';
  const env={NEXT_DATABASE_URL:dev,NEXT_DOCKER_DATABASE_URL:baseline};const selected=localDeploymentDatabase(env);
  assert.equal(selected.url.pathname,'/store_settle');assert.equal(selected.url.hostname,'host.docker.internal');assert.equal(selected.jobsVolume,'store-next-jobs-store-settle');assert.equal(selected.baseline,true);assert.equal(env.NEXT_DATABASE_URL,dev);
- assert.equal(localDeploymentDatabase({NEXT_DATABASE_URL:dev}).jobsVolume,'store-next-jobs');
+ assert.throws(()=>localDeploymentDatabase({NEXT_DATABASE_URL:dev}));
+ assert.throws(()=>localDeploymentDatabase({NEXT_DOCKER_DATABASE_URL:baseline.replace('/store_settle','/store_settle_refactor_p1')}));
  assert.throws(()=>localDeploymentDatabase({NEXT_DATABASE_URL:baseline}));assert.throws(()=>localDeploymentDatabase({NEXT_DOCKER_DATABASE_URL:baseline.replace('127.0.0.1','production.example')}));assert.throws(()=>localDeploymentDatabase({NEXT_DOCKER_DATABASE_URL:baseline.replace('/store_settle','/postgres')}));
 });
 

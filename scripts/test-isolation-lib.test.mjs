@@ -1,9 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {browserSuites,sourceConnection,temporaryDatabaseName,dropStatement,testEnvironment} from './test-isolation-lib.mjs';
 test('disposable tests leave application configuration unchanged and cannot target or drop a baseline',()=>{
- const original={NEXT_DATABASE_URL:'postgresql://u:p@localhost/store_settle_refactor_p1',NEXT_TEST_DATABASE_URL:'postgresql://u:p@localhost/store_settle_refactor_p1'},snapshot={...original};
- const source=sourceConnection(original.NEXT_TEST_DATABASE_URL),name=temporaryDatabaseName();assert.equal(source.database,'store_settle_refactor_p1');assert.match(name,/_refactor_p1$/);assert.match(dropStatement(name,source.database),/^DROP DATABASE IF EXISTS "store_test_/);
+ const original={NEXT_DATABASE_URL:'postgresql://u:p@localhost/store_settle',NEXT_TEST_DATABASE_URL:'postgresql://u:p@localhost/store_settle'},snapshot={...original};
+ const source=sourceConnection(original.NEXT_TEST_DATABASE_URL),name=temporaryDatabaseName();assert.equal(source.database,'store_settle');assert.match(name,/_refactor_p1$/);assert.match(dropStatement(name,source.database),/^DROP DATABASE IF EXISTS "store_test_/);
  for(const value of ['store_settle','store_settle_refactor_p1','postgres',name+';DROP','store_test_bad_refactor_p1'])assert.throws(()=>dropStatement(value,source.database));
- for(const value of ['postgresql://u:p@production/store_settle_refactor_p1','postgresql://u:p@localhost/store_settle','mysql://u:p@localhost/store_settle_refactor_p1'])assert.throws(()=>sourceConnection(value));
+ for(const value of ['postgresql://u:p@production/store_settle_refactor_p1','postgresql://u:p@localhost/store_settle_refactor_p1','mysql://u:p@localhost/store_settle_refactor_p1'])assert.throws(()=>sourceConnection(value));
  const target='postgresql://u:p@localhost/'+name,result=testEnvironment(original,target);assert.deepEqual(original,snapshot);assert.equal(result.NEXT_DATABASE_URL,target);assert.equal(result.NEXT_TEST_DATABASE_URL,target);assert.match(result.DATABASE_URL,/^postgresql\+psycopg2:/);assert.equal(result.NEXT_TEST_ISOLATED,'1');
 });
 

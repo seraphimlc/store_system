@@ -31,6 +31,7 @@ async function main(){
   await admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`);created=true;
   cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],schema);
   cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/001-auth-security.sql','utf8'));
+  cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/002-store-search-log.sql','utf8'));
   if(interrupted)throw Error('Test setup interrupted');
   const target=new URL(source.url);target.pathname='/'+name;
   const probe=new Pool({connectionString:target.href,max:1});try{const row=(await probe.query('SELECT (SELECT count(*)::int FROM users) AS users,(SELECT count(*)::int FROM formal_records) AS records')).rows[0];if(row.users||row.records)throw Error('Disposable test database must have schema only');}finally{await probe.end();}

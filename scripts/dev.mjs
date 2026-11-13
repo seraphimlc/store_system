@@ -22,5 +22,5 @@ try{
  launch('admin',[join(root,'apps/admin/node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port','8001','--strictPort'],config.frontend,join(root,'apps/admin'));
  launch('staff',[join(root,'apps/staff/node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port','8002','--strictPort'],config.frontend,join(root,'apps/staff'));
  console.log(`[dev] Admin: ${config.urls.admin}\n[dev] Staff: ${config.urls.staff}\n[dev] API: ${config.urls.api}\n[dev] Ctrl+C stops all four services. Config changes require restarting pnpm dev.`);
- console.log('[dev] Local refactor DB retained; private dev task directory; historical DB task reconciliation disabled.');
+ console.log('[dev] Unified local store_settle DB retained; private dev task directory; historical DB task reconciliation disabled.');
 }catch(error){console.error('[dev] '+error.message);failed=true;await stop();}

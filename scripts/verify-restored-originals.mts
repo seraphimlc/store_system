@@ -2,10 +2,10 @@
 import '../apps/server/node_modules/reflect-metadata/Reflect.js';
 import {createRequire} from 'node:module';import {createHash} from 'node:crypto';import {createReadStream} from 'node:fs';import {stat,mkdir,writeFile} from 'node:fs/promises';import {resolve} from 'node:path';
 import {readUploadPath} from '../apps/server/src/private-files';import {parseVisitWorkbook,readWorkbookRows} from '../apps/server/src/visit-workbook';
-const require=createRequire(new URL('../apps/server/package.json',import.meta.url)),{Pool}=require('pg'),url=new URL(process.env.NEXT_DATABASE_URL??'');if(!['postgres:','postgresql:'].includes(url.protocol)||!['localhost','127.0.0.1'].includes(url.hostname)||url.pathname!=='/store_settle_refactor_p1')throw Error('Explicit local refactor database required');url.searchParams.set('options','-c default_transaction_read_only=on');
+const require=createRequire(new URL('../apps/server/package.json',import.meta.url)),{Pool}=require('pg'),url=new URL(process.env.NEXT_DATABASE_URL??'');if(!['postgres:','postgresql:'].includes(url.protocol)||!['localhost','127.0.0.1'].includes(url.hostname)||url.pathname!=='/store_settle')throw Error('Explicit local store_settle database required');url.searchParams.set('options','-c default_transaction_read_only=on');
 const root=process.env.NEXT_LEGACY_UPLOAD_HOST_DIRECTORY;if(!root)throw Error('Restored legacy directory required');process.env.NEXT_LEGACY_UPLOAD_DIRECTORY=resolve(root);const pool=new Pool({connectionString:url.href,max:1});
 async function checksum(path:string){const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex');}
-const evidence:any={capturedAt:new Date().toISOString(),database:'store_settle_refactor_p1',readOnly:true,imports:[],reconciliation:[],retainedWithoutOriginal:[],errors:[],databaseWritten:false};
+const evidence:any={capturedAt:new Date().toISOString(),database:'store_settle',readOnly:true,imports:[],reconciliation:[],retainedWithoutOriginal:[],errors:[],databaseWritten:false};
 try{
  const imports=(await pool.query('SELECT id,stored_path,file_size,file_sha256,status,parsed_rows,layout FROM imports ORDER BY id')).rows;
  for(const row of imports){if(row.stored_path==='kept'&&row.file_size===0&&row.file_sha256.startsWith('kept-')){evidence.retainedWithoutOriginal.push({id:row.id,classification:'historical_retention_marker',source:'legacy/scripts/reset_august.py',originalAvailable:false});continue;}

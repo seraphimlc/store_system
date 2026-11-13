@@ -48,11 +48,11 @@ ssh visitworld 'python3 /opt/store-next/production-release.py rollback <release>
 
 > **生产迁移计划**：[生产迁移与回滚](../docs/计划-生产迁移与回滚.md)。本手册现有CLI只支持本地；生产切换须先完成该计划P0。应用回滚保留同库数据，全库恢复属于单独事故决策。
 
-> **2026-11-12端口更新**：本地Docker统一入口改为 http://localhost:8000/admin/ （管理端）和 http://localhost:8000/ （员工端）。开发态仍使用8001/8002，API3000，Docker基准库store_settle与开发临时库store_settle_refactor_p1不变。只重新创建edge端口映射，不重建或切换业务release。下文8080为历史记录。
+> **2026-11-12端口更新**：本地Docker统一入口改为 http://localhost:8000/admin/ （管理端）和 http://localhost:8000/ （员工端）。开发态仍使用8001/8002，API3000，Docker与开发已于2026-11-13统一使用store_settle，旧开发库移除。只重新创建edge端口映射，不重建或切换业务release。下文8080为历史记录。
 
 ## 当前本地验收连接（2026-11-12）
 
-Docker 与日常开发配置分开：Docker 使用未跟踪的 `.env.next.docker.local`，通过 `NEXT_DOCKER_DATABASE_URL` 显式指向本地 `store_settle`；`.env.next.local` 的 `NEXT_DATABASE_URL` 继续使用 `store_settle_refactor_p1`。部署不会迁移、清库或覆盖开发配置。
+Docker 与日常开发配置文件分开，但统一连接本地 `store_settle`：Docker 使用 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL`，开发使用 `.env.next.local` 的 `NEXT_DATABASE_URL`。`NEXT_TEST_DATABASE_URL`仅作为只读结构来源，隔离运行器创建随机临时库后才运行写测试；禁止直接对该变量执行破坏性fixture。
 
 ```bash
 pnpm release:build -- --env local --assets cdn --release <新release-id> --config .env.next.docker.local
@@ -88,7 +88,7 @@ Ctrl+C统一停止四服务；遇端口冲突退出，不强停他人服务。�
 
 ## 配置
 
-复制根目录`.env.next.example`到未跟踪的`.env.next.local`。`NEXT_DATABASE_URL`沿用当前本地独立副本`store_settle_refactor_p1`，该库是保留数据的本地基准，**不可丢弃或自动覆盖**。自动化写验收由隔离运行器创建随机schema-only临时库，不能直接对该基准库运行破坏性fixture。命令不创建表、不迁移数据库，也不自动恢复数据。
+复制根目录`.env.next.example`到未跟踪的`.env.next.local`。`NEXT_DATABASE_URL`统一连接本地`store_settle`，该库是开发与Docker共用的业务库，**不可丢弃或自动覆盖**。自动化写验收由隔离运行器创建随机schema-only临时库，不能直接对该基准库运行破坏性fixture。命令不创建表、不迁移数据库，也不自动恢复数据。
 
 需要本地Node22.12+、pnpm12.18、Docker（Compose/buildx）。镜像在本地构建，目标不重新编译。首次拉取基础镜像和依赖耗时单独计算，不能当作应用重启耗时。
 

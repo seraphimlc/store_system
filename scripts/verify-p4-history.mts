@@ -13,7 +13,7 @@ function snapshot(database:string){const raw=JSON.parse(sql(database,baselineSql
 function digest(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 const report:{[key:string]:unknown}={capturedAt:new Date().toISOString(),source,target,scope:'Full local snapshot; read-only payroll parity, no settlement rebuild or new payment registration',months:[]};
 try{
- const connection=new URL(process.env.NEXT_TEST_DATABASE_URL??'');if(!['127.0.0.1','localhost'].includes(connection.hostname)||!connection.pathname.endsWith('_refactor_p1'))throw Error('EXPLICIT_LOCAL_TEST_CONNECTION_REQUIRED');
+ const connection=new URL(process.env.NEXT_TEST_DATABASE_URL??'');if(!['127.0.0.1','localhost'].includes(connection.hostname)||connection.pathname!=='/store_settle')throw Error('EXPLICIT_LOCAL_TEST_CONNECTION_REQUIRED');
  await mkdir(directory,{recursive:true});const before=snapshot(source);report.sourceBefore=before;
  // Atomic database creation fails if a target already exists; only our freshly-created target is ever dropped.
  sql('postgres',`CREATE DATABASE "${target}";`);created=true;

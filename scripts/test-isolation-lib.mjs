@@ -3,7 +3,7 @@ const TEMPORARY=/^store_test_[0-9]{13}_[a-f0-9]{12}_refactor_p1$/;
 export function sourceConnection(value){
  const url=new URL(value);
  if(!['postgres:','postgresql:'].includes(url.protocol)||!['localhost','127.0.0.1','[::1]'].includes(url.hostname)||!url.username)throw Error('Tests require an explicit local PostgreSQL source');
- const database=decodeURIComponent(url.pathname.slice(1));if(database!=='store_settle_refactor_p1')throw Error('Schema source must be the local refactor replica');
+ const database=decodeURIComponent(url.pathname.slice(1));if(database!=='store_settle')throw Error('Schema source must be the local store_settle database');
  return {url,database,user:decodeURIComponent(url.username)};
 }
 export function temporaryDatabaseName(){return `store_test_${Date.now()}_${randomBytes(6).toString('hex')}_refactor_p1`;}

@@ -34,7 +34,7 @@
 
 > **生产已上线（2026-11-12 23:42，UTC+8）**：`ssh visitworld` / https://store.visitworld.me 当前为 `prod-20261112`（React/NestJS），来源为已验收本地版 `local-staff-menu-20261112`。API/Worker/Gateway健康；继续使用原生产 `store_settle`，没有表结构迁移，也没有用本地库覆盖生产。旧Web/MCP暂停保留供回滚。以下“未操作生产/待生产”等为历史阶段记录，当前执行结果以[生产迁移与回滚计划](计划-生产迁移与回滚.md)顶部为准。
 
-> **最新本地发布（2026-11-12）**：8000当前release为`local-staff-menu-20261112`，上一版`local-search-tags-20261112`保留。员工菜单我的绩效中日文隐藏；195项测试、发布构建和两端只读验收通过。Docker连接store_settle、开发配置store_settle_refactor_p1不变，未操作生产。证据data/refactor/staff-menu-deploy-acceptance.json。
+> **最新本地发布（2026-11-12）**：8000当前release为`local-staff-menu-20261112`，上一版`local-search-tags-20261112`保留。员工菜单我的绩效中日文隐藏；195项测试、发布构建和两端只读验收通过。Docker连接store_settle、开发配置store_settle不变，未操作生产。证据data/refactor/staff-menu-deploy-acceptance.json。
 
 > **本地入口更新（2026-11-12）**：Docker已改为8000，管理端http://localhost:8000/admin/、员工端http://localhost:8000/。release仍为local-acceptance-20261112-theme-b、连接基准库store_settle；开发8001/8002与临时库不变。8080已停止监听，下文8080为历史记录。
 
@@ -53,7 +53,7 @@
 
 已发布 `local-acceptance-20261112-theme-b` 至本地8080，两端包含最新默认主题、管理端头像菜单与已构建界面。HTML由Nginx提供，59项静态资源（含字体）发布到新CDN不可变前缀，部署校验摘要/MIME/CORS通过。
 
-用户本轮明确要求：Docker连接基准库 `store_settle`；日常开发保留 `store_settle_refactor_p1`。已用独立未跟踪配置 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL` 实现，开发配置摘要未变化且开发API统计与原库一致。基准库Docker队列卷独立为 `store-next-jobs-store-settle`，关闭Worker历史任务自动补投；新任务处理正常，system.check通过。
+用户本轮明确要求：Docker连接基准库 `store_settle`；日常开发保留 `store_settle`。已用独立未跟踪配置 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL` 实现，开发配置摘要未变化且开发API统计与原库一致。基准库Docker队列卷独立为 `store-next-jobs-store-settle`，关闭Worker历史任务自动补投；新任务处理正常，system.check通过。
 
 192项测试全部通过，工作区类型检查和发布构建通过。实际Docker内SQL确认current_database=store_settle；API/Worker/gateway健康。8080只读验收12个API、7个两端页面通过，真实CDN加载27项资源无失败，页面无错误/横向溢出；基准库关键表数量与账号密码摘要未变化。证据 `data/refactor/local-docker-baseline-acceptance.json`、`data/refactor/local-baseline-worker.json`。不代表执行了基准库上的写入/导入/发薪验收；这些验证使用隔离测试库完成。
 
@@ -751,3 +751,9 @@ release ID 使用提交标识与构建标识，工作区有未提交修改时禁
 ### 2026-11-12 结算与作业页面对齐
 
 概览恢复原数据看板指标和月度图表；绩效补回期次指标、重复巡店、成功率、找平入口；独立薪资找平页沿用 `carry_map` / `pay_plan` 与实发台账规则。员工、日报、计划、团队、日志和批次页面完成本轮布局修正，进展复核菜单恢复，批次创建使用地图加右侧抽屉。类型检查、服务端和管理端构建、管理及地图浏览器回归通过。下一阶段仍是本地 Docker/CDN 验收，不涉及生产切换。
+
+### 本地数据库统一（2026-11-13）
+
+按用户要求移除旧开发副本，开发与本地Docker统一使用`store_settle`。两个原库均已备份并通过归档清单验证，位置`data/backup/local-db-unification-20261113-141342/`。旧开发库比目标库多2条任务事件，仅保存在旧库备份、不合入目标业务数据；旧搜索日志表为空，在目标库建立同结构日志表。未覆盖商户、任务、账号或结算原值。开发启动器/只读测试结构来源/只读核验脚本/环境示例已改用统一库；Docker仍需显式`NEXT_DOCKER_DATABASE_URL`，业务任务目录分开。
+
+随机`store_test_*_refactor_p1`是隔离运行器临时库名称，后缀保留兼容既有测试保护，绝非被移除的常驻开发库；所有fixture仍只写临时库。直接执行的破坏性验收脚本仍保留隔离库限制，不因统一库放宽。安全整改迁移不在本次范围，不自动执行。

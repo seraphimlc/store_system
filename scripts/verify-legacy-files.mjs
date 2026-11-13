@@ -1,7 +1,7 @@
 /** Read-only local file availability audit; outputs counts, never filenames or record contents. */
 import {createRequire} from 'node:module';import {stat,realpath,mkdir,writeFile} from 'node:fs/promises';import {isAbsolute,resolve,relative} from 'node:path';
 const require=createRequire(new URL('../apps/server/package.json',import.meta.url)),{Pool}=require('pg'),url=new URL(process.env.NEXT_TEST_DATABASE_URL??'');
-if(!['127.0.0.1','localhost'].includes(url.hostname)||!url.pathname.endsWith('_refactor_p1'))throw Error('Explicit local connection required');url.pathname='/store_settle';url.searchParams.set('options','-c default_transaction_read_only=on');const db=new Pool({connectionString:url.href});
+if(!['127.0.0.1','localhost'].includes(url.hostname)||url.pathname!=='/store_settle')throw Error('Explicit local connection required');url.pathname='/store_settle';url.searchParams.set('options','-c default_transaction_read_only=on');const db=new Pool({connectionString:url.href});
 const report={capturedAt:new Date().toISOString(),database:'store_settle',readOnly:false,total:0,legacyReferences:0,legacyAvailable:0,legacyMissing:0,otherReferences:0,otherAvailableAtOriginalPath:0,mappedDirectoryConfigured:!!process.env.NEXT_LEGACY_UPLOAD_HOST_DIRECTORY};
 try{
  report.readOnly=(await db.query("SELECT current_setting('default_transaction_read_only') AS mode")).rows[0].mode==='on';if(!report.readOnly)throw Error('Read-only required');

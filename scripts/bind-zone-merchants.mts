@@ -27,7 +27,7 @@ if (!info.isFile() || info.size > 128 * 1024 * 1024)
     throw Error('Input must be a regular JSON file up to 128 MiB');
 const doc = JSON.parse(await readFile(input, 'utf8'));
 const url = new URL(process.env.NEXT_DATABASE_URL ?? '');
-if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || !['store_settle', 'store_settle_refactor_p1'].includes(url.pathname.slice(1)))
+if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || !['store_settle'].includes(url.pathname.slice(1)))
     throw Error('Binding requires the explicit local source/refactor PostgreSQL database');
 url.searchParams.set('options', '-c default_transaction_read_only=on');
 const db = new Database({ databaseUrl: url.href, sessionSecret: 'offline-merchant-readonly-not-a-session-secret', cookieSecure: false, port: 3000, host: '127.0.0.1' });

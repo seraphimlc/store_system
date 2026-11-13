@@ -180,13 +180,13 @@ export function retiredReleaseNetworks(networks,knownReleases,keepReleases){
  }).map(network=>({id:network.Id,name:network.Name}));
 }
 
-/** Local Docker may explicitly target the restored baseline; dev/test URLs remain independent. */
+/** Docker requires an explicit local store_settle URL; tests use disposable databases. */
 export function localDeploymentDatabase(env){
  const explicit=env.NEXT_DOCKER_DATABASE_URL;
  let url;try{url=new URL(explicit||env.NEXT_DATABASE_URL||'');}catch{throw Error('Local Docker database configuration is required');}
  if(!['postgres:','postgresql:'].includes(url.protocol)||!['127.0.0.1','localhost','host.docker.internal','[::1]'].includes(url.hostname)||!url.username)throw Error('Docker deployment requires a local PostgreSQL database');
  const name=decodeURIComponent(url.pathname.slice(1));
- if(name!=='store_settle_refactor_p1'&&!(explicit&&name==='store_settle'))throw Error('Baseline requires explicit NEXT_DOCKER_DATABASE_URL');
+ if(!(explicit&&name==='store_settle'))throw Error('Baseline requires explicit NEXT_DOCKER_DATABASE_URL');
  if(['127.0.0.1','localhost','[::1]'].includes(url.hostname))url.hostname='host.docker.internal';
  return {url,jobsVolume:name==='store_settle'?'store-next-jobs-store-settle':'store-next-jobs',baseline:name==='store_settle'};
 }
