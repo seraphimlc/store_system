@@ -4,7 +4,7 @@ import {normalizeStoreQuery,storeQueryTerms} from '../../../packages/domain/src/
 import {storeNameBigrams} from '../../../packages/domain/src/store-name-index';
 import {createStoreNameProfiler,storeNameKey} from '../../../packages/domain/src/store-name-compatibility';
 
-export const MERCHANT_SEARCH_VERSION='merchant-guarded-v1';
+export const MERCHANT_SEARCH_VERSION='merchant-guarded-v2';
 export const MERCHANT_SOURCE='public.kanto_merchants_v20261029';
 /** Persist both single characters and bigrams. Verification still checks the actual fields: grams are not evidence. */
 export function merchantLiteralGrams(fields:string[]){
@@ -28,10 +28,10 @@ export async function buildMerchantSearchIndex(client:PoolClient){
    if(typeof row.storeId!=='string'||!row.storeId)throw Error('Missing merchant source identity');
    const name=row.name??'',address=row.address??null,nameKey=storeNameKey(name),normalizedId=normalizeStoreQuery(row.storeId),normalizedName=normalizeStoreQuery(name),normalizedAddress=normalizeStoreQuery(address??'');
    if(nameKey){const previous=groups.get(nameKey);if(previous===undefined||name<previous)groups.set(nameKey,name);}
-   const doc={store_id:row.storeId,name,address,lat:row.lat,lon:row.lon,name_key:nameKey,normalized_id:normalizedId,normalized_name:normalizedName,normalized_address:normalizedAddress,literal_grams:merchantLiteralGrams([normalizedId,normalizedName,normalizedAddress])};
+   const doc={store_id:row.storeId,name,address,lat:row.lat,lon:row.lon,name_key:nameKey,normalized_id:normalizedId,normalized_name:normalizedName,normalized_address:normalizedAddress};
    hash.update(JSON.stringify([doc.store_id,doc.name,doc.address,doc.lat,doc.lon])+'\n');return doc;
   });
-  await client.query(`INSERT INTO bd_merchant_search_document SELECT $1::uuid,d.* FROM jsonb_to_recordset($2::jsonb) AS d(store_id text,name text,address text,lat double precision,lon double precision,name_key text,normalized_id text,normalized_name text,normalized_address text,literal_grams text[])`,[generation,JSON.stringify(documents)]);
+  await client.query(`INSERT INTO bd_merchant_search_document SELECT $1::uuid,d.* FROM jsonb_to_recordset($2::jsonb) AS d(store_id text,name text,address text,lat double precision,lon double precision,name_key text,normalized_id text,normalized_name text,normalized_address text)`,[generation,JSON.stringify(documents)]);
   count+=documents.length;last=rows.at(-1)!.storeId;
  }
  const profiler=createStoreNameProfiler();let pending:any[]=[];

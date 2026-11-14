@@ -1,4 +1,13 @@
 -- Search-only, rebuildable projection. Apply explicitly; never change source merchants or settlement tables.
+-- Tokens live in the GIN expression index, not again in every heap tuple.
+-- PostgreSQL substring uses Unicode code points, matching the shared JS character/bigram generator.
+CREATE OR REPLACE FUNCTION bd_merchant_search_literal_keys(text,text,text) RETURNS text[]
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+ SELECT ARRAY(SELECT DISTINCT substring(f.value FROM i.pos FOR w.n)
+ FROM unnest(ARRAY[$1,$2,$3]) AS f(value)
+ CROSS JOIN unnest(ARRAY[1,2]) AS w(n)
+ CROSS JOIN LATERAL generate_series(1,char_length(f.value)-w.n+1) AS i(pos))
+$$;
 CREATE TABLE IF NOT EXISTS bd_merchant_search_generation (
  id uuid PRIMARY KEY,
  strategy_version text NOT NULL,
@@ -24,10 +33,9 @@ CREATE TABLE IF NOT EXISTS bd_merchant_search_document (
  normalized_id text NOT NULL,
  normalized_name text NOT NULL,
  normalized_address text NOT NULL,
- literal_grams text[] NOT NULL,
  PRIMARY KEY(generation_id,store_id)
 );
-CREATE INDEX IF NOT EXISTS ix_merchant_search_literal ON bd_merchant_search_document USING gin(literal_grams);
+CREATE INDEX IF NOT EXISTS ix_merchant_search_literal ON bd_merchant_search_document USING gin(bd_merchant_search_literal_keys(normalized_id,normalized_name,normalized_address));
 CREATE INDEX IF NOT EXISTS ix_merchant_search_name_key ON bd_merchant_search_document(generation_id,name_key);
 CREATE TABLE IF NOT EXISTS bd_merchant_search_name (
  generation_id uuid NOT NULL REFERENCES bd_merchant_search_generation(id) ON DELETE CASCADE,

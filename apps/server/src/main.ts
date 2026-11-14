@@ -1,3 +1,4 @@
+import {warmMerchantSearch} from './merchant-search-runtime';
 import {McpCredentialsController,McpCredentialsService} from './mcp-credentials';
 import {McpOAuthService} from './mcp-oauth';
 import {McpOAuthController,McpOAuthHttp} from './mcp-oauth-http';
@@ -92,6 +93,7 @@ export async function createApp(config: AppConfig) {
   app.use((req: Request, res: Response, next: NextFunction) => { void mcp.handle(req, res, next).catch(() => { if (!res.headersSent) res.status(500).json({ ok: false, error: { code: 'INTERNAL', message: 'MCP 请求处理失败', retryable: true, hint: '稍后重试' } }); }); });
   app.enableShutdownHooks();
   await app.init();
+  await warmMerchantSearch(app.get(Database));
   return app;
 }
 

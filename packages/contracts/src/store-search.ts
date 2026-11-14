@@ -32,7 +32,7 @@ export interface MerchantSearchGroup {id:number;name:string;count:number;regionI
 export interface MerchantSearchPage {
  total:number;matchedTotal:number;unassignedTotal:number;page:number;pageSize:number;
  gridGroups:MerchantSearchGroup[];regionGroups:MerchantSearchGroup[];items:MerchantSearchItem[];
- searchVersion:string;sourceVersion:string;nameMatchMethod:string|null;status:string;searchMode:'literal'|'related';searchLogId:string|null;
+ searchVersion:string;sourceVersion:string;geographyVersion?:string;nameMatchMethod:string|null;status:string;searchMode:'literal'|'related';searchLogId:string|null;
 }
 
 export interface MerchantSearchFeedback {eventId:string;searchLogId:string;merchantId:string;kind:'opened'|'confirmed'}

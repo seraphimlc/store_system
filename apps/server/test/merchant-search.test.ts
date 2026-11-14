@@ -20,7 +20,13 @@ test('merchant search is global, keyed by source identity and atomically rebuilt
  try{
   await db.query(await readFile('deploy-next/migrations/007-merchant-search-index.sql','utf8'));
   await db.query(await readFile('deploy-next/migrations/008-merchant-search-telemetry.sql','utf8'));
+  await db.query(await readFile('deploy-next/migrations/009-merchant-search-geography-version.sql','utf8'));
+  await db.query(await readFile('deploy-next/migrations/009-merchant-search-geography-version.sql','utf8'));
   await db.query(await readFile('deploy-next/migrations/007-merchant-search-index.sql','utf8'));
+  for(const fields of [['abc商店','新宿1-2','store-1'],['𠮷野家😀','药店',''],['%_','a b','東京都'],['','','']]){
+   const actual=(await db.query('SELECT bd_merchant_search_literal_keys($1,$2,$3) AS keys',fields)).rows[0].keys;
+   assert.deepEqual([...actual].sort(),merchantLiteralGrams(fields),'SQL expression index keys must equal shared JS code-point keys');
+  }
   const actor=(await db.query("INSERT INTO users(username,password_hash,display_name,role,status,is_active,must_change_password,lang,created_at) VALUES('merchant-search-fixture','not-a-login-hash','fixture','staff','active',true,false,'zh',now()) RETURNING id")).rows[0].id;
   await db.query(`INSERT INTO public.kanto_merchants_v20261029(place_id,name,address,lat,lon,target_en,target_zh,sources,overture_id,osm_id,phone,website,region,prefecture,municipality) SELECT id,name,address,35,139,'','','','','','','','','','' FROM (VALUES('merchant-a','ＡＢＣ　商店','新宿1-2'),('merchant-b','あさひ薬局','中野'),('merchant-c','同名商店','東京'),('merchant-d','同名商店','千葉')) AS fixture(id,name,address)`);
   const publish=()=>db.transaction(async client=>{await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');return buildMerchantSearchIndex(client);});
@@ -37,6 +43,7 @@ test('merchant search is global, keyed by source identity and atomically rebuilt
   assert.equal((await service.search(actor,{q:'同名商店',groupGrid:0})).total,2);
   assert.equal((await service.search(actor,{q:'完全不在'})).total,0);
   await assert.rejects(()=>service.search(actor,{q:'商店',scope:'batch'}),{code:'VALIDATION'});
+  await assert.rejects(()=>service.search(actor,{q:'\0药店'}),{code:'VALIDATION'});
   await assert.rejects(()=>service.search(actor,{q:'商店',groupGrid:0,groupRegion:0}),{code:'VALIDATION'});
   await assert.rejects(()=>service.search(-1,{q:'商店'}),{code:'FORBIDDEN'});
   await db.query("DELETE FROM public.kanto_merchants_v20261029 WHERE place_id='merchant-c'");
@@ -76,6 +83,10 @@ test('geographic groups count unique merchants across all pages and releases, no
   const grid=await service.search(f.users[2],{q:'分类样本商户',groupGrid:f.baseGrids[0],page:2});assert.equal(grid.total,22);assert.equal(grid.items.length,2);assert.equal(grid.matchedTotal,25);
   const region=await service.search(f.users[2],{q:'分类样本商户',groupRegion:otherRegion});assert.equal(region.total,1);assert.equal(region.items[0].merchantId,'group-merchant-1');
   assert.equal((await service.search(f.users[2],{q:'分类样本商户',groupGrid:0})).total,2);
+  const geoRevision=async()=>String((await db.query('SELECT revision::text FROM bd_merchant_search_geography_version WHERE singleton')).rows[0].revision);
+  const originalRevision=await geoRevision();await db.query('UPDATE bd_work_grid SET progress=progress+1 WHERE id=$1',[f.baseGrids[0]]);assert.equal(await geoRevision(),originalRevision,'task progress is not a geographic version change');
+  await db.query("UPDATE bd_work_grid SET name='renamed geographic grid' WHERE id=$1",[f.baseGrids[0]]);assert.notEqual(await geoRevision(),originalRevision);
+  const renamed=await service.search(f.users[2],{q:'分类样本商户'});assert.equal(renamed.gridGroups.find((g:any)=>g.id===f.baseGrids[0]).name,'renamed geographic grid');assert.notEqual(renamed.geographyVersion,first.geographyVersion);
   const serialized=JSON.stringify(first);for(const field of ['teamId','assigneeId','mainTaskId','storeTaskId','password_hash'])assert(!serialized.includes(field),'no task/team private fields');
   await db.query("UPDATE bd_region SET state='archived' WHERE id=$1",[otherRegion]);assert.equal((await service.search(f.users[2],{q:'分类样本商户'})).gridGroups.some((g:any)=>g.id===otherGrid),false);
   await db.query("UPDATE bd_work_grid SET state='archived' WHERE id=$1",[f.baseGrids[1]]);assert.equal((await service.search(f.users[2],{q:'分类样本商户'})).unassignedTotal,3);

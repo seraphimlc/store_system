@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {createReadStream} from 'node:fs';import {readFile,mkdir,writeFile} from 'node:fs/promises';import {createInterface} from 'node:readline';import {createHash} from 'node:crypto';import {parseEnv} from 'node:util';import {join,resolve} from 'node:path';
 import {chromium} from '@playwright/test';import {hash} from '@node-rs/argon2';import {createApp} from '../src/main';import {seedBatchWork} from '../../../scripts/batch-work-fixture.mjs';
+import {disposeMerchantSearchRuntime,warmMerchantSearch} from '../src/merchant-search-runtime';
 import {Client} from 'pg';import {Database} from '../src/database';import {buildMerchantSearchIndex} from '../src/merchant-search-index';import {MerchantSearchService} from '../src/merchant-search';
 
 const enabled=process.env.NEXT_MERCHANT_FULL_STAGE==='1',url=process.env.NEXT_TEST_DATABASE_URL;
@@ -14,11 +15,12 @@ test('full frozen merchant corpus: build, real geography and timed global search
  const report:any={createdAt:new Date().toISOString(),snapshot:manifest.version,temporaryDatabase:target.pathname.slice(1),sourceDatabaseWrites:false,productionAccessed:false,phases:[],samples:[]};
  const db=new Database({databaseUrl:url!,sessionSecret:'unused',cookieSecure:false,port:0,host:'127.0.0.1'});let source:Client|undefined;
  const traced={transaction:<T>(fn:(client:any)=>Promise<T>)=>db.transaction(client=>fn({query:async(...args:any[])=>{const t=performance.now();try{return await (client.query as any)(...args);}finally{if(performance.now()-t>500){report.slowStatements??=[];report.slowStatements.push({ms:Math.round(performance.now()-t),sql:String(args[0]).slice(0,180)});if(process.env.NEXT_MERCHANT_EXPLAIN==='1'&&String(args[0]).startsWith('WITH parameters')){try{const plan=await client.query('EXPLAIN (FORMAT JSON) '+args[0],args[1]);await writeFile(join(out,'plan-'+report.slowStatements.length+'.json'),JSON.stringify(plan.rows,null,2),{mode:0o600});}catch{}}}}}}))};
- const service=new MerchantSearchService(traced as Database);
+ const service=new MerchantSearchService(db);
  const phase=async(name:string,fn:()=>Promise<any>)=>{const t=performance.now();const result=await fn();const value={phase:name,ms:Math.round(performance.now()-t),...result};report.phases.push(value);console.log(JSON.stringify(value));await writeFile(join(out,'report.json'),JSON.stringify(report,null,2),{mode:0o600});return result;};
  try{
   await db.query(await readFile('deploy-next/migrations/007-merchant-search-index.sql','utf8'));
   await db.query(await readFile('deploy-next/migrations/008-merchant-search-telemetry.sql','utf8'));
+  await db.query(await readFile('deploy-next/migrations/009-merchant-search-geography-version.sql','utf8'));
   const actor=(await db.query("INSERT INTO users(username,password_hash,display_name,role,status,is_active,must_change_password,lang,created_at) VALUES('merchant-full-stage','not-a-login-hash','fixture','staff','active',true,false,'zh',now()) RETURNING id")).rows[0].id;
   await phase('load-frozen-merchants',async()=>{
    const stream=createReadStream(join(root,'merchants.jsonl')),hash=createHash('sha256');stream.on('data',chunk=>hash.update(chunk));let batch:any[]=[],count=0;
@@ -41,11 +43,13 @@ test('full frozen merchant corpus: build, real geography and timed global search
   const generation=await phase('build-persisted-index',()=>db.transaction(async client=>{await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ; SET LOCAL statement_timeout=0");return buildMerchantSearchIndex(client);}));assert.equal(generation.documentCount,620280);
   await phase('analyze-disposable-only',async()=>{for(const table of ['bd_merchant_search_document','bd_merchant_search_name','bd_merchant_search_gram_weight','bd_grid_store','bd_work_grid','bd_region'])await db.query('ANALYZE '+table);return {};});
   const queries=['東京都','新宿','東京 新宿','焼肉 中央苑','新宿中央薬局','炭火焼鳥 西田屋 下北沢店','长乐药店','chocoZAP','ｃｈｏｃｏＺＡＰ','長楽薬店','薬局','店','zzzz完全不存在987654321','セブンイレブン','コーヒー','カフェ 新宿'];
+  await phase('warm-runtime-before-readiness',async()=>{await warmMerchantSearch(db);return {rss:process.memoryUsage().rss};});
   await phase('cold-searches',async()=>{for(const q of queries){const t=performance.now();try{const r=await service.search(actor,{q});report.samples.push({q,ms:Math.round(performance.now()-t),total:r.total,unassigned:r.unassignedTotal,grids:r.gridGroups.length,method:r.nameMatchMethod,mode:r.searchMode,ok:true});}catch(e){report.samples.push({q,ms:Math.round(performance.now()-t),ok:false,message:(e as Error).message,code:(e as any).code});}}return {samples:report.samples};});
   assert(report.samples.every((s:any)=>s.ok),'Complete corpus search must not timeout; inspect private stage report');
   const timings:number[]=[],errors:any[]=[];let next=0;
   await phase('five-concurrent-200-requests',async()=>{await Promise.all(Array.from({length:5},async()=>{for(;;){const index=next++;if(index>=200)break;const t=performance.now();try{const response=await service.search(actor,{q:queries[index%queries.length]});assert(response.searchLogId,'Merchant telemetry must persist under the measured load');timings.push(performance.now()-t);}catch(e){errors.push({index,code:(e as any).code,message:(e as Error).message});}}}));timings.sort((a,b)=>a-b);return {requests:200,errors,p95:Math.round(timings[Math.ceil(timings.length*.95)-1]??0),p99:Math.round(timings[Math.ceil(timings.length*.99)-1]??0)};});
   const perf=report.phases.at(-1);assert.equal(errors.length,0);assert(perf.p95<=1000&&perf.p99<=2000,'Latency target not achieved');
+  disposeMerchantSearchRuntime(db);
   await phase('actual-nest-vite-browser',async()=>{
    const app=await createApp({databaseUrl:url!,sessionSecret:'merchant-browser-isolated-secret-at-least-forty-characters',cookieSecure:false,port:0,host:'127.0.0.1'});let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
    try{
