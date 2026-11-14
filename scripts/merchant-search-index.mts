@@ -19,6 +19,6 @@ try{
  }else{
   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ; SET LOCAL lock_timeout='5s'");
   if(action==='schema'){await client.query(await readFile(new URL('../deploy-next/migrations/007-merchant-search-index.sql',import.meta.url),'utf8'));await client.query(await readFile(new URL('../deploy-next/migrations/008-merchant-search-telemetry.sql',import.meta.url),'utf8'));await client.query(await readFile(new URL('../deploy-next/migrations/009-merchant-search-geography-version.sql',import.meta.url),'utf8'));await client.query('COMMIT');console.log(JSON.stringify({database,schemaApplied:true,sourceRowsChanged:false}));}
-  else{const result=await buildMerchantSearchIndex(client);await client.query('COMMIT');console.log(JSON.stringify({database,...result,sourceRowsChanged:false}));}
+  else{const result=await buildMerchantSearchIndex(client);await client.query('COMMIT');await client.query('VACUUM ANALYZE bd_merchant_search_name_posting');console.log(JSON.stringify({database,...result,sourceRowsChanged:false}));}
  }
 }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{await client.end();}

@@ -60,3 +60,13 @@ CREATE TABLE IF NOT EXISTS bd_merchant_search_gram_weight (
 -- Existing (release_id,source_id) uniqueness cannot support global source lookups without a release prefix.
 -- This changes no source/association rows and allows the same live geographic mapping after merchant retrieval.
 CREATE INDEX IF NOT EXISTS ix_bd_grid_store_source_id ON bd_grid_store(source_id);
+
+-- Covering weighted-name postings: calculate overlap/score without reading wide profile rows.
+CREATE TABLE IF NOT EXISTS bd_merchant_search_name_posting (
+ generation_id uuid NOT NULL REFERENCES bd_merchant_search_generation(id) ON DELETE CASCADE,
+ gram text NOT NULL,
+ name_key text NOT NULL,
+ key_length integer NOT NULL,
+ gram_weight double precision NOT NULL,
+ PRIMARY KEY(generation_id,gram,name_key) INCLUDE(key_length,gram_weight)
+);

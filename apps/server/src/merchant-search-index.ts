@@ -4,7 +4,7 @@ import {normalizeStoreQuery,storeQueryTerms} from '../../../packages/domain/src/
 import {storeNameBigrams} from '../../../packages/domain/src/store-name-index';
 import {createStoreNameProfiler,storeNameKey} from '../../../packages/domain/src/store-name-compatibility';
 
-export const MERCHANT_SEARCH_VERSION='merchant-guarded-v2';
+export const MERCHANT_SEARCH_VERSION='merchant-guarded-v3';
 export const MERCHANT_SOURCE='public.kanto_merchants_v20261029';
 /** Persist both single characters and bigrams. Verification still checks the actual fields: grams are not evidence. */
 export function merchantLiteralGrams(fields:string[]){
@@ -39,6 +39,7 @@ export async function buildMerchantSearchIndex(client:PoolClient){
  for(const [key,name] of groups){const profile=profiler(name);pending.push({name_key:key,name,profile,key_length:[...key].length,grams:storeNameBigrams(key),core_key:merchantCoreKey(profile)});if(pending.length===1000)await flush();}await flush();
  await client.query(`INSERT INTO bd_merchant_search_gram_weight SELECT $1::uuid,gram,1+ln(($2::double precision+1)/(count(*)+1)) FROM bd_merchant_search_name n CROSS JOIN LATERAL unnest(n.grams) AS gram WHERE n.generation_id=$1 GROUP BY gram`,[generation,groups.size]);
  await client.query(`WITH totals AS(SELECT n.name_key,sum(w.weight) AS weight FROM bd_merchant_search_name n CROSS JOIN LATERAL unnest(n.grams) AS x(gram) JOIN bd_merchant_search_gram_weight w ON w.generation_id=n.generation_id AND w.gram=x.gram WHERE n.generation_id=$1 GROUP BY n.name_key) UPDATE bd_merchant_search_name n SET gram_weight=t.weight FROM totals t WHERE n.generation_id=$1 AND n.name_key=t.name_key`,[generation]);
+ await client.query(`INSERT INTO bd_merchant_search_name_posting SELECT n.generation_id,x.gram,n.name_key,n.key_length,n.gram_weight FROM bd_merchant_search_name n CROSS JOIN LATERAL unnest(n.grams) x(gram) WHERE n.generation_id=$1`,[generation]);
  const sourceSha256=hash.digest('hex');
  await client.query('UPDATE bd_merchant_search_generation SET source_sha256=$2,document_count=$3,group_count=$4,ready=true WHERE id=$1',[generation,sourceSha256,count,groups.size]);
  await client.query('INSERT INTO bd_merchant_search_active(singleton,generation_id) VALUES(true,$1) ON CONFLICT(singleton) DO UPDATE SET generation_id=excluded.generation_id',[generation]);
