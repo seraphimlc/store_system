@@ -1,0 +1,27 @@
+import 'reflect-metadata';import test from 'node:test';import assert from 'node:assert/strict';import {hash} from '@node-rs/argon2';import {performance} from 'node:perf_hooks';import {createRequire} from 'node:module';import {mkdir,writeFile} from 'node:fs/promises';
+import {createApp} from '../src/main';import {Database} from '../src/database';import {BatchWorkService} from '../src/batch-work';import {seedBatchWork,clearBatchWork} from '../../../scripts/batch-work-fixture.mjs';
+const url=process.env.NEXT_TEST_DATABASE_URL,{Pool}=createRequire(import.meta.url)('pg');
+function requireDisposable(){assert.equal(process.env.NEXT_TEST_ISOLATED,'1');const parsed=new URL(url!);assert.ok(['localhost','127.0.0.1','[::1]'].includes(parsed.hostname));assert.match(parsed.pathname,/^\/store_test_\d{13}_[a-f0-9]{12}_refactor_p1$/);}
+async function evidence(kind:string,data:unknown){await mkdir('data/refactor/search-evaluation',{recursive:true,mode:0o700});const file='data/refactor/search-evaluation/connections-'+kind+'-'+Date.now()+'.json';await writeFile(file,JSON.stringify(data,null,2),{mode:0o600,flag:'wx'});console.log(JSON.stringify({searchConnectionEvidence:{file,...data as object}}));}
+test('exhausted application pool rejects rather than returning a false empty search, then recovers when leases are released',{skip:!url},async()=>{
+ requireDisposable();const app=await createApp({databaseUrl:url!,sessionSecret:'search-pool-test-secret-at-least-forty-characters',cookieSecure:false,host:'127.0.0.1',port:0}),db=app.get(Database),service=app.get(BatchWorkService),leases:any[]=[];let f:any;
+ try{f=await seedBatchWork(db,'POOL-BOUNDARY-'+Date.now(),await hash('fixture-pass'));const grid=f.grids[0][0],id=f.stores[0][0][0];await db.query("UPDATE bd_store_task SET snapshot=jsonb_build_object('name','ABCDEF','address','mock') WHERE id=$1",[id]);
+  for(let i=0;i<8;i++)leases.push(await db.pool.connect());assert.equal(db.pool.totalCount,8);assert.equal(db.pool.idleCount,0);
+  const start=performance.now();await assert.rejects(()=>service.visits(f.users[2],grid,{q:'ABCDEF'}),error=>error instanceof Error&&/timeout/i.test(error.message));const elapsed=performance.now()-start;assert.ok(elapsed>=2500&&elapsed<5000,'existing three-second pool budget must bound acquisition');
+  for(const client of leases.splice(0))client.release();const recovered=await service.visits(f.users[2],grid,{q:'ABCDEF'});assert.equal(recovered.total,1);assert.equal(recovered.items[0].id,id);assert.ok(recovered.searchLogId);assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_store_search_log')).rows[0].n,1,'failed acquisition created no phantom search log');
+  await evidence('exhaustion',{scenario:'eight leased application clients; existing three-second acquisition budget',durationMs:elapsed,poolMax:8,recovered:true,falseZeroResult:false,productionAccessed:false,database:'disposable'});
+ }finally{for(const client of leases)client.release();if(f)await clearBatchWork(db,f);await app.close();}
+});
+test('terminated idle test-app connection is discarded and the next authorized search reconnects without changing data',{skip:!url},async()=>{
+ requireDisposable();const app=await createApp({databaseUrl:url!,sessionSecret:'search-disconnect-secret-at-least-forty-characters',cookieSecure:false,host:'127.0.0.1',port:0}),db=app.get(Database),service=app.get(BatchWorkService),control=new Pool({connectionString:url!,max:1,application_name:'search-disposable-fault-control'});let f:any;
+ try{f=await seedBatchWork(db,'DISCONNECT-'+Date.now(),await hash('fixture-pass'));const grid=f.grids[0][0],id=f.stores[0][0][0];await db.query("UPDATE bd_store_task SET snapshot=jsonb_build_object('name','ABCDEF','address','mock') WHERE id=$1",[id]);
+  const client=await db.pool.connect();const pid=(await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;client.release();
+  const scope=(await control.query('SELECT datname,application_name,state FROM pg_stat_activity WHERE pid=$1',[pid])).rows[0];assert.equal(scope.datname,new URL(url!).pathname.slice(1));assert.equal(scope.application_name,'store-next-api');assert.equal(scope.state,'idle');
+  const disconnected=new Promise<void>(resolve=>db.pool.once('error',()=>resolve()));const guard=setTimeout(()=>{},3000);
+  try{assert.equal((await control.query('SELECT pg_terminate_backend(pid) AS terminated FROM pg_stat_activity WHERE pid=$1 AND datname=$2 AND application_name=$3 AND state=$4',[pid,scope.datname,'store-next-api','idle'])).rows[0].terminated,true);
+   await Promise.race([disconnected,new Promise((_,reject)=>setTimeout(()=>reject(Error('Pool did not observe disconnected idle client')),2500))]);
+  }finally{clearTimeout(guard);}
+  const result=await service.visits(f.users[2],grid,{q:'ABCDEF'});assert.equal(result.total,1);assert.equal(result.items[0].id,id);assert.ok(result.searchLogId);const newPid=(await db.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;assert.notEqual(newPid,pid);assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_task_event')).rows[0].n,0);
+  await evidence('idle-disconnect',{scenario:'one idle application connection terminated by exact pid in disposable database',poolObservedError:true,reconnected:true,recovered:true,productionAccessed:false,database:'disposable',limitation:'not network partition, PostgreSQL restart or disk failure'});
+ }finally{await control.end();if(f)await clearBatchWork(db,f);await app.close();}
+});

@@ -19,3 +19,8 @@ test('multipart request preserves browser boundary and sends only CSRF header',a
   assert.deepEqual(await upload('/imports/upload',{csrfToken:'fixture',user:{}},form),{id:1});assert.equal(headers['X-CSRF-Token'],'fixture');assert.equal(headers['Content-Type'],undefined);
  }finally{globalThis.fetch=original;}
 });
+
+test('optional cancellation reaches fetch and preserves abort instead of reporting a network error',async()=>{
+ const original=globalThis.fetch,controller=new AbortController();const abort=new DOMException('Aborted','AbortError');
+ try{globalThis.fetch=async(_url,init)=>{assert.equal(init.signal,controller.signal);controller.abort();throw abort;};await assert.rejects(()=>api('/completions',null,undefined,controller.signal),error=>error===abort);}finally{globalThis.fetch=original;}
+});

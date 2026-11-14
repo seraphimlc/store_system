@@ -20,10 +20,12 @@ test('search log SQL creates a missing table and is repeatable without losing lo
   await client.query(sql);
   const row=(await client.query('SELECT * FROM bd_store_search_log')).rows[0];assert.equal(row.query_text,'schema-probe');assert.equal(row.matched_count,0);assert.equal(row.used_location,false);assert.equal(Object.keys(row).length,21);
   assert.equal((await client.query('SELECT count(*)::int AS n FROM pg_indexes WHERE schemaname=$1',[schema])).rows[0].n,3);
+  const strategySql=await readFile('deploy-next/migrations/003-store-search-strategy.sql','utf8');await client.query(strategySql);await client.query(strategySql);assert.equal((await client.query('SELECT strategy_version FROM bd_store_search_log')).rows[0].strategy_version,'legacy-literal-v0');
+  const feedbackSql=await readFile('deploy-next/migrations/004-store-search-feedback.sql','utf8');await client.query(feedbackSql);await client.query(feedbackSql);assert.deepEqual((await client.query('SELECT result_task_ids,request_id,query_session_id FROM bd_store_search_log')).rows[0],{result_task_ids:[],request_id:null,query_session_id:null});
   await client.query('SET LOCAL search_path TO public');await client.query(`DROP SCHEMA "${schema}" CASCADE`);
  });}finally{await app.close();}
 });
-test('search audit distinguishes filters and normalization evidence, ignores paging, and feeds read-only daily summary',{skip:!url},async()=>{
+test('search audit keeps page provenance but excludes paging from first-page daily rates',{skip:!url},async()=>{
  const app=await createApp({databaseUrl:url!,sessionSecret:'search-log-test-secret-at-least-forty-characters',cookieSecure:false,port:0,host:'127.0.0.1'}),db=app.get(Database),service=app.get(BatchWorkService);let f:any;
  try{
   f=await seedBatchWork(db,'SEARCH-LOG-'+Date.now(),await hash('fixture-pass'));
@@ -31,18 +33,18 @@ test('search audit distinguishes filters and normalization evidence, ignores pag
   await db.query("UPDATE bd_store_task SET snapshot=jsonb_build_object('name','ＡＢＣ　商店','address','テスト住所') WHERE id=$1",[store]);
   const search=async(q:string,state='')=>service.visits(actor,grid,{q,state});
   assert.equal((await search('不存在的店')).total,0);
-  assert.equal((await search('ABC商店')).total,0);
+  assert.equal((await search('ABC商店')).total,1);
   assert.equal((await search('ＡＢＣ','completed')).total,0);
   assert.equal((await search('ＡＢＣ')).total,1);
   const before=(await db.query('SELECT count(*)::int AS n FROM bd_store_search_log WHERE grid_task_id=$1',[grid])).rows[0].n;
   await service.visits(actor,grid,{q:'ＡＢＣ',page:2});await service.visits(actor,grid,{});
-  assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_store_search_log WHERE grid_task_id=$1',[grid])).rows[0].n,before);
-  const rows=(await db.query('SELECT * FROM bd_store_search_log WHERE grid_task_id=$1 ORDER BY id',[grid])).rows;
-  assert.equal(rows.length,4);assert.deepEqual(rows.map(r=>r.no_result_reason),['unresolved','normalization_candidate','filters_excluded','']);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_store_search_log WHERE grid_task_id=$1',[grid])).rows[0].n,before+1);
+  const rows=(await db.query('SELECT * FROM bd_store_search_log WHERE grid_task_id=$1 AND page=1 ORDER BY id',[grid])).rows;
+  assert.ok(rows.every(r=>r.strategy_version==='terms-nfkc-v2'));assert.equal(rows.length,4);assert.deepEqual(rows.map(r=>r.no_result_reason),['unresolved','','filters_excluded','']);
   assert.equal(rows[1].normalized_match_count,1);assert.equal(rows[2].keyword_match_count,1);assert.equal(rows[3].matched_count,1);assert.equal(rows[0].actor_id,actor);assert.ok(rows.every(r=>r.duration_ms>=0));
   assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_task_event WHERE main_task_id=$1',[f.mains[0]])).rows[0].n,0,'searches do not create business events');
   await assert.rejects(()=>service.visits(f.users[4],grid,{q:'店'}),{code:'FORBIDDEN'});
-  const summary=spawnSync(process.execPath,['scripts/analyze-store-search.mjs'],{env:{...process.env,NEXT_DATABASE_URL:url!},encoding:'utf8'});assert.equal(summary.status,0,summary.stderr);const report=JSON.parse(summary.stdout);assert.equal(report.searches,4);assert.equal(report.zero_result_searches,3);assert.equal(report.result_searches,1);assert.equal(Number(report.result_rate_percent),25);
+  const summary=spawnSync(process.execPath,['scripts/analyze-store-search.mjs'],{env:{...process.env,NEXT_DATABASE_URL:url!},encoding:'utf8'});assert.equal(summary.status,0,summary.stderr);const report=JSON.parse(summary.stdout);assert.equal(report.searches,4);assert.equal(report.zero_result_searches,2);assert.equal(report.result_searches,2);assert.equal(Number(report.result_rate_percent),50);assert.equal(report.by_strategy[0].strategy_version,'terms-nfkc-v2');
   const empty=spawnSync(process.execPath,['scripts/analyze-store-search.mjs','--date','2000-01-01'],{env:{...process.env,NEXT_DATABASE_URL:url!},encoding:'utf8'});assert.equal(empty.status,0,empty.stderr);assert.equal(JSON.parse(empty.stdout).result_rate_percent,null);
   // Logging failure must not turn a valid search into an error.
   await db.transaction(async client=>{await client.query('ALTER TABLE bd_store_search_log RENAME TO bd_store_search_log_offline');});

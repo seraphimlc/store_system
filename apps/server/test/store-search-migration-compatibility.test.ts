@@ -1,0 +1,27 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {readFile,mkdir,writeFile} from 'node:fs/promises';import {randomUUID} from 'node:crypto';
+const {Pool}=createRequire(import.meta.url)('pg'),url=process.env.NEXT_TEST_DATABASE_URL;
+test('search migrations roll back atomically on failure and support old/new telemetry writers without schema downgrade',{skip:!url},async()=>{
+ assert.equal(process.env.NEXT_TEST_ISOLATED,'1');assert.match(new URL(url!).pathname,/^\/store_test_\d{13}_[a-f0-9]{12}_refactor_p1$/);
+ const pool=new Pool({connectionString:url!,max:1}),c=await pool.connect(),schema='search_compat_'+randomUUID().replaceAll('-','');
+ const initial=await readFile('deploy-next/migrations/002-store-search-log.sql','utf8'),strategy=await readFile('deploy-next/migrations/003-store-search-strategy.sql','utf8'),feedback=await readFile('deploy-next/migrations/004-store-search-feedback.sql','utf8'),completion=await readFile('deploy-next/migrations/005-store-completion-feedback.sql','utf8'),scope=await readFile('deploy-next/migrations/006-store-search-scope.sql','utf8');
+ try{
+  await c.query('BEGIN');await c.query(`CREATE SCHEMA "${schema}"`);await c.query(`SET LOCAL search_path TO "${schema}"`);await c.query(initial);
+  const legacyId=(await c.query("INSERT INTO bd_store_search_log(main_task_id,region_task_id,grid_task_id,query_text,matched_count,created_at) VALUES(1,2,3,'legacy fixture',1,'2026-10-01') RETURNING id")).rows[0].id;await c.query('COMMIT');
+  await c.query('BEGIN');await c.query(`SET LOCAL search_path TO "${schema}"`);await c.query(strategy);await c.query(feedback);await c.query(completion);await c.query(scope);await assert.rejects(()=>c.query('SELECT deliberately_missing_search_compatibility_function()'));await c.query('ROLLBACK');
+  const failed=(await c.query("SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='bd_store_search_log' ORDER BY ordinal_position",[schema])).rows.map((r:any)=>r.column_name);
+  assert.equal(failed.length,21);assert.ok(!failed.includes('strategy_version'));assert.equal((await c.query('SELECT to_regclass($1)::text AS name',[schema+'.bd_store_search_feedback'])).rows[0].name,null);
+  await c.query('BEGIN');await c.query(`SET LOCAL search_path TO "${schema}"`);await c.query(strategy);await c.query(feedback);await c.query(completion);await c.query(scope);await c.query(strategy);await c.query(feedback);await c.query(completion);await c.query(scope);
+  assert.equal((await c.query('SELECT count(*)::int AS n FROM bd_store_search_log')).rows[0].n,1);
+  const defaults=(await c.query('SELECT strategy_version,result_task_ids,request_id,search_scope,scope_grid_task_ids,group_grid_task_id,group_region_task_id FROM bd_store_search_log WHERE id=$1',[legacyId])).rows[0];assert.deepEqual(defaults,{strategy_version:'legacy-literal-v0',result_task_ids:[],request_id:null,search_scope:'grid',scope_grid_task_ids:[],group_grid_task_id:null,group_region_task_id:null});
+  const modernId=(await c.query("INSERT INTO bd_store_search_log(main_task_id,region_task_id,grid_task_id,query_text,matched_count,strategy_version,request_id,result_task_ids,created_at) VALUES(1,2,3,'new fixture',1,'terms-nfkc-v2',$1,'[7]',now()) RETURNING id",[randomUUID()])).rows[0].id;
+  await c.query("INSERT INTO bd_store_search_feedback(event_id,search_log_id,actor_id,kind,store_task_id,strategy_version) VALUES($1,$2,1,'confirmed',7,'terms-nfkc-v2')",[randomUUID(),modernId]);
+  const batchId=(await c.query("INSERT INTO bd_store_search_log(main_task_id,region_task_id,grid_task_id,query_text,matched_count,strategy_version,result_task_ids,search_scope,scope_grid_task_ids,group_region_task_id,created_at) VALUES(1,2,3,'batch fixture',1,'batch-guarded-name-index-v1','[7]','batch','[3,4]',2,now()) RETURNING id")).rows[0].id;
+  await c.query("INSERT INTO bd_store_search_feedback(event_id,search_log_id,actor_id,kind,suggested_name,strategy_version) VALUES($1,$2,1,'completion_selected','fixture-name','name-prefix-v1')",[randomUUID(),batchId]);
+  // Simulated code rollback: same old INSERT column list; keep all new telemetry and schema.
+  await c.query("INSERT INTO bd_store_search_log(main_task_id,region_task_id,grid_task_id,query_text,created_at) VALUES(1,2,3,'old writer after rollback',now())");
+  assert.equal((await c.query('SELECT count(*)::int AS n FROM bd_store_search_log')).rows[0].n,4);assert.equal((await c.query('SELECT count(*)::int AS n FROM bd_store_search_feedback')).rows[0].n,2);
+  await c.query('COMMIT');
+  const report={passed:true,scenario:'isolated schema migration rehearsal; no release CLI or Docker switch',initialColumns:21,failedTransactionRolledBack:true,existingLogsPreserved:true,repeatedMigrationSafe:true,legacyWriterAfterUpgrade:true,modernWriterAndFeedback:true,migrationsThrough006:true,batchScopeAndCompletionPreserved:true,rollbackMeansCodeOnly:true,productionAccessed:false};
+  await mkdir('data/refactor/search-evaluation',{recursive:true,mode:0o700});const file='data/refactor/search-evaluation/migration-compatibility-'+Date.now()+'.json';await writeFile(file,JSON.stringify(report,null,2),{mode:0o600,flag:'wx'});console.log(JSON.stringify({searchMigrationCompatibility:{file,...report}}));
+ }finally{await c.query('ROLLBACK');await c.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);c.release();await pool.end();}
+});

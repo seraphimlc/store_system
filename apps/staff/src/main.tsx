@@ -5,7 +5,7 @@ import {WorkRouter} from './work/WorkRouter';
 import {MyStationTasks} from './MyStationTasks';
 import { StrictMode, useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Badge, Button, ConfigProvider, List, NavBar, Popup } from 'antd-mobile';
+import { Badge, Button, ConfigProvider, List, NavBar, Popup, unstableSetRender } from 'antd-mobile';
 import zhCN from 'antd-mobile/es/locales/zh-CN';
 import jaJP from 'antd-mobile/es/locales/ja-JP';
 import { ClipboardList, UserRound, ChevronRight, Globe2, LogOut, LockKeyhole, FileText, CalendarDays, Mail, Menu, MapPinned } from 'lucide-react';
@@ -120,4 +120,6 @@ function App() {
     </div>}
   </ConfigProvider>;
 }
+// Ant Design Mobile v5 imperative overlays must use the React 19 root lifecycle.
+unstableSetRender((node,container)=>{const root=createRoot(container);root.render(node);return async()=>{await new Promise<void>(resolve=>setTimeout(resolve,0));root.unmount();};});
 createRoot(document.getElementById('root')!).render(<StrictMode><App/></StrictMode>);

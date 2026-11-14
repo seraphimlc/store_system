@@ -32,6 +32,10 @@ async function main(){
   cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],schema);
   cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/001-auth-security.sql','utf8'));
   cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/002-store-search-log.sql','utf8'));
+  cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/003-store-search-strategy.sql','utf8'));
+  cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/004-store-search-feedback.sql','utf8'));
+  cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/005-store-completion-feedback.sql','utf8'));
+  cli(['exec','-i',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-U',source.user,'-d',name],await readFile('deploy-next/migrations/006-store-search-scope.sql','utf8'));
   if(interrupted)throw Error('Test setup interrupted');
   const target=new URL(source.url);target.pathname='/'+name;
   const probe=new Pool({connectionString:target.href,max:1});try{const row=(await probe.query('SELECT (SELECT count(*)::int FROM users) AS users,(SELECT count(*)::int FROM formal_records) AS records')).rows[0];if(row.users||row.records)throw Error('Disposable test database must have schema only');}finally{await probe.end();}
