@@ -21,3 +21,18 @@ export interface StoreSearchMatchEvidence {mode:'literal'|'related';method?:'fol
 export type StoreRelatedStatus='ready'|'unsupported_query'|'literal_results'|'scope_too_large'|'filters_excluded';
 
 export interface StoreSearchResultGroup {id:number;name:string|null;count:number;regionTaskId?:number;regionName?:string|null}
+
+
+/** Merchant identity is a source place_id, never a task ID. Geographic groups contain no task/team metadata. */
+export interface MerchantSearchItem {
+ merchantId:string;name:string;address:string|null;lat:number|null;lon:number|null;
+ searchMatch:StoreSearchMatchEvidence;
+}
+export interface MerchantSearchGroup {id:number;name:string;count:number;regionId?:number;regionName?:string}
+export interface MerchantSearchPage {
+ total:number;matchedTotal:number;unassignedTotal:number;page:number;pageSize:number;
+ gridGroups:MerchantSearchGroup[];regionGroups:MerchantSearchGroup[];items:MerchantSearchItem[];
+ searchVersion:string;sourceVersion:string;nameMatchMethod:string|null;status:string;searchMode:'literal'|'related';searchLogId:string|null;
+}
+
+export interface MerchantSearchFeedback {eventId:string;searchLogId:string;merchantId:string;kind:'opened'|'confirmed'}

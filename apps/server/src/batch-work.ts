@@ -1,3 +1,4 @@
+import {MerchantSearchService} from './merchant-search';
 import {storeNameCompletions} from './store-search-completions';
 import {writeStoreSearchTelemetry,searchFailureKind,suggestionFailure} from './store-search-resilience';
 import {signSuggestionReceipt,verifySuggestionReceipt} from './store-suggestion-receipt';
@@ -22,6 +23,8 @@ interface Actor{id:number;role:string;code:string|null;name:string;username:stri
 @Injectable()
 export class BatchWorkService{
  constructor(@Inject(Database)private readonly db:Database){}
+ async merchantSearch(actorId:number,query:unknown){return new MerchantSearchService(this.db).search(actorId,query);}
+ async merchantSearchFeedback(actorId:number,value:unknown){return new MerchantSearchService(this.db).feedback(actorId,value);}
  private async actor(client:PoolClient,id:number,lock=false):Promise<Actor>{const row=(await client.query<Actor>(`SELECT id,role,person_code AS code,display_name AS name,username FROM users WHERE id=$1 AND is_active=true AND status='active' ${lock?'FOR SHARE':''}`,[id])).rows[0];if(!row)throw new BusinessError('STAFF_NOT_ACTIVE','当前账号未在岗，不能执行作业',403);return row;}
  private async membership(client:PoolClient,actor:Actor,region:any){return(await client.query(`SELECT m.role,t.name AS "teamName",(SELECT count(*)::int FROM bd_team_member x WHERE x.team_id=m.team_id AND x.role='leader' AND x.end_date IS NULL) AS leaders,(SELECT count(*)::int FROM users u JOIN bd_team_member x ON x.person_code=u.person_code WHERE x.team_id=m.team_id AND x.role='leader' AND x.end_date IS NULL AND u.is_active=true AND u.status='active' AND u.role IN('staff','leader')) AS "leaderAccounts" FROM bd_team_member m JOIN bd_team t ON t.id=m.team_id WHERE m.team_id=$1 AND m.person_code=$2 AND m.end_date IS NULL AND m.start_date<=(now() AT TIME ZONE 'Asia/Tokyo')::date AND t.status='active'`,[region.team_id,actor.code])).rows[0]??null;}
  private captain(actor:Actor,region:any,membership:any){return actor.id===region.leader_id&&membership?.role==='leader'&&membership.leaders===1&&membership.leaderAccounts===1&&['staff','leader'].includes(actor.role);}
@@ -392,6 +395,8 @@ export class BatchPhotoUploadGuard implements CanActivate{
 @Controller('batch-work')
 export class BatchWorkController{
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(BatchWorkService)private readonly service:BatchWorkService){}
+ @Post('merchants/search-feedback')async merchantFeedback(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{write:true});return this.service.merchantSearchFeedback(user.id,body);}
+ @Get('merchants/search')async merchantSearch(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req);return this.service.merchantSearch(user.id,query);}
  @Get('creation-regions')async creationRegions(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.creationRegions(user.id,query);}
  @Post('batches')async create(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.create(user.id,body);}
  @Post('batches/:id/disable')async disable(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.disable(user.id,parse(identity,id),body);}
