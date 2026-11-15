@@ -9,6 +9,8 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import { Database } from './database';
 import { BusinessError } from './errors';
 import { passwordWork } from './password-work';
+import { jstToday } from './business-dates';
+import { syncTeamAccountRoles } from './team-roles';
 
 export const employeeStates = ['active', 'leave', 'disabled', 'resigned'] as const;
 export type EmployeeState = typeof employeeStates[number];
@@ -122,13 +124,31 @@ export class EmployeeService {
     await client.query('UPDATE users SET status=$1,is_active=$2 WHERE id=$3', [status, active, id]);
     return { id, status, isActive: active, tokenUsable: status === 'active' };
   }
-  async remove(id: number, expectedStatus: EmployeeState) {
+  async remove(id: number, expectedStatus: EmployeeState, actor: { username: string; displayName: string }) {
     return this.db.transaction(async client => {
-      const target = (await client.query("SELECT status FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE", [id])).rows[0];
+      const target = (await client.query("SELECT status, person_code, display_name FROM users WHERE id=$1 AND role IN ('staff','leader') AND status<>'deleted' FOR UPDATE", [id])).rows[0];
       if (!target) throw new BusinessError('NOT_FOUND', '员工不存在或已删除', 404);
       if (target.status !== expectedStatus) throw new BusinessError('CONFLICT', '员工状态已更新，请刷新后重试', 409);
+      let removedTeams = 0;
+      if (target.person_code) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('teams-write'),0)");
+        const memberships = (await client.query(`SELECT m.id, m.team_id, m.role, t.name AS team_name
+          FROM bd_team_member m JOIN bd_team t ON t.id=m.team_id
+          WHERE m.person_code=$1 AND m.end_date IS NULL FOR UPDATE OF m`, [target.person_code])).rows;
+        const day = jstToday();
+        const name = target.display_name || target.person_code;
+        for (const row of memberships) {
+          await client.query('UPDATE bd_team_member SET end_date=$1 WHERE id=$2', [day, row.id]);
+          const duty = row.role === 'leader' ? '队长' : '队员';
+          await client.query(`INSERT INTO bd_log(domain,action,ref_id,ref_label,field,old_value,new_value,actor,actor_name,note,created_at)
+            VALUES('member','remove',$1,$2,'成员',$3,'',$4,$5,'删除员工时自动移出，记录保留',now())`,
+            [row.team_id, `${row.team_name} / ${name}`.slice(0, 128), `${name}（${duty}）`, actor.username, actor.displayName]);
+          removedTeams++;
+        }
+      }
       await client.query("UPDATE users SET status='deleted',is_active=false WHERE id=$1", [id]);
-      return { id, deleted: true };
+      if (removedTeams) await syncTeamAccountRoles(client);
+      return { id, deleted: true, removedTeams };
     });
   }
   async reset(id: number | null, password = '') {

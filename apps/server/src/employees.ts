@@ -54,9 +54,9 @@ export class EmployeesController {
   await this.auth.require(req,{admin:true,write:true});const input=parse(z.object({password:password.default('')}).strict(),body);return this.service.reset(identity(id),input.password);
  }
  @Post(':id/delete') async remove(@Req() req:Request,@Param('id') value:string,@Body() body:unknown){
-  await this.auth.require(req,{admin:true,write:true});
+  const {user}=await this.auth.require(req,{admin:true,write:true});
   const input=parse(z.object({confirm:z.literal('DELETE_EMPLOYEE'),expectedStatus:state}).strict(),body);
-  return this.service.remove(identity(value),input.expectedStatus);
+  return this.service.remove(identity(value),input.expectedStatus,{username:user.username,displayName:user.displayName});
  }
  @Post(':id/status') async status(@Req() req:Request,@Param('id') value:string,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});

@@ -492,3 +492,29 @@ M0 补核完成：当前任务服务分别读取 `users.role` 和有效的 `bd_t
 Skill入口实测为“技能 → 添加技能 → 上传技能”，导入窗口支持包含SKILL.md的ZIP/文件夹和带YAML元信息的Markdown。已准备 `data/refactor/visit-settle-skill.zip`，仅含 `visit-settle/SKILL.md`，与源码字节一致，不含凭据或MCP配置。用户随后手动完成安装。已安装技能面板显示visit-settle，实际安装文件与源码SHA256一致。通过“去试试”选择Skill，执行一次仅限visit_whoami({})的验收请求。客户端运行日志确认Skill加载，以及mcp__visit-settle__visit_whoami的tool.call.completed为success（75ms），本次该服务只有这一次已完成工具调用；界面显示ok=true、role=admin、scopes=read/write、can_write=true。未查询工资、员工列表或业务明细，未执行业务写入；原始客户端日志未复制进项目验收文件。
 
 本阶段管理员实机OAuth、27工具发现、Skill安装/加载与代表只读调用已通过。剩余：员工/队长实机角色验收；准备含未提交/新增文件在内的窄范围Docker候选。SDK既有6/10/27权限检查与隔离Docker验收不重复执行；默认8000与生产未部署。
+
+
+## 25. 生产 MCP 三层恢复方案（2026-11-15）
+
+用户已要求修复线上不可连接问题。开始前实测：带标准MCP请求头、额外无效Bearer的公网初始化均404。服务器当前Gateway为prod-20261115-165416、API为prod-20261115-153017、Worker仍prod-20261112。宿主机store.conf对/mcp、/oauth/、/.well-known/显式return 404；Gateway也返回MCP_NOT_SUPPORTED/OAUTH_NOT_SUPPORTED；直连当前API的三条协议路由均404。根因是发布产物未纳入MCP/OAuth，并有两层旧阻断，不是缺少请求头。
+
+当前源码main.ts已有MCP/OAuth接线，release-lib.mjs已有对应反代规则；不重写接口、不新增URL Token、不用旧Python MCP容器代替新栈。禁止把HEAD或整个工作区当作生产当前字节。
+
+### 执行顺序与验收
+
+1. **冻结实际生产基线（已定位版本，继续核对依赖）**：读取稳定Compose、镜像摘要、各组件产物和Nginx原配置；记录回滚基线。仅输出非敏感摘要，不导出runtime.env或凭据。
+2. **最小发布范围**：基于实际API153017/Gateway165416及其冻结产物准备补丁。API纳入MCP/OAuth及其必需依赖；管理端仅补授权页、凭据/客户端准入入口；Gateway与宿主机仅开放精确协议路径。不重建员工端，不把搜索/批量交互回退；Worker仅在任务兼容性证据要求时更新，否则保留。提交、annotated tag和完整白名单确定后才构建。
+3. **认证安全前置**：只读核对auth_sessions、oauth_client_policies、security_export_events及OAuth依赖表是否存在，核对生产认证模块与候选差异。缺表先备份再显式执行审核过的迁移；若迁移或切换使旧登录/OAuth失效、需要弱口令轮换或统一吊销，先明确影响和交付安排，不静默执行。不得把搜索迁移或结算表修改混入。
+4. **隔离候选验收**：使用现有隔离测试基础设施验证本次MCP/OAuth及受影响认证模块；相关类型检查/构建顺序执行一次。候选验证发现、注册/准入、PKCE、read/read-write角色边界、私有导出和原有核心只读页面；需要写入的验收只在隔离库合成账号执行。原版Worker任务兼容性是切换门槛。
+5. **发布与可逆配置**：严格按生产部署与回滚手册：已提交版本最小构建→AES-256-GCM加密白名单ZIP→现有OSS→服务器校验解密→稳定Compose。配置生产MCP源为https://store.visitworld.me/mcp、授权页为同源/admin/mcp-authorize。先更新并验证API/Gateway，最后移除宿主机三类旧阻断；保留ACME路径，不宽泛代理整个/.well-known/，协议关闭缓冲并设置长超时。Nginx须通过nginx -t后reload。
+6. **公网验收与记录**：两类发现GET为200且所有地址指向生产域名；无凭据和无效Bearer的POST /mcp为401且WWW-Authenticate指向正确资源元数据，不是404；WorkBuddy完成准入/OAuth及一次visit_whoami只读调用。原页面、搜索、Worker健康不退化，记录实际各组件版本。失败恢复原Compose、镜像和Nginx配置，不回灌业务库或删除卷。
+
+### 生产依赖核对结果
+
+只读连接当前API使用的数据库，以BEGIN READ ONLY检查表名：api_tokens、mcp_audit_log、oauth_clients、oauth_codes、oauth_refresh_tokens已存在；auth_sessions、oauth_client_policies、security_export_events缺失。当前API镜像不存在mcp.js、mcp-oauth.js、mcp-credentials.js，main未接线MCP，auth不使用持久会话；MCP公开源与授权页环境变量也未配置。不能只开放Nginx就宣称修复。
+
+生产修复必须把认证安全迁移作为前置，不能直接启动当前安全版代码。切换到持久会话后旧Cookie不兼容，现有用户需要重新登录；迁移还会使未批准的旧OAuth凭据失效。弱口令重置、全量凭据吊销、历史云端资源处置另按明确范围确认，不在此次诊断时隐式执行。正式执行前需确认可接受这次登录/授权失效影响；确认后继续候选构建、隔离验收和切流。
+
+### 当前交付边界
+
+本节为已确认根因后的修复方案与执行队列，不代表生产已修好。生产只读核查已完成；尚未修改生产配置、迁移数据库、重建镜像或切流。现有未提交文档改动保留，不能随本次发布自动纳入。

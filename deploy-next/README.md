@@ -1,52 +1,28 @@
-> **安全迁移（2026-11-13）**：当前源码需要先执行 `deploy-next/migrations/001-auth-security.sql`，详见[生产部署与回滚](生产部署与回滚.md)开头的安全整改门槛。新增认证/审计表，不改结算表。旧会话失效；OAuth 客户端需管理员准入。镜像包必须使用独立私有 `NEXT_RELEASE_BUCKET`，不能复用公开前端资源桶。开发库和生产库均不在构建/启动时自动迁移。
+# 部署入口与当前生产状态
+
+> **唯一生产部署方式**：[生产部署与回滚手册](生产部署与回滚.md)。流程固定为已提交版本最小化构建 → 加密 ZIP 经现有 OSS 中转 → 服务器校验解密 → SSH/稳定 Compose 切换与验收。本文只提供入口和状态，不提供另一套生产操作步骤。明文包、私有桶/gcloud、集团云分卷、首次 Python 切换脚本和本地部署 CLI 均不是生产替代路径。
+
+2026-11-15 03:52:30（UTC+8）已部署搜索版本 `prod-20261115-031440`，源码 `bc3cfd0d70c9226cb13f85691c04c914bb6d5182`。API、员工端和 Gateway 更新；管理端仍 `prod-20261113-011447`，Worker 仍 `store-next-api:prod-20261112`。API 资源为 1.5 CPU / 1024MiB，Worker 为 1 CPU / 512MiB。
+
+- 生产以 `/opt/store-next/production-state.json`、`/opt/store-next/runtime/compose.json` 与实际容器为准；私有环境文件为 `/opt/store-next/runtime/runtime.env`。
+- 当前搜索采用商户全量语料，按片区/网格返回分类、计数和分页，不以任务或批次限制商户检索。任务历史与写入仍保留原权限。
+- 搜索迁移为 **007–009**，已执行显式索引构建及提交后的 `VACUUM ANALYZE`；不要追加执行历史任务搜索 003–006 或认证 001。
+- 当前代码回退点 `prod-20261113-105556`；恢复备份 Compose/API/Gateway，保留新增搜索结构和日志，不回灌数据库、不启用旧 Python/MCP。
+- 本地业务库未随生产执行搜索迁移，本地默认 Docker 未随本次更新。[完整验收记录](../docs/计划-商户搜索升级.md) §10.50。
+
+> **认证安全迁移是独立发布范围**：仅在交付对应认证/OAuth 安全改动时，按[生产部署与回滚](生产部署与回滚.md)的安全整改门槛评审 `001-auth-security.sql`。2026-11-15 搜索发布未替换生产认证模块、未执行该迁移；不能将源码能力视为生产已上线。开发及生产均不在构建/启动时自动迁移。
 
 > **2026-11-13 MCP 本地阶段验收**：源码支持27工具与OAuth，`local-mcp-m6-20261113-a` 已完成独立随机库Docker候选/浏览器/SDK/Worker/回退验收，验收容器已清理；默认8000仍为旧版，生产未动。候选manifest为 `acceptanceOnly`，不能直接切流。详见 [补充计划](../docs/计划-MCP-OAuth与Skill恢复补充.md#21-m6-阶段检查与独立-docker-候选验收2026-11-13)。
 >
 > 当前网关生成器已支持原生MCP/OAuth路径、外部Host端口、300秒长调用及私有导出；本地正常部署将配置 `NEXT_MCP_PUBLIC_URL=http://127.0.0.1:8000/mcp` 和 `NEXT_MCP_AUTHORIZATION_UI_URL=http://127.0.0.1:8000/admin/mcp-authorize`。`build --reuse-staff <release>` 可复用已部署员工HTML/资源，按摘要校验；不代表其他组件的所有改动都自动获准发布。
 
-> **当前日常发布手册（2026-11-13）**：[生产部署与回滚](生产部署与回滚.md)。镜像统一打为单个 ZIP，通过 Google Cloud Storage 上传；下文集团云分卷与首次旧系统迁移仅作历史记录。
+> **当前日常发布手册（2026-11-15）**：[生产部署与回滚](生产部署与回滚.md)。现有公开 OSS 桶只中转 **AES-256-GCM 加密后的镜像 ZIP**，密钥经 SSH 独立传送，详见[加密 OSS 中转与搜索发布记录](../docs/发布-搜索升级-加密OSS中转.md)。不使用新增私有桶或 gcloud 作为备选路径；明文镜像归档不用于生产中转。历史迁移只保留背景引用。
 
-## 镜像集团云归档（2026-11-12）
+## 历史迁移与归档（不再作为部署方式）
 
-通过用户指定的frontend-tools / front-demo / aliyun_default（集团云）上传。完整ZIP为231,917,744字节（约221.2MiB），单次上传失败后分为14卷，均已上传并核对公开HTTP状态和大小。
+2026-11-12 集团云分卷与首次 Python → NestJS 切换已结束。本入口不再保留下载还原、cutover/rollback 等可复制执行步骤；仅在[历史生产迁移记录](../docs/计划-生产迁移与回滚.md)中查阅背景。该历史记录不是当前操作手册，禁止据此解暂停旧 Python/MCP 或退回旧栈。
 
-- [下载清单与还原脚本ZIP](https://static.xyb2b.com/files/f2e97b4c6150a2c259a533b4e7f06d46.zip)（这是下载工具包，镜像由脚本从14个分卷还原）。
-- 解压后运行`python3 restore-images.py`；逐卷SHA256、整体ZIP SHA256及CRC验证完成后生成`images.tar.gz`。已用本地已校验分卷完整演练还原；未重新下载全部221MiB。
-- 导入：`docker load -i images.tar.gz`；镜像为`store-next-api:prod-20261112`与`store-next-gateway:prod-20261112`，linux/amd64。下载脚本不会执行Docker或修改数据库。
-- 完整镜像ZIP SHA256：`e1217be2748e34d600c03e7b3c4da6de2efa94fa57686739a4438ab4c2c43f25`。
-- 下载工具包SHA256：`ca2213bbb17b364957fbf812e303d8aabbf257ef8c722a743d10de2d7d6683d7`。
-- 归档只含镜像、公开资源及manifest，不含运行凭证或数据库备份。分卷URL及校验清单位于工具包`cloud-download.json`。
-
-## 生产目标：visitworld（2026-11-12）
-
-生产使用独立的 `deploy-next/production-release.py` 编排器，不复用本地数据库白名单或HTTP豁免。执行方式为通过SSH将该文件安装到 `/opt/store-next/production-release.py`，所有生产操作固定经 `ssh visitworld`。现有 `scripts/release.mjs` 仍为本地目标，`--env production` 继续拒绝，不能删除guard来发布。
-
-生产目录：
-
-- `/opt/store-next/releases/<release>/`：amd64镜像归档、manifest、Compose、私有运行配置和验收证明。
-- `/opt/store-next/backups/<release>/`：数据库备份、旧容器配置、Nginx原配置、原件归档；仅root可读。
-- `/opt/store-next/production-state.json`：正式运行状态。
-- `/opt/store-next/legacy-static/`：保留旧页面静态资源。
-
-分阶段命令（prepare不可盲目重跑，先status核对）：
-
-```bash
-ssh visitworld 'python3 /opt/store-next/production-release.py status <release>'
-# prepare：备份并恢复到临时库；candidate：只读恢复库，生产入口不变。
-ssh visitworld 'python3 /opt/store-next/production-release.py prepare <release>'
-ssh visitworld 'python3 /opt/store-next/production-release.py candidate <release>'
-# 切流前完成候选浏览器和同库回滚演练，再执行授权的cutover。
-ssh visitworld 'python3 /opt/store-next/production-release.py cutover <release>'
-# 应用回滚保留同一现库数据，不恢复旧数据库备份。
-ssh visitworld 'python3 /opt/store-next/production-release.py rollback <release>'
-```
-
-生产API使用Secure Cookie、现有`deploy_default`网络的生产`store_settle`，不启用本地HTTP例外。切换窗口有全站维护、事务排空、旧应用暂停、最终备份及只读验证；新Worker使用独立`store-next-prod-jobs`，历史补投关闭。旧Web/MCP暂停并禁止自动重启，DB持续运行；回滚恢复旧策略并unpause，避免旧entrypoint执行迁移。不要手动unpause旧应用造成双写。
-
-原件卷只读挂载，后续新文件写新任务卷；回滚前必须保留/核对新卷里的合法文件及新任务，不能删卷或全库回灌。回滚只对本次首次Python→Node切换实现；后续生产新栈版本升级应另行扩展带当前release校验、任务兼容检查和相同数据卷交接的流程。
-
-
-> **生产迁移计划**：[生产迁移与回滚](../docs/计划-生产迁移与回滚.md)。本手册现有CLI只支持本地；生产切换须先完成该计划P0。应用回滚保留同库数据，全库恢复属于单独事故决策。
+生产当前使用稳定 `/opt/store-next/runtime/compose.json` 与 `/opt/store-next/runtime/runtime.env`；`/opt/store-next/releases/<release>/` 保存不可变产物与证据，`/opt/store-next/backups/<release>/` 保存受控备份。应用回退按唯一手册恢复上一稳定 Compose/镜像，保留当前数据库与持久卷。
 
 > **2026-11-12端口更新**：本地Docker统一入口改为 http://localhost:8000/admin/ （管理端）和 http://localhost:8000/ （员工端）。开发态仍使用8001/8002，API3000，Docker与开发已于2026-11-13统一使用store_settle，旧开发库移除。只重新创建edge端口映射，不重建或切换业务release。下文8080为历史记录。
 
@@ -113,7 +89,9 @@ pnpm release:rollback -- --env local --release <previous-release-id>
 
 Worker持久卷`store-next-jobs`保存queued/running/done/failed，稳定ID拒绝重复入队；独占Worker由部署顺序保证，容器重启恢复已登记的幂等任务，超过重试上限或未知任务失败留痕。当前注册`system.check`、`report.analysis`、`dashboard.analysis`及`settlement.judge/finalize/rebuild`、`import.visit/delete`、`reconciliation.monthly`、`store.master`与`reconciliation.insight`，API与Worker共享任务卷；AI报告逐语言检查点和数据版本保护已验证。其他业务任务的副作用幂等与进度写入在P4/P5逐一实现，不能把基础恢复测试当作所有业务恢复保证。
 
-## OSS/CDN（等待配置与真实验收）
+## 历史 OSS/CDN 配置说明（2026-11-11）
+
+> 当前生产已通过已有 `STORE_FILES_*` 与 `OSS_ACCESS_KEY_*` 配置完成 CDN/加密 OSS 验收，不需要另补一套凭证。下列 `NEXT_OSS_*` 是覆盖项；如设置须核对其优先级，避免覆盖现有正确配置。当前日常生产流程以顶部手册为准。
 
 额外变量：`NEXT_CDN_BASE_URL`、`NEXT_OSS_ENDPOINT`、`NEXT_OSS_REGION`、`NEXT_OSS_BUCKET`、`NEXT_OSS_PREFIX`、`NEXT_OSS_ACCESS_KEY_ID`、`NEXT_OSS_ACCESS_KEY_SECRET`，临时凭证另设`NEXT_OSS_STS_TOKEN`；`NEXT_PUBLIC_ORIGIN`用于CDN CORS验证。
 

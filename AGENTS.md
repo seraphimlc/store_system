@@ -12,7 +12,7 @@
 
 - `pnpm dev`：管理端8001、员工端8002、API3000及Worker。开发与Docker统一连接 `store_settle`；旧 `store_settle_refactor_p1` 已备份移除。测试只读克隆该库结构到随机临时库，禁止向业务库写fixture。
 - 本地Docker统一入口8000（管理端 `/admin/`，员工端 `/`），显式连接基准库 `store_settle`。部署见 `deploy-next/README.md`，使用独立 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL`，与开发使用同一业务库，但配置文件和任务目录仍分开。
-- **日常生产部署**按 `deploy-next/生产部署与回滚.md` 执行：镜像归档为白名单 ZIP，使用 Google Cloud Storage 上传和 SHA256 校验；不得把 `production-release.py` 的首次旧系统 cutover/rollback 当作日常新栈升级命令。
+- **唯一日常生产部署方式**按 `deploy-next/生产部署与回滚.md` 执行：已提交版本最小化构建 → AES-256-GCM 加密镜像白名单 ZIP → 现有 OSS 中转 → 服务器校验解密 → SSH/稳定 Compose 切换与验收。前端静态资源沿用现有 OSS/CDN；不提供明文包、私有桶/gcloud、集团云分卷或 SSH 直传大包等备选路径。`production-release.py` 首次旧系统 cutover/rollback 与本地部署 CLI 均不得用于日常生产升级。
 - **最小化发布**：发布前对照上次实际部署的源码/产物清单核对本次差异（含未提交、新增文件及共享依赖），先列出受影响组件，再只构建、上传和替换必要产物。纯员工端展示修改只更新员工静态资源和Gateway，保留管理端产物及API/Worker镜像、容器、配置；文档/发布工具修改不触发业务服务发布。不能把当前工作区所有改动默认纳入上线。
 - 当前模块检查：`pnpm --filter @store/admin typecheck` / `pnpm --filter @store/staff typecheck` / `pnpm --filter @store/server typecheck`；构建用对应模块 `build`。
 - `pnpm test` 使用已有隔离运行器，PostgreSQL写测试只在随机schema-only临时库执行；不得向基准库或开发完整副本写fixture、清表或覆盖密码。

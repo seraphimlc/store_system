@@ -6,7 +6,7 @@ const url=process.env.NEXT_TEST_DATABASE_URL;
 test('employee state changes preserve history, permit leave login, invalidate work access and reject stale writes',{skip:!url},async()=>{
  assert.match(new URL(url!).pathname,/_refactor_p1$/);
  const app=await createApp({databaseUrl:url!,sessionSecret:'employee-test-only-at-least-40-characters',cookieSecure:false,port:0,host:'127.0.0.1'});const db=app.get(Database);
- const password='employee-fixture';const pw=await hash(password);let adminId:number|undefined,staffId:number|undefined;
+ const password='employee-fixture';const pw=await hash(password);let adminId:number|undefined,staffId:number|undefined,teamId:number|undefined;const personCode='P3-DEL-TEAM';
  try{
   const rows=(await db.query(`INSERT INTO users(username,password_hash,display_name,role,status,is_active,must_change_password,lang,created_at) VALUES
    ('employee-p3-admin',$1,'员工验收管理员','admin','active',true,false,'zh',now()),('employee-p3-staff',$1,'员工验收对象','leader','active',true,false,'ja',now()) RETURNING id,role`,[pw])).rows;
@@ -32,8 +32,15 @@ test('employee state changes preserve history, permit leave login, invalidate wo
   await admin.post(`/api/employees/${adminId}/delete`).set('X-CSRF-Token',login.body.csrfToken).send({confirm:'DELETE_EMPLOYEE',expectedStatus:'active'}).expect(404);
   await admin.post(`/api/employees/${staffId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'active',expectedStatus:'resigned'}).expect(201);
   await staff.post('/api/auth/login').send({username:'employee-p3-staff',password}).expect(201);
+  await db.query('INSERT INTO persons(code,display_name,created_at) VALUES($1,$2,now())',[personCode,'员工验收对象']);
+  await db.query('UPDATE users SET person_code=$1 WHERE id=$2',[personCode,staffId]);
+  teamId=(await db.query("INSERT INTO bd_team(name,status,created_by,created_at,updated_at) VALUES('P3删除离队','active','fixture',now(),now()) RETURNING id")).rows[0].id;
+  await db.query("INSERT INTO bd_team_member(team_id,person_code,role,start_date,created_at) VALUES($1,$2,'leader',CURRENT_DATE,now())",[teamId,personCode]);
   const before=(await db.query('SELECT username,display_name,password_hash,person_code FROM users WHERE id=$1',[staffId])).rows[0];
   await deletion().send({confirm:'DELETE_EMPLOYEE',expectedStatus:'active'}).expect(201);
+  assert.equal((await db.query('SELECT end_date IS NOT NULL AS gone FROM bd_team_member WHERE team_id=$1 AND person_code=$2',[teamId,personCode])).rows[0].gone,true);
+  assert.equal((await db.query('SELECT role FROM users WHERE id=$1',[staffId])).rows[0].role,'staff');
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM bd_log WHERE domain='member' AND action='remove' AND ref_id=$1 AND note='删除员工时自动移出，记录保留'",[teamId])).rows[0].n,1);
   await staff.get('/api/auth/session').expect(401);
   await staff.post('/api/auth/login').send({username:'employee-p3-staff',password}).expect(401);
   const removed=(await db.query('SELECT username,display_name,password_hash,person_code,status,is_active FROM users WHERE id=$1',[staffId])).rows[0];
@@ -50,5 +57,5 @@ test('employee state changes preserve history, permit leave login, invalidate wo
   assert.ok(!workbook.worksheets[0].getColumn(1).values.includes(before.username));
 
   await admin.post(`/api/employees/${adminId}/status`).set('X-CSRF-Token',login.body.csrfToken).send({status:'disabled',expectedStatus:'active'}).expect(404);
- }finally{await db.query('DELETE FROM users WHERE id=ANY($1::int[])',[[adminId,staffId].filter(Boolean)]);await app.close();}
+ }finally{await db.query("DELETE FROM bd_log WHERE domain='member' AND ref_id=$1",[teamId??null]);await db.query('DELETE FROM bd_team_member WHERE team_id=$1',[teamId??null]);await db.query('DELETE FROM bd_team WHERE id=$1',[teamId??null]);await db.query('DELETE FROM users WHERE id=ANY($1::int[])',[[adminId,staffId].filter(Boolean)]);await db.query('DELETE FROM persons WHERE code=$1',[personCode]);await app.close();}
 });
