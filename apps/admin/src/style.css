@@ -241,3 +241,15 @@ html{color-scheme:light}html.dark{color-scheme:dark}body{color:var(--foreground)
 .admin-searchable-select [data-slot=combobox-list]{min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .admin-searchable-select .admin-select-search{flex-shrink:0}
 .admin-searchable-select input[data-slot=combobox-input-field]{border:0!important;border-radius:0;box-shadow:none!important;background:transparent;padding:0;min-height:0;height:100%;outline:none!important}
+
+/* One density contract for native inputs, Appica comboboxes and date controls. */
+.workspace [data-slot=combobox-trigger],.management-dialog [data-slot=combobox-trigger]{height:var(--admin-control-height,36px);min-height:var(--admin-control-height,36px);font-size:var(--admin-control-font,13px);padding:0 10px;line-height:20px;border-radius:var(--radius-sm)}
+.workspace .admin-filter-panel label:has([data-slot=combobox-trigger]){display:flex;flex-direction:column;gap:6px}
+.admin-bulk-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0;min-height:36px}
+.admin-bulk-toolbar>span{font-size:13px;color:var(--foreground-muted);margin-right:4px;white-space:nowrap}
+.admin-bulk-toolbar button{width:auto;flex:none}
+.workspace table.admin-selectable-table .table-selection-cell{width:44px!important;min-width:44px!important;max-width:44px!important;padding:8px 12px!important;box-sizing:border-box;white-space:nowrap;text-align:center}
+.admin-selectable-table tr[data-selected=true]{background:var(--background-muted)}
+.bulk-action-dialog label{display:flex;flex-direction:column;gap:6px}
+@media(max-width:600px){.management-dialog{--admin-control-height:40px;--admin-control-font:16px}}
+.workspace .admin-filter-panel button[data-slot=button],.workspace .admin-bulk-toolbar button[data-slot=button]{height:var(--admin-control-height);min-height:var(--admin-control-height);font-size:var(--admin-control-font)}
