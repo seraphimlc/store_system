@@ -22,7 +22,7 @@ test('report arithmetic preserves points, two different ratios, absolute errors 
 test('reports: one per JST day, atomic plan sync, comparison refresh, private feedback and formal-date locks',{skip:!url},async()=>{
  assert.match(new URL(url!).pathname,/_refactor_p1$/);
  const app=await createApp({databaseUrl:url!,sessionSecret:'daily-report-test-only-at-least-40-characters',cookieSecure:false,port:0,host:'127.0.0.1'});
- const db=app.get(Database);const ids:Record<string,number>={};const code='P3-REPORT-A',other='P3-REPORT-B';const today=jstToday(),yesterday=offset(today,-1),before=offset(today,-2);
+ const db=app.get(Database);const ids:Record<string,number>={};const code='P3-REPORT-A',other='P3-REPORT-B',removed='P3-REPORT-DEL',kept='P3-REPORT-RES';const today=jstToday(),yesterday=offset(today,-1),before=offset(today,-2);
  const password='report-fixture-password';const pw=await hash(password);
  try{
   await db.query('INSERT INTO persons(code,display_name,created_at) VALUES($1,$2,now()),($3,$4,now())',[code,'日报验收员工',other,'另一员工']);
@@ -67,7 +67,17 @@ test('reports: one per JST day, atomic plan sync, comparison refresh, private fe
   await db.query('INSERT INTO formal_records(import_id,raw_record_id,person_code,japan_date,created_at) VALUES($1,$2,$3,$4,now())',[ids.import,ids.raw,code,today]);
   await staff.post('/api/reports/mine').set('X-CSRF-Token',s.csrfToken).send({p1:1,p2:0,mode:'update'}).expect(409);
   await post('/api/reports/delete',{personCode:code,date:today}).expect(409);
-  const list=await admin.get(`/api/reports?start=${before}&end=${today}&page=999`).expect(200);assert.equal(list.body.items.length,0);assert.equal(list.body.summary.total,7);
+  await db.query('INSERT INTO persons(code,display_name,created_at) VALUES($1,$2,now()),($3,$4,now())',[removed,'已删除日报',kept,'离职日报']);
+  ids.deleted=(await db.query(`INSERT INTO users(username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang,created_at) VALUES('reports-p3-deleted',$1,'已删除日报',$2,'staff','deleted',false,false,'zh',now()) RETURNING id`,[pw,removed])).rows[0].id;
+  ids.resigned=(await db.query(`INSERT INTO users(username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang,created_at) VALUES('reports-p3-resigned',$1,'离职日报',$2,'staff','resigned',false,false,'zh',now()) RETURNING id`,[pw,kept])).rows[0].id;
+  await db.query(`INSERT INTO staff_daily_reports(person_code,report_date,user_id,area,p1_cnt,p2_cnt,total_cnt,source,submitted_at,created_at,client_ts) VALUES($1,$3,$4,'已删除',4,0,4,'admin',now(),now(),''),($2,$3,$5,'离职',1,0,1,'admin',now(),now(),'')`,[removed,kept,today,ids.deleted,ids.resigned]);
+  await post('/api/reports/save',{personCode:removed,date:offset(today,1),area:'不应写入',p1:1,p2:0}).expect(400);
+  const people=await admin.get('/api/reports/people').expect(200);assert.equal(people.body.items.some((person:{code:string})=>person.code===removed),false);assert.ok(people.body.items.some((person:{code:string})=>person.code===kept));
+  const hidden=await admin.get(`/api/reports?start=${before}&end=${today}&personCode=${removed}`).expect(200);assert.equal(hidden.body.total,0);assert.equal(hidden.body.summary.total,0);
+  const visibleKept=await admin.get(`/api/reports/compare?start=${before}&end=${today}`).expect(200);assert.equal(visibleKept.body.persons.some((person:{person_code:string})=>person.person_code===removed),false);assert.ok(visibleKept.body.persons.some((person:{person_code:string})=>person.person_code===kept));
+  const exportedHidden=await admin.get(`/api/reports/export?start=${before}&end=${today}&kind=reports`).buffer(true).parse((response,done)=>{const chunks:Buffer[]=[];response.on('data',chunk=>chunks.push(Buffer.from(chunk)));response.on('end',()=>done(null,Buffer.concat(chunks)));}).expect(200);
+  const hiddenBook=new ExcelJS.Workbook();await hiddenBook.xlsx.load(exportedHidden.body);const exportedText=JSON.stringify(hiddenBook.worksheets[0].getSheetValues());assert.equal(exportedText.includes(removed),false);assert.match(exportedText,new RegExp(kept));
+  const list=await admin.get(`/api/reports?start=${before}&end=${today}&page=999`).expect(200);assert.equal(list.body.items.length,0);assert.equal(list.body.summary.total,8);
   // Expand only the synthetic coverage to permit the stored analysis period.
   await db.query('UPDATE formal_records SET japan_date=$1 WHERE raw_record_id=$2',[before,ids.raw]);
   ids.raw2=(await db.query(`INSERT INTO raw_records(import_id,sheet_name,excel_row,store_id_raw,store_name_local_raw,store_name_en_raw,modified_raw,submitter_raw,record_id_raw,original_row,created_at) VALUES($1,'fixture',2,'fixture2','fixture2','','','','fixture2','{}',now()) RETURNING id`,[ids.import])).rows[0].id;
@@ -77,6 +87,6 @@ test('reports: one per JST day, atomic plan sync, comparison refresh, private fe
  }finally{
   await db.query('DELETE FROM staff_report_compare_day WHERE analysis_id=$1',[ids.analysis]);await db.query('DELETE FROM staff_report_compare_person WHERE analysis_id=$1',[ids.analysis]);await db.query('DELETE FROM staff_report_analyses WHERE id=$1',[ids.analysis]);
   await db.query('DELETE FROM formal_records WHERE import_id=$1',[ids.import]);await db.query('DELETE FROM raw_records WHERE import_id=$1',[ids.import]);await db.query('DELETE FROM imports WHERE id=$1',[ids.import]);
-  await db.query('DELETE FROM person_daily_stats WHERE person_code=ANY($1::text[])',[[code,other]]);await db.query('DELETE FROM staff_daily_reports WHERE person_code=ANY($1::text[])',[[code,other]]);await db.query('DELETE FROM staff_date_plans WHERE person_code=ANY($1::text[])',[[code,other]]);await db.query('DELETE FROM users WHERE id=ANY($1::int[])',[Object.values(ids).filter(id=>id===ids.admin||id===ids.staff||id===ids.other)]);await db.query('DELETE FROM persons WHERE code=ANY($1::text[])',[[code,other]]);await app.close();
+  await db.query('DELETE FROM person_daily_stats WHERE person_code=ANY($1::text[])',[[code,other,removed,kept]]);await db.query('DELETE FROM staff_daily_reports WHERE person_code=ANY($1::text[])',[[code,other,removed,kept]]);await db.query('DELETE FROM staff_date_plans WHERE person_code=ANY($1::text[])',[[code,other,removed,kept]]);await db.query('DELETE FROM users WHERE id=ANY($1::int[])',[Object.values(ids).filter(id=>id===ids.admin||id===ids.staff||id===ids.other||id===ids.deleted||id===ids.resigned)]);await db.query('DELETE FROM persons WHERE code=ANY($1::text[])',[[code,other,removed,kept]]);await app.close();
  }
 });

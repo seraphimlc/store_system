@@ -1,3 +1,4 @@
+import {AdminCheckbox} from './AdminCheckbox';
 import {OAuthClients} from './OAuthClients';
 import {McpCredentials} from './McpCredentials';
 import {SuccessNotice} from './SuccessNotice';
@@ -48,6 +49,20 @@ export function Employees({ session, language }: { session: Session; language: s
   const [credentialUser,setCredentialUser]=useState<Employee|null>(null);
   const [temporaryCredential,setTemporaryCredential]=useState<{username:string;temporaryPassword:string}|null>(null);
   
+  const [selectedEmployees,setSelectedEmployees]=useState<number[]>([]),[bulkStatus,setBulkStatus]=useState('active'),[bulkConfirm,setBulkConfirm]=useState<'status'|'delete'|null>(null);
+  useEffect(()=>{setSelectedEmployees([]);setBulkConfirm(null);},[page,search,status]);
+  async function saveBulk(){
+    if(writing.current||!bulkConfirm||!data)return;
+    writing.current=true;setSaving(true);setError('');let done=0;
+    const action=bulkConfirm;setBulkConfirm(null);
+    try{for(const employee of data.items.filter(e=>selectedEmployees.includes(e.id))){
+      if(action==='delete')await api(`/employees/${employee.id}/delete`,session,{confirm:'DELETE_EMPLOYEE',expectedStatus:employee.status});
+      else await api(`/employees/${employee.id}/edit`,session,{username:employee.username,name:employee.displayName,status:bulkStatus,language:employee.language||'',role:employee.role,expected:{username:employee.username,name:employee.displayName,status:employee.status,language:employee.language||'',role:employee.role}});
+      done++;setSelectedEmployees(v=>v.filter(id=>id!==employee.id));
+    }setNotice(language==='ja'?`${done} 件を更新しました`:`已处理 ${done} 位员工`);await load();}
+    catch(cause){await load();setError((language==='ja'?`${done} 件は保存済み、残りは未保存：`:`已保存 ${done} 项，其余未保存：`)+(cause as Error).message);}
+    finally{writing.current=false;setSaving(false);}
+  }
   const form = useRef<HTMLFormElement>(null);
   const writing = useRef(false);
   const requestGeneration = useRef(0);
@@ -115,16 +130,18 @@ export function Employees({ session, language }: { session: Session; language: s
       <AdminSelect name="status" aria-label={t('状态')}><option value="">{t('全部状态')}</option>{Object.entries(statusLabels).map(([key,label]) => <option value={key} key={key}>{t(label)}</option>)}</AdminSelect>
       
     <div className="admin-filter-submit"><Button type="submit">{t('搜索')}</Button>
-      <Button onClick={() => open('create')}><Plus size={16}/>{t('新建员工')}</Button>
+      <Button disabled={saving} onClick={() => open('create')}><Plus size={16}/>{t('新建员工')}</Button>
       <a className="toolbar-download" href="/api/employees/accounts-export" download><Download size={16}/>{t('导出账号')}</a>
 
     </div></Form>
     {notice && <SuccessNotice className="success-notice" role="status">{notice}</SuccessNotice>}
     {error && !editor && <Alert className="error" role="alert">{error}</Alert>}
+    <div className="admin-actions"><span>{language==='ja'?`選択 ${selectedEmployees.length} 名`:`已选 ${selectedEmployees.length} 人`}</span><AdminSelect aria-label={t('批量状态')} value={bulkStatus} disabled={saving} onChange={e=>setBulkStatus(e.target.value)}>{Object.entries(statusLabels).map(([value,label])=><option key={value} value={value}>{t(label)}</option>)}</AdminSelect><Button variant="outline" disabled={!selectedEmployees.length||saving||loading} onClick={()=>setBulkConfirm('status')}>{language==='ja'?'状態を一括変更':'批量修改状态'}</Button><Button variant="outline" disabled={!selectedEmployees.length||saving||loading} onClick={()=>setBulkConfirm('delete')}>{language==='ja'?'一括削除':'批量删除'}</Button></div>
+    <Dialog open={bulkConfirm!==null} onOpenChange={open=>{if(!open&&!saving)setBulkConfirm(null);}}><DialogContent><DialogTitle>{language==='ja'?'一括操作を確認':'确认批量操作'}</DialogTitle><p>{language==='ja'?`選択した ${selectedEmployees.length} 名`:`已选 ${selectedEmployees.length} 位员工`} · {bulkConfirm==='delete'?t('删除'):t(statusLabels[bulkStatus as keyof typeof statusLabels])}</p><Alert>{bulkConfirm==='delete'?t('确认删除此员工？删除后账号立即停用，员工不再显示在列表和账号导出中，历史业务记录保留。'):t('请假可登录；停用或离职后不能登录，历史数据始终保留。')}</Alert><div className="dialog-actions"><Button variant="outline" onClick={()=>setBulkConfirm(null)}>{t('取消')}</Button><Button onClick={()=>void saveBulk()}>{language==='ja'?'確定':'确认操作'}</Button></div></DialogContent></Dialog>
     <div className="employee-result-count">{language === 'ja' ? `${data?.total ?? 0} 名` : `共 ${data?.total ?? 0} 位员工`}</div>
     {loading ? <p role="status">{t('正在读取员工…')}</p> : !data?.items.length ? <div className="empty-state"><h3>{t('没有符合条件的员工')}</h3></div> :
-      <div className="table-scroll"><Table><TableHeader><TableRow>{['姓名 / 账号','人员编号','账号角色','状态','操作'].map(label => <TableHead key={label}>{t(label)}</TableHead>)}</TableRow></TableHeader><TableBody>{data.items.map(employee =>
-        <TableRow key={employee.id}><TableCell><strong>{employee.displayName || employee.username}</strong><span className="row-id">{employee.username}</span></TableCell><TableCell>{employee.personCode || '—'}</TableCell><TableCell>{t(employee.role === 'leader' ? '队长端权限' : '员工端权限')}</TableCell><TableCell><span className={'status-label state-' + employee.status}>{t(statusLabels[employee.status])}</span></TableCell><TableCell><div className="row-actions"><Button variant="outline" onClick={() => open('edit', employee)}>{t('编辑')}</Button><Button variant="outline" onClick={() => open('reset', employee)}>{t('重置口令')}</Button><Button variant="outline" onClick={()=>setCredentialUser(employee)}>{language==='ja'?'MCP 認証情報':'MCP 凭据'}</Button><Button variant="outline" onClick={() => open('delete', employee)}>{t('删除')}</Button></div></TableCell></TableRow>)}</TableBody></Table></div>}
+      <div className="table-scroll"><Table><TableHeader><TableRow><TableHead><AdminCheckbox aria-label={language==='ja'?'このページをすべて選択':'全选本页员工'} checked={!!data?.items.length&&data.items.every(e=>selectedEmployees.includes(e.id))} disabled={saving||loading} onChange={e=>setSelectedEmployees(e.target.checked?data!.items.map(e=>e.id):[])}/></TableHead>{['姓名 / 账号','人员编号','账号角色','状态','操作'].map(label => <TableHead key={label}>{t(label)}</TableHead>)}</TableRow></TableHeader><TableBody>{data.items.map(employee =>
+        <TableRow key={employee.id}><TableCell><AdminCheckbox aria-label={(language==='ja'?'選択 ':'选择员工 ')+employee.displayName} checked={selectedEmployees.includes(employee.id)} disabled={saving} onChange={e=>setSelectedEmployees(v=>e.target.checked?[...v,employee.id]:v.filter(id=>id!==employee.id))}/></TableCell><TableCell><strong>{employee.displayName || employee.username}</strong><span className="row-id">{employee.username}</span></TableCell><TableCell>{employee.personCode || '—'}</TableCell><TableCell>{t(employee.role === 'leader' ? '队长端权限' : '员工端权限')}</TableCell><TableCell><span className={'status-label state-' + employee.status}>{t(statusLabels[employee.status])}</span></TableCell><TableCell><div className="row-actions"><Button variant="outline" disabled={saving} onClick={() => open('edit', employee)}>{t('编辑')}</Button><Button variant="outline" disabled={saving} onClick={() => open('reset', employee)}>{t('重置口令')}</Button><Button variant="outline" onClick={()=>setCredentialUser(employee)}>{language==='ja'?'MCP 認証情報':'MCP 凭据'}</Button><Button variant="outline" disabled={saving} onClick={() => open('delete', employee)}>{t('删除')}</Button></div></TableCell></TableRow>)}</TableBody></Table></div>}
     <AdminPagination className="pagination"><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage(page - 1)}>{t('上一页')}</Button><span>{page} / {Math.max(1, Math.ceil((data?.total ?? 0) / 30))}</span><Button variant="outline" disabled={loading || page * 30 >= (data?.total ?? 0)} onClick={() => setPage(page + 1)}>{t('下一页')}</Button></AdminPagination>
     <p className="muted">{t('账号清单仅向管理员提供，请妥善交付。')}</p>
     <Dialog open={!!editor} onOpenChange={open=>{if(!open&&!saving)setEditor(null);}}><DialogContent className="management-dialog employee-editor-dialog" frame={false} closeButton={false}>

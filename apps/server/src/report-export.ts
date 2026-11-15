@@ -7,6 +7,7 @@ import {Database} from './database';
 import {BusinessError} from './errors';
 import {validDate} from './business-dates';
 import {ReportComparisonService,reportPoints,scoreShare} from './report-comparison';
+import {excludeDeletedStaff} from './deleted-staff';
 const schema=z.object({start:z.string().refine(validDate),end:z.string().refine(validDate),personCode:z.string().max(32).default(''),page:z.coerce.number().int().optional(),kind:z.enum(['reports','compare']).default('compare')}).strict().refine(value=>value.start<=value.end);
 @Controller('reports/export')
 export class ReportExportController{
@@ -27,7 +28,7 @@ export class ReportExportController{
     let cursor=0;
     for(;;){
      if(res.destroyed)throw new Error('EXPORT_CLIENT_CLOSED');
-     const rows=(await client.query<{id:number;date:string;person_code:string;name:string;area:string;p1:number;p2:number;source:string}>(`SELECT r.id,r.report_date::text AS date,r.person_code,coalesce(p.display_name,r.person_code) AS name,r.area,r.p1_cnt AS p1,r.p2_cnt AS p2,r.source FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE r.report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3) AND r.id>$4 ORDER BY r.id LIMIT 1000`,[input.start,input.end,input.personCode,cursor])).rows;
+     const rows=(await client.query<{id:number;date:string;person_code:string;name:string;area:string;p1:number;p2:number;source:string}>(`SELECT r.id,r.report_date::text AS date,r.person_code,coalesce(p.display_name,r.person_code) AS name,r.area,r.p1_cnt AS p1,r.p2_cnt AS p2,r.source FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE r.report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3) AND ${excludeDeletedStaff('r.person_code')} AND r.id>$4 ORDER BY r.id LIMIT 1000`,[input.start,input.end,input.personCode,cursor])).rows;
      if(!rows.length)break;
      for(const row of rows)sheet.addRow([row.date,row.person_code,row.name,row.area,row.p1,row.p2,row.p1+row.p2,reportPoints(row.p1,row.p2),scoreShare(row.p1,row.p2)===null?null:scoreShare(row.p1,row.p2)!*100,row.source]).commit();
      cursor=rows.at(-1)!.id;

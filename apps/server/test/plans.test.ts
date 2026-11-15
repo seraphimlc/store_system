@@ -39,6 +39,12 @@ test('plan save protects history/reported facts; leave preserves manual off days
   assert.deepEqual((await db.query('SELECT reported,available FROM staff_date_plans WHERE person_code=$1 AND plan_date=$2',[code,today])).rows[0],{reported:true,available:false});
   await post('/api/plans/mine',{key,unavailable:['2020-01-01']}).expect(400);
   const matrix=await app.get(PlansService).matrix(key);assert.ok(matrix.rows.some(row=>row.code===code));assert.equal(matrix.summary.find(day=>day.date===today)?.actual,1);assert.ok(matrix.total>=1);
+  const removed='P3-PLAN-DEL',kept='P3-PLAN-RES';
+  await db.query('INSERT INTO persons(code,display_name,created_at) VALUES($1,$2,now()),($3,$4,now())',[removed,'已删除计划',kept,'离职计划']);
+  await db.query(`INSERT INTO users(username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang,created_at) VALUES('plans-p3-deleted',$1,'已删除计划',$2,'staff','deleted',false,false,'zh',now())`,[await hash(password),removed]);
+  await db.query(`INSERT INTO users(username,password_hash,display_name,person_code,role,status,is_active,must_change_password,lang,created_at) VALUES('plans-p3-resigned',$1,'离职计划',$2,'staff','resigned',false,false,'zh',now())`,[await hash(password),kept]);
+  await db.query(`INSERT INTO staff_date_plans(person_code,plan_date,available,reported,source,created_at,updated_at) VALUES($1,$3,true,true,'report',now(),now()),($2,$3,true,true,'report',now(),now())`,[removed,kept,today]);
+  const filtered=await app.get(PlansService).matrix(key);assert.ok(filtered.rows.some(row=>row.code===kept));assert.equal(filtered.rows.some(row=>row.code===removed),false);assert.equal(filtered.summary.find(day=>day.date===today)?.actual,2);
 
   // Manual off and reported rows are both protected from automatic leave marks.
   const leaveStart=addDays(today,1),leaveEnd=addDays(today,3);
@@ -53,5 +59,5 @@ test('plan save protects history/reported facts; leave preserves manual off days
   assert.equal((await db.query('SELECT available FROM staff_date_plans WHERE person_code=$1 AND plan_date=$2',[code,leaveStart])).rows[0].available,false);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_log WHERE ref_label=$1',[code])).rows[0].n,2);
   await post('/api/plans/mine',{key:'2020-01-H1',unavailable:[]}).expect(409);
- }finally{await db.query('DELETE FROM bd_log WHERE ref_label=$1',[code]);await db.query('DELETE FROM staff_date_plans WHERE person_code=$1',[code]);await db.query('DELETE FROM bd_staff_leave WHERE person_code=$1',[code]);await db.query('DELETE FROM users WHERE id=$1',[id]);await db.query('DELETE FROM persons WHERE code=$1',[code]);await app.close();}
+ }finally{await db.query('DELETE FROM bd_log WHERE ref_label=$1',[code]);await db.query('DELETE FROM staff_date_plans WHERE person_code=ANY($1::text[])',[[code,'P3-PLAN-DEL','P3-PLAN-RES']]);await db.query('DELETE FROM bd_staff_leave WHERE person_code=$1',[code]);await db.query('DELETE FROM users WHERE username=ANY($1::text[])',[['plans-p3-staff','plans-p3-deleted','plans-p3-resigned']]);await db.query('DELETE FROM persons WHERE code=ANY($1::text[])',[[code,'P3-PLAN-DEL','P3-PLAN-RES']]);await app.close();}
 });

@@ -7,6 +7,7 @@ import { AuthService } from './auth';
 import { BusinessError } from './errors';
 import { jstToday, monthRange, validDate } from './business-dates';
 import { ReportComparisonService, reportPoints, scoreShare } from './report-comparison';
+import { excludeDeletedStaff } from './deleted-staff';
 const date=z.string().refine(validDate,'日期无效');
 const counts=z.object({area:z.string().max(4096).default(''),p1:z.number().int().min(0).max(999),p2:z.number().int().min(0).max(999)});
 const range=z.object({start:date,end:date,personCode:z.string().max(32).default(''),page:z.coerce.number().int().min(1).max(10000).default(1)}).strict().refine(value=>value.start<=value.end);
@@ -18,8 +19,8 @@ function enrich(row:ReportRow){return {...row,points:reportPoints(row.p1,row.p2)
 @Injectable()
 export class DailyReportsService {
  constructor(@Inject(Database)private readonly db:Database,@Inject(ReportComparisonService)private readonly comparison:ReportComparisonService){}
- async people(){return this.db.query<{code:string;name:string}>('SELECT code,display_name AS name FROM persons ORDER BY display_name,code');}
- async teamPeople(code:string){return (await this.db.query<{code:string;name:string}>(`SELECT DISTINCT p.code,p.display_name AS name FROM bd_team_member leader JOIN bd_team team ON team.id=leader.team_id JOIN bd_team_member member ON member.team_id=team.id JOIN persons p ON p.code=member.person_code WHERE leader.person_code=$1 AND leader.role='leader' AND leader.end_date IS NULL AND member.end_date IS NULL AND team.status='active' ORDER BY p.display_name,p.code`,[code])).rows;}
+ async people(){return this.db.query<{code:string;name:string}>(`SELECT p.code,p.display_name AS name FROM persons p WHERE ${excludeDeletedStaff('p.code')} ORDER BY p.display_name,p.code`);}
+ async teamPeople(code:string){return (await this.db.query<{code:string;name:string}>(`SELECT DISTINCT p.code,p.display_name AS name FROM bd_team_member leader JOIN bd_team team ON team.id=leader.team_id JOIN bd_team_member member ON member.team_id=team.id JOIN persons p ON p.code=member.person_code WHERE leader.person_code=$1 AND leader.role='leader' AND leader.end_date IS NULL AND member.end_date IS NULL AND team.status='active' AND ${excludeDeletedStaff('p.code')} ORDER BY p.display_name,p.code`,[code])).rows;}
  async coverage(client?:PoolClient){const sql='SELECT min(japan_date)::text AS start,max(japan_date)::text AS end FROM formal_records';return (client?await client.query(sql):await this.db.query(sql)).rows[0] as {start:string|null;end:string|null};}
  async assertWritable(client:PoolClient,day:string){const cov=await this.coverage(client);if(cov.end&&day<=cov.end)throw new BusinessError('REPORT_LOCKED','该日期已对账，无法修改或删除自报',409);}
  async synchronize(client:PoolClient,code:string,day:string,reported:boolean){
@@ -33,6 +34,7 @@ export class DailyReportsService {
  }
  async saveTransaction(client:PoolClient,code:string,day:string,userId:number,input:ReportInput,mode:'create'|'update'|'admin',synchronize=true){
    if(!(await client.query('SELECT code FROM persons WHERE code=$1',[code])).rowCount)throw new BusinessError('PERSON_NOT_FOUND','账号未绑定有效员工编号',400);
+   if(!(await client.query(`SELECT 1 FROM (SELECT $1::text AS code) person WHERE ${excludeDeletedStaff('person.code')}`,[code])).rowCount)throw new BusinessError('PERSON_DELETED','该员工已删除',400);
    await this.assertWritable(client,day);
    // Serialize this person's report date without adding a revision column or changing schema.
    await client.query('SELECT pg_advisory_xact_lock(hashtext($1),hashtext($2))',[code,day]);
@@ -52,7 +54,7 @@ export class DailyReportsService {
   return {deleted:!!deleted.rowCount};
  });}
  async list(start:string,end:string,code:string,page:number,limit=30){
-  const result=await this.db.query(`WITH matching AS (SELECT ${fields},coalesce(p.display_name,r.person_code) AS name FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3)),paged AS (SELECT * FROM matching ORDER BY date DESC,"personCode",id LIMIT $4 OFFSET $5)
+  const result=await this.db.query(`WITH matching AS (SELECT ${fields},coalesce(p.display_name,r.person_code) AS name FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3) AND ${excludeDeletedStaff('r.person_code')}),paged AS (SELECT * FROM matching ORDER BY date DESC,"personCode",id LIMIT $4 OFFSET $5)
    SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items,
    (SELECT json_build_object('p1',coalesce(sum(p1),0),'p2',coalesce(sum(p2),0),'total',coalesce(sum(total),0),'points',coalesce(sum(p1+2*p2),0)) FROM matching) AS summary`,[start,end,code,limit,(page-1)*limit]);
   const value=result.rows[0];return {...value,items:(value.items as ReportRow[]).map(enrich),page,pageSize:limit,coverage:await this.coverage()};

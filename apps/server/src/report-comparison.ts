@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { Database } from './database';
+import { excludeDeletedStaff } from './deleted-staff';
 import { reportFingerprint } from './report-model';
 import { KIND_BOTH, KIND_MISSING_REPORT, KIND_MISSING_SYSTEM } from './report-kinds';
 export interface DailySide { person_code:string;date:string;p1:number;p2:number;total:number;name:string }
@@ -53,8 +54,8 @@ export class ReportComparisonService {
  constructor(@Inject(Database)private readonly db:Database){}
  async compare(start:string,end:string,personCode='',sort='acc',client?:PoolClient){
   const values=[start,end,personCode];
-  const sysSql=`SELECT s.person_code,s.ref_date::text AS date,coalesce(s.p1,0)::int AS p1,coalesce(s.p2,0)::int AS p2,(coalesce(s.p1,0)+coalesce(s.p2,0))::int AS total,coalesce(p.display_name,s.person_code) AS name FROM person_daily_stats s LEFT JOIN persons p ON p.code=s.person_code WHERE ref_date BETWEEN $1::date AND $2::date AND ($3='' OR s.person_code=$3) ORDER BY s.person_code,s.ref_date`;
-  const repSql=`SELECT r.person_code,r.report_date::text AS date,r.p1_cnt AS p1,r.p2_cnt AS p2,r.total_cnt AS total,coalesce(p.display_name,r.person_code) AS name FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3) ORDER BY r.person_code,r.report_date`;
+  const sysSql=`SELECT s.person_code,s.ref_date::text AS date,coalesce(s.p1,0)::int AS p1,coalesce(s.p2,0)::int AS p2,(coalesce(s.p1,0)+coalesce(s.p2,0))::int AS total,coalesce(p.display_name,s.person_code) AS name FROM person_daily_stats s LEFT JOIN persons p ON p.code=s.person_code WHERE ref_date BETWEEN $1::date AND $2::date AND ($3='' OR s.person_code=$3) AND ${excludeDeletedStaff('s.person_code')} ORDER BY s.person_code,s.ref_date`;
+  const repSql=`SELECT r.person_code,r.report_date::text AS date,r.p1_cnt AS p1,r.p2_cnt AS p2,r.total_cnt AS total,coalesce(p.display_name,r.person_code) AS name FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3) AND ${excludeDeletedStaff('r.person_code')} ORDER BY r.person_code,r.report_date`;
   const sys=client?await client.query<DailySide>(sysSql,values):await this.db.query<DailySide>(sysSql,values);
   const rep=client?await client.query<DailySide>(repSql,values):await this.db.query<DailySide>(repSql,values);
   return compareDaily(sys.rows,rep.rows,start,end,sort);

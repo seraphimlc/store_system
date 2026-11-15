@@ -231,3 +231,7 @@ html{color-scheme:light}html.dark{color-scheme:dark}body{color:var(--foreground)
 .mcp-credentials{display:grid;gap:18px;min-width:0}.mcp-token-once{display:grid;gap:10px;padding:14px;border:1px solid var(--border-strong);border-radius:var(--radius-md);overflow-wrap:anywhere}
 .mcp-credential-list{margin:0;padding:0;list-style:none;display:grid;gap:12px}.mcp-credential-list li{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}.mcp-credential-list li>div{min-width:0;overflow-wrap:anywhere}
 @media(max-width:600px){.oauth-page{padding:16px}.oauth-panel{align-self:flex-start;padding:20px;gap:18px}.oauth-panel input{font-size:16px}.oauth-actions>*{min-height:44px}.mcp-credential-list li{flex-wrap:wrap}}
+
+.admin-searchable-select .admin-select-search{position:sticky;top:0;z-index:1;padding:8px;background:var(--background)}
+.admin-searchable-select{max-width:min(28rem,calc(100vw - 24px));min-width:min(16rem,calc(100vw - 24px))}
+.admin-searchable-select [data-slot=combobox-item]{overflow-wrap:anywhere}

@@ -15,7 +15,6 @@ import './style.css';
 import { MyDailyReport } from './MyDailyReport';
 import { MyReportFeedback } from './MyReportFeedback';
 import { MyPlan } from './MyPlan';
-import { MyPerformance } from './MyPerformance';
 import { MySettlement } from './MySettlement';
 import { MessageCenter } from '../../../packages/client/src/MessageCenter';
 import { useAppLanguage } from '../../../packages/client/src/language';
@@ -35,7 +34,7 @@ const ja: Record<string,string> = {
 function tabForPath(path: string) {
   if (path.includes('/my/tasks') || /^\/tasks\/\d+/.test(path)) return 'station';
   if (path.includes('/confirm') || path.includes('/appeal')) return 'settlement';
-  if (path.includes('/perf')) return 'performance';
+  if (path.includes('/perf')) return 'report';
   if (path.includes('messages')) return 'messages';
   if (path.includes('/plan')) return 'plan';
   if (path.includes('/report/feedback')) return 'feedback';
@@ -43,7 +42,7 @@ function tabForPath(path: string) {
   if (path.includes('/password')) return 'account';
   return 'tasks';
 }
-const tabPaths: Record<string, string> = { station: '/my/tasks', tasks: '/my/work', performance: '/my/perf', report: '/my/report', plan: '/my/plan', messages: '/messages', feedback: '/my/report/feedback', account: '/my/password', settlement: '/my/confirm' };
+const tabPaths: Record<string, string> = { station: '/my/tasks', tasks: '/my/work', report: '/my/report', plan: '/my/plan', messages: '/messages', feedback: '/my/report/feedback', account: '/my/password', settlement: '/my/confirm' };
 function App() {
   const t = (value: string) => language === 'ja' ? ja[value] ?? value : value;
   const [session, setSession] = useState<Session | null>(null);
@@ -93,12 +92,12 @@ function App() {
   return <ConfigProvider locale={language === 'ja' ? jaJP : zhCN}>
     {!session || session.user.mustChangePassword ? <main className="auth-page"><header className="auth-header"><span className="wordmark">巡店</span>{localeButton}</header><section className="auth-content">{session && <LockKeyhole size={28} className="auth-icon"/>}<h1>{t(session ? '设置新密码' : '欢迎回来')}</h1>{session && <p className="muted">{t('初始密码需要更新后才能继续')}</p>}{session ? passwordForm() : <form onSubmit={submit} className="auth-form"><label>{t('账号')}<input name="username" autoComplete="username" autoCapitalize="none" required maxLength={128}/></label><label>{t('密码')}<input name="password" type="password" autoComplete="current-password" required maxLength={512}/></label>{error && <p className="error" role="alert">{error}</p>}<Button color="primary" block size="large" type="submit" loading={pending}>{t(pending ? '登录中…' : '登录')}</Button></form>}</section><footer className="auth-footer">{t('日本业务时间')} · JST</footer></main> : <div className={"staff-shell"+((mapPage||batchPage||regionPage)?" is-grid-screen":"")}>
       <NavBar backIcon={pageHeader?.back||['messages','feedback','account','settlement'].includes(tab)?<LeftIcon size={22} aria-label={t('返回')}/>:false} onBack={() => {const path=pageHeader?.back||'/my/work';history.pushState({},'',path);window.dispatchEvent(new PopStateEvent('popstate'));window.scrollTo({top:0});}} right={<button className="staff-menu-trigger" type="button" aria-label={t('菜单')} aria-expanded={menuOpen} aria-controls="staff-menu" onClick={() => setMenuOpen(true)}><Menu size={22}/>{unread > 0 && <span className="menu-unread" aria-label={t('站内消息') + ': ' + unread}>{unread}</span>}</button>}>
-        <h1>{pageHeader?.title||t(tab === 'station' ? session.user.role === 'leader' ? '任务分派' : '我的任务' : tab === 'tasks' ? '巡店任务' : tab === 'report' ? '每日填报' : tab === 'plan' ? '出勤计划' : tab === 'messages' ? '站内消息' : tab === 'feedback' ? '核对结果' : tab === 'performance' ? '我的绩效' : tab === 'settlement' ? '判定与申诉' : '我的账号')}</h1>
+        <h1>{pageHeader?.title||t(tab === 'station' ? session.user.role === 'leader' ? '任务分派' : '我的任务' : tab === 'tasks' ? '巡店任务' : tab === 'report' ? '每日填报' : tab === 'plan' ? '出勤计划' : tab === 'messages' ? '站内消息' : tab === 'feedback' ? '核对结果' : tab === 'settlement' ? '判定与申诉' : '我的账号')}</h1>
       </NavBar>
       <PageHeaderContext.Provider value={setPageHeader}><main className={"staff-content"+(mapPage?" staff-content-map":batchPage?" staff-content-batch":regionPage?" staff-content-region":"")}>
         {planPending&&tab==='tasks'&&['/','/my/work','/my/work/'].includes(routePath)&&planDismissed!==planPending&&<aside className="h5-plan-pending" role="status"><p>{language==='ja'?'出勤予定が未登録です':'出勤计划待登记'} · {planPending}</p><div><Button size="small" onClick={()=>navigate('plan')}>{language==='ja'?'登録する':'去登记'}</Button><Button size="small" fill="none" onClick={()=>setPlanDismissed(planPending)}>{language==='ja'?'後で':'稍后再说'}</Button></div></aside>}
 
-        {tab === 'station' ? <MyStationTasks session={session} language={language}/> : tab === 'tasks' ? <WorkRouter path={routePath} session={session} language={language}/> : tab === 'report' ? <MyDailyReport session={session} language={language}/> : tab === 'feedback' ? <MyReportFeedback language={language}/> : tab === 'plan' ? <MyPlan session={session} language={language}/> : tab === 'messages' ? <MessageCenter mobile session={session} language={language} request={api} onUnread={setUnread}/> : tab === 'performance' ? <MyPerformance language={language}/> : tab === 'settlement' ? <MySettlement session={session} language={language}/> : <>
+        {tab === 'station' ? <MyStationTasks session={session} language={language}/> : tab === 'tasks' ? <WorkRouter path={routePath} session={session} language={language}/> : tab === 'report' ? <MyDailyReport session={session} language={language}/> : tab === 'feedback' ? <MyReportFeedback language={language}/> : tab === 'plan' ? <MyPlan session={session} language={language}/> : tab === 'messages' ? <MessageCenter mobile session={session} language={language} request={api} onUnread={setUnread}/> : tab === 'settlement' ? <MySettlement session={session} language={language}/> : <>
           <section className="account-heading"><UserRound size={32}/><h2>{session.user.displayName}</h2><p>{t(({ admin: '管理员', leader: '队长', staff: '员工' })[session.user.role])} · {session.user.username}</p></section>
           <List><List.Item onClick={() => navigate('settlement')} arrowIcon={<ChevronRight size={18}/>}>{t('判定与申诉')}</List.Item><List.Item extra={session.user.personCode || '—'}>{t('人员编号')}</List.Item><List.Item onClick={() => { setError(''); setPasswordOpen(true); }} arrowIcon={<ChevronRight size={18}/>}>{t('修改密码')}</List.Item>{session.user.role === 'admin' && <List.Item onClick={() => location.assign('/admin/')} arrowIcon={<ChevronRight size={18}/>}>{t('管理端入口')}</List.Item>}</List>
           <Button className="logout-button" fill="outline" block onClick={logout}><span className="h5-button-content"><LogOut size={16}/>{t('退出登录')}</span></Button>{error && <p className="error" role="alert">{error}</p>}
@@ -109,7 +108,6 @@ function App() {
           <div className="sheet-title"><h2>{session.user.displayName}</h2><Button fill="none" onClick={() => setMenuOpen(false)}>{t('关闭')}</Button></div>
           <List>
             <List.Item prefix={<MapPinned size={20}/>} onClick={()=>navigate('tasks')}>{t('巡店任务')}</List.Item>
-            <List.Item prefix={<ClipboardList size={20}/>} onClick={()=>navigate('station')}>{t(session.user.role==='leader'?'任务分派':'我的任务')}</List.Item>
             <List.Item prefix={<FileText size={20}/>} onClick={()=>navigate('report')}>{t('每日填报')}</List.Item>
             <List.Item prefix={<CalendarDays size={20}/>} extra={planPending?<Badge content={Badge.dot}/>:undefined} onClick={()=>navigate('plan')}>{t('出勤计划')}</List.Item>
             <List.Item prefix={<Mail size={20}/>} extra={unread || undefined} onClick={() => navigate('messages')}>{t('站内消息')}</List.Item><List.Item prefix={<ClipboardList size={20}/>} onClick={() => navigate('feedback')}>{t('核对结果')}</List.Item><List.Item prefix={<LockKeyhole size={20}/>} onClick={() => {navigate('account');setPasswordOpen(true);}}>{t('修改密码')}</List.Item><List.Item prefix={<UserRound size={20}/>} onClick={() => navigate('account')}>{t('我的账号')}</List.Item></List>

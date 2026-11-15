@@ -9,6 +9,7 @@ try{for(const executable of [true,false]){
  await context.route(base+'/api/**',async route=>{const request=route.request(),p=new URL(request.url()).pathname.slice(4);let body;
  if(p==='/auth/session')body={csrfToken:'fixture',user:{id:1,username:'fixture',displayName:'移动验收',personCode:'fixture',role:'leader',status:'active',languagePreference:'zh',mustChangePassword:false}};
  else if(p==='/messages')body={items:[],total:0,unread:0};else if(p==='/plans/mine')body={pending:null};else if(p==='/work/batches')body={items:[]};
+ else if(p==='/batch-work/grids/1/completions')body={status:'ready',query:'',total:0,candidateTotal:0,items:[]};
  else if(p==='/batch-work/grids/1/map-config')body={enabled:true,key:'offline-key'};
  else if(p==='/batch-work/grids/1/visits')body={items:stores,total:2,page:1,pageSize:20,main:{id:2,title:'批次',status:'active'},region:{id:3,name:'片区',leaderId:1},grid:{id:1,grid_id:8,snapshot:{name:'网格',geometry},total_stores:2,completed_stores:0,progress:0},canExecute:executable};
  else if(p==='/batch-work/grids/1/proposals'&&request.method()==='POST'){

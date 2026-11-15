@@ -1,5 +1,6 @@
 import {Controller,Get,Inject,Injectable,Query,Req} from '@nestjs/common';import type {Request} from 'express';import {z} from 'zod';
 import {AuthService} from './auth';import {Database} from './database';import {PayrollService} from './payroll';import {BusinessError} from './errors';import {monthRange,validDate} from './business-dates';import {validMonth} from '../../../packages/domain/src/payroll';
+import {excludeDeletedStaff} from './deleted-staff';
 const base=z.object({month:z.string().refine(validMonth),date:z.union([z.literal('all'),z.string().refine(validDate)]).optional(),page:z.coerce.number().int().min(1).max(10000).default(1)}).strict();
 function parse<T>(schema:z.ZodType<T>,input:unknown){const value=schema.safeParse(input);if(!value.success)throw new BusinessError('VALIDATION','绩效日期、月份或分页参数无效',400);return value.data;}
 @Injectable()
@@ -20,7 +21,7 @@ export class PerformanceDailyService{
     (SELECT row_to_json(totals) FROM totals) AS summary,(SELECT row_to_json(month_totals) FROM month_totals) AS "monthSummary",
     coalesce((SELECT json_agg(date::text ORDER BY date DESC) FROM dates),'[]'::json) AS dates,(SELECT day::text FROM selected) AS "selectedDate"`;
    const result=(await client.query(sql,[start,end,code,date??null,(page-1)*30,personal])).rows[0];
-   const people=personal?[]:(await client.query<{code:string;name:string}>(`SELECT DISTINCT d.code,coalesce(p.display_name,d.code) AS name FROM (${source}) d LEFT JOIN persons p ON p.code=d.code WHERE d.code IS NOT NULL ORDER BY name,code`,[start,end,null])).rows;
+   const people=personal?[]:(await client.query<{code:string;name:string}>(`SELECT DISTINCT d.code,coalesce(p.display_name,d.code) AS name FROM (${source}) d LEFT JOIN persons p ON p.code=d.code WHERE d.code IS NOT NULL AND ${excludeDeletedStaff('d.code')} ORDER BY name,code`,[start,end,null])).rows;
    return {...result,month,page,pageSize:30,people,source:personal?'person_daily_stats':'formal_records'};
   });
  }

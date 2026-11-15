@@ -9,6 +9,7 @@ import { Database } from './database';
 import { BusinessError } from './errors';
 import { jstToday, validDate } from './business-dates';
 import { addDays, periodBounds, periodDays, periodOf, planView, shiftPeriod, windowState, landingPath, type PlanRow } from './plan-rules';
+import { excludeDeletedStaff } from './deleted-staff';
 const keySchema=z.string().max(16).refine(value=>{try{periodBounds(value);return true;}catch{return false;}});
 const dateSchema=z.string().refine(validDate);
 function parse<T>(schema:z.ZodType<T>,input:unknown){const result=schema.safeParse(input);if(!result.success)throw new BusinessError('VALIDATION','请检查半月和日期格式',400);return result.data;}
@@ -57,7 +58,7 @@ export class PlansService {
    ),planned AS (SELECT DISTINCT person_code AS code FROM staff_date_plans WHERE plan_date BETWEEN $1::date AND $2::date)
    SELECT coalesce(a.code,planned.code) AS code,coalesce(a.name,p.display_name,planned.code) AS name,coalesce(a.status,'') AS status
    FROM accounts a FULL JOIN planned ON planned.code=a.code LEFT JOIN persons p ON p.code=planned.code
-   WHERE a.status IN ('active','leave') OR planned.code IS NOT NULL ORDER BY name,code`,[bounds.start,bounds.end])).rows;
+   WHERE (a.status IN ('active','leave') OR planned.code IS NOT NULL) AND ${excludeDeletedStaff('coalesce(a.code,planned.code)')} ORDER BY name,code`,[bounds.start,bounds.end])).rows;
   const codes=people.map(person=>person.code);
   const plans=(await this.db.query<PlanRow&{person_code:string}>('SELECT person_code,plan_date::text AS date,available,reported,source,leave_id,updated_at::text AS updated_at FROM staff_date_plans WHERE person_code=ANY($1::text[]) AND plan_date BETWEEN $2::date AND $3::date',[codes,bounds.start,bounds.end])).rows;
   const starts=(await this.db.query<{code:string;day:string}>(`SELECT code,min(day)::text AS day FROM (
