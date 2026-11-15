@@ -13,7 +13,12 @@ await mkdir(join(source,'apps/admin'),{recursive:true});
 const tar=execFileSync('git',['archive',adminBaseline,'apps/admin']);execFileSync('tar',['-x','-C',source],{input:tar});
 for(const path of ['node_modules','apps/admin/node_modules','apps/staff/node_modules'])await symlink(join(root,path),join(source,path),'dir');
 // Both app dependency versions and lockfile must still be compatible with the production source baseline.
-for(const file of ['pnpm-lock.yaml','apps/staff/package.json','apps/admin/package.json']){const bytes=await readFile(join(source,file));if(sha(bytes)!==sha(readGit(file)))throw Error('Dependency drift requires explicit scope review: '+file);}
+for(const file of ['apps/staff/package.json','apps/admin/package.json']){const bytes=await readFile(join(source,file));if(sha(bytes)!==sha(readGit(file)))throw Error('Dependency drift requires explicit scope review: '+file);}
+// Staff-only production source intentionally pruned unrelated workspace importers.
+const lock=readGit('pnpm-lock.yaml').toString(),staffLock=await readFile(join(source,'pnpm-lock.yaml'),'utf8'),adminLock=execFileSync('git',['show',adminBaseline+':pnpm-lock.yaml'],{encoding:'utf8'});
+const importer=(text,name)=>{const key='  '+name+':\n',a=text.indexOf(key);if(a<0)throw Error('Missing lock importer '+name);const tail=text.slice(a+key.length),m=tail.search(/^  \S|^packages:/m);return tail.slice(0,m<0?undefined:m).trim();};
+for(const [old,name]of [[staffLock,'apps/staff'],[adminLock,'apps/admin']])if(importer(old,name)!==importer(lock,name))throw Error('Frontend dependency resolution drift: '+name);
+await writeFile(join(source,'pnpm-lock.yaml'),lock);
 async function replace(file,bytes,why){await mkdir(join(source,file,'..'),{recursive:true});await writeFile(join(source,file),bytes);report.replacements.push({file,sha256:sha(bytes),why});}
 for(const file of ['apps/staff/src/work/BatchDetail.tsx','apps/staff/src/work/RegionDetail.tsx','apps/staff/src/work/StoreForm.tsx','apps/staff/src/work/WorkMap.tsx','apps/admin/src/AdminSelect.tsx','packages/client/src/BatchWork.tsx'])await replace(file,readGit(file),'requested bulk assignment, visible choices, photo actions and navigation');
 let staffMain=await readFile(join(source,'apps/staff/src/main.tsx'),'utf8');const station=staffMain.split('\n').filter(line=>line.includes("navigate('station')")&&line.includes('<List.Item prefix={<ClipboardList'));
