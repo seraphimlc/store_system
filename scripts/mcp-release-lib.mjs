@@ -23,6 +23,10 @@ export function restoreMcpMain(baseline, compiled) {
  if (!middleware || !middleware.includes('mcp.handle')) throw Error('Missing protocol middleware');
  if (result.split('    app.enableShutdownHooks();').length !== 2) throw Error('Unexpected shutdown hook');
  result=result.replace('    app.enableShutdownHooks();',middleware+'    app.enableShutdownHooks();');
+ if (!result.includes('X-Frame-Options')) {
+  const headers=compiled.match(/        res\.setHeader\('X-Frame-Options',[\s\S]*?(?=        res\.on\('finish')/)?.[0];
+  if(headers && result.split("        res.on('finish'").length===2) result=result.replace("        res.on('finish'",headers+"        res.on('finish'");
+ }
  return imports.map(m=>m[0]).join('\n')+'\n'+result;
 }
 export function restoreMcpGateway(baseline, protocolLocations) {
