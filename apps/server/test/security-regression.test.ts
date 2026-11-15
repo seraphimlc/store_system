@@ -14,7 +14,7 @@ const url=process.env.NEXT_TEST_DATABASE_URL;
 test('private upload names normalize traversal and control characters',()=>{
  assert.equal(safeUploadName('../../../../tmp/a.xlsx'),'a.xlsx');assert.equal(safeUploadName('..\\..\\tmp\\a.xlsx'),'a.xlsx');assert.equal(safeUploadName('bad\0\n.xlsx'),'bad.xlsx');assert.equal(safeUploadName('../../..'),'upload.xlsx');
 });
-test('security migration, isolated credentials, OAuth admission/scope, export audit and shared throttling',{skip:!url},async()=>{
+test('security migration, isolated credentials, OAuth direct authorization/scope, export audit and shared throttling',{skip:!url},async()=>{
  const app=await createApp({databaseUrl:url!,sessionSecret:'security-regression-secret-at-least-40-characters',cookieSecure:true,host:'127.0.0.1',port:0});
  const db=app.get(Database),users:number[]=[],codes=['SECURITY-ONE','SECURITY-TWO'],clients:string[]=[];
  // Cookies marked Secure are copied explicitly by this HTTP-only test, never weakened in production configuration.
@@ -47,20 +47,23 @@ test('security migration, isolated credentials, OAuth admission/scope, export au
   assert.equal(await verify((await db.query('SELECT password_hash FROM users WHERE id=$1',[users[0]])).rows[0].password_hash,password),true,'failed credential revocation must roll back the password change');
   await get('/api/auth/session').expect(200);
   const v='x'.repeat(43),challenge=createHash('sha256').update(v).digest('base64url'),callback='https://untrusted.fixture.test/callback';
-  const reg=await agent.post('/oauth/register').send({redirect_uris:[callback],scope:'read'}).expect(201);clients.push(reg.body.client_id);assert.equal(reg.body.approval_required,true);
+  const reg=await agent.post('/oauth/register').send({redirect_uris:[callback],scope:'read'}).expect(201);clients.push(reg.body.client_id);assert.equal(reg.body.approval_required,undefined);
   const payload={client_id:reg.body.client_id,redirect_uri:callback,response_type:'code',code_challenge:challenge,code_challenge_method:'S256',scope:'read'};
-  await get('/api/mcp-oauth/context').query(payload).expect(403);
-  await agent.post('/api/mcp-oauth/clients/'+reg.body.client_id).set('Cookie',cookie).send({approved:true,scope:'read'}).expect(403);
-  await post('/api/mcp-oauth/clients/'+reg.body.client_id,{approved:true,scope:'read'}).expect(201);
+  // Existing pending registrations must connect without a client-admission decision.
+  await db.query('UPDATE oauth_client_policies SET approved=false WHERE client_id=(SELECT id FROM oauth_clients WHERE client_id=$1)',[reg.body.client_id]);
+  await agent.get('/oauth/authorize').query(payload).expect(303);
+  await get('/api/mcp-oauth/context').query(payload).expect(200);
+  await get('/api/mcp-oauth/clients').expect(404);
+  await post('/api/mcp-oauth/clients/'+reg.body.client_id,{approved:true,scope:'read'}).expect(404);
   await get('/api/mcp-oauth/context').query({...payload,scope:'read write'}).expect(400);
   await get('/api/mcp-oauth/context').query({...payload,redirect_uri:callback+'?changed=1'}).expect(400);
   const approved=await post('/api/mcp-oauth/authorize',{request:payload,approved:true}).expect(201);
   const code=new URL(approved.body.redirect).searchParams.get('code');
   const token=await agent.post('/oauth/token').send({grant_type:'authorization_code',client_id:reg.body.client_id,redirect_uri:callback,code,code_verifier:v}).expect(200);assert.equal(token.body.scope,'read');
-  await post('/api/mcp-oauth/clients/'+reg.body.client_id,{approved:false,scope:'read'}).expect(201);
+  await agent.post('/oauth/revoke').send({client_id:reg.body.client_id,token:token.body.refresh_token}).expect(200);
   assert.ok((await db.query('SELECT revoked_at FROM api_tokens WHERE token_hash=$1',[createHash('sha256').update(token.body.access_token).digest('hex')])).rows[0].revoked_at);
-  await agent.post('/oauth/token').send({grant_type:'refresh_token',client_id:reg.body.client_id,refresh_token:token.body.refresh_token}).expect(403);
-  // The migration is idempotent and does not change approved policy decisions.
+  await agent.post('/oauth/token').send({grant_type:'refresh_token',client_id:reg.body.client_id,refresh_token:token.body.refresh_token}).expect(400);
+  // The historical schema migration remains compatible and idempotent.
   await db.query(await readFile('deploy-next/migrations/001-auth-security.sql','utf8'));
   let release!:()=>void,started!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;}),entered=new Promise<void>(resolve=>{started=resolve;});
   const first=withExportGuard(db,users[0],'fixture','',async()=>{started();await held;return 'done';});await entered;

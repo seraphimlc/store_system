@@ -10,7 +10,7 @@ class Recovery(core.Deployment):
   receipt=json.load(open(self.d/'encrypted-upload.json'));p=self.d/receipt['file'];urllib.request.urlretrieve(receipt['url'],p);assert p.stat().st_size==receipt['size'] and core.sha(p)==receipt['sha256']
   with zipfile.ZipFile(p) as z:
    assert sorted(z.namelist())==sorted(['image-overlay.tar.gz.enc','manifest.json','SHA256SUMS']) and z.testzip() is None;z.extractall(self.d)
-  self.m=json.load(open(self.d/'manifest.json'));m=self.m;assert m['id']==self.r and m['releaseTag']==self.r and not m['dirty'] and m['artifactKind']=='image-overlay-v1' and m['migrations']==['001-auth-security.sql'];self.baseline()
+  self.m=json.load(open(self.d/'manifest.json'));m=self.m;assert m['id']==self.r and m['releaseTag']==self.r and not m['dirty'] and m['artifactKind']=='image-overlay-v1' and m['migrations'] in ([],['001-auth-security.sql']);self.baseline()
   run('sha256sum','--check','SHA256SUMS',cwd=self.d,stdout=subprocess.DEVNULL)
   run('docker','run','--rm','--network','none','--user','0','-v',str(self.d)+':/release','-w','/release',m['baseImages']['api']['tag'],'node','--input-type=module','-e',"import{readFile}from'node:fs/promises';import{decryptArchive}from'./encrypted-release-bundle.mjs';await decryptArchive('image-overlay.tar.gz.enc','image-overlay.tar.gz','decrypt-key.json',JSON.parse(await readFile('manifest.json','utf8')).encryption)")
   root=self.d/'overlay';root.mkdir(mode=0o700);expected={f['path']:f for f in m['files']};assert len(expected)==len(m['files'])
@@ -19,12 +19,13 @@ class Recovery(core.Deployment):
    core.validate_members(t.getmembers(),expected)
    for member in t.getmembers():
     meta=expected[member.name];raw=t.extractfile(member).read();assert member.size==meta['size'] and hashlib.sha256(raw).hexdigest()==meta['sha256'];p=root/member.name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(raw)
-  dockerfiles={'api':f"FROM {m['baseImages']['api']['tag']}\nCOPY api/ /app/apps/server/dist/\nCOPY vendor/ /app/mcp-dependencies/\nENV NODE_PATH=/app/mcp-dependencies/node_modules\n",'gateway':f"FROM {m['baseImages']['gateway']['tag']}\nCOPY gateway/default.conf /etc/nginx/conf.d/default.conf\nCOPY gateway/html/ /usr/share/nginx/html/\n"}
+  has_vendor=any(x.startswith('vendor/') for x in expected)
+  dockerfiles={'api':f"FROM {m['baseImages']['api']['tag']}\nCOPY api/ /app/apps/server/dist/\n"+('COPY vendor/ /app/mcp-dependencies/\nENV NODE_PATH=/app/mcp-dependencies/node_modules\n' if has_vendor else ''),'gateway':f"FROM {m['baseImages']['gateway']['tag']}\nCOPY gateway/default.conf /etc/nginx/conf.d/default.conf\nCOPY gateway/html/ /usr/share/nginx/html/\n"}
   for kind in ['api','gateway']:
    assert (root/(kind+'.Dockerfile')).read_text()==dockerfiles[kind]
    with open(self.d/(kind+'-image-build.log'),'w') as log:run('docker','build','--pull=false','--network','none','-f',str(root/(kind+'.Dockerfile')),'-t',m['images'][kind],str(root),stdout=log,stderr=subprocess.STDOUT)
    image=inspect(m['images'][kind]);base=m['baseImages'][kind]['identity'];assert image['Architecture']=='amd64' and image['RootFS']['Layers'][:len(base['RootFS']['Layers'])]==base['RootFS']['Layers'];config=dict(base['Config'])
-   if kind=='api':config['Env']=[x for x in config['Env'] if not x.startswith('NODE_PATH=')]+['NODE_PATH=/app/mcp-dependencies/node_modules']
+   if kind=='api' and has_vendor:config['Env']=[x for x in config['Env'] if not x.startswith('NODE_PATH=')]+['NODE_PATH=/app/mcp-dependencies/node_modules']
    assert image['Config']==config
    entries=[]
    for name,f in expected.items():
@@ -37,7 +38,9 @@ class Recovery(core.Deployment):
     for dest,digest in entries:assert out('docker','run','--rm','--network','none','--entrypoint','sha256sum',m['images'][kind],dest).split()[0]==digest
   (self.d/'decrypt-key.json').unlink();write_json(self.d/'server-image-verification.json',{'ok':True,'basePinned':True,'filesVerified':len(expected),'runtimeConfigChange':'SDK NODE_PATH only'})
  def prepare(self):
-  super().prepare();self.schema((self.d/'candidate-database.txt').read_text().strip());p=self.d/'candidate.env';p.write_text(p.read_text()+'\nNEXT_MCP_PUBLIC_URL=https://store.visitworld.me/mcp\nNEXT_MCP_AUTHORIZATION_UI_URL=https://store.visitworld.me/admin/mcp-authorize\n')
+  super().prepare()
+  if self.m['migrations']:self.schema((self.d/'candidate-database.txt').read_text().strip())
+  p=self.d/'candidate.env';p.write_text(p.read_text()+'\nNEXT_MCP_PUBLIC_URL=https://store.visitworld.me/mcp\nNEXT_MCP_AUTHORIZATION_UI_URL=https://store.visitworld.me/admin/mcp-authorize\n')
  def schema(self,name):
   assert name=='store_settle' or re.fullmatch(r'ui_candidate_\d{8}_\d{6}',name)
   with open(self.d/'001-auth-security.sql','rb') as f:run('docker','exec','-i','deploy-db-1','sh','-c','psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1"','sh',name,stdin=f,stdout=subprocess.DEVNULL)
@@ -56,7 +59,8 @@ class Recovery(core.Deployment):
    with open(self.b/'database.final.dump','wb') as f:run('docker','exec','deploy-db-1','sh','-c','pg_dump -U "$POSTGRES_USER" -d store_settle -Fc --no-owner --no-acl',stdout=f)
    os.chmod(self.b/'database.final.dump',0o600)
    with open(self.b/'database.final.dump','rb') as f:run('docker','exec','-i','deploy-db-1','pg_restore','--list',stdin=f,stdout=subprocess.DEVNULL)
-   self.schema('store_settle');c=json.load(open(self.b/'compose.before.json'));c['services']['api']['image']=self.m['images']['api'];c['services']['gateway']['image']=self.m['images']['gateway'];c['services']['api'].setdefault('environment',{}).update({'NEXT_MCP_PUBLIC_URL':'https://store.visitworld.me/mcp','NEXT_MCP_AUTHORIZATION_UI_URL':'https://store.visitworld.me/admin/mcp-authorize'});write_json(self.compose,c)
+   if self.m['migrations']:self.schema('store_settle')
+   c=json.load(open(self.b/'compose.before.json'));c['services']['api']['image']=self.m['images']['api'];c['services']['gateway']['image']=self.m['images']['gateway'];c['services']['api'].setdefault('environment',{}).update({'NEXT_MCP_PUBLIC_URL':'https://store.visitworld.me/mcp','NEXT_MCP_AUTHORIZATION_UI_URL':'https://store.visitworld.me/admin/mcp-authorize'});write_json(self.compose,c)
    self.dc('up','-d','--no-deps','api');health('store-next-prod-20261112-api-1');self.smoke('store-next-prod-20261112-api-1','production');self.dc('--profile','worker','up','-d','--no-deps','worker');health('store-next-prod-20261112-worker-1',60);self.dc('up','-d','--no-deps','gateway');health('store-next-prod-20261112-gateway-1',60)
    block='''    location ~ ^/(mcp(/|$)|oauth/|[.]well-known/oauth-(authorization-server|protected-resource)$) {
         proxy_pass http://127.0.0.1:8000;
@@ -71,14 +75,14 @@ class Recovery(core.Deployment):
         client_max_body_size 25m;
     }
 '''
-   for route in ['/mcp','/.well-known/','/oauth/']:
+   for route in (['/mcp','/.well-known/','/oauth/'] if self.m['migrations'] else []):
     pattern=r'    location '+re.escape(route)+r' \{ default_type application/json; return 404; \}\n';assert len(re.findall(pattern,original))==1;original=re.sub(pattern,'',original)
-   original=original.replace(marker,block+'\n'+marker);self.nginx.write_text(original);run('nginx','-t');run('nginx','-s','reload');core.wait_public_ready('https://store.visitworld.me/api/health/ready');write_json(self.d/'switch.json',{'release':self.r,'switchedAt':datetime.now(ZoneInfo('Asia/Singapore')).isoformat()})
+   original=original.replace(marker,block+'\n'+marker) if self.m['migrations'] else original;self.nginx.write_text(original);run('nginx','-t');run('nginx','-s','reload');core.wait_public_ready('https://store.visitworld.me/api/health/ready');write_json(self.d/'switch.json',{'release':self.r,'switchedAt':datetime.now(ZoneInfo('Asia/Singapore')).isoformat()})
   except Exception:self.rollback();raise
  def finalize(self):
   assert json.load(open(self.d/'production-smoke.json'))['ok'];assert json.load(open(self.d/'public-mcp-proof.json'))['ok'];old=json.load(open(self.b/'state.before.json'));c=json.load(open(self.compose));before=json.load(open(self.b/'compose.before.json'));assert c['services']['worker']==before['services']['worker'];assert Path('/opt/store-next/runtime/runtime.env').read_bytes()==(self.b/'runtime.before.env').read_bytes()
   for n in ['api','gateway','worker']:health('store-next-prod-20261112-'+n+'-1',20)
-  now=datetime.now(ZoneInfo('Asia/Singapore')).isoformat();s={**old,'current':self.r,'previous':old['current'],'releaseTag':self.r,'sourceCommit':self.m['sourceCommit'],'apiRelease':self.r,'adminRelease':self.r,'staffRelease':old['staffRelease'],'workerRelease':old['workerRelease'],'backups':str(self.b),'updatedAt':now,'verifiedAt':now,'mcpRecovery':True};tmp=self.state.with_suffix('.pending.json');write_json(tmp,s);tmp.replace(self.state);write_json(self.d/'deployment-proof.json',{'ok':True,'release':self.r,'rollback':old['current'],'sourceCommit':self.m['sourceCommit'],'verifiedAt':now,'staffUnchanged':True,'workerImageUnchanged':True,'migration':'001-auth-security.sql','publicMcp':True});self.clean()
+  now=datetime.now(ZoneInfo('Asia/Singapore')).isoformat();s={**old,'current':self.r,'previous':old['current'],'releaseTag':self.r,'sourceCommit':self.m['sourceCommit'],'apiRelease':self.r,'adminRelease':self.r,'staffRelease':old['staffRelease'],'workerRelease':old['workerRelease'],'backups':str(self.b),'updatedAt':now,'verifiedAt':now,'mcpRecovery':True};tmp=self.state.with_suffix('.pending.json');write_json(tmp,s);tmp.replace(self.state);write_json(self.d/'deployment-proof.json',{'ok':True,'release':self.r,'rollback':old['current'],'sourceCommit':self.m['sourceCommit'],'verifiedAt':now,'staffUnchanged':True,'workerImageUnchanged':True,'migrations':self.m['migrations'],'publicMcp':True});self.clean()
 def main():
  p=argparse.ArgumentParser();p.add_argument('action',choices=['artifacts','prepare','candidate','switch','finalize','rollback','clean']);p.add_argument('release');a=p.parse_args();d=Recovery(a.release)
  with open('/opt/store-next/runtime/ui-release.lock','w') as lock:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);d.phase(a.action,getattr(d,a.action));print(json.dumps({'ok':True,'phase':a.action,'release':a.release}),flush=True)

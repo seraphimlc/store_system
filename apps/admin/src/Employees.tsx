@@ -1,5 +1,4 @@
 import {AdminCheckbox} from './AdminCheckbox';
-import {OAuthClients} from './OAuthClients';
 import {McpCredentials} from './McpCredentials';
 import {SuccessNotice} from './SuccessNotice';
 import {AdminPagination} from './AdminPagination';
@@ -116,7 +115,6 @@ export function Employees({ session, language }: { session: Session; language: s
   const isAccount = editor?.mode === 'create' || editor?.mode === 'edit';
   const title = editor?.mode === 'delete' ? '删除员工' : editor?.mode === 'create' ? '新建员工' : editor?.mode === 'edit' ? '编辑员工' : '重置口令';
   return <section className="employee-section">
-    <OAuthClients session={session} language={language}/>
     <Dialog open={!!temporaryCredential} onOpenChange={open=>{if(!open)setTemporaryCredential(null);}}><DialogContent>
       <DialogTitle>{language==='ja'?'一時パスワードを安全に渡す':'请安全交付临时口令'}</DialogTitle>
       <p>{language==='ja'?'この画面を閉じると再表示できません。初回ログイン時に変更が必要です。':'关闭后无法再次查看。请单独交付给本人，首次登录必须修改。'}</p>

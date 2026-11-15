@@ -27,13 +27,13 @@ function scope(value:unknown,base?:string){
  if(!requested.length||requested.some(s=>!['read','write'].includes(s)))throw new OAuthError('invalid_scope','只支持read/write');
  if(!requested.includes('read'))requested.unshift('read');
  const output=['read',...(requested.includes('write')?['write']:[])].join(',');
- if(base&&output.split(',').some(s=>!base.split(',').includes(s)))throw new OAuthError('invalid_scope','请求的权限超过已批准范围');
+ if(base&&output.split(',').some(s=>!base.split(',').includes(s)))throw new OAuthError('invalid_scope','请求的权限超过客户端注册或本次授权范围');
  return output;
 }
 const registerSchema=z.object({scope:z.string().max(64).optional(),client_name:z.string().trim().max(128).default('MCP客户端'),redirect_uris:z.array(z.string().refine(validOAuthRedirect)).min(1).max(10),token_endpoint_auth_method:z.literal('none').optional(),grant_types:z.array(z.enum(['authorization_code','refresh_token'])).optional(),response_types:z.array(z.literal('code')).optional(),client_uri:z.string().max(1024).optional(),logo_uri:z.string().max(1024).optional(),contacts:z.array(z.string().max(255)).max(10).optional(),policy_uri:z.string().max(1024).optional(),tos_uri:z.string().max(1024).optional()}).strict();
 const authorizeSchema=z.object({client_id:z.string().min(1).max(128),redirect_uri:z.string().max(512),response_type:z.literal('code'),code_challenge:z.string().regex(/^[A-Za-z0-9_-]{43}$/),code_challenge_method:z.literal('S256'),scope:z.string().max(64).optional(),state:z.string().max(2048).optional(),resource:z.string().max(1024).optional()}).strict();
 type User={id:number;role:string;status:string;is_active:boolean;must_change_password:boolean};
-type OAuthClient={id:number;client_id:string;client_name:string;redirect_uris:string[];client_secret_hash:string|null;allowed_scopes:string;approved:boolean};
+type OAuthClient={id:number;client_id:string;client_name:string;redirect_uris:string[];client_secret_hash:string|null;allowed_scopes:string};
 const accessSeconds=24*3600,refreshSeconds=90*24*3600;
 @Injectable()
 export class McpOAuthService{
@@ -42,32 +42,16 @@ export class McpOAuthService{
  issuer(){return new URL(this.resource()).origin;}
  metadata(){const issuer=this.issuer();return {issuer,authorization_endpoint:issuer+'/oauth/authorize',token_endpoint:issuer+'/oauth/token',registration_endpoint:issuer+'/oauth/register',revocation_endpoint:issuer+'/oauth/revoke',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],token_endpoint_auth_methods_supported:['none'],code_challenge_methods_supported:['S256'],scopes_supported:['read','write']};}
  private resourceCheck(value:unknown){if(value!==undefined&&value!==this.resource())throw new OAuthError('invalid_target','授权资源与MCP入口不一致');}
- private async client(client:Pick<Database,'query'>,clientId:string){const row=(await client.query<OAuthClient>(`SELECT c.id,c.client_id,c.client_name,c.redirect_uris,c.client_secret_hash,p.allowed_scopes,p.approved FROM oauth_clients c JOIN oauth_client_policies p ON p.client_id=c.id WHERE c.client_id=$1`,[clientId])).rows[0];if(!row||row.client_secret_hash)throw new OAuthError('invalid_client','未注册的公共客户端');if(!row.approved)throw new OAuthError('unauthorized_client','客户端尚未获管理员批准，请联系管理员',403);return row;}
+ private async client(client:Pick<Database,'query'>,clientId:string){const row=(await client.query<OAuthClient>(`SELECT c.id,c.client_id,c.client_name,c.redirect_uris,c.client_secret_hash,p.allowed_scopes FROM oauth_clients c JOIN oauth_client_policies p ON p.client_id=c.id WHERE c.client_id=$1`,[clientId])).rows[0];if(!row||row.client_secret_hash)throw new OAuthError('invalid_client','未注册的公共客户端');return row;}
  private async user(client:PoolClient,id:number){const row=(await client.query<User>("SELECT id,role,status,is_active,must_change_password FROM users WHERE id=$1 FOR SHARE",[id])).rows[0];if(!row||!row.is_active||row.status!=='active'||row.must_change_password||!['admin','leader','staff'].includes(row.role))throw new OAuthError('invalid_grant','账号当前不可授权，请登录检查状态');return row;}
  async register(value:unknown){const p=registerSchema.safeParse(value);if(!p.success)throw new OAuthError('invalid_client_metadata','需要有效回调地址和公共客户端元数据');
   const requestedScope=scope(p.data.scope),id=randomBytes(18).toString('base64url'),uris=[...new Set(p.data.redirect_uris)];
-  const approved=uris.every(uri=>this.config.oauthTrustedRedirectUris?.includes(uri));
   await this.db.transaction(async client=>{
    const row=(await client.query<{id:number}>("INSERT INTO oauth_clients(client_id,client_name,redirect_uris,created_at) VALUES($1,$2,$3,timezone('UTC',now())) RETURNING id",[id,p.data.client_name,JSON.stringify(uris)])).rows[0];
-   await client.query('INSERT INTO oauth_client_policies(client_id,allowed_scopes,approved) VALUES($1,$2,$3)',[row.id,requestedScope,approved]);
+   await client.query('INSERT INTO oauth_client_policies(client_id,allowed_scopes,approved) VALUES($1,$2,true)',[row.id,requestedScope]);
   });
-  return {client_id:id,client_name:p.data.client_name,redirect_uris:uris,scope:requestedScope.replaceAll(',',' '),approval_required:!approved,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']};
+  return {client_id:id,client_name:p.data.client_name,redirect_uris:uris,scope:requestedScope.replaceAll(',',' '),token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']};
  }
- async clients(){return (await this.db.query('SELECT c.client_id,c.client_name,c.redirect_uris,p.allowed_scopes,p.approved FROM oauth_clients c JOIN oauth_client_policies p ON p.client_id=c.id ORDER BY c.id DESC LIMIT 100')).rows;}
- async approve(clientId:string,approved:boolean,allowedScopes:string){
-  const permissions=scope(allowedScopes);
-  return this.db.transaction(async client=>{
-   await client.query("SELECT pg_advisory_xact_lock(hashtext('oauth-client'),hashtext($1))",[clientId]);
-   const row=(await client.query<{id:number}>('SELECT id FROM oauth_clients WHERE client_id=$1 FOR UPDATE',[clientId])).rows[0];
-   if(!row)throw new OAuthError('invalid_client','客户端不存在',404);
-   await client.query('UPDATE oauth_client_policies SET approved=$2,allowed_scopes=$3 WHERE client_id=$1',[row.id,approved,permissions]);
-   await client.query("UPDATE api_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE name LIKE $1",[`OAuth:${row.id}:%`]);
-   await client.query("UPDATE oauth_refresh_tokens SET revoked_at=coalesce(revoked_at,timezone('UTC',now())) WHERE client_id=$1",[row.id]);
-   await client.query('DELETE FROM oauth_codes WHERE client_id=$1 AND used_at IS NULL',[row.id]);
-   return {client_id:clientId,approved,scope:permissions.replaceAll(',',' ')};
-  });
- }
-
  async authorization(value:unknown,client:Pick<Database,'query'>=this.db){const p=authorizeSchema.safeParse(value);if(!p.success)throw new OAuthError('invalid_request','授权请求、PKCE或回调参数无效');this.resourceCheck(p.data.resource);const registered=await this.client(client,p.data.client_id);
   if(!validOAuthRedirect(p.data.redirect_uri)||!registered.redirect_uris.includes(p.data.redirect_uri))throw new OAuthError('invalid_request','回调地址与注册值不一致');
   return {request:p.data,client:registered,scope:scope(p.data.scope,registered.allowed_scopes)};

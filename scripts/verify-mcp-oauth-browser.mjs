@@ -8,7 +8,7 @@ if(!url||!/^\/store_test_[0-9]{13}_[a-f0-9]{12}_refactor_p1$/.test(new URL(url).
 const db=new Pool({connectionString:url}),password='oauth-browser-fixture-2026',ids=[],clientIds=[];let browser;
 const errors=[];const code='MCP-OAUTH-BROWSER';
 async function json(response){const data=await response.json();if(!response.ok)throw Error('HTTP '+response.status+' '+JSON.stringify(data));return data;}
-async function requestClient(){const v=randomBytes(32).toString('base64url'),redirect=(process.env.NEXT_MCP_CALLBACK_BASE_URL??base)+'/oauth-browser-callback',registered=await json(await fetch(base+'/oauth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_name:'浏览器授权客户端 <script>',redirect_uris:[redirect],token_endpoint_auth_method:'none',scope:'read write'})}));clientIds.push(registered.client_id);await db.query("UPDATE oauth_client_policies SET approved=true WHERE client_id=(SELECT id FROM oauth_clients WHERE client_id=$1)",[registered.client_id]);const query=new URLSearchParams({client_id:registered.client_id,redirect_uri:redirect,response_type:'code',code_challenge:createHash('sha256').update(v).digest('base64url'),code_challenge_method:'S256',scope:'read write',state:'browser-state',resource:base+'/mcp'});return {v,query,registered,redirect};}
+async function requestClient(){const v=randomBytes(32).toString('base64url'),redirect=(process.env.NEXT_MCP_CALLBACK_BASE_URL??base)+'/oauth-browser-callback',registered=await json(await fetch(base+'/oauth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_name:'浏览器授权客户端 <script>',redirect_uris:[redirect],token_endpoint_auth_method:'none',scope:'read write'})}));clientIds.push(registered.client_id);const query=new URLSearchParams({client_id:registered.client_id,redirect_uri:redirect,response_type:'code',code_challenge:createHash('sha256').update(v).digest('base64url'),code_challenge_method:'S256',scope:'read write',state:'browser-state',resource:base+'/mcp'});return {v,query,registered,redirect};}
 async function noOverflow(page){return page.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth,width:innerWidth,body:document.documentElement.scrollWidth}));}
 try{
  await db.query('INSERT INTO persons(code,display_name,created_at) VALUES($1,\'授权浏览器员工\',now())',[code]);const pw=await hash(password);
@@ -34,13 +34,9 @@ try{
  const desktopLayout=await noOverflow(admin);await admin.setViewportSize({width:390,height:844});const narrowPanel=await dialog.boundingBox(),narrowLayout=await noOverflow(admin);if(narrowLayout.overflow||!narrowPanel||narrowPanel.x<0||narrowPanel.x+narrowPanel.width>390)throw Error('Credential panel exceeds narrow viewport');
  if(errors.length||desktopLayout.overflow)throw Error(JSON.stringify({errors,desktopLayout}));
 
- // Use the actual employee and approval UI; no production data or live providers.
+ // Client admission UI is removed; user consent is still required.
  await dialog.getByRole('button',{name:'关闭',exact:true}).first().click();await admin.setViewportSize({width:1440,height:1000});
- const unknown=await json(await fetch(base+'/oauth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_name:'待批准安全客户端',redirect_uris:['https://pending.fixture.test/callback'],scope:'read'})}));clientIds.push(unknown.client_id);
- await admin.locator('summary').filter({hasText:'MCP 客户端准入'}).click();
- const pending=admin.locator('details section').filter({hasText:'待批准安全客户端'});await pending.getByText('待批准',{exact:true}).waitFor();
- await pending.getByRole('button',{name:'批准并保存',exact:true}).click();await pending.getByText('已批准',{exact:true}).waitFor();
- if(!(await db.query('SELECT approved FROM oauth_client_policies WHERE client_id=(SELECT id FROM oauth_clients WHERE client_id=$1)',[unknown.client_id])).rows[0].approved)throw Error('UI client approval not saved');
+ if(await admin.locator('summary').filter({hasText:'MCP 客户端准入'}).count())throw Error('Removed client admission UI must not remain');
  if(await admin.getByRole('button',{name:'批量重置',exact:true}).count())throw Error('Shared reset still exposed');
  await admin.getByRole('button',{name:'新建员工',exact:true}).click();
  const create=admin.getByRole('dialog');await create.getByLabel('人员编号',{exact:true}).fill('MCP-OAUTH-BROWSER-NEW');await create.getByLabel('姓名',{exact:true}).fill('安全建号验收');await create.getByRole('button',{name:'保存',exact:true}).click();
