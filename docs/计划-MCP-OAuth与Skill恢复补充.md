@@ -523,3 +523,28 @@ Skill入口实测为“技能 → 添加技能 → 上传技能”，导入窗�
 ### 25.1 旧实现对照与恢复执行
 
 旧实现legacy/mcp_service/auth.py明确只接受Authorization: Bearer单通道，不做query参数通道；legacy连接器使用固定${VISIT_BASE_URL}/mcp。恢复目标是旧OAuth/个人凭据和27工具的角色/业务行为，不启动旧Python服务或绕过鉴权。用户已要求直接修复，允许必要的新栈认证迁移及重新登录影响。候选以当前生产API153017、Gateway165416冻结产物为底，不整包覆盖其他已上线功能。
+
+
+## 26. 生产旧功能恢复完成（2026-11-15）
+
+正式发布 `prod-20261115-200002`，源码Tag指向 `b77ae27`；验收辅助修正提交 `37f0ab6`（只修正合成验收的允许回环主机名，无运行产物差异）。API/Gateway均已替换；员工端仍 `prod-20261115-095410`，Worker镜像仍 `prod-20261112`。回滚基线为 `prod-20261115-165416`，备份目录 `/opt/store-next/backups/prod-20261115-200002`。
+
+### 恢复内容与旧实现对照
+
+- 旧实现本来只接受Bearer请求头，本次继续固定 `/mcp`，没有引入URL Token。恢复27个工具、OAuth发现/动态注册/PKCE/刷新撤销、个人凭据、管理员客户端准入及授权登录页。角色仍按员工6/队长10/管理员27隔离；财务确认、版本和事务保护沿用已验收恢复实现。
+- 基于实际生产API153017/Gateway165416产物叠加40个新增/修改API模块，不以HEAD完整镜像覆盖已上线搜索/报表入口。管理端基于165416冻结源码恢复授权/凭据/安全账号入口，保留原布局和已部署员工生命周期文案；员工端静态产物复用。原API搜索预热和Worker消费者保留。
+- 宿主机移除三类旧404阻断，改为精确MCP/OAuth/两类发现的反代；Gateway同步恢复路由，300秒超时、关闭缓冲、25MiB限制。生产源固定 `https://store.visitworld.me/mcp`，授权页为同源 `/admin/mcp-authorize`。
+- 正式执行001-auth-security.sql：补持久会话、客户端策略、导出审计表，并按策略撤销未批准旧OAuth。没有重置用户密码或改结算/任务/搜索业务数据。旧Cookie需要重新登录，旧OAuth需重新准入。最终备份已保存且pg_restore列表可读，不做全库回灌。
+
+### 验证证据
+
+- 候选直接使用冻结生产JS加定向模块运行现有测试：44项MCP/认证检查，其中首轮41通过；修正安全响应头接线、mock搜索预热适配及按恢复版本员工合同核对后，失败3项定向重跑通过。最后API40模块与已验收候选字节一致。新增发布接线库3项测试通过，server类型检查/构建及实际候选admin类型检查/构建通过；没有重跑无关全量。pnpm存在本地store预检告警，但实际tsc命令完成；没有重装工作区依赖。
+- 加密OSS传输ZIP 4,523,539字节，AES-256-GCM、基础amd64镜像Config/RootFS与白名单文件摘要校验通过；API仅额外设置隔离SDK NODE_PATH。管理端复用已上传校验的194856资源。没有SSH直传镜像或明文归档。
+- 服务器恢复库实际迁移后，用随机合成admin/leader/staff验证登录201、客户端准入201、PKCE换码200、工具数27/10/6及whoami成功。未使用真实账号凭据；合成记录与临时恢复库清理。初次内部探针使用127.0.0.1被DNS重绑定保护拒绝，修为已有允许localhost后通过，未关闭安全校验。
+- 公网无凭据及无效Bearer的POST /mcp均401，WWW-Authenticate准确指向生产资源元数据；两类发现GET均200，资源/授权/token/注册/撤销地址均为生产域名。健康、/admin/、/、/admin/mcp-authorize均200，release header为200002。
+- 生产授权页430/1280px浏览器实际显示账号/密码与“登录并继续”，无横向溢出、页面异常或CDN失败；没有提交真实凭据或查询业务明细。正式Worker/API/Gateway健康。
+- 证据保留在 `.release/prod-20261115-200002/`：candidate-local-proof、candidate-smoke、production-smoke、server-image-verification、public-mcp-proof、public-consent-browser、deployment-proof及timings。两端本次加密密钥删除，候选容器/网络/恢复库清理；原生产镜像/卷/回滚备份保留。
+
+### 客户端后续
+
+线上服务端已恢复，不再等待路由部署。WorkBuddy配置应从本地3000切换为 `https://store.visitworld.me/mcp`，重新连接并登录；首次动态注册后，管理员在“员工 → MCP 客户端准入”核对回调、批准权限，再回客户端重连。生产真实用户WorkBuddy OAuth/Skill调用尚未替用户完成，不能把恢复库合成验收当成真实用户授权证据。
