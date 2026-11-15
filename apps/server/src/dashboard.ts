@@ -11,7 +11,7 @@ import {BusinessError} from './errors';
 import {loadConfig} from './config';
 import {DurableQueue} from '../../worker/src/queue';
 import {configuredReportModel,type ReportModel} from './report-model';
-import {excludeDeletedStaff} from './deleted-staff';
+import {excludeDeletedStaff,selectableStaff} from './deleted-staff';
 export interface DashboardMonth {month:string;employees:number;records:number;p1:number;p2:number;points:number;amount:number;p2rate:number;per_emp_points:number;per_emp_amount:number;per_emp_records:number;per_store_points:number;[key:`d_${string}`]:number|null}
 export interface DashboardStaffMonth {month:string;records:number;p1:number;p2:number;points:number;amount:number;dups:number|null}
 interface InsightPointer {id:string;code:string;month:string;fingerprint:string}
@@ -36,7 +36,7 @@ export class DashboardService {
  async overview(requested?:string){
   const monthly=await this.monthly();const selected=monthly.find(row=>row.month===requested)??monthly.at(-1)??null;
   if(requested&&!monthly.some(row=>row.month===requested))throw new BusinessError('NOT_FOUND','该月份暂无绩效数据',404);
-  const people=(await this.db.query<{code:string;name:string}>(`SELECT code,display_name AS name FROM persons WHERE ${excludeDeletedStaff('code')} ORDER BY code`)).rows;
+  const people=(await this.db.query<{code:string;name:string}>(`SELECT code,display_name AS name FROM persons WHERE ${selectableStaff('code')} ORDER BY code`)).rows;
   if(!selected)return {monthly,current:null,previous:null,people,top:[],newStaff:[],goneStaff:[],quality:null};
   const previous=monthly[monthly.indexOf(selected)-1]??null;
   const entries=(await this.db.query<{code:string;name:string;month:string;points:number;amount:string;records:number;p1:number;p2:number}>(`SELECT m.person_code AS code,coalesce(p.display_name,m.person_code) AS name,m.month,m.points,m.salary::text AS amount,m.records,m.p1,m.p2 FROM month_perf_records m LEFT JOIN persons p ON p.code=m.person_code WHERE m.month=ANY($1::text[]) ORDER BY m.points DESC,m.person_code`,[[selected.month,...previous?[previous.month]:[]]])).rows.map(row=>({...row,amount:Number(row.amount)}));

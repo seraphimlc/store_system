@@ -20,10 +20,11 @@ export async function decryptArchive(source,output,keyFile,metadata){
 }
 export async function packEncrypted(release,base=resolve('.release')){
  const dir=join(base,release),manifest=JSON.parse(await readFile(join(dir,'manifest.json'),'utf8'));if(manifest.id!==release||manifest.dirty!==false||manifest.platform!=='linux/amd64'||!manifest.releaseTag||!manifest.sourceCommit)throw Error('Committed/tagged amd64 manifest required');
- const encryption=await encryptArchive(join(dir,'images.tar.gz'),join(dir,'images.tar.gz.enc'),join(dir,'decrypt-key.json'),release);
+ const archive=manifest.artifactKind==='image-overlay-v1'?'image-overlay.tar.gz':'images.tar.gz',cipherFile=archive+'.enc';
+ const encryption=await encryptArchive(join(dir,archive),join(dir,cipherFile),join(dir,'decrypt-key.json'),release);
  const publicDir=join(dir,'encrypted-public');await mkdir(publicDir,{mode:0o700});await writeFile(join(publicDir,'manifest.json'),JSON.stringify({...manifest,encryption},null,2),{mode:0o600});
- await writeFile(join(publicDir,'SHA256SUMS'),encryption.cipherSha256+'  images.tar.gz.enc\n'+await sha(join(publicDir,'manifest.json'))+'  manifest.json\n',{mode:0o600});
- const zip=join(dir,'images-'+release+'.encrypted.zip');const py='import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],"x",zipfile.ZIP_STORED,allowZip64=True) as z:\n for p,n in zip(sys.argv[2:],["images.tar.gz.enc","manifest.json","SHA256SUMS"]):z.write(p,n)\nwith zipfile.ZipFile(sys.argv[1]) as z:\n assert z.testzip() is None\n';const r=spawnSync('python3',['-c',py,zip,join(dir,'images.tar.gz.enc'),join(publicDir,'manifest.json'),join(publicDir,'SHA256SUMS')],{encoding:'utf8'});if(r.status)throw Error('Encrypted ZIP pack failed');
+ await writeFile(join(publicDir,'SHA256SUMS'),encryption.cipherSha256+'  '+cipherFile+'\n'+await sha(join(publicDir,'manifest.json'))+'  manifest.json\n',{mode:0o600});
+ const zip=join(dir,'images-'+release+'.encrypted.zip');const py='import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],"x",zipfile.ZIP_STORED,allowZip64=True) as z:\n for p,n in zip(sys.argv[3:],[sys.argv[2],"manifest.json","SHA256SUMS"]):z.write(p,n)\nwith zipfile.ZipFile(sys.argv[1]) as z:\n assert z.testzip() is None\n';const r=spawnSync('python3',['-c',py,zip,cipherFile,join(dir,cipherFile),join(publicDir,'manifest.json'),join(publicDir,'SHA256SUMS')],{encoding:'utf8'});if(r.status)throw Error('Encrypted ZIP pack failed');
  const bundle={release,platform:'linux/amd64',file:zip.split('/').at(-1),size:(await stat(zip)).size,sha256:await sha(zip),archiveSha256:encryption.archiveSha256,encryption:'AES-256-GCM; key excluded and sent only via SSH'};await writeFile(join(dir,'encrypted-bundle.json'),JSON.stringify(bundle,null,2),{mode:0o600});return bundle;
 }
 export async function uploadEncrypted(release,base=resolve('.release')){
