@@ -548,3 +548,16 @@ Skill入口实测为“技能 → 添加技能 → 上传技能”，导入窗�
 ### 客户端后续
 
 线上服务端已恢复，不再等待路由部署。WorkBuddy配置应从本地3000切换为 `https://store.visitworld.me/mcp`，重新连接并登录；首次动态注册后，管理员在“员工 → MCP 客户端准入”核对回调、批准权限，再回客户端重连。生产真实用户WorkBuddy OAuth/Skill调用尚未替用户完成，不能把恢复库合成验收当成真实用户授权证据。
+
+
+## 27. 取消管理员客户端预批准（2026-11-15）
+
+用户明确要求取消客户端预批准，恢复认证直连。源码提交 `6e0b890`；`c4d7feb`仅修正浏览器证据字段名。移除McpOAuthService对approved的阻断、管理员客户端列表/审批方法与HTTP接口、管理端OAuthClients入口和组件、受信回调自动准入配置。动态注册后直接进入账号登录与用户同意；既有approved=false记录亦可直接完成OAuth。保留注册scope硬上限、精确回调、S256 PKCE、CSRF、账号/角色权限以及令牌刷新/撤销，不支持匿名或URL Token。
+
+历史oauth_client_policies表继续保存scope，approved列仅为回滚兼容保留，不用于鉴权；新注册写true以兼容旧版本。不更新历史客户端标志、不恢复已撤销令牌、不重置密码、不执行迁移。001历史安全迁移不重复执行。
+
+验收：2项认证安全断言（含既有pending→授权303、越权scope/错误回调拒绝及撤销）和3项OAuth/官方SDK检查通过；现有OAuth隔离浏览器390/1440通过，用户登录/同意/拒绝/切换账号/凭据签发与撤销仍有效，确认管理员准入入口消失。server/admin类型检查和构建通过，实际候选admin检查构建通过。pnpm存在本机store预检告警但tsc/vite均执行成功，未重装依赖。随机临时库已清理、业务库指纹未变。
+
+候选 `prod-20261115-214854` 基于实际生产 `prod-20261115-200002` 的API/Gateway固定身份。仅替换config、mcp-oauth、mcp-oauth-http三个编译模块；管理端从已部署冻结源码只移除准入import/组件，其他界面不变。员工端、Worker镜像、数据库和宿主机路由不变。AES-256-GCM加密OSS增量ZIP 34,646字节，前端资源白名单50项上传校验通过。服务器固定镜像/逐文件校验和恢复库实际镜像验收已通过；合成账号登录、approved=false客户端直接OAuth/PKCE、27/10/6工具及whoami均成功，未使用真实账号凭据。正式生产已切换并最终记录为 `prod-20261115-214854` / `6e0b890`，API/Gateway同步更新；Worker镜像仍prod-20261112、staff仍095410，runtime.env与宿主机路由保留，无数据库迁移或密码重置。短维护窗口保留原Worker消费者并使用最终备份，回退点200002。
+
+公网复测原问题中的WorkBuddy client_id（公开标识，不是令牌）：同一个approved=false注册的GET /oauth/authorize现在返回303并定位同源/admin/mcp-authorize，不再unauthorized_client；未提交真实用户登录或同意。POST /mcp无凭据401、两个发现200、健康200、授权页200；已删除的/api/mcp-oauth/clients为404。该证据保存在本次release的public-mcp-proof.json。恢复库/候选容器/网络与两端密钥清理，正式镜像、状态和备份保留。用户只需回WorkBuddy重试连接，不必重新注册。
