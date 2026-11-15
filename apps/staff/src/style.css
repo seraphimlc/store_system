@@ -232,7 +232,7 @@
 .work-store-footer:empty{display:none}.work-store-footer>.adm-button{height:44px;width:100%}
 
 /* Non-modal store sheet leaves the map interactive above its 40% viewport height. */
-.work-store-drawer{height:40dvh;max-height:40dvh}
+.work-store-drawer{height:var(--store-sheet-height,40dvh);max-height:var(--store-sheet-height,40dvh)}
 .work-store-footer{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,3fr);gap:12px;align-items:center}
 .work-store-footer.is-readonly{grid-template-columns:minmax(0,1fr)}
 .work-store-footer.is-readonly .work-store-save-slot{display:none}
