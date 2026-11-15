@@ -30,6 +30,16 @@ def health(name,seconds=240):
         if not state['Running']:raise RuntimeError('service stopped: '+name)
         time.sleep(2)
     raise RuntimeError('readiness timeout: '+name)
+def wait_public_ready(url,attempts=15):
+    # Nginx reload is asynchronous: retry only this safe GET, never a business write.
+    for _ in range(attempts):
+        try:
+            with urllib.request.urlopen(url,timeout=5) as response:
+                if response.status==200 and json.load(response).get('ok'):return
+        except (OSError,ValueError):pass
+        time.sleep(1)
+    raise RuntimeError('public readiness did not recover after nginx reload')
+
 def write_json(p,x):p.write_text(json.dumps(x,indent=2)+'\n');os.chmod(p,0o600)
 
 class Deployment:
@@ -134,7 +144,7 @@ class Deployment:
             self.dc('up','-d','--no-deps','api');health('store-next-prod-20261112-api-1');self.smoke('store-next-prod-20261112-api-1','production')
             self.dc('--profile','worker','up','-d','--no-deps','worker');health('store-next-prod-20261112-worker-1',60)
             self.dc('up','-d','--no-deps','gateway');health('store-next-prod-20261112-gateway-1',60)
-            self.nginx.write_text(original);run('nginx','-t');run('nginx','-s','reload');run('curl','-fsS','https://store.visitworld.me/api/health/ready',stdout=subprocess.DEVNULL)
+            self.nginx.write_text(original);run('nginx','-t');run('nginx','-s','reload');wait_public_ready('https://store.visitworld.me/api/health/ready')
             write_json(self.d/'switch.json',{'release':self.r,'switchedAt':datetime.now(ZoneInfo('Asia/Singapore')).isoformat()})
         except Exception:self.rollback();raise
     def finalize(self):
