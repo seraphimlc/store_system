@@ -41,8 +41,10 @@ test('MCP public resource URL rejects credentials, wrong paths and insecure prod
   assert.equal(loadConfig({ ...env, NEXT_MCP_PUBLIC_URL: 'https://example.test/mcp' }).mcpPublicUrl, 'https://example.test/mcp');
 });
 
-test('official MCP SDK: stateless identity isolation, legacy envelope, revoked credentials and redacted two-stage audit', async () => {
-  const app = await createApp({ databaseUrl: 'postgresql://localhost/mcp_mock_only', sessionSecret: 'x'.repeat(40), cookieSecure: false, port: 3000, host: '127.0.0.1' });
+test('official MCP SDK: stateless identity isolation, legacy envelope, revoked credentials and redacted two-stage audit', { skip: process.env.NEXT_TEST_ISOLATED !== '1' }, async () => {
+  // Bootstrap now prewarms search using the database before request-level mocks are installed.
+  // Use only the runner-owned schema database, never a nonexistent/default local connection.
+  const app = await createApp({ databaseUrl: process.env.NEXT_TEST_DATABASE_URL!, sessionSecret: 'x'.repeat(40), cookieSecure: false, port: 3000, host: '127.0.0.1' });
   const db = app.get(Database);
   const adminRaw = 'AdminKey_mock_fixture_001', staffRaw = 'StaffKey_mock_fixture_002';
   const row = (raw: string, id: number, role: McpActor['role']) => ({ token_id: id, uid: id, token_hash: digest(raw), scopes: 'read', revoked_at: null,

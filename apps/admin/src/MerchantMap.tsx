@@ -1,3 +1,4 @@
+import {MapPin,Search,X} from 'lucide-react';
 import {AdminLink} from './AdminLink';
 import {Alert} from '@appica/ui-react/alert';
 import {Form} from '@appica/ui-react/form';
@@ -6,16 +7,24 @@ import {Input} from '@appica/ui-react/input';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {Button} from '@appica/ui-react/button';
 import type {Session} from '../../../packages/contracts/src';
-import {api} from './api';import {googleMaps} from './google-maps';import './grid-map.css';
+import {api} from './api';import {googleMaps} from './google-maps';import './grid-map.css';import './merchant-map-search.css';
 type View={west:number;east:number;south:number;north:number;zoom:number};
 type Summary={merchant_count:number;covered_count:number;coverage_pct:number};
 type Data={mode:'points'|'clusters';summary:Summary;dense:boolean;as_of:string;points:{id:string;lat:number;lon:number;covered:boolean}[];cells:({id:string;lat:number;lon:number}&Summary)[]};
 type Detail={place_id:string;name:string;address:string;lat:number;lon:number;phone:string;website:string;sources:string;prefecture:string;municipality:string;location_accuracy:string;covered:boolean;last_visited_at:string|null};
+type SearchItem={merchantId:string;name:string;address:string;lat:number|null;lon:number|null;businessStatus:string|null};
+type SearchResult={items:SearchItem[];total:number;page:number;pageSize:number};
 const defaultView={west:139.6,east:139.9,south:35.6,north:35.9,zoom:12};
 function safeWebsite(value:string){try{const url=new URL(value);return url.protocol==='https:'||url.protocol==='http:'?url.href:null;}catch{return null;}}
 export function MerchantMap({session,language}:{session:Session;language:string}){
  const t=(zh:string,jp:string)=>language==='ja'?jp:zh;
  const [view,setView]=useState<View>(defaultView),[data,setData]=useState<Data>(),[detail,setDetail]=useState<Detail>(),[loading,setLoading]=useState(false),[detailLoading,setDetailLoading]=useState(false),[error,setError]=useState(''),[detailError,setDetailError]=useState(''),[missingKey,setMissingKey]=useState(false),[sdkError,setSdkError]=useState(false),[sdk,setSdk]=useState<typeof google.maps>(),[refresh,setRefresh]=useState(0);
+ const [query,setQuery]=useState(''),[searchRetry,setSearchRetry]=useState(0),[searchPage,setSearchPage]=useState(1),[searchResult,setSearchResult]=useState<SearchResult>(),[searchLoading,setSearchLoading]=useState(false),[searchError,setSearchError]=useState(''),[searchOpen,setSearchOpen]=useState(true),[selectedMerchant,setSelectedMerchant]=useState<SearchItem>();
+ const searchInput=useRef<HTMLInputElement>(null);
+ useEffect(()=>{let ignore=false;setSearchResult(undefined);setSearchError('');setSearchLoading(!!query.trim());if(!query.trim())return;
+  const timer=window.setTimeout(()=>{void api<SearchResult>('/merchant-map/search?'+new URLSearchParams({q:query.trim(),page:String(searchPage)}),session).then(value=>{if(!ignore)setSearchResult(value);}).catch(cause=>{if(!ignore)setSearchError(cause.message);}).finally(()=>{if(!ignore)setSearchLoading(false);});},300);
+  return()=>{ignore=true;window.clearTimeout(timer);};
+ },[query,searchPage,searchRetry,session]);
  const route=()=>location.pathname.startsWith('/admin/merchant-map/')?decodeURIComponent(location.pathname.slice('/admin/merchant-map/'.length)):'';
  const [detailIdentity,setDetailIdentity]=useState(route);
  useEffect(()=>{const pop=()=>setDetailIdentity(route());window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
@@ -34,13 +43,34 @@ export function MerchantMap({session,language}:{session:Session;language:string}
  },[sdk,detailIdentity]);
  useEffect(()=>{if(detailIdentity)return;const version=++generation.current;let ignore=false;setLoading(true);setError('');const timer=window.setTimeout(()=>{api<Data>('/merchant-map/data?'+new URLSearchParams(Object.entries(view).map(([key,value])=>[key,String(value)])),session).then(value=>{if(!ignore&&version===generation.current)setData(value);},cause=>{if(!ignore&&version===generation.current){setError(cause.message);setData(undefined);}}).finally(()=>{if(!ignore&&version===generation.current)setLoading(false);});},180);return()=>{ignore=true;generation.current++;window.clearTimeout(timer);};},[view,refresh,session,detailIdentity]);
  useEffect(()=>{const features=layer.current;if(!features)return;features.forEach(feature=>features.remove(feature));if(!data||loading)return;features.addGeoJson({type:'FeatureCollection',features:data.mode==='points'?data.points.map(point=>({type:'Feature',id:point.id,geometry:{type:'Point',coordinates:[point.lon,point.lat]},properties:{kind:'point',label:point.covered?'✓':'•',title:point.id}})):data.cells.map(cell=>({type:'Feature',id:cell.id,geometry:{type:'Point',coordinates:[cell.lon,cell.lat]},properties:{kind:'cell',label:String(cell.merchant_count),title:`${cell.covered_count}/${cell.merchant_count}`}}))});},[data,loading,sdk,detailIdentity]);
+ useEffect(()=>{if(!sdk||!map.current||!selectedMerchant||detailIdentity)return;const {lat,lon}=selectedMerchant;if(lat===null||lon===null||!Number.isFinite(lat)||!Number.isFinite(lon))return;
+  map.current.panTo({lat,lng:lon});map.current.setZoom(18);
+  const marker=new sdk.Data({map:map.current});marker.setStyle({label:'1',title:selectedMerchant.name,clickable:false});marker.addGeoJson({type:'FeatureCollection',features:[{type:'Feature',id:selectedMerchant.merchantId,geometry:{type:'Point',coordinates:[lon,lat]},properties:{}}]});return()=>marker.setMap(null);
+ },[selectedMerchant,sdk,detailIdentity]);
  function submitView(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=new FormData(event.currentTarget),next=Object.fromEntries(['west','east','south','north','zoom'].map(key=>[key,Number(form.get(key))])) as unknown as View;setView(next);if(map.current){map.current.fitBounds({west:next.west,east:next.east,south:next.south,north:next.north},24);map.current.setZoom(next.zoom);}}
  const [boundsOpen,setBoundsOpen]=useState(false),[listOpen,setListOpen]=useState(false);
  const website=detail?safeWebsite(detail.website):null,accuracy:Record<string,string>={pending:t('待核实','未確認'),accurate:t('准确','正確'),nonexistent:t('不存在','該当なし'),doubtful:t('存疑','要確認')};
  if(detailIdentity)return <section className="merchant-detail-page"><div className="admin-actions"><AdminLink href="/admin/merchant-map" onNavigate={()=>{detailGeneration.current++;setDetailIdentity('');setDetail(undefined);setDetailError('');history.pushState({},'','/admin/merchant-map');}}>{t('返回商户地图','店舗地図へ戻る')}</AdminLink></div>{detailLoading&&<p role="status">{t('正在读取商户详情…','店舗詳細を読込中…')}</p>}{detailError&&<Alert role="alert">{detailError}</Alert>}{detail&&<article><h2>{detail.name}</h2><p>{detail.address||'—'}</p><p>{detail.place_id}</p><p>{[detail.prefecture,detail.municipality].filter(Boolean).join(' · ')}</p><p>{detail.lat}, {detail.lon} · {accuracy[detail.location_accuracy]??detail.location_accuracy}</p><p>{t('电话：','電話：')}{detail.phone||'—'}</p><p>{t('网站：','ウェブサイト：')}{website?<a href={website} target="_blank" rel="noreferrer">{website}</a>:detail.website||'—'}</p><p>{detail.covered?t('近30天已覆盖','過去30日に訪問済み'):t('近30天未覆盖','過去30日は未訪問')}</p><p>{detail.last_visited_at?new Date(detail.last_visited_at).toLocaleString(language==='ja'?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo'}):t('暂无巡店记录','訪問履歴なし')}</p></article>}</section>;
  return <section className="batch-work merchant-map">
  {missingKey&&<p role="status">{t('地图公钥未配置，可按下方范围读取统计和查询详情。','地図の公開キーは未設定です。下の範囲指定で集計と詳細を確認できます。')}</p>}{sdkError&&<Alert role="alert">{t('底图加载失败，范围统计与详情仍可使用。','地図を読み込めません。範囲集計と詳細は利用できます。')}</Alert>}
- <Form className="merchant-map-search" onReset={()=>{detailGeneration.current++;setDetailLoading(false);setDetail(undefined);setDetailError('');}} onSubmit={event=>{event.preventDefault();const identity=String(new FormData(event.currentTarget).get('identity')??'');void loadDetail(identity);}}><label>{t('商户编号','店舗ID')}<Input name="identity" required maxLength={255}/></label><div className="admin-filter-submit"><Button type="submit" disabled={detailLoading}>{t('查询商户详情','店舗詳細を検索')}</Button><Button type="reset" variant="outline">{t('重置','リセット')}</Button></div></Form> <div className="grid-map-canvas" ref={canvas} aria-label={t('商户地图画布','店舗地図キャンバス')} hidden={!sdk}/>
+ <div className="merchant-map-workspace">
+ <div className="grid-map-canvas" ref={canvas} aria-label={t('商户地图画布','店舗地図キャンバス')} hidden={!sdk}/>
+ <div className="merchant-search-panel">
+ <Form className="merchant-search-form" onSubmit={event=>{event.preventDefault();setSearchOpen(true);searchInput.current?.focus();}}>
+ <Search size={20} aria-hidden="true"/><Input ref={searchInput} aria-label={t('搜索全地图商户','地図全体の店舗を検索')} placeholder={t('搜索名称、地址或商户编号','店舗名・住所・店舗IDで検索')} value={query} maxLength={200} onFocus={()=>setSearchOpen(true)} onClick={()=>setSearchOpen(true)} onKeyDown={event=>{if(event.key==='Escape')setSearchOpen(false);if(event.key==='ArrowDown')setSearchOpen(true);}} onChange={event=>{setQuery(event.target.value);setSearchPage(1);setSearchOpen(true);setSelectedMerchant(undefined);}}/>
+ {query&&<Button type="button" variant="outline" aria-label={t('清空搜索','検索をクリア')} onClick={()=>{setQuery('');setSearchPage(1);setSelectedMerchant(undefined);searchInput.current?.focus();}}><X size={18}/></Button>}
+ </Form>
+ {query.trim()&&searchOpen&&<div className="merchant-search-results" aria-label={t('商户搜索结果','店舗検索結果')} aria-busy={searchLoading}>
+ <div className="merchant-search-heading" role="status">{searchLoading?t('正在搜索全地图…','地図全体を検索中…'):searchResult?t(`全地图 · ${searchResult.total} 个结果`,`地図全体 · ${searchResult.total} 件`):t('全地图搜索','地図全体を検索')}</div>
+ {searchError&&<Alert role="alert">{searchError}<Button type="button" variant="outline" onClick={()=>{setSearchRetry(value=>value+1);}}>{t('重试','再試行')}</Button></Alert>}
+ {!searchLoading&&searchResult?.total===0&&<p className="merchant-search-empty">{t('未找到商户，请尝试其他名称或地址。','店舗が見つかりません。別の店舗名や住所で検索してください。')}</p>}
+ <ul>{searchResult?.items.map(item=><li key={item.merchantId} data-selected={selectedMerchant?.merchantId===item.merchantId}>
+ <button type="button" className="merchant-search-result" aria-pressed={selectedMerchant?.merchantId===item.merchantId} onClick={()=>setSelectedMerchant(item)}><MapPin size={20} aria-hidden="true"/><span><strong>{item.name||t('未命名商户','名称未登録')}</strong><span className="merchant-search-address">{item.address||t('地址未记录','住所未登録')}</span><span>{t('店铺状态：','店舗状態：')}{({normal:t('正常','正常'),abnormal:t('异常','異常'),uncertain:t('不确定','不明'),closed:t('关闭','閉店')} as Record<string,string>)[item.businessStatus??'']??t('未记录','未記録')}</span>{(item.lat===null||item.lon===null)&&<span>{t('暂无坐标，无法定位','座標がないため地図に表示できません')}</span>}</span></button>
+ <AdminLink href={'/admin/merchant-map/'+encodeURIComponent(item.merchantId)} onNavigate={()=>loadDetail(item.merchantId)}>{t('查看详情','詳細を見る')}</AdminLink>
+ </li>)}</ul>
+ {searchResult&&searchResult.total>searchResult.pageSize&&<div className="merchant-search-pagination"><Button type="button" variant="outline" disabled={searchLoading||searchPage<=1} onClick={()=>setSearchPage(searchPage-1)}>{t('上一页','前へ')}</Button><span>{searchPage} / {Math.ceil(searchResult.total/searchResult.pageSize)}</span><Button type="button" variant="outline" disabled={searchLoading||searchPage*searchResult.pageSize>=searchResult.total} onClick={()=>setSearchPage(searchPage+1)}>{t('下一页','次へ')}</Button></div>}
+ </div>}
+ </div></div>
 
 {error&&<Alert role="alert" className="error">{error}</Alert>}{loading&&<p role="status">{t('正在读取商户分布…','店舗分布を読込中…')}</p>}
  {!loading&&data&&<><dl className="merchant-map-summary"><div><dt>{t('当前视口商户数','表示範囲の店舗数')}</dt><dd>{data.summary.merchant_count}</dd></div><div><dt>{t('近30天已覆盖','過去30日の訪問済み')}</dt><dd>{data.summary.covered_count}</dd></div><div><dt>{t('覆盖率','カバレッジ')}</dt><dd>{data.summary.coverage_pct}%</dd></div></dl><p>{t('统计时间：','集計時刻：')}{new Date(data.as_of).toLocaleString(language==='ja'?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo'})}</p>{data.dense&&<p>{t('视口超过1000家，保持聚合；请继续放大。','表示範囲が1000店舗を超えるため集約表示します。さらに拡大してください。')}</p>}{data.summary.merchant_count===0&&<p>{t('当前视口没有商户','表示範囲に店舗はありません')}</p>}

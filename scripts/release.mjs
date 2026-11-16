@@ -1,3 +1,4 @@
+import { stageStaffPwa, verifyStaffPwa, isStaffPwaPath } from './staff-pwa-release.mjs';
 import {replaceGateway,handoffRelease} from './release-transition.mjs';
 import {assetStorage} from './asset-storage.mjs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -54,12 +55,14 @@ async function build() {
   await mkdir(join(gateway, 'html', 'admin'), { recursive: true });
   const assets = [];
   let reusedStaff=null;
+  let staffPwa=[];
   if(opts['reuse-staff']){
     const previousDir=join(base,opts['reuse-staff']),previous=await json(join(previousDir,'manifest.json'));
     if(previous.id!==opts['reuse-staff']||previous.env!=='local')throw new Error('Staff reuse must reference an existing local release');
     const htmlBytes=await readFile(join(previousDir,'gateway-context/html/index.html'));
     if(digest(htmlBytes)!==previous.html['index.html'])throw new Error('Previous staff HTML checksum mismatch');
     await writeFile(join(gateway,'html/index.html'),htmlBytes);
+    staffPwa=await stageStaffPwa(join(previousDir,'gateway-context/html'),join(gateway,'html'),{optional:true,expected:previous.staffPwa});
     const staffAssets=previous.assets.filter(asset=>asset.app==='staff');if(!staffAssets.length)throw new Error('Previous staff assets missing');
     for(const asset of staffAssets){const source=join(previousDir,'assets/staff',asset.path),bytes=await readFile(source);if(digest(bytes)!==asset.sha256||bytes.length!==asset.size)throw new Error('Previous staff asset checksum mismatch');const staged=join(dir,'assets/staff',asset.path);await mkdir(resolve(staged,'..'),{recursive:true});await writeFile(staged,bytes);assets.push(asset);}
     reusedStaff={release:previous.id,htmlSha256:digest(htmlBytes),assetCount:staffAssets.length};
@@ -70,10 +73,11 @@ async function build() {
     const url = assetBase(id, app, opts.assets, process.env);
     run('pnpm', ['--filter', `@store/${app}`, 'build'], { env: { ...process.env, ASSET_BASE_URL: url } });
     const dist = resolve(root, 'apps', app, 'dist');
+    if(app==='staff') staffPwa=await stageStaffPwa(dist,join(gateway,'html'));
     await cp(join(dist, 'index.html'), join(gateway, 'html', app === 'admin' ? 'admin/index.html' : 'index.html'));
     for (const path of await files(dist)) {
       const name = relative(dist, path).replaceAll('\\', '/');
-      if (name === 'index.html') continue;
+      if (name === 'index.html' || (app === 'staff' && isStaffPwaPath(name))) continue;
       if (name.endsWith('.map')) throw new Error('Public source maps are forbidden');
       const content = await readFile(path);
       const staged = join(dir, 'assets', app, name);
@@ -112,7 +116,7 @@ async function build() {
   const html = {};
   for (const name of ['index.html', 'admin/index.html']) html[name] = digest(await readFile(join(gateway, 'html', name)));
   const manifest = { id, commit, dirty, createdAt: new Date().toISOString(), env: opts.env, assetsMode: opts.assets, platform,
-    componentScope:{api:'rebuild',worker:'rebuild-shared-image',admin:'rebuild',gateway:'rebuild',staff:reusedStaff??'rebuild'},supportedTaskKinds:['system.check','report.analysis','dashboard.analysis','settlement.judge','settlement.finalize','settlement.rebuild','import.visit','import.delete','reconciliation.monthly','store.master','reconciliation.insight','store.ai'],zoneEvidence,lockSha256: digest(await readFile('pnpm-lock.yaml')), images, imageDigests, html, assets };
+    componentScope:{api:'rebuild',worker:'rebuild-shared-image',admin:'rebuild',gateway:'rebuild',staff:reusedStaff??'rebuild'},supportedTaskKinds:['system.check','report.analysis','dashboard.analysis','settlement.judge','settlement.finalize','settlement.rebuild','import.visit','import.delete','reconciliation.monthly','store.master','reconciliation.insight','store.ai'],zoneEvidence,lockSha256: digest(await readFile('pnpm-lock.yaml')), images, imageDigests, html, assets, staffPwa };
   await writeJson(join(dir, 'manifest.json'), manifest);
   await rm(join(dir, 'building.json'));
   console.log(JSON.stringify({ release: id, manifest: relative(root, join(dir, 'manifest.json')), deploy: `pnpm release:deploy -- --env local --release ${id}` }, null, 2));
@@ -190,6 +194,7 @@ async function deploy() {
   assertDeployableManifest(manifest);
   progress('verify release checksums and assets');
   for (const name of ['index.html', 'admin/index.html']) if (digest(await readFile(join(dir, 'gateway-context/html', name))) !== manifest.html[name]) throw new Error('HTML checksum mismatch');
+  await verifyStaffPwa(join(dir,'gateway-context/html'),manifest.staffPwa);
   await verifyAssets(manifest, dir, opts.command === 'deploy');
   for (const name of ['api', 'gateway']) if (await imageId(manifest.images[name]) !== manifest.imageDigests[name]) throw new Error('Runtime image checksum mismatch');
   const machine = run('docker', ['info', '--format', '{{.Architecture}}'], { quiet: true });

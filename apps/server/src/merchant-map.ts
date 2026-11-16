@@ -1,5 +1,6 @@
 import {Controller,Get,Inject,Injectable,Query,Req} from '@nestjs/common';
 import type {Request} from 'express';import {z} from 'zod';import type {PoolClient} from 'pg';
+import {MerchantSearchService} from './merchant-search';
 import {Database} from './database';import {AuthService} from './auth';import {BusinessError} from './errors';
 import {merchantView,merchantSummary,MERCHANT_POINT_LIMIT,MERCHANT_POINT_ZOOM} from '../../../packages/domain/src/merchant-viewport';
 const number=z.preprocess(value=>typeof value==='string'&&value.trim()?Number(value):value,z.number().finite());
@@ -43,6 +44,19 @@ export class MerchantMapService{
    return {mode:'clusters' as const,cells,points:[],point_limit:MERCHANT_POINT_LIMIT,summary:merchantSummary(cells.reduce((sum,row)=>sum+row.merchant_count,0),cells.reduce((sum,row)=>sum+row.covered_count,0)),dense:view.zoom>=MERCHANT_POINT_ZOOM,as_of:now.toISOString()};
   });
  }
+ async search(actorId:number,query:unknown){
+  await this.read(actorId,async()=>{});
+  // Reuse the global index and ranking; viewport bounds must never constrain search.
+  const result=await new MerchantSearchService(this.db).search(actorId,query);
+  return this.read(actorId,async client=>{
+   const ids=result.items.map((item:any)=>item.merchantId);
+   const {rows}=await client.query(`SELECT DISTINCT ON (store_source_id) store_source_id,new_value->'result'->>'business_status' AS business_status
+    FROM bd_task_event WHERE store_source_id=ANY($1::text[]) AND event_type IN (${VISITS})
+    ORDER BY store_source_id,created_at DESC,id DESC`,[ids]);
+   const statuses=new Map(rows.map(row=>[row.store_source_id,row.business_status]));
+   return {...result,items:result.items.map((item:any)=>({...item,businessStatus:statuses.get(item.merchantId)??null}))};
+  });
+ }
  async detail(actorId:number,identity:unknown,now=new Date()){
   if(typeof identity!=='string'||!identity||Array.from(identity).length>255)throw new BusinessError('VALIDATION','商户编号无效',400);
   return this.read(actorId,async client=>{const {rows:[row]}=await client.query(`SELECT m.place_id,m.name,m.address,
@@ -61,5 +75,6 @@ export class MerchantMapController{
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(MerchantMapService)private readonly service:MerchantMapService){}
  @Get('config')async config(@Req()req:Request){await this.auth.require(req,{admin:true});const key=process.env.GOOGLE_PUBLIC_API_KEY?.trim()??'';return {enabled:!!key,key:key||null,provider:'google'};}
  @Get('data')async data(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.viewport(user.id,query);}
+ @Get('search')async search(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.search(user.id,query);}
  @Get('detail')async detail(@Req()req:Request,@Query('identity')identity:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.detail(user.id,identity);}
 }

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';
 import {Database} from '../src/database';
 import {buildMerchantSearchIndex,merchantLiteralGrams,merchantQueryGrams} from '../src/merchant-search-index';
+import {MerchantMapService} from '../src/merchant-map';
 import {MerchantSearchService,merchantNameRetrieval} from '../src/merchant-search';
 import {seedBatchWork,clearBatchWork} from '../../../scripts/batch-work-fixture.mjs';
 import {StoreNameIndex} from '../../../packages/domain/src/store-name-index';
@@ -75,6 +76,15 @@ test('geographic groups count unique merchants across all pages and releases, no
   assert.equal((await agent.get('/api/batch-work/merchants/search').query({q:'分类样本商户',scope:'batch'})).status,400);
 
   const first=await service.search(f.users[2],{q:'分类样本商户'}),second=await service.search(f.users[2],{q:'分类样本商户',page:2});
+  const mapSearch=new MerchantMapService(db);
+  const mapPage=await mapSearch.search(f.users[0],{q:'分类样本商户'}),mapNext=await mapSearch.search(f.users[0],{q:'分类样本商户',page:2});
+  assert.equal(mapPage.total,25);assert.equal(mapPage.items.length,20);assert.equal(mapNext.items.length,5);
+  assert.ok(mapPage.items.every((item:any)=>item.businessStatus===null));
+  await db.query("INSERT INTO bd_task_event(main_task_id,event_type,actor_id,actor_label,actor_role,store_source_id,old_value,new_value,created_at,main_label,region_label,grid_label,store_label,team_label) VALUES($1,'update_store_result',$2,'fixture','member',$3,'{}',$4,now(),'','','','','')",[f.mains[0],f.users[2],mapPage.items[0].merchantId,JSON.stringify({result:{business_status:'closed'}})]);
+  assert.equal((await mapSearch.search(f.users[0],{q:mapPage.items[0].merchantId})).items[0].businessStatus,'closed');
+  await assert.rejects(()=>mapSearch.search(f.users[2],{q:'分类样本商户'}),{code:'FORBIDDEN'});
+  await agent.get('/api/merchant-map/search').query({q:'分类样本商户'}).expect(403);
+
   assert.equal(first.total,25);assert.equal(first.matchedTotal,25);assert.equal(first.unassignedTotal,2);assert.equal(first.items.length,20);assert.equal(second.items.length,5);
   assert.equal(new Set([...first.items,...second.items].map((x:any)=>x.merchantId)).size,25);
   assert.deepEqual(first.gridGroups,second.gridGroups,'groups reflect all matches, not loaded page');

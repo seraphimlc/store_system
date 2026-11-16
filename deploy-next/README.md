@@ -1,3 +1,7 @@
+> **2026-11-16 本地Docker已收敛为固定单实例**：统一入口 http://127.0.0.1:8000/（管理端 `/admin/`），固定Compose项目`store-next-local`，配置`.release/local/compose.json`。当前仅API/Worker/Gateway各一个健康容器，使用`store-next-api:local-current`（API/Worker共享）与`store-next-gateway:local-current`。复用原`store_settle`、任务卷及凭证。后续本地更新按固定Compose替换受影响服务，不再运行下文历史按release命名的部署CLI制造长期实例；先验收、失败恢复、成功清旧，不删除数据卷。历史命令仅作背景。
+>
+> 本次范围为已提交`8438589`＋明确PWA改动，排除并发未完成考勤。真实登录批次3详情/地图均200，PWA注册/匿名离线页、管理端及健康验收通过。清理6个旧容器、20个旧应用镜像标签、2个无引用网络，其他项目与基础镜像保留。商户搜索索引及OAuth策略/导出结构未迁移，不能将本次上线视为这些功能已就绪。证据`.release/local-build/{acceptance,cleanup}.json`，运行配置和环境文件在`.release/local/`，含凭证的文件不得提交。
+
 # 部署入口与当前生产状态
 
 > **唯一生产部署方式**：[生产部署与回滚手册](生产部署与回滚.md)。流程固定为已提交版本最小化构建 → 加密 ZIP 经现有 OSS 中转 → 服务器校验解密 → SSH/稳定 Compose 切换与验收。本文只提供入口和状态，不提供另一套生产操作步骤。明文包、私有桶/gcloud、集团云分卷、首次 Python 切换脚本和本地部署 CLI 均不是生产替代路径。

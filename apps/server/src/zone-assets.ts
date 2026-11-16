@@ -91,9 +91,12 @@ export class ZoneAssetsService{
  }
  async detail(actorId:number,id:number){return this.db.transaction(async client=>{
   await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');await this.admin(client,actorId);
-  const {rows:[region]}=await client.query(`SELECT r.id,r.name,r.source_id AS "sourceId",r.release_id AS "releaseId",r.area_km2 AS "areaKm2",r.state,r.revision,(SELECT name FROM bd_team WHERE id=r.team_id) AS "teamName",(SELECT display_name FROM users WHERE id=r.leader_id) AS "leaderName",
+  const {rows:[region]}=await client.query(`SELECT r.id,r.name,r.source_id AS "sourceId",r.release_id AS "releaseId",r.area_km2 AS "areaKm2",r.state,r.revision,
     coalesce(s.source->>'region_code','tokyo23') AS "regionCode" FROM bd_region r JOIN bd_zone_release s ON s.id=r.release_id WHERE r.id=$1 AND r.state<>'archived'`,[id]);
   if(!region)throw new BusinessError('NOT_FOUND','片区不存在',404);
+  const {rows:batches}=await client.query(`SELECT t.id AS "taskId",m.id AS "batchId",m.title,m.status AS "batchStatus",t.status,t.progress,team.name AS "teamName",u.display_name AS "leaderName",t.created_at AS "createdAt"
+   FROM bd_region_task t JOIN bd_main_task m ON m.id=t.main_task_id LEFT JOIN bd_team team ON team.id=t.team_id LEFT JOIN users u ON u.id=t.leader_id
+   WHERE t.region_id=$1 ORDER BY t.created_at DESC,t.id DESC`,[id]);
   const {rows:[stats]}=await client.query(`WITH grids AS (SELECT id,source_id AS "sourceId",name,stations,keywords,state,area_km2 AS "areaKm2",revision FROM bd_work_grid WHERE zone_id=$1),
    mapped AS (SELECT g.id,count(DISTINCT m.source_id)::int AS total,count(DISTINCT v.store_id)::int AS visited
     FROM grids g LEFT JOIN bd_grid_store m ON m.grid_id=g.id LEFT JOIN bd_store_visit_log v ON v.grid_id=g.id AND v.store_id=m.source_id GROUP BY g.id),
@@ -105,7 +108,7 @@ export class ZoneAssetsService{
     (SELECT count(*)::int FROM bd_grid_store m JOIN grids g ON g.id=m.grid_id) AS total,
     (SELECT count(*)::int FROM bd_grid_store m JOIN grids g ON g.id=m.grid_id WHERE EXISTS(SELECT 1 FROM bd_store_visit_log v WHERE v.grid_id=m.grid_id AND v.store_id=m.source_id)) AS visited`,[id]);
   const grids=stats.grids as {progress:number}[];
-  return {region,grids:stats.grids,stats:{total:stats.total,visited:stats.visited,progress:grids.length?Number((grids.reduce((sum,row)=>sum+row.progress,0)/grids.length).toFixed(1)):0,
+  return {region,batches,grids:stats.grids,stats:{total:stats.total,visited:stats.visited,progress:grids.length?Number((grids.reduce((sum,row)=>sum+row.progress,0)/grids.length).toFixed(1)):0,
    statuses:{normal:0,abnormal:0,uncertain:0,closed:0,unverified:0,...stats.statuses}}};
  });}
  async rename(actorId:number,id:number,value:unknown){

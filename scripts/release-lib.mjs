@@ -1,3 +1,4 @@
+import { staffPwaGatewayLocations } from './staff-pwa-release.mjs';
 import { createHash } from 'node:crypto';
 export function parseArgs(argv) {
   const args = argv.filter(x => x !== '--');
@@ -134,7 +135,7 @@ export function gatewayConfig(release) {
  location ^~ /mcp { default_type application/json; return 404 '{"code":"NOT_FOUND"}'; }
  location = /oauth { default_type application/json; return 404 '{"code":"NOT_FOUND"}'; }
  location ^~ /.well-known/ { default_type application/json; return 501 '{"code":"MIGRATION_PENDING"}'; }
- location = /admin { return 308 /admin/; }
+${staffPwaGatewayLocations()} location = /admin { return 308 /admin/; }
  location /admin/ { try_files $uri /admin/index.html; add_header X-Content-Type-Options nosniff always;
  add_header X-Frame-Options DENY always;
  add_header Referrer-Policy strict-origin-when-cross-origin always;

@@ -1,6 +1,6 @@
 import type {Session} from '../../contracts/src';
 export const SESSION_EXPIRED_EVENT='store:session-expired';
-export class ApiFailure extends Error{constructor(public code:string,message:string){super(message);}}
+export class ApiFailure extends Error{constructor(public code:string,message:string){super(message);if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('store:api-error',{detail:message}));}}
 const japanese:Record<string,string>={UNAUTHENTICATED:'ログインの有効期限が切れました。再度ログインしてください。',INVALID_CREDENTIALS:'アカウントまたはパスワードが正しくないか、現在利用できません。',FORBIDDEN:'この操作を行う権限がありません。',VALIDATION:'入力内容と日付・件数を確認してください。',CSRF_INVALID:'送信の検証に失敗しました。画面を更新してください。',PASSWORD_CHANGE_REQUIRED:'初期パスワードを変更してください。',PASSWORD_INCORRECT:'現在のパスワードが正しくありません。',CODE_EXISTS:'スタッフ番号は既に登録されています。',USERNAME_EXISTS:'ログイン名は既に使用されています。',CONFLICT:'データが更新されました。画面を更新して再度お試しください。',ALREADY_SUBMITTED:'本日は申告済みです。編集画面をご利用ください。',REPORT_LOCKED:'照合済みのため変更できません。',PLAN_WINDOW_CLOSED:'予定の登録期間外です。',PLAN_ALL_LOCKED:'変更可能な日付がありません。',REPORT_AI_DISABLED:'AIレポートは無効です。数値の比較は利用できます。',REPORT_NOT_RETRYABLE:'生成中または完了済みのため再試行できません。',RECIPIENT_FORBIDDEN:'宛先が現在の送信範囲外です。',AUTH_BUSY:'ログインが混み合っています。しばらくして再度お試しください。'};
 function message(code:string,fallback:string){return typeof document!=='undefined'&&document.documentElement.lang.startsWith('ja')?japanese[code]??'リクエストに失敗しました。画面を更新して再度お試しください。':fallback;}
 export async function api<T>(path:string,session?:Session|null,body?:unknown,signal?:AbortSignal):Promise<T>{

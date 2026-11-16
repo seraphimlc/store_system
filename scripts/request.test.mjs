@@ -24,3 +24,8 @@ test('optional cancellation reaches fetch and preserves abort instead of reporti
  const original=globalThis.fetch,controller=new AbortController();const abort=new DOMException('Aborted','AbortError');
  try{globalThis.fetch=async(_url,init)=>{assert.equal(init.signal,controller.signal);controller.abort();throw abort;};await assert.rejects(()=>api('/completions',null,undefined,controller.signal),error=>error===abort);}finally{globalThis.fetch=original;}
 });
+
+test('API failures publish their message for host Toast feedback',()=>{
+ const original=globalThis.window,target=new EventTarget();let message;globalThis.window=target;target.addEventListener('store:api-error',event=>{message=event.detail;});
+ try{const error=new ApiFailure('VALIDATION','请检查输入');assert.equal(message,'请检查输入');assert.equal(error.message,message);}finally{if(original===undefined)delete globalThis.window;else globalThis.window=original;}
+});

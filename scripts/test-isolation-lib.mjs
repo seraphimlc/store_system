@@ -22,9 +22,10 @@ const CORE_BROWSER=['verify-p1-browser.mjs','verify-p3-plans-browser.mjs','verif
 const MAP_BROWSER=['verify-p5-batch-map-browser.mjs','verify-p5-grid-map-browser.mjs','verify-p5-zone-assets-browser.mjs','verify-p5-region-merge-browser.mjs','verify-p5-region-split-browser.mjs','verify-p5-grid-enable-browser.mjs'];
 const OPS_BROWSER=['verify-p5-batch-create-browser.mjs','verify-p5-batch-work-browser.mjs','verify-p5-batch-events-browser.mjs','verify-p5-batch-disable-browser.mjs','verify-p5-batch-photos-browser.mjs','verify-p5-store-proposals-browser.mjs'];
 export function browserSuites(group='all'){
+ if(group==='attendance')return ['scripts/verify-attendance-browser.mjs'];
  if(group==='oauth')return ['scripts/verify-mcp-oauth-browser.mjs'];
  if(group==='messages')return ['scripts/verify-p3-messages-browser.mjs'];
- if(group==='map-workspace')return ['scripts/verify-map-workspace-browser.mjs'];
+ if(group==='map-workspace')return ['scripts/verify-map-workspace-browser.mjs','scripts/verify-merchant-map-search-browser.mjs'];
  if(group==='h5-grid')return ['scripts/verify-h5-grid-controls-browser.mjs'];
  if(group==='h5')return ['scripts/verify-h5-layout-browser.mjs','scripts/verify-p5-batch-map-browser.mjs'];
  if(group==='management')return ['scripts/verify-management-browser.mjs'];
