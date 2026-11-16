@@ -3,7 +3,7 @@
 No schema migrations. Existing runtime configuration, volumes and task snapshots are preserved.
 Run stages in order under the deployment lock; public acceptance gates finalization.
 """
-import argparse,fcntl,importlib.util,json,os,re,shutil,subprocess,time,urllib.request,zipfile
+import argparse,fcntl,importlib.util,json,os,re,shutil,subprocess,time,urllib.request,zipfile,tarfile,hashlib
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -46,11 +46,23 @@ class FullDeployment(common.Deployment):
         old=json.load(open(self.compose))['services']['api']['image']
         run('docker','run','--rm','--network','none','--user','0','-v',str(self.d)+':/release','-w','/release',old,'node','--input-type=module','-e',"import{readFile}from'node:fs/promises';import{decryptArchive}from'./encrypted-release-bundle.mjs';await decryptArchive('images.tar.gz.enc','images.tar.gz','decrypt-key.json',JSON.parse(await readFile('manifest.json','utf8')).encryption)")
         run('docker','load','-i',str(self.d/'images.tar.gz'),stdout=subprocess.DEVNULL)
-        for k,tag in self.m['images'].items():
-            image=inspect(tag)
-            if image['Id']!=self.m['imageDigests'][k] or image['Architecture']!='amd64':raise RuntimeError('loaded image mismatch')
+        self.verify_loaded()
         (self.d/'decrypt-key.json').unlink()
         write_json(self.d/'artifacts.json',{'ok':True,'images':self.m['imageDigests']})
+    def verify_loaded(self):
+        validate_manifest(self.m,self.r)
+        if sha(self.d/'images.tar.gz')!=self.m['encryption']['archiveSha256']:raise RuntimeError('authenticated archive changed')
+        verified={}
+        with tarfile.open(self.d/'images.tar.gz') as archive:
+            entries=json.load(archive.extractfile('manifest.json'))
+            for kind,tag in self.m['images'].items():
+                matches=[row for row in entries if tag in row.get('RepoTags',[])]
+                if len(matches)!=1:raise RuntimeError('archive tag inventory mismatch')
+                raw=archive.extractfile(matches[0]['Config']).read();config=json.loads(raw);image=inspect(tag)
+                if 'sha256:'+hashlib.sha256(raw).hexdigest()!=self.m['imageDigests'][kind]:raise RuntimeError('archive config digest mismatch')
+                if image['Architecture']!='amd64' or image['Os']!='linux' or config['config']!=image['Config'] or config['rootfs']['diff_ids']!=image['RootFS']['Layers'] or config['created']!=image['Created']:raise RuntimeError('loaded image content mismatch')
+                verified[kind]={'archiveDigest':self.m['imageDigests'][kind],'runtimeDigest':image['Id'],'configAndLayersMatch':True}
+        write_json(self.d/'loaded-image-verification.json',{'ok':True,'images':verified})
     def prepare(self):
         for name in ('ui-candidate-api','ui-candidate-gateway','full-candidate-worker'):
             if subprocess.run(['docker','inspect',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:raise RuntimeError('candidate name already in use: '+name)
