@@ -12,8 +12,8 @@
 
 - `pnpm dev`：管理端8001、员工端8002、API3000及Worker。开发与Docker统一连接 `store_settle`；旧 `store_settle_refactor_p1` 已备份移除。测试只读克隆该库结构到随机临时库，禁止向业务库写fixture。
 - 本地Docker统一入口8000（管理端 `/admin/`，员工端 `/`），显式连接基准库 `store_settle`。部署见 `deploy-next/README.md`，使用独立 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL`，与开发使用同一业务库，但配置文件和任务目录仍分开。
-- **唯一日常生产部署方式**按 `deploy-next/生产部署与回滚.md` 执行：已提交版本最小化构建 → AES-256-GCM 加密镜像白名单 ZIP → 现有 OSS 中转 → 服务器校验解密 → SSH/稳定 Compose 切换与验收。前端静态资源沿用现有 OSS/CDN；不提供明文包、私有桶/gcloud、集团云分卷或 SSH 直传大包等备选路径。`production-release.py` 首次旧系统 cutover/rollback 与本地部署 CLI 均不得用于日常生产升级。
-- **最小化发布**：发布前对照上次实际部署的源码/产物清单核对本次差异（含未提交、新增文件及共享依赖），先列出受影响组件，再只构建、上传和替换必要产物。纯员工端展示修改只更新员工静态资源和Gateway，保留管理端产物及API/Worker镜像、容器、配置；文档/发布工具修改不触发业务服务发布。不能把当前工作区所有改动默认纳入上线。
+- **唯一日常生产部署方式**按 `deploy-next/生产部署与回滚.md` 执行：已提交版本整版构建 → AES-256-GCM 加密镜像白名单 ZIP → 现有 OSS 中转 → 服务器校验解密 → SSH/稳定 Compose 切换与验收。前端静态资源沿用现有 OSS/CDN；不提供明文包、私有桶/gcloud、集团云分卷或 SSH 直传大包等备选路径。`production-release.py` 首次旧系统 cutover/rollback 与本地部署 CLI 均不得用于日常生产升级。
+- **常规整版发布（默认）**：发布前对照上次实际部署的源码/产物清单，汇总全部已完成、已验收且纳入本版的累计改动及共享依赖，不限于最后一次任务或提交。冻结并提交统一版本，构建管理端、员工端（含PWA）、API/Worker及Gateway，按同一release发布静态资源并替换API、Worker、Gateway；保留生产配置、持久卷与业务数据。未完成、未经确认或其他agent尚未验收的改动不得夹带。仅文档/工具修改无需发布业务服务；仅数据维护按授权范围备份、事务执行和验收，不触发代码发布。只有用户明确要求或已审查的紧急修复才做增量发布，须记录复用组件版本。本条不自动授权生产发布。
 - 当前模块检查：`pnpm --filter @store/admin typecheck` / `pnpm --filter @store/staff typecheck` / `pnpm --filter @store/server typecheck`；构建用对应模块 `build`。
 - `pnpm test` 使用已有隔离运行器，PostgreSQL写测试只在随机schema-only临时库执行；不得向基准库或开发完整副本写fixture、清表或覆盖密码。
 - 浏览器验收使用 `scripts/test-isolated.mjs --browser` 的相关分组；只重跑受本次变更影响的检查。静态文案/样式不新增业务测试。

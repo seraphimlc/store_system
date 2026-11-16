@@ -6,7 +6,7 @@ import type {GridSelection} from './GridMerge';
 import {cachedGridApi as api} from '../../../packages/client/src/grid-geometry-cache';
 import {googleMaps} from './google-maps';
 import './grid-map.css';
-export type GridMapProperties=GridSelection&{name:string;sourceId:string;state:string;zoneName:string|null;selectable:boolean;stores:number;areaKm2?:number};
+export type GridMapProperties=GridSelection&{name:string;sourceId:string;state:string;zoneName:string|null;selectable:boolean;convertible?:boolean;stores:number;areaKm2?:number};
 type Feature={type:'Feature';id:number;geometry:object;properties:GridMapProperties};
 type Page={type:'FeatureCollection';features:Feature[];hasMore:boolean;nextCursor:number|null};
 const centers:Record<string,{lat:number;lng:number}>={tokyo23:{lat:35.68,lng:139.76},tokyo26:{lat:35.69,lng:139.4},kanagawa:{lat:35.45,lng:139.5},saitama:{lat:35.86,lng:139.65},chiba:{lat:35.65,lng:140.1},all:{lat:35.7,lng:139.7}};
@@ -22,7 +22,7 @@ export function GridMap({session,language,filter,selections,onToggle,reload,onFo
    const instance=new maps.Map(element.current,{center:centers[filter.region]??centers.tokyo23,zoom:12,mapTypeControl:false,streetViewControl:false,fullscreenControl:false,gestureHandling:'cooperative'}),data=new maps.Data({map:instance});
    map.current=instance;layer.current=data;
    data.setStyle(feature=>({fillColor:current.current.selections[Number(feature.getId())]?'#0e7490':feature.getProperty('state')==='disabled'?'#94a3b8':'#64748b',fillOpacity:.18,strokeColor:current.current.selections[Number(feature.getId())]?'#0e7490':'#475569',strokeWeight:current.current.selections[Number(feature.getId())]?3:1.5,clickable:true}));
-   click=data.addListener('click',(event:google.maps.Data.MouseEvent)=>{const feature=event.feature,properties:GridMapProperties={id:Number(feature.getId()),revision:feature.getProperty('revision') as number,zoneId:feature.getProperty('zoneId') as number|null,zoneRevision:feature.getProperty('zoneRevision') as number|null,name:feature.getProperty('name') as string,sourceId:feature.getProperty('sourceId') as string,state:feature.getProperty('state') as string,zoneName:feature.getProperty('zoneName') as string|null,selectable:feature.getProperty('selectable') as boolean,stores:feature.getProperty('stores') as number,areaKm2:feature.getProperty('areaKm2') as number};setFocus(properties);if(current.current.directSelect){if(properties.selectable)current.current.onToggle(properties);else current.current.onFocus?.(properties);}});
+   click=data.addListener('click',(event:google.maps.Data.MouseEvent)=>{const feature=event.feature,properties:GridMapProperties={id:Number(feature.getId()),revision:feature.getProperty('revision') as number,zoneId:feature.getProperty('zoneId') as number|null,zoneRevision:feature.getProperty('zoneRevision') as number|null,name:feature.getProperty('name') as string,sourceId:feature.getProperty('sourceId') as string,state:feature.getProperty('state') as string,zoneName:feature.getProperty('zoneName') as string|null,selectable:feature.getProperty('selectable') as boolean,convertible:feature.getProperty('convertible') as boolean,stores:feature.getProperty('stores') as number,areaKm2:feature.getProperty('areaKm2') as number};setFocus(properties);if(current.current.directSelect){if(properties.selectable)current.current.onToggle(properties);else current.current.onFocus?.(properties);}});
    idle=instance.addListener('idle',()=>request.current());setReady(true);
   }).catch(()=>{if(!cancelled)setError('SDK');});
   return()=>{cancelled=true;generation.current++;idle?.remove();click?.remove();layer.current?.setMap(null);layer.current=null;map.current=null;};
@@ -48,8 +48,8 @@ export function GridMap({session,language,filter,selections,onToggle,reload,onFo
  // next is the continuation cursor, not a trigger: each explicit load-more increments more.
  },[ready,filter.q,filter.region,filter.state,reload,more,session]);
  useEffect(()=>{if(!directSelect||busy||next===null)return;const timer=window.setTimeout(()=>setMore(value=>value+1),40);return()=>window.clearTimeout(timer);},[directSelect,busy,next,rows.length]);
- return <section className="grid-map">{unconfigured&&<p role="status">{t('尚未配置地图公钥，可继续使用列表选择和合并。','地図の公開キーが未設定です。一覧で選択・結合できます。')}</p>}
- {error&&<Alert role="alert">{error==='SDK'?t('地图加载失败，请检查公钥与来源限制；可继续使用列表。','地図を読み込めません。公開キーと参照元制限を確認してください。一覧は利用できます。'):error}</Alert>}
+ return <section className="grid-map">{unconfigured&&<p role="status">{t('尚未配置地图公钥，暂时不能在地图上选择网格。','地図の公開キーが未設定のため、グリッドを選択できません。')}</p>}
+ {error&&<Alert role="alert">{error==='SDK'?t('地图加载失败，请检查公钥与来源限制。','地図を読み込めません。公開キーと参照元制限を確認してください。'):error}</Alert>}
  {!ready&&!unconfigured&&!error&&<p role="status">{t('正在加载地图…','地図を読込中…')}</p>}
  <div ref={element} className="grid-map-canvas" aria-label={t('基础网格地图画布','基礎グリッド地図キャンバス')} hidden={unconfigured||error==='SDK'}/>
  {ready&&<div className="grid-map-controls"><p role="status">{busy?t('正在读取当前视口…','表示範囲を読込中…'):t('视口已加载网格：','表示範囲のグリッド：')+rows.length}{next!==null&&!busy&&t('，还有网格未加载','、未読込のグリッドがあります')}</p>{next!==null&&<Button type="button" variant="outline" disabled={busy} onClick={()=>setMore(value=>value+1)}>{t('加载更多地图网格','地図グリッドを追加読込')}</Button>}

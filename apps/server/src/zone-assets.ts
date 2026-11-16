@@ -39,6 +39,16 @@ export class ZoneAssetsService{
    return {...result,page:input.page,pageSize:30};
   });
  }
+ async gridBatches(actorId:number,id:number){return this.db.transaction(async client=>{
+  await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');await this.admin(client,actorId);
+  if(!(await client.query('SELECT id FROM bd_work_grid WHERE id=$1',[id])).rowCount)throw new BusinessError('NOT_FOUND','网格不存在',404);
+  const {rows}=await client.query(`SELECT g.id AS "taskId",m.id AS "batchId",m.title,m.status AS "batchStatus",g.status,g.progress,g.completed_stores AS "completedStores",g.total_stores AS "totalStores",
+   assignee.display_name AS "assigneeName",team.name AS "teamName",leader.display_name AS "leaderName",t.created_at AS "createdAt"
+   FROM bd_grid_task g JOIN bd_region_task t ON t.id=g.region_task_id JOIN bd_main_task m ON m.id=t.main_task_id
+   LEFT JOIN users assignee ON assignee.id=g.assignee_id LEFT JOIN bd_team team ON team.id=t.team_id LEFT JOIN users leader ON leader.id=t.leader_id
+   WHERE g.grid_id=$1 ORDER BY t.created_at DESC,g.id DESC`,[id]);
+  return {items:rows};
+ });}
  async enableGrid(actorId:number,id:number,value:unknown){
   const input=parse(z.object({revision:z.number().int().min(0)}).strict(),value);
   return this.db.transaction(async client=>{
@@ -139,6 +149,7 @@ export class ZoneAssetsController{
  @Post('regions/:id/split-preview')async splitPreview(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.splitPreview(user.id,parse(identity,id),body);}
  @Post('regions/:id/split')async split(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.split(user.id,parse(identity,id),body);}
  @Get('grids')async grids(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.grids(user.id,query);}
+ @Get('grids/:id/batches')async gridBatches(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req,{admin:true});return this.service.gridBatches(user.id,parse(identity,id));}
  @Post('grids/:id/enable')async enable(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.enableGrid(user.id,parse(identity,id),body);}
  @Get('regions')async catalog(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.catalog(user.id,query);}
  @Get('regions/:id')async detail(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req,{admin:true});return this.service.detail(user.id,parse(identity,id));}
