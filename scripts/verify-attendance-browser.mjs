@@ -1,10 +1,14 @@
 /** Deterministic UI regression: API and geolocation are mocked; no paid or live location calls. */
 import {chromium} from '@playwright/test';
 import assert from 'node:assert/strict';
-import {mkdir} from 'node:fs/promises';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {prepareBrowserAssets,attachPinnedAssets} from './release-browser-assets.mjs';
 await mkdir('data/refactor/attendance-views',{recursive:true});
 const base=process.env.NEXT_BROWSER_BASE_URL;
 if(!base||process.env.NEXT_BROWSER_ISOLATED_RUNTIME!=='1')throw Error('Use scripts/test-isolated.mjs --browser --attendance');
+const release=process.env.NEXT_BROWSER_PINNED_RELEASE;
+const pinned=release?await prepareBrowserAssets(release,base):null;
+if(pinned)await writeFile(pinned.dir+'/browser-network.json',JSON.stringify({ok:true,probes:pinned.probes},null,2));
 const browser=await chromium.launch({headless:true,channel:'chrome'}),errors=[],checks=[];
 const day='2026-11-16',now='2026-11-16T01:00:00Z',events=[],requests=[],punches=[];
 const people=[{code:'attendance-fixture',name:'打卡员工',team:'验收队伍'},{code:'attendance-out',name:'只有退勤员工',team:'验收队伍'}];
@@ -13,6 +17,7 @@ let lostResponse=true;
 async function pageFor(role,width=430,language='zh',reminder=false){
  const context=await browser.newContext({viewport:{width,height:932},isMobile:width<600,hasTouch:width<600}),page=await context.newPage();
  page.on('pageerror',e=>errors.push(e.message));
+ if(pinned)await attachPinnedAssets(context,pinned,base);
  if(!reminder)await context.addInitScript(()=>localStorage.setItem('store:daily-login:attendance:1',new Date(Date.now()+4*3600_000).toISOString().slice(0,10)));
  let responseDay=day,alreadyIn=false,attendanceUnavailable=false,planPending=null;
  const reminderState={setPlan(value){planPending=value;},setDay(value){responseDay=value;},setAlreadyIn(value){alreadyIn=value;},setUnavailable(value){attendanceUnavailable=value;}};

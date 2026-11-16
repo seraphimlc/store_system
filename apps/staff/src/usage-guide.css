@@ -1,0 +1,28 @@
+.usage-guide{max-width:70ch;margin:0 auto;color:var(--foreground);font-size:15px;line-height:1.8;overflow-wrap:anywhere}
+.usage-guide h2{font-size:19px;line-height:1.45;font-weight:650;margin:0 0 12px;text-wrap:balance}
+.usage-guide p{margin:0 0 12px}
+.usage-guide-intro{padding:8px 0 24px}
+.usage-guide-intro>h2{font-size:24px}
+.usage-guide-flow{font-weight:550}
+.usage-guide-note{padding:14px 16px;background:var(--background-subtle);border:1px solid var(--border);border-radius:var(--radius-md)}
+.usage-guide-note p:last-child{margin-bottom:0}
+.usage-guide-note strong{display:block;margin-bottom:6px}
+.usage-guide-index{padding:20px 0 24px;border-top:1px solid var(--border)}
+.usage-guide-index ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.usage-guide a{color:var(--primary);text-decoration:underline;text-underline-offset:4px}
+.usage-guide-index a{display:flex;align-items:center;min-height:44px;padding:7px 0}
+.usage-guide a:focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:2px}
+.usage-guide-chapter{padding:24px 0;border-top:1px solid var(--border);scroll-margin-top:80px}
+.usage-guide-intro{scroll-margin-top:80px}
+.usage-guide-entry{font-weight:550}
+.usage-guide ol{padding-left:1.5em;margin:16px 0}
+.usage-guide li{padding-left:3px;margin-bottom:10px}
+.usage-guide-index li{padding:0;margin:0}
+.usage-guide li::marker{color:var(--foreground-muted);font-variant-numeric:tabular-nums}
+.usage-guide-top{display:inline-flex;align-items:center;min-height:44px;margin-top:8px;font-size:14px}
+@media(max-width:360px){.usage-guide-index ul{grid-template-columns:1fr}}
+.usage-guide-figure{margin:20px 0 24px}
+.usage-guide-figure>a{display:block;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;cursor:zoom-in}
+.usage-guide-figure img{display:block;width:100%;height:auto;aspect-ratio:24/19;background:var(--background-subtle)}
+.usage-guide-figure figcaption{margin-top:10px;font-size:14px;line-height:1.7}
+.usage-guide-figure figcaption span{display:block;color:var(--foreground-muted);font-size:12px;margin-top:3px}

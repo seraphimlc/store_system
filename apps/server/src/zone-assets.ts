@@ -1,3 +1,4 @@
+import {gridGeometryResponse} from './grid-geometry-cache';
 import {gridAssetsSelect} from './grid-assets-query';
 import {gridViewport} from './grid-viewport';
 import {regionMerge} from './region-merge';
@@ -25,16 +26,16 @@ export class ZoneAssetsService{
   return this.db.transaction(client=>regionSplit(client,actorId,id,input.revision,input.previewToken));
  }
  async grids(actorId:number,value:unknown){
-  const input=parse(z.object({q:z.string().trim().max(128).default(''),region:z.enum(['tokyo23','tokyo26','kanagawa','saitama','chiba','all']).default('tokyo23'),state:z.enum(['','disabled','ready']).default(''),page:identity.max(10000).default(1)}).strict(),value);
+  const input=parse(z.object({q:z.string().trim().max(128).default(''),region:z.enum(['tokyo23','tokyo26','kanagawa','saitama','chiba','all']).default('tokyo23'),state:z.enum(['','disabled','ready']).default(''),page:identity.max(10000).default(1),gridId:identity.optional()}).strict(),value);
   return this.db.transaction(async client=>{
    await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');await this.admin(client,actorId);
    const term='%'+input.q.replace(/[\\%_]/g,'\\$&')+'%';
    const {rows:[result]}=await client.query(`WITH matching AS (
     ${gridAssetsSelect}
-    WHERE coalesce(s.source->>'region_code','tokyo23')=ANY($1::text[]) AND ($2='' OR g.state=$2)
+    WHERE ($6::int IS NULL OR g.id=$6) AND coalesce(s.source->>'region_code','tokyo23')=ANY($1::text[]) AND ($2='' OR g.state=$2)
      AND ($3='' OR g.name ILIKE $4 OR g.source_id ILIKE $4 OR g.id::text=$3 OR g.stations::text ILIKE $4 OR g.keywords::text ILIKE $4)
    ), paged AS (SELECT * FROM matching ORDER BY id LIMIT 30 OFFSET $5)
-   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT jsonb_agg(p ORDER BY p.id) FROM paged p),'[]') AS items`,[input.region==='all'?['tokyo23','tokyo26','kanagawa','saitama','chiba']:[input.region],input.state,input.q,term,(input.page-1)*30]);
+   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT jsonb_agg(p ORDER BY p.id) FROM paged p),'[]') AS items`,[input.region==='all'?['tokyo23','tokyo26','kanagawa','saitama','chiba']:[input.region],input.state,input.q,term,(input.page-1)*30,input.gridId??null]);
    return {...result,page:input.page,pageSize:30};
   });
  }
@@ -132,7 +133,7 @@ export class ZoneAssetsController{
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(ZoneAssetsService)private readonly service:ZoneAssetsService){}
  @Get('map-config')async mapConfig(@Req()req:Request){await this.auth.require(req,{admin:true});const key=process.env.GOOGLE_PUBLIC_API_KEY?.trim()??'';return {provider:'google',enabled:!!key,key:key||null};}
  @Get('region-map')async regionMap(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.regionMap(user.id,query);}
- @Get('grid-viewport')async viewport(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.viewport(user.id,query);}
+ @Get('grid-viewport')async viewport(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return gridGeometryResponse(req,await this.service.viewport(user.id,query),'current');}
  @Post('merge-preview')async mergePreview(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.mergePreview(user.id,body);}
  @Post('merge')async merge(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.merge(user.id,body);}
  @Post('regions/:id/split-preview')async splitPreview(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.splitPreview(user.id,parse(identity,id),body);}

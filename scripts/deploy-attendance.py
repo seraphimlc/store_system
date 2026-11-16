@@ -1,5 +1,5 @@
 """Immutable encrypted image-overlay deployment; fixed-baseline build, isolated candidate, rollback."""
-import argparse,fcntl,hashlib,json,os,re,shutil,subprocess,tarfile,time,urllib.request,zipfile
+import argparse,ast,fcntl,hashlib,json,os,re,shutil,subprocess,tarfile,time,urllib.request,zipfile
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -42,6 +42,24 @@ def wait_public_ready(url,attempts=15):
 
 def write_json(p,x):p.write_text(json.dumps(x,indent=2)+'\n');os.chmod(p,0o600)
 
+
+def download_artifact(receipt,path,timeout=20):
+    url=receipt['url']
+    if not url.startswith('https://') or Path(receipt['file']).name!=receipt['file']:raise ValueError('Invalid encrypted artifact receipt')
+    tmp=path.with_suffix(path.suffix+'.pending')
+    try:
+        with urllib.request.urlopen(url,timeout=timeout) as response,open(tmp,'wb') as target:
+            size=0
+            while True:
+                chunk=response.read(1024*1024)
+                if not chunk:break
+                size+=len(chunk)
+                if size>receipt['size']:raise ValueError('Artifact larger than receipt')
+                target.write(chunk)
+        if size!=receipt['size'] or sha(tmp)!=receipt['sha256']:raise ValueError('Artifact receipt mismatch')
+        tmp.replace(path)
+    finally:tmp.unlink(missing_ok=True)
+
 class Deployment:
     def __init__(self,r):
         if not re.fullmatch(r'prod-\d{8}-\d{6}',r):raise ValueError('release id')
@@ -49,17 +67,37 @@ class Deployment:
         self.state=Path('/opt/store-next/production-state.json');self.compose=Path('/opt/store-next/runtime/compose.json');self.nginx=Path('/etc/nginx/conf.d/store.conf')
         self.m=json.load(open(self.d/'manifest.json')) if (self.d/'manifest.json').exists() else None
     def phase(self,name,action):
-        start=time.time()
-        try:return action()
+        start=time.monotonic();p=self.d/'timings.json';items=json.load(open(p)) if p.exists() else []
+        entry={'phase':name,'startedAt':datetime.now(ZoneInfo('Asia/Singapore')).isoformat(),'status':'running'}
+        items.append(entry);write_json(p,items)
+        try:
+            result=action();entry['status']='passed';return result
+        except Exception as error:
+            entry['status']='failed';entry['errorType']=type(error).__name__;raise
         finally:
-            p=self.d/'timings.json';items=json.load(open(p)) if p.exists() else []
-            items.append({'phase':name,'startedAt':datetime.fromtimestamp(start,ZoneInfo('Asia/Singapore')).isoformat(),'seconds':round(time.time()-start,3)});write_json(p,items)
+            entry['endedAt']=datetime.now(ZoneInfo('Asia/Singapore')).isoformat();entry['seconds']=round(time.monotonic()-start,3)
+            # Nested measured steps may already have appended entries.
+            current=json.load(open(p));index=next(i for i,x in enumerate(current) if x['startedAt']==entry['startedAt'] and x['phase']==name);current[index]=entry;write_json(p,current)
+    def preflight(self):
+        required=['encrypted-upload.json','decrypt-key.json','encrypted-release-bundle.mjs','asset-storage.mjs','attendance-smoke.cjs']
+        for name in required:
+            p=self.d/name
+            if not p.is_file():raise RuntimeError('Missing release helper: '+name)
+        if (self.d/'decrypt-key.json').stat().st_mode & 0o077:raise RuntimeError('Decrypt key must be private')
+        ast.parse((self.d/'deploy-attendance.py').read_text())
+        state=json.load(open(self.state));base=json.load(open(self.compose))['services']['api']['image']
+        if self.m is not None:self.baseline()
+        # Exercise the real decrypt import graph and smoke syntax before downloading artifacts/restoring a DB.
+        run('docker','run','--rm','--network','none','--user','0','-v',str(self.d)+':/release:ro','-w','/release',base,'node','--input-type=module','-e',"await import('./encrypted-release-bundle.mjs')")
+        run('docker','run','--rm','--network','none','--user','0','-v',str(self.d)+':/release:ro','-w','/release',base,'node','--check','attendance-smoke.cjs')
+        write_json(self.d/'helper-preflight.json',{'ok':True,'baseline':state['current'],'helperImports':True,'smokeSyntax':True})
     def baseline(self):
         s=json.load(open(self.state));assert s['current']==self.m['sourceRelease'],'production baseline changed'
         for kind,x in self.m['baseImages'].items():assert identity(inspect(x['tag']))==x['identity'],'base image changed: '+kind
         return s
     def artifacts(self):
-        receipt=json.load(open(self.d/'encrypted-upload.json'));p=self.d/receipt['file'];urllib.request.urlretrieve(receipt['url'],p)
+        self.phase('helper-preflight',self.preflight)
+        receipt=json.load(open(self.d/'encrypted-upload.json'));p=self.d/receipt['file'];download_artifact(receipt,p)
         assert p.stat().st_size==receipt['size'] and sha(p)==receipt['sha256']
         with zipfile.ZipFile(p) as z:
             assert sorted(z.namelist())==sorted(['image-overlay.tar.gz.enc','manifest.json','SHA256SUMS']) and z.testzip() is None
@@ -78,7 +116,7 @@ class Deployment:
         expected={'api':f"FROM {m['baseImages']['api']['tag']}\nCOPY api/ /app/apps/server/dist/\n",'gateway':f"FROM {m['baseImages']['gateway']['tag']}\nCOPY gateway/default.conf /etc/nginx/conf.d/default.conf\nCOPY gateway/html/ /usr/share/nginx/html/\n"}
         for k in ('api','gateway'):
             assert (root/(k+'.Dockerfile')).read_text()==expected[k]
-            with open(self.d/(k+'-image-build.log'),'w') as log:run('docker','build','--pull=false','--network','none','-f',str(root/(k+'.Dockerfile')),'-t',m['images'][k],str(root),stdout=log,stderr=subprocess.STDOUT)
+            with open(self.d/(k+'-image-build.log'),'w') as log:self.phase(k+'-image-build',lambda:run('docker','build','--pull=false','--network','none','-f',str(root/(k+'.Dockerfile')),'-t',m['images'][k],str(root),stdout=log,stderr=subprocess.STDOUT))
             x=inspect(m['images'][k]);base=m['baseImages'][k]['identity'];assert x['Architecture']=='amd64' and x['Config']==base['Config'] and x['RootFS']['Layers'][:len(base['RootFS']['Layers'])]==base['RootFS']['Layers']
             for f in [f for f in m['files'] if f['path'].startswith(k+'/')]:
                 if k=='api':dest='/app/apps/server/dist/'+f['path'][4:]
@@ -89,13 +127,13 @@ class Deployment:
     def prepare(self):
         self.baseline();self.b.mkdir(mode=0o700)
         for src,name in [(self.state,'state.before.json'),(self.compose,'compose.before.json'),(self.nginx,'nginx.before.conf'),(Path('/opt/store-next/runtime/runtime.env'),'runtime.before.env')]:shutil.copy2(src,self.b/name);os.chmod(self.b/name,0o600)
-        with open(self.b/'database.before.dump','wb') as f:run('docker','exec','deploy-db-1','sh','-c','pg_dump -U "$POSTGRES_USER" -d store_settle -Fc --no-owner --no-acl',stdout=f)
+        with open(self.b/'database.before.dump','wb') as f:self.phase('database-before-backup',lambda:run('docker','exec','deploy-db-1','sh','-c','pg_dump -U "$POSTGRES_USER" -d store_settle -Fc --no-owner --no-acl',stdout=f))
         os.chmod(self.b/'database.before.dump',0o600)
         with open(self.b/'database.before.dump','rb') as f,open(self.b/'database.before.list','w') as o:run('docker','exec','-i','deploy-db-1','pg_restore','--list',stdin=f,stdout=o)
         name='attendance_candidate_'+self.r[5:].replace('-','_');(self.d/'candidate-database.txt').write_text(name)
         run('docker','exec','deploy-db-1','sh','-c','createdb -U "$POSTGRES_USER" "$1"','sh',name)
-        with open(self.b/'database.before.dump','rb') as f,open(self.d/'candidate-restore.log','w') as log:run('docker','exec','-i','deploy-db-1','sh','-c','pg_restore -U "$POSTGRES_USER" -d "$1" --no-owner --no-acl --exit-on-error','sh',name,stdin=f,stdout=log,stderr=subprocess.STDOUT)
-        with open(self.d/'overlay/migrations/010-attendance.sql','rb') as f:run('docker','exec','-i','deploy-db-1','sh','-c','psql -Xq -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1"','sh',name,stdin=f)
+        with open(self.b/'database.before.dump','rb') as f,open(self.d/'candidate-restore.log','w') as log:self.phase('candidate-database-restore',lambda:run('docker','exec','-i','deploy-db-1','sh','-c','pg_restore -U "$POSTGRES_USER" -d "$1" --no-owner --no-acl --exit-on-error','sh',name,stdin=f,stdout=log,stderr=subprocess.STDOUT))
+        with open(self.d/'overlay/migrations/010-attendance.sql','rb') as f:self.phase('candidate-migration',lambda:run('docker','exec','-i','deploy-db-1','sh','-c','psql -Xq -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1"','sh',name,stdin=f))
         from urllib.parse import urlsplit,urlunsplit
         env=dict(l.split('=',1) for l in (self.b/'runtime.before.env').read_text().splitlines() if l and not l.startswith('#') and '=' in l);u=urlsplit(env['NEXT_DATABASE_URL']);env['NEXT_DATABASE_URL']=urlunsplit((u.scheme,u.netloc,'/'+name,u.query,u.fragment));env['NEXT_TASK_DIRECTORY']='/tmp/ui-jobs';env['NEXT_WORKER_RECONCILE']='false'
         (self.d/'candidate.env').write_text('\n'.join(k+'='+v for k,v in env.items())+'\n');os.chmod(self.d/'candidate.env',0o600)
@@ -108,6 +146,8 @@ class Deployment:
         self.smoke('attendance-candidate-api','candidate')
     def smoke(self,container,mode):
         run('docker','cp',str(self.d/'attendance-smoke.cjs'),container+':/tmp/attendance-smoke.cjs')
+        run('docker','exec','--user','0',container,'chown','node:node','/tmp/attendance-smoke.cjs')
+        run('docker','exec','--user','0',container,'chmod','400','/tmp/attendance-smoke.cjs')
         with open(self.d/(mode+'-smoke.json'),'w') as f:run('docker','exec','-e','ATTENDANCE_MODE='+mode,container,'node','/tmp/attendance-smoke.cjs',stdout=f)
     def clean(self):
         for container in ('attendance-candidate-gateway','attendance-candidate-api'):
@@ -137,10 +177,10 @@ class Deployment:
             self.dc('--profile','worker','stop','-t','60','worker','api')
             for name in ('api','worker'):
                 s=inspect('store-next-prod-20261112-'+name+'-1')['State'];assert not s['Running'] and s['ExitCode']!=137
-            with open(self.b/'database.final.dump','wb') as f:run('docker','exec','deploy-db-1','sh','-c','pg_dump -U "$POSTGRES_USER" -d store_settle -Fc --no-owner --no-acl',stdout=f)
+            with open(self.b/'database.final.dump','wb') as f:self.phase('database-final-backup',lambda:run('docker','exec','deploy-db-1','sh','-c','pg_dump -U "$POSTGRES_USER" -d store_settle -Fc --no-owner --no-acl',stdout=f))
             os.chmod(self.b/'database.final.dump',0o600)
             with open(self.b/'database.final.dump','rb') as f:run('docker','exec','-i','deploy-db-1','pg_restore','--list',stdin=f,stdout=subprocess.DEVNULL)
-            with open(self.d/'overlay/migrations/010-attendance.sql','rb') as f:run('docker','exec','-i','deploy-db-1','sh','-c','psql -Xq -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d store_settle','sh',stdin=f)
+            with open(self.d/'overlay/migrations/010-attendance.sql','rb') as f:self.phase('production-migration',lambda:run('docker','exec','-i','deploy-db-1','sh','-c','psql -Xq -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d store_settle','sh',stdin=f))
             c=json.load(open(self.b/'compose.before.json'));c['services']['api']['image']=self.m['images']['api'];c['services']['gateway']['image']=self.m['images']['gateway'];write_json(self.compose,c)
             self.dc('up','-d','--no-deps','api');health('store-next-prod-20261112-api-1');self.smoke('store-next-prod-20261112-api-1','production')
             self.dc('--profile','worker','up','-d','--no-deps','worker');health('store-next-prod-20261112-worker-1',60)
@@ -157,7 +197,11 @@ class Deployment:
         tmp=self.state.with_suffix('.pending.json');write_json(tmp,s);tmp.replace(self.state);write_json(self.d/'deployment-proof.json',{'ok':True,'release':self.r,'sourceCommit':self.m['sourceCommit'],'rollback':old['current'],'verifiedAt':now,'staffUpdated':True,'workerUnchanged':True,'runtimeUnchanged':True,'migrations':['010-attendance.sql']});self.clean()
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('action',choices=['artifacts','prepare','candidate','switch','finalize','rollback','clean']);p.add_argument('release');a=p.parse_args();d=Deployment(a.release)
+    p=argparse.ArgumentParser();p.add_argument('action',choices=['preflight','stage','artifacts','prepare','candidate','switch','finalize','rollback','clean']);p.add_argument('release');a=p.parse_args();d=Deployment(a.release)
     with open('/opt/store-next/runtime/ui-release.lock','w') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);d.phase(a.action,getattr(d,a.action));print(json.dumps({'ok':True,'phase':a.action,'release':a.release}),flush=True)
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if a.action=='stage':
+            for phase in ['artifacts','prepare','candidate']:d.phase(phase,getattr(d,phase))
+        else:d.phase(a.action,getattr(d,a.action))
+        print(json.dumps({'ok':True,'phase':a.action,'release':a.release}),flush=True)
 if __name__=='__main__':main()

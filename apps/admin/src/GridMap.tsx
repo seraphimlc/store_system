@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import {Button} from '@appica/ui-react/button';
 import type {Session} from '../../../packages/contracts/src';
 import type {GridSelection} from './GridMerge';
-import {api} from './api';
+import {cachedGridApi as api} from '../../../packages/client/src/grid-geometry-cache';
 import {googleMaps} from './google-maps';
 import './grid-map.css';
 export type GridMapProperties=GridSelection&{name:string;sourceId:string;state:string;zoneName:string|null;selectable:boolean;stores:number;areaKm2?:number};
@@ -12,7 +12,7 @@ type Page={type:'FeatureCollection';features:Feature[];hasMore:boolean;nextCurso
 const centers:Record<string,{lat:number;lng:number}>={tokyo23:{lat:35.68,lng:139.76},tokyo26:{lat:35.69,lng:139.4},kanagawa:{lat:35.45,lng:139.5},saitama:{lat:35.86,lng:139.65},chiba:{lat:35.65,lng:140.1},all:{lat:35.7,lng:139.7}};
 export function GridMap({session,language,filter,selections,onToggle,reload,onFocus,directSelect=false}:{session:Session;language:string;filter:{q:string;region:string;state:string};selections:Record<number,GridSelection>;onToggle:(grid:GridMapProperties)=>void;reload:number;onFocus?:(grid:GridMapProperties)=>void;directSelect?:boolean}){
  const t=(zh:string,jp:string)=>language==='ja'?jp:zh;
- const element=useRef<HTMLDivElement>(null),map=useRef<google.maps.Map|null>(null),layer=useRef<google.maps.Data|null>(null),generation=useRef(0),current=useRef({selections,onToggle,onFocus,directSelect}),request=useRef<()=>void>(()=>{}),loadingMore=useRef(false),handledMore=useRef(0);
+ const element=useRef<HTMLDivElement>(null),map=useRef<google.maps.Map|null>(null),layer=useRef<google.maps.Data|null>(null),generation=useRef(0),current=useRef({selections,onToggle,onFocus,directSelect}),request=useRef<()=>void>(()=>{}),loadingMore=useRef(false),handledMore=useRef(0),fittedGrid=useRef('');
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[unconfigured,setUnconfigured]=useState(false),[busy,setBusy]=useState(false),[rows,setRows]=useState<Feature[]>([]),[focus,setFocus]=useState<GridMapProperties>(),[next,setNext]=useState<number|null>(null),[refresh,setRefresh]=useState(0),[more,setMore]=useState(0);
  current.current={selections,onToggle,onFocus,directSelect};
  useEffect(()=>{let cancelled=false;let idle:google.maps.MapsEventListener|undefined,click:google.maps.MapsEventListener|undefined;
@@ -29,12 +29,15 @@ export function GridMap({session,language,filter,selections,onToggle,reload,onFo
  },[session,refresh]);
  useEffect(()=>{layer.current?.setStyle(feature=>({fillColor:selections[Number(feature.getId())]?'#2563eb':'#64748b',fillOpacity:selections[Number(feature.getId())]?.28:.06,strokeColor:selections[Number(feature.getId())]?'#2563eb':'#475569',strokeWeight:selections[Number(feature.getId())]?2:1,clickable:true}));},[selections]);
  useEffect(()=>{if(!ready||!map.current)return;map.current.setCenter(centers[filter.region]??centers.tokyo23);map.current.setZoom(filter.region==='all'?9:12);},[ready,filter.region]);
+ useEffect(()=>{fittedGrid.current='';},[filter.q,filter.region,filter.state,refresh]);
  useEffect(()=>{
   if(!ready)return;let timer:number|undefined;let stopped=false;
   async function load(after=0){const instance=map.current,data=layer.current,bounds=instance?.getBounds();if(!instance||!data||!bounds)return;
    if(after&&loadingMore.current)return;const version=++generation.current;loadingMore.current=after>0;setBusy(true);setError('');if(!after){setNext(null);setFocus(undefined);setRows([]);data.forEach(feature=>data.remove(feature));}
-   const view=bounds.toJSON(),params=new URLSearchParams({q:filter.q,region:filter.region,state:filter.state,west:String(view.west),east:String(view.east),south:String(view.south),north:String(view.north),after:String(after)});
-   try{const page=await api<Page>('/zone-assets/grid-viewport?'+params,session);if(stopped||version!==generation.current)return;data.addGeoJson({type:'FeatureCollection',features:page.features});setRows(previous=>after?[...previous,...page.features]:page.features);setNext(page.hasMore?page.nextCursor:null);}
+   const view=bounds.toJSON(),params=new URLSearchParams({...(/^\d+$/.test(filter.q)?{gridId:filter.q,q:''}:{q:filter.q}),region:filter.region,state:filter.state,west:String(view.west),east:String(view.east),south:String(view.south),north:String(view.north),after:String(after)});
+   try{const page=await api<Page>('/zone-assets/grid-viewport?'+params,session);if(stopped||version!==generation.current)return;const added=data.addGeoJson({type:'FeatureCollection',features:page.features});
+    if(!after&&/^\d+$/.test(filter.q)&&fittedGrid.current!==filter.q&&added.length){const target=added.find(feature=>String(feature.getId())===filter.q),fit=new google.maps.LatLngBounds();target?.getGeometry()?.forEachLatLng(point=>fit.extend(point));if(!fit.isEmpty()){fittedGrid.current=filter.q;instance.fitBounds(fit,{top:120,right:32,bottom:32,left:32});}}
+    setRows(previous=>after?[...previous,...page.features]:page.features);setNext(page.hasMore?page.nextCursor:null);}
    catch(cause){if(!stopped&&version===generation.current){setError((cause as Error).message);setNext(null);}}
    finally{if(!stopped&&version===generation.current){loadingMore.current=false;setBusy(false);}}
   }
@@ -44,7 +47,7 @@ export function GridMap({session,language,filter,selections,onToggle,reload,onFo
   return()=>{stopped=true;generation.current++;window.clearTimeout(timer);loadingMore.current=false;};
  // next is the continuation cursor, not a trigger: each explicit load-more increments more.
  },[ready,filter.q,filter.region,filter.state,reload,more,session]);
- useEffect(()=>{if(!directSelect||busy||next===null||rows.length>=1000)return;const timer=window.setTimeout(()=>setMore(value=>value+1),40);return()=>window.clearTimeout(timer);},[directSelect,busy,next,rows.length]);
+ useEffect(()=>{if(!directSelect||busy||next===null)return;const timer=window.setTimeout(()=>setMore(value=>value+1),40);return()=>window.clearTimeout(timer);},[directSelect,busy,next,rows.length]);
  return <section className="grid-map">{unconfigured&&<p role="status">{t('尚未配置地图公钥，可继续使用列表选择和合并。','地図の公開キーが未設定です。一覧で選択・結合できます。')}</p>}
  {error&&<Alert role="alert">{error==='SDK'?t('地图加载失败，请检查公钥与来源限制；可继续使用列表。','地図を読み込めません。公開キーと参照元制限を確認してください。一覧は利用できます。'):error}</Alert>}
  {!ready&&!unconfigured&&!error&&<p role="status">{t('正在加载地图…','地図を読込中…')}</p>}

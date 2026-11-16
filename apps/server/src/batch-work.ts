@@ -1,3 +1,4 @@
+import {gridGeometryResponse} from './grid-geometry-cache';
 import {MerchantSearchService} from './merchant-search';
 import {storeNameCompletions} from './store-search-completions';
 import {writeStoreSearchTelemetry,searchFailureKind,suggestionFailure} from './store-search-resilience';
@@ -403,20 +404,20 @@ export class BatchWorkController{
  @Post('batches/:id/disable')async disable(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.disable(user.id,parse(identity,id),body);}
  @Get('batches/:id/events')async events(@Req()req:Request,@Param('id')id:string,@Query()query:unknown){const {user}=await this.auth.require(req);return this.service.events(user.id,parse(identity,id),query);}
  @Get('batches/:id')async tree(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return this.service.tree(user.id,parse(identity,id));}
- @Get('batches/:id/map')async batchMap(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return this.service.batchMap(user.id,parse(identity,id));}
+ @Get('batches/:id/map')async batchMap(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return gridGeometryResponse(req,await this.service.batchMap(user.id,parse(identity,id)),'snapshot');}
  @Get('batches/:id/mobile')async mobileTree(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return this.service.mobileTree(user.id,parse(identity,id));}
  @Get('regions/:id')async regionDetail(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return this.service.regionDetail(user.id,parse(identity,id));}
  @Get('regions/:id/map-config')async regionMapConfig(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return this.service.regionMapConfig(user.id,parse(identity,id));}
- @Get('regions/:id/map')async regionMap(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return this.service.regionMap(user.id,parse(identity,id));}
+ @Get('regions/:id/map')async regionMap(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);return gridGeometryResponse(req,await this.service.regionMap(user.id,parse(identity,id)),'snapshot');}
  @Get('grids/:id/completions')async completions(@Req()req:Request,@Param('id')id:string,@Query()q:unknown){const {user}=await this.auth.require(req);return this.service.completions(user.id,parse(identity,id),q);}
  @Get('grids/:id/suggestions')async suggestions(@Req()req:Request,@Param('id')id:string,@Query()q:unknown){const {user}=await this.auth.require(req);return this.service.suggestions(user.id,parse(identity,id),q);}
  @Post('search-feedback')async searchFeedback(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{write:true});return this.service.searchFeedback(user.id,body);}
- @Get('grids/:id/visits')async visits(@Req()req:Request,@Param('id')id:string,@Query()q:unknown){const {user}=await this.auth.require(req);return this.service.visits(user.id,parse(identity,id),q);}
+ @Get('grids/:id/visits')async visits(@Req()req:Request,@Param('id')id:string,@Query()q:unknown){const {user}=await this.auth.require(req);return gridGeometryResponse(req,await this.service.visits(user.id,parse(identity,id),q),'snapshot');}
  @Post('stores/:id/place-lookup')async placeLookup(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req,{write:true});return this.service.placeLookup(user.id,parse(identity,id));}
  @Post('regions/:id/auto-preview')async autoPreview(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{write:true});return this.service.autoPreview(user.id,parse(identity,id),body);}
  @Post('regions/:id/auto-apply')async autoApply(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{write:true});return this.service.autoApply(user.id,parse(identity,id),body);}
  @Get('grids/:id/map-config')async mapConfig(@Req()req:Request,@Param('id')id:string){const {user}=await this.auth.require(req);await this.service.map(user.id,parse(identity,id),{limit:1});const key=process.env.GOOGLE_PUBLIC_API_KEY?.trim()??'';return {enabled:!!key,key:key||null,provider:'google'};}
- @Get('grids/:id/map')async map(@Req()req:Request,@Param('id')id:string,@Query()query:unknown){const {user}=await this.auth.require(req);return this.service.map(user.id,parse(identity,id),query);}
+ @Get('grids/:id/map')async map(@Req()req:Request,@Param('id')id:string,@Query()query:unknown){const {user}=await this.auth.require(req);return gridGeometryResponse(req,await this.service.map(user.id,parse(identity,id),query),'snapshot');}
  @Post('stores/:id/location')async location(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{write:true});return this.service.location(user.id,parse(identity,id),body);}
  @Get('grids/:id')async stores(@Req()req:Request,@Param('id')id:string,@Query()query:unknown){const {user}=await this.auth.require(req);return this.service.stores(user.id,parse(identity,id),query);}
  @Post('regions/:id/assign')async region(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.assignRegion(user.id,parse(identity,id),body);}

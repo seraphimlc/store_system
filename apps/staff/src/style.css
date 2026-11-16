@@ -21,10 +21,10 @@
 .staff-content :is(h1,h2){font-size:18px;font-weight:650;margin-block:0 16px}
 .staff-content :is(h3,h4){font-size:16px;font-weight:600;margin-block:16px 8px}
 .staff-content :is(p,label,dt,th,td){font-size:14px}
-.staff-content :is(button,a,summary),.staff-menu :is(button,a),.staff-menu-trigger{min-height:44px;min-width:44px}
-.staff-content button,.staff-content summary{font:inherit}
-.staff-content :is(button,summary):not(.adm-button){padding:8px 12px}
-.staff-content :is(button,a,summary):focus-visible,.staff-menu :is(button,a):focus-visible{outline:3px solid var(--focus-ring);outline-offset:2px}
+.staff-content :is(button,a,summary):not(.work-map-canvas *),.staff-menu :is(button,a),.staff-menu-trigger{min-height:44px;min-width:44px}
+.staff-content button:not(.work-map-canvas *),.staff-content summary:not(.work-map-canvas *){font:inherit}
+.staff-content :is(button,summary):not(.adm-button):not(.work-map-canvas *){padding:8px 12px}
+.staff-content :is(button,a,summary):not(.work-map-canvas *):focus-visible,.staff-menu :is(button,a):focus-visible{outline:3px solid var(--focus-ring);outline-offset:2px}
 .staff-content :is(input,select,textarea){font-size:16px;max-width:100%}
 .staff-content :is(select,textarea){color:inherit;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--background);padding:8px 12px;min-height:44px}
 .staff-content :is(label:has(input[type=checkbox]),label:has(input[type=radio])){min-height:44px;align-items:center}

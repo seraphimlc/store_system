@@ -3,7 +3,7 @@ import {UIFieldset} from './ui-controls';
 import {UIButton,UIForm,UISelect,UIInput} from './ui-controls';
 import {useEffect,useLayoutEffect,useId,useRef,useState,type FormEvent} from 'react';
 import type {Session} from '../../contracts/src';
-import {api} from './request';
+import {cachedGridApi as api} from './grid-geometry-cache';
 import {googleMaps} from './google-maps';
 import './batch-map.css';
 type Point={id:number;storeId:string;name:string;address:string;status:string;revision:number;profileRevision:number;lat:number|null;lon:number|null;accuracy:string};
