@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {hydrateGridGeometry,geometryHash} from '../packages/client/src/grid-geometry-cache.ts';
+import {hydrateGridGeometry,geometryHash,cacheDeadline} from '../packages/client/src/grid-geometry-cache.ts';
 import {gridGeometryResponse} from '../apps/server/src/grid-geometry-cache.ts';
 const geometry={type:'Polygon',coordinates:[[[139,35],[140,35],[140,36],[139,35]]]};
 function wire(payload,mode='manifest',scope='snapshot'){return gridGeometryResponse({headers:{'x-grid-geometry-cache':mode}},structuredClone(payload),scope);}
@@ -10,3 +10,5 @@ test('geometry content changes invalidate version; current and snapshot versions
 test('same grid task geometry is shared across batch, region and grid detail formats',async()=>{const s=store();await hydrateGridGeometry(wire(payload),s,async keys=>wire(payload,'load:'+keys.join(',')).geometries);const detail={grid:{id:42,snapshot:{geometry}},canExecute:true};const boundary={gridId:42,boundary:geometry,items:[]};for(const value of [detail,boundary])assert.deepEqual(await hydrateGridGeometry(wire(value),s,async()=>{throw Error('Unexpected download');}),value);});
 test('storage failure falls back to network; corrupt cache is reloaded; changed snapshot cannot hydrate stale manifest',async()=>{const s=store(),manifest=wire(payload),key=manifest.geometryRefs[0].key;s.saved.set(key,{type:'broken'});await hydrateGridGeometry(manifest,s,async keys=>wire(payload,'load:'+keys.join(',')).geometries);assert.deepEqual(s.saved.get(key),geometry);const denied={get:async()=>{throw Error('denied');},put:async()=>{throw Error('quota');}};assert.deepEqual(await hydrateGridGeometry(wire(payload),denied,async keys=>wire(payload,'load:'+keys.join(',')).geometries),payload);await assert.rejects(()=>hydrateGridGeometry(wire(payload),store(),async()=>({})),/版本/);assert.equal(await geometryHash(geometry),key.split(':').at(-1));});
 test('legacy responses and unauthorized source records are not invented by transport',async()=>{assert.deepEqual(await hydrateGridGeometry(structuredClone(payload),store(),async()=>{throw Error();}),payload);assert.deepEqual(wire(payload,'load:snapshot:999:bogus').geometries,{});});
+
+test('stalled cache operations have a bounded deadline; successful operations settle normally',async()=>{await assert.rejects(cacheDeadline(new Promise(()=>{}),10),/timed out/);assert.equal(await cacheDeadline(Promise.resolve('ready'),10),'ready');await assert.rejects(cacheDeadline(Promise.reject(Error('denied')),10),/denied/);});
