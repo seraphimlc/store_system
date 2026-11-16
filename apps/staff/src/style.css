@@ -391,3 +391,12 @@
 /* Direct choices keep all options visible without opening another control. */
 .work-choice-group{border:0;padding:0;margin:12px 0;min-width:0}.work-choice-options{display:flex;flex-wrap:wrap;gap:6px}.work-choice-options label{position:relative;flex:1;min-width:64px;margin:0}.work-choice-options input{position:absolute;opacity:0;width:1px;height:1px}.work-choice-options span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px;border:1px solid var(--border);border-radius:var(--radius,12px);white-space:nowrap}.work-choice-options input:checked+span{border-color:var(--adm-color-primary);color:var(--adm-color-primary);background:var(--adm-color-primary-light)}.work-choice-options input:focus-visible+span{outline:2px solid var(--adm-color-primary);outline-offset:2px}.work-choice-options input:disabled+span{opacity:.5}.work-region-detail>.work-region-toolbar{justify-content:flex-start;flex-wrap:wrap}.work-region-toolbar>.work-link{margin-left:auto}.work-photo-actions input[hidden]{display:none}
 .work-batch-detail>.work-map{height:50%;flex:0 0 50%;margin:0;width:100%}.work-batch-detail>.work-map.is-expanded{height:100dvh}.staff-content-region .work-region-detail>.work-map,.staff-content-region .work-region-map-placeholder{height:50%;flex:0 0 50%}
+
+/* Creation is a bounded form; review records belong to the independent batch page. */
+.work-proposal-drawer{height:min(72dvh,640px);max-height:calc(100dvh - env(safe-area-inset-top) - 16px);display:flex;flex-direction:column;overflow:hidden;padding:0 16px}
+.work-proposal-drawer>.work-proposal-header{flex:none;margin:0;padding:12px 0;border-bottom:1px solid var(--border)}
+.work-proposal-content{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px 0}
+.work-proposal-content>.work-help{margin:0 0 12px}
+.work-proposal-footer{flex:none;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;align-items:center;padding:12px 0 calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--background)}
+.work-proposal-footer a{display:flex;align-items:center;justify-content:center;min-height:44px;font-size:13px}
+.work-proposal-submit-slot button{width:100%}
