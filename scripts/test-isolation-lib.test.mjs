@@ -31,7 +31,7 @@ test('candidate financial fixture cleanup can target only its explicitly isolate
 
  test('management acceptance uses the existing disposable runtime and a dedicated business-flow suite',()=>{assert.deepEqual(browserSuites('management'),['scripts/verify-management-browser.mjs']);});
 
-test('map workspace uses a bounded dedicated suite',()=>{assert.deepEqual(browserSuites('map-workspace'),['scripts/verify-map-workspace-browser.mjs']);});
+test('map workspace uses a bounded dedicated suite',()=>{assert.deepEqual(browserSuites('map-workspace'),['scripts/verify-map-workspace-browser.mjs','scripts/verify-merchant-map-search-browser.mjs']);});
 
 test('messages use the existing disposable browser runtime',()=>{assert.deepEqual(browserSuites('messages'),['scripts/verify-p3-messages-browser.mjs']);});
 
