@@ -29,7 +29,6 @@ export class AttendanceService {
   await this.actor(client,user);
   const previous=(await client.query('SELECT * FROM bd_attendance_event WHERE person_code=$1 AND request_key=$2',[code,data.requestKey])).rows[0];
   if(previous){this.samePunch(previous,data);return {id:previous.id,day:attendanceDay(new Date(previous.occurred_at))};}
-  if(Math.abs(Date.now()-Date.parse(data.locatedAt))>120_000)throw new BusinessError('VALIDATION','定位已过期，请重新获取位置后打卡',400);
   const row=(await client.query(`INSERT INTO bd_attendance_event(person_code,kind,source,latitude,longitude,accuracy,located_at,request_key,actor_id)
    VALUES($1,$2,'onsite',$3,$4,$5,$6,$7,$8) ON CONFLICT(person_code,request_key) DO NOTHING RETURNING *`,[code,data.kind,data.latitude,data.longitude,data.accuracy,data.locatedAt,data.requestKey,user.id])).rows[0]
    ??(await client.query('SELECT * FROM bd_attendance_event WHERE person_code=$1 AND request_key=$2',[code,data.requestKey])).rows[0];

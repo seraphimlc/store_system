@@ -51,7 +51,7 @@ test('attendance API: mandatory location, server time, retry/concurrency, curren
   const punch=()=>({kind:'in',requestKey:randomUUID(),latitude:35.68,longitude:139.76,accuracy:24,locatedAt:new Date().toISOString()});
   await member.agent.post('/api/attendance/punch').send(punch()).expect(403);
   await admin.post('/api/attendance/punch',punch()).expect(403);
-  for(const body of [{kind:'in',requestKey:randomUUID()},{...punch(),latitude:91},{...punch(),accuracy:-1},{...punch(),locatedAt:'2020-01-01T00:00:00Z'},{...punch(),occurredAt:'2000-01-01T00:00:00Z'},{...punch(),personCode:codes[3]}])await member.post('/api/attendance/punch',body).expect(400);
+  for(const body of [{kind:'in',requestKey:randomUUID()},{...punch(),latitude:91},{...punch(),accuracy:-1},{...punch(),occurredAt:'2000-01-01T00:00:00Z'},{...punch(),personCode:codes[3]}])await member.post('/api/attendance/punch',body).expect(400);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM bd_attendance_event')).rows[0].n,0);
   const body=punch(),start=Date.now();
   const posted=await Promise.all([member.post('/api/attendance/punch',body).expect(201),member.post('/api/attendance/punch',body).expect(201)]);
@@ -60,6 +60,15 @@ test('attendance API: mandatory location, server time, retry/concurrency, curren
   await member.post('/api/attendance/punch',{...punch(),kind:'out'}).expect(201);
   await member.post('/api/attendance/punch',punch()).expect(201);
   await leaderA.post('/api/attendance/punch',punch()).expect(201);
+  // Device clock drift must not reject a successful location or change server-recorded punch time.
+  for(const locatedAt of ['2020-01-01T00:00:00Z','2099-01-01T00:00:00Z']){
+   const shifted={...punch(),locatedAt};const saved=(await leaderA.post('/api/attendance/punch',shifted).expect(201)).body;
+   const event=(await db.query('SELECT occurred_at,located_at FROM bd_attendance_event WHERE id=$1',[saved.id])).rows[0];
+   assert.equal(new Date(event.located_at).getTime(),Date.parse(locatedAt));
+   assert.ok(new Date(event.occurred_at).getTime()>=start&&new Date(event.occurred_at).getTime()<=Date.now());
+   assert.equal(saved.day,attendanceDay(new Date(event.occurred_at)));
+   assert.equal((await leaderA.post('/api/attendance/punch',shifted).expect(201)).body.id,saved.id);
+  }
   await outsider.post('/api/attendance/punch',{...punch(),kind:'out'}).expect(201);
   const mine=(await member.agent.get('/api/attendance').expect(200)).body;
   assert.equal(mine.people.length,1);assert.equal(mine.events.length,3);assert.ok(mine.events.every((e:AttendanceEvent)=>e.code===codes[2]&&Date.parse(e.at)>=start));
