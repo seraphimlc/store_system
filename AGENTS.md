@@ -14,6 +14,7 @@
 - 本地Docker统一入口8000（管理端 `/admin/`，员工端 `/`），显式连接基准库 `store_settle`。部署见 `deploy-next/README.md`，使用独立 `.env.next.docker.local` 的 `NEXT_DOCKER_DATABASE_URL`，与开发使用同一业务库，但配置文件和任务目录仍分开。
 - **唯一日常生产部署方式**按 `deploy-next/生产部署与回滚.md` 执行：已提交版本整版构建 → AES-256-GCM 加密镜像白名单 ZIP → 现有 OSS 中转 → 服务器校验解密 → SSH/稳定 Compose 切换与验收。前端静态资源沿用现有 OSS/CDN；不提供明文包、私有桶/gcloud、集团云分卷或 SSH 直传大包等备选路径。`production-release.py` 首次旧系统 cutover/rollback 与本地部署 CLI 均不得用于日常生产升级。
 - **常规整版发布（默认）**：发布前对照上次实际部署的源码/产物清单，汇总全部已完成、已验收且纳入本版的累计改动及共享依赖，不限于最后一次任务或提交。冻结并提交统一版本，构建管理端、员工端（含PWA）、API/Worker及Gateway，按同一release发布静态资源并替换API、Worker、Gateway；保留生产配置、持久卷与业务数据。未完成、未经确认或其他agent尚未验收的改动不得夹带。仅文档/工具修改无需发布业务服务；仅数据维护按授权范围备份、事务执行和验收，不触发代码发布。只有用户明确要求或已审查的紧急修复才做增量发布，须记录复用组件版本。本条不自动授权生产发布。
+- **发布执行收敛**：按生产手册§12.4先确定范围、适用脚本/验收入口及回滚方案，再冻结commit/tag；不在部署中追新改动或临时拼脚本。从范围确认开始分阶段计时，失败只复验直接影响项；公开验收后立即finalize与清理。耗时阈值只触发说明阻塞，不跳过安全门禁。
 - 当前模块检查：`pnpm --filter @store/admin typecheck` / `pnpm --filter @store/staff typecheck` / `pnpm --filter @store/server typecheck`；构建用对应模块 `build`。
 - `pnpm test` 使用已有隔离运行器，PostgreSQL写测试只在随机schema-only临时库执行；不得向基准库或开发完整副本写fixture、清表或覆盖密码。
 - 浏览器验收使用 `scripts/test-isolated.mjs --browser` 的相关分组；只重跑受本次变更影响的检查。静态文案/样式不新增业务测试。
