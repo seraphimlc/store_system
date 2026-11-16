@@ -68,6 +68,15 @@ class FullDeployment(common.Deployment):
             if subprocess.run(['docker','inspect',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:raise RuntimeError('candidate name already in use: '+name)
         if (self.b/'state.before.json').exists():raise RuntimeError('backup already exists; do not repeat prepare')
         super().prepare()
+    def restore_candidate(self):
+        # Retry only candidate setup from the verified original backup; never re-backup production.
+        self.baseline()
+        name='ui_candidate_'+self.r[5:].replace('-','_');(self.d/'candidate-database.txt').write_text(name)
+        run('docker','exec','deploy-db-1','sh','-c','createdb -U "$POSTGRES_USER" "$1"','sh',name)
+        with open(self.b/'database.before.dump','rb') as f,open(self.d/'candidate-restore-retry.log','w') as log:run('docker','exec','-i','deploy-db-1','sh','-c','pg_restore -U "$POSTGRES_USER" -d "$1" --no-owner --no-acl --exit-on-error','sh',name,stdin=f,stdout=log,stderr=subprocess.STDOUT)
+        from urllib.parse import urlsplit,urlunsplit
+        env=dict(l.split('=',1) for l in (self.b/'runtime.before.env').read_text().splitlines() if l and not l.startswith('#') and '=' in l);u=urlsplit(env['NEXT_DATABASE_URL']);env['NEXT_DATABASE_URL']=urlunsplit((u.scheme,u.netloc,'/'+name,u.query,u.fragment));env['NEXT_TASK_DIRECTORY']='/tmp/ui-jobs';env['NEXT_WORKER_RECONCILE']='false'
+        (self.d/'candidate.env').write_text('\n'.join(k+'='+v for k,v in env.items())+'\n');os.chmod(self.d/'candidate.env',0o600)
     def smoke(self,container,mode):
         run('docker','cp',str(self.d/'full-release-smoke.cjs'),container+':/tmp/full-release-smoke.cjs')
         run('docker','exec','--user','0',container,'chown','node:node','/tmp/full-release-smoke.cjs')

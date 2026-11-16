@@ -1,7 +1,6 @@
 /** Inside the candidate/production API image. Read-only, no session, telemetry or provider calls. */
-require('reflect-metadata');
 const assert=require('node:assert/strict'),{createRequire}=require('node:module');
-const r=createRequire('/app/apps/server/dist/apps/server/src/main.js'),{Pool}=r('pg'),{BatchWorkService}=r('./batch-work');
+const r=createRequire('/app/apps/server/dist/apps/server/src/main.js');r('reflect-metadata');const {Pool}=r('pg'),{BatchWorkService}=r('./batch-work');
 (async()=>{r('@node-rs/argon2');r('sharp');const pool=new Pool({connectionString:process.env.NEXT_DATABASE_URL,max:1,statement_timeout:10000,options:'-c default_transaction_read_only=on'});let checked=0;
 try{const db={transaction:async fn=>{const c=await pool.connect();try{await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');return await fn(c);}finally{await c.query('ROLLBACK');c.release();}}};const service=new BatchWorkService(db);
 const actor=(await pool.query("SELECT id FROM users WHERE role='admin' AND is_active=true AND status='active' ORDER BY id LIMIT 1")).rows[0];assert(actor);
