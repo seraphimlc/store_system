@@ -2,14 +2,19 @@ import {spawnLegacyPython} from '../../../scripts/legacy-python.mjs';
 import 'reflect-metadata';import test from 'node:test';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {randomUUID} from 'node:crypto';import {hash} from '@node-rs/argon2';import request from '../node_modules/supertest';
 import {createApp} from '../src/main';import {Database} from '../src/database';import {BatchWorkService} from '../src/batch-work';import {seedBatchWork,clearBatchWork} from '../../../scripts/batch-work-fixture.mjs';
 const url=process.env.NEXT_TEST_DATABASE_URL;
-test('batch map respects frozen bounds, shared coordinate precedence, current scope and location edits preserve completed facts',{skip:!url},async()=>{
+test('batch maps reference current grid geometry, invalidate caches and preserve historical snapshots, authorization and completed facts',{skip:!url},async()=>{
  assert.match(new URL(url!).pathname,/_refactor_p1$/);const app=await createApp({databaseUrl:url!,sessionSecret:'batch-map-test-at-least-40-character-secret-value',cookieSecure:false,host:'127.0.0.1',port:0}),db=app.get(Database),service=app.get(BatchWorkService);let f:any;
  try{
   f=await seedBatchWork(db,'P5-BM-'+Date.now().toString(36),await hash('fixture-batch-map'));const worker=f.users[2],grid=f.grids[0][0],store=f.stores[0][0][0],source=f.prefix+'-source-0-0',other=f.stores[1][0][0];
   await db.query("INSERT INTO public.kanto_merchants_v20261029(place_id,name,lat,lon,location_accuracy,target_en,target_zh,sources,overture_id,osm_id,phone,website,address,region,prefecture,municipality) VALUES($1,$2,35.2,139.2,$3,'','','fixture','','','','','','','','')",[source,'synthetic map merchant','doubtful']);
   const frozen=(await db.query('SELECT snapshot FROM bd_grid_task WHERE id=$1',[grid])).rows[0].snapshot.geometry;
   await db.query("UPDATE bd_work_grid SET geometry=$1 WHERE id=$2",[JSON.stringify({type:'Polygon',coordinates:[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}),f.baseGrids[0]]);
-  let page=await service.map(worker,grid,{});assert.deepEqual(page.boundary,frozen);assert.equal(page.items[0].lat,35.2);assert.equal(page.items[0].accuracy,'doubtful');assert.equal(page.canExecute,true);
+  const currentGeometry={type:'Polygon',coordinates:[[[1,1],[2,1],[2,2],[1,2],[1,1]]]};
+  assert.deepEqual((await service.batchMap(f.users[0],f.mains[0])).features.find(g=>g.id===grid)!.geometry,currentGeometry);
+  assert.deepEqual((await service.regionMap(worker,f.regions[0])).features.find(g=>g.id===grid)!.geometry,currentGeometry);
+  assert.deepEqual((await service.visits(worker,grid,{})).grid.snapshot.geometry,currentGeometry);
+  assert.deepEqual((await db.query('SELECT snapshot FROM bd_grid_task WHERE id=$1',[grid])).rows[0].snapshot.geometry,frozen);
+  let page=await service.map(worker,grid,{});assert.deepEqual(page.boundary,currentGeometry);assert.equal(page.items[0].lat,35.2);assert.equal(page.items[0].accuracy,'doubtful');assert.equal(page.canExecute,true);
   assert.equal((await service.stores(worker,grid,{focus:store})).items[0].id,store);
   const legacyCode=`import json\nfrom app.db import SessionLocal\nfrom app.models import User,BdStoreTask,BdMerchantDetail\nfrom app.services.bd_hierarchical_tasks import update_location_accuracy\nfrom app.services import bd_merchant_media as media\nmedia.lookup_place_id=lambda *args:{'google_place_id':None,'place_lookup_state':'unconfigured'}\ns=SessionLocal()\ntry:\n result=update_location_accuracy(s,s.get(User,${worker}),${store},'doubtful',35.6,139.6)\n s.flush()\n row=s.get(BdStoreTask,${store})\n profile=s.get(BdMerchantDetail,${JSON.stringify(source)})\n print(json.dumps({'snapshot':row.snapshot,'revision':row.revision,'lat':profile.lat,'lon':profile.lon,'profileRevision':profile.revision,'lookup':profile.place_lookup_state}))\nfinally:\n s.rollback()\n s.close()`;
   const legacy=spawnLegacyPython(['-c',legacyCode],{encoding:'utf8',env:{...process.env,DATABASE_URL:url!.replace(/^postgres(?:ql)?:/,'postgresql+psycopg2:')}});assert.equal(legacy.status,0,legacy.stderr);const expected=JSON.parse(legacy.stdout);
@@ -28,7 +33,18 @@ test('batch map respects frozen bounds, shared coordinate precedence, current sc
   try{await assert.rejects(()=>service.location(worker,other,{revision:0,profileRevision:2,accuracy:'accurate',lat:35.8,lon:139.8}),/synthetic location audit failure/);}finally{mutable.connect=connect;}
   assert.equal((await service.map(worker,grid,{})).items[0].lat,35.7);
   const agent=request.agent(app.getHttpServer());const login=(await agent.post('/api/auth/login').send({username:f.codes[2],password:'fixture-batch-map'}).expect(201)).body;
-  const geometryManifest=(await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','manifest').expect(200)).body;assert.equal(geometryManifest.boundary,null);const geometryKey=geometryManifest.geometryRefs[0].key;assert.match(geometryKey,new RegExp('^snapshot:'+grid+':'));const geometryPayload=(await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','load:'+geometryKey).expect(200)).body;assert.deepEqual(geometryPayload.geometries[geometryKey],frozen);
+  const geometryManifest=(await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','manifest').expect(200)).body;assert.equal(geometryManifest.boundary,null);const geometryKey=geometryManifest.geometryRefs[0].key;assert.match(geometryKey,new RegExp('^current:'+grid+':'));const geometryPayload=(await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','load:'+geometryKey).expect(200)).body;assert.deepEqual(geometryPayload.geometries[geometryKey],currentGeometry);
+  const revisedGeometry={type:'Polygon',coordinates:[[[3,3],[4,3],[4,4],[3,4],[3,3]]]};
+  await db.query('UPDATE bd_work_grid SET geometry=$1,revision=revision+1 WHERE id=$2',[JSON.stringify(revisedGeometry),f.baseGrids[0]]);
+  const revisedManifest=(await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','manifest').expect(200)).body;
+  assert.notEqual(revisedManifest.geometryRefs[0].key,geometryKey);
+  assert.deepEqual((await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','load:'+geometryKey).expect(200)).body.geometries,{});
+  const batchGeometry=(await service.batchMap(f.users[0],f.mains[0])).features.find(g=>g.id===grid);assert.deepEqual(batchGeometry!.geometry,revisedGeometry);
+  // Current base-region membership must never select the members of an existing batch.
+  await db.query('UPDATE bd_work_grid SET zone_id=NULL WHERE id=$1',[f.baseGrids[0]]);
+  assert.ok((await service.regionMap(worker,f.regions[0])).features.some(g=>g.id===grid));
+  assert.deepEqual((await db.query('SELECT snapshot FROM bd_grid_task WHERE id=$1',[grid])).rows[0].snapshot.geometry,frozen);
+  await db.query('UPDATE bd_work_grid SET zone_id=$1 WHERE id=$2',[f.region,f.baseGrids[0]]);
   await agent.get(`/api/batch-work/grids/${grid}/map`).expect(200);await agent.post(`/api/batch-work/stores/${store}/location`).send({revision:2,profileRevision:2,accuracy:'accurate'}).expect(403);
   await db.query('UPDATE bd_grid_task SET assignee_id=$1 WHERE id=$2',[f.users[3],grid]);await agent.get(`/api/batch-work/grids/${grid}/map`).expect(403);await agent.get(`/api/batch-work/grids/${grid}/map`).set('X-Grid-Geometry-Cache','load:'+geometryKey).expect(403);await agent.post(`/api/batch-work/stores/${store}/location`).set('X-CSRF-Token',login.csrfToken).send({revision:2,profileRevision:2,accuracy:'accurate'}).expect(403);
   const missing=f.stores[0][1][0],missingSnapshot=(await db.query('SELECT snapshot FROM bd_store_task WHERE id=$1',[missing])).rows[0].snapshot;
