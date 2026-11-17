@@ -258,13 +258,14 @@
 .staff-content-region>.work-region-detail{height:100%;padding:0;display:flex;flex-direction:column;min-height:0}
 .staff-content-region .work-region-detail>.work-map,.staff-content-region .work-region-map-placeholder{height:min(310px,38dvh);flex-shrink:0;width:100%;margin:0}
 .staff-content-region .work-region-detail>.work-map.is-expanded{height:100dvh}
-.work-region-detail>.work-region-toolbar{flex-shrink:0;margin:0;padding:0 16px;min-height:44px;border-bottom:1px solid var(--border);background:var(--background)}
+.work-region-detail>.work-region-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex-shrink:0;margin:0;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--background)}
+.work-region-toolbar>.adm-button{width:100%;min-height:44px;margin:0;padding:10px 12px;line-height:22px;white-space:nowrap;--border-radius:var(--radius-sm)}
+@media(min-width:480px){.work-region-detail>.work-region-toolbar.is-selecting{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .work-grid-list-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;background:var(--background)}
 .work-grid-rows{list-style:none;padding:0;margin:0;display:block}
 .work-grid-rows>.work-grid-compact{border:0;border-bottom:1px solid var(--border);border-radius:0;margin:0;padding:8px 16px;display:grid;gap:0;background:var(--background);color:var(--foreground)}
 .work-grid-rows .work-row:first-child{min-height:24px}.work-grid-rows .work-row:last-child{min-height:44px}
 
-.work-region-detail>.work-region-toolbar{justify-content:flex-end}
 .work-grid-rows .work-grid-name-row{justify-content:flex-start;gap:8px;min-width:0}
 .work-grid-name-row>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .work-grid-metrics{flex-shrink:0;font-size:12px;color:var(--foreground-muted);white-space:nowrap}
@@ -389,7 +390,7 @@
 .work-store-list a,.work-search-preview a{color:inherit;text-decoration:none}.work-store-list a[aria-disabled="true"],.work-search-preview a[aria-disabled="true"]{opacity:.5}.work-store-result-info .work-store-location{white-space:normal}
 
 /* Direct choices keep all options visible without opening another control. */
-.work-choice-group{border:0;padding:0;margin:12px 0;min-width:0}.work-choice-options{display:flex;flex-wrap:wrap;gap:6px}.work-choice-options label{position:relative;flex:1;min-width:64px;margin:0}.work-choice-options input{position:absolute;opacity:0;width:1px;height:1px}.work-choice-options span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px;border:1px solid var(--border);border-radius:var(--radius,12px);white-space:nowrap}.work-choice-options input:checked+span{border-color:var(--adm-color-primary);color:var(--adm-color-primary);background:var(--adm-color-primary-light)}.work-choice-options input:focus-visible+span{outline:2px solid var(--adm-color-primary);outline-offset:2px}.work-choice-options input:disabled+span{opacity:.5}.work-region-detail>.work-region-toolbar{justify-content:flex-start;flex-wrap:wrap}.work-region-toolbar>.work-link{margin-left:auto}.work-photo-actions input[hidden]{display:none}
+.work-choice-group{border:0;padding:0;margin:12px 0;min-width:0}.work-choice-options{display:flex;flex-wrap:wrap;gap:6px}.work-choice-options label{position:relative;flex:1;min-width:64px;margin:0}.work-choice-options input{position:absolute;opacity:0;width:1px;height:1px}.work-choice-options span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px;border:1px solid var(--border);border-radius:var(--radius,12px);white-space:nowrap}.work-choice-options input:checked+span{border-color:var(--adm-color-primary);color:var(--adm-color-primary);background:var(--adm-color-primary-light)}.work-choice-options input:focus-visible+span{outline:2px solid var(--adm-color-primary);outline-offset:2px}.work-choice-options input:disabled+span{opacity:.5}.work-photo-actions input[hidden]{display:none}
 .work-batch-detail>.work-map{height:50%;flex:0 0 50%;margin:0;width:100%}.work-batch-detail>.work-map.is-expanded{height:100dvh}.staff-content-region .work-region-detail>.work-map,.staff-content-region .work-region-map-placeholder{height:50%;flex:0 0 50%}
 
 /* Creation is a bounded form; review records belong to the independent batch page. */
@@ -402,3 +403,13 @@
 .work-proposal-submit-slot button{width:100%}
 
 .attendance-login-reminder{font-size:14px;line-height:1.7;color:var(--foreground)}.attendance-login-reminder p{margin:0}.attendance-login-reminder small{display:block;margin-top:12px;font-size:12px;color:var(--foreground-muted)}
+
+/* Keep native choices independent from full-width text-field sizing. */
+.work-grid-selection{display:flex;align-items:center;gap:8px;min-height:44px;justify-self:start}
+.work-grid-selection input[type=checkbox],.work-drawer input:is([type=checkbox],[type=radio]){flex:0 0 22px;width:22px;height:22px;min-width:22px;min-height:22px;margin:0;padding:0;accent-color:var(--adm-color-primary)}
+.work-owner-options{border:0;padding:0;margin:0;min-width:0;display:grid;gap:4px}
+.work-owner-options legend{margin-bottom:8px}.work-owner-options label{justify-content:flex-start;overflow-wrap:anywhere}
+.work-progress>.work-progress-fill{position:absolute;inset:0 auto 0 0;background:var(--primary);opacity:.16}
+.attendance .attendance-mobile-tabs{margin-bottom:16px;--title-font-size:15px}
+.attendance .attendance-mobile-tabs a{display:block;color:inherit;text-decoration:none;padding:10px 12px;white-space:nowrap}
+.attendance-mobile-tabs .adm-tabs-tab{padding:0}

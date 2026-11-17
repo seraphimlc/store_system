@@ -110,3 +110,11 @@ test('Gateway staging, staff reuse and checksum verification include the complet
     await assert.rejects(stageStaffPwa(target, join(dir, 'bad'), { expected: files }), /checksum/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('waiting updates remain available in account settings without automatic toast interruptions', async () => {
+  const source = await readFile('apps/staff/src/pwa/PwaProvider.tsx', 'utf8');
+  const provider = source.slice(source.indexOf('export function PwaProvider'), source.indexOf('export function PwaSettings'));
+  assert.doesNotMatch(provider, /Toast\.show/);
+  assert.match(provider, /patch\(\{ waiting:/);
+  assert.match(source, /activateUpdate\(state\.waiting\)/);
+});

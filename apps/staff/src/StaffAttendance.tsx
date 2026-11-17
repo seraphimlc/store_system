@@ -1,5 +1,5 @@
 import type {ComponentPropsWithoutRef} from 'react';
-import {Button,DatePicker,Popup,Toast} from 'antd-mobile';
+import {Button,DatePicker,Popup,Tabs,Toast} from 'antd-mobile';
 import {Attendance,type AttendanceSheetProps,type AttendanceDateProps} from '../../../packages/client/src/Attendance';
 import type {Language,Session} from '../../../packages/contracts/src';
 
@@ -16,6 +16,12 @@ function AttendanceDatePicker({visible,value,language,onConfirm,onClose}:Attenda
  const [year,month,day]=value.split('-').map(Number);
  return <DatePicker destroyOnClose visible={visible} value={new Date(year,month-1,day,12)} min={new Date(2000,0,1)} max={new Date(new Date().getFullYear()+1,11,31)} precision="day" title={language==='ja'?'日付を選択':'选择日期'} confirmText={language==='ja'?'記録を表示':'查看记录'} cancelText={language==='ja'?'キャンセル':'取消'} onClose={onClose} onConfirm={date=>onConfirm([date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-'))}/>
 }
+function AttendanceTabs({mine,language}:{mine:boolean;language:Language}){
+ return <Tabs className="attendance-mobile-tabs" activeKey={mine?'mine':'team'}>
+  <Tabs.Tab key="mine" title={<a href="/my/attendance" aria-current={mine?'page':undefined}>{language==='ja'?'自分の記録':'我的记录'}</a>}/>
+  <Tabs.Tab key="team" title={<a href="/my/team-attendance" aria-current={!mine?'page':undefined}>{language==='ja'?'チームの履歴':'本队动态'}</a>}/>
+ </Tabs>;
+}
 export function StaffAttendance(props:{session:Session;language:Language;compact?:boolean}){
- return <Attendance {...props} mobile mobileButton={AttendanceButton} mobileSheet={AttendanceSheet} mobileDatePicker={AttendanceDatePicker} onSuccess={message=>Toast.show({content:message})}/>;
+ return <Attendance {...props} mobile mobileTabs={AttendanceTabs} mobileButton={AttendanceButton} mobileSheet={AttendanceSheet} mobileDatePicker={AttendanceDatePicker} onSuccess={message=>Toast.show({content:message})}/>;
 }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Dialog, List, Toast } from 'antd-mobile';
 import { activateUpdate, iosDevice, standalone, type InstallPrompt } from './client';
 
@@ -8,9 +8,6 @@ const PwaContext = createContext(initial);
 
 export function PwaProvider({ children, language }: { children: ReactNode; language: string }) {
   const [state, setState] = useState(initial);
-  const notified = useRef(false);
-  const languageRef = useRef(language);
-  languageRef.current = language;
   useEffect(() => {
     let live = true;
     const cleanups: (() => void)[] = [];
@@ -34,10 +31,6 @@ export function PwaProvider({ children, language }: { children: ReactNode; langu
         const check = () => {
           const waiting = registration.waiting;
           patch({ waiting: waiting?.state === 'installed' && registration.active ? waiting : null });
-          if (waiting?.state === 'installed' && registration.active && !notified.current) {
-            notified.current = true;
-            Toast.show({ content: languageRef.current === 'ja' ? '新しいバージョンがあります。「マイアカウント」で更新できます。' : '新版本已就绪，可在“我的账号”中更新', duration: 4000 });
-          }
         };
         const watch = (worker: ServiceWorker | null) => {
           if (!worker) return;

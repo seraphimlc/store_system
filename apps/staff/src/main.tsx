@@ -118,7 +118,7 @@ function App() {
           <List>
             <List.Item prefix={<MapPinned size={20}/>} onClick={()=>navigate('tasks')}>{t('巡店任务')}</List.Item>
             <List.Item prefix={<FileText size={20}/>} onClick={()=>navigate('report')}>{t('每日填报')}</List.Item>
-            <List.Item prefix={<Clock3 size={20} aria-hidden="true"/>} arrowIcon={<ChevronRight size={18} aria-hidden="true"/>}><a href="/my/attendance">{language==='ja'?'打刻記録':'打卡记录'}</a></List.Item>{session.user.role==='leader'&&<List.Item prefix={<ClipboardList size={20} aria-hidden="true"/>} arrowIcon={<ChevronRight size={18} aria-hidden="true"/>}><a href="/my/team-attendance">{language==='ja'?'チームの履歴':'本队出退勤动态'}</a></List.Item>}
+            <List.Item prefix={<Clock3 size={20} aria-hidden="true"/>} arrowIcon={<ChevronRight size={18} aria-hidden="true"/>}><a href="/my/attendance">{language==='ja'?'打刻記録':'打卡记录'}</a></List.Item>
             <List.Item prefix={<CalendarDays size={20}/>} extra={planPending?<Badge content={Badge.dot}/>:undefined} onClick={()=>navigate('plan')}>{t('出勤计划')}</List.Item>
             <List.Item prefix={<Mail size={20}/>} extra={unread || undefined} onClick={() => navigate('messages')}>{t('站内消息')}</List.Item><List.Item prefix={<ClipboardList size={20}/>} onClick={() => navigate('feedback')}>{t('核对结果')}</List.Item><List.Item prefix={<LockKeyhole size={20}/>} onClick={() => {navigate('account');setPasswordOpen(true);}}>{t('修改密码')}</List.Item><List.Item prefix={<UserRound size={20}/>} onClick={() => navigate('account')}>{t('我的账号')}</List.Item>
             <List.Item prefix={<BookOpen size={20} aria-hidden="true"/>} arrowIcon={<ChevronRight size={18} aria-hidden="true"/>}><a href="/my/guide">{t('使用指南')}</a></List.Item>

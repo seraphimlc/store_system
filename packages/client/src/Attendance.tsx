@@ -12,7 +12,7 @@ type Makeup={kind:AttendanceKind;requestKey:string;occurredAt:string;reason:stri
 export type AttendanceSheetProps={visible:boolean;title:string;busy:boolean;onClose:()=>void;children:ReactNode};
 export type AttendanceDateProps={visible:boolean;value:string;language:Language;onConfirm:(day:string)=>void;onClose:()=>void};
 export type AttendanceDetailDrawerProps={title:string;language:Language;onClose:()=>void;children:ReactNode};
-type Props={session:Session;language:Language;mobile?:boolean;compact?:boolean;onSuccess?:(message:string)=>void;mobileButton?:ComponentType<ComponentPropsWithoutRef<'button'>>;mobileSheet?:ComponentType<AttendanceSheetProps>;mobileDatePicker?:ComponentType<AttendanceDateProps>;detailDrawer?:ComponentType<AttendanceDetailDrawerProps>};
+type Props={session:Session;language:Language;mobile?:boolean;compact?:boolean;onSuccess?:(message:string)=>void;mobileTabs?:ComponentType<{mine:boolean;language:Language}>;mobileButton?:ComponentType<ComponentPropsWithoutRef<'button'>>;mobileSheet?:ComponentType<AttendanceSheetProps>;mobileDatePicker?:ComponentType<AttendanceDateProps>;detailDrawer?:ComponentType<AttendanceDetailDrawerProps>};
 const dictionary:Record<string,string>={
  '选择日期':'日付を選択','查看记录':'記録を表示','取消':'キャンセル','当天记录':'この日の記録','本页':'このページ','待审核补卡':'承認待ちの修正申請','状态':'状態','已出勤':'出勤済み','今天':'今日','历史记录':'過去の記録','前一天':'前日','后一天':'翌日','打卡规则':'打刻ルール','日本时间 · 每日05:00换日':'日本時間・毎日05:00に日付切替','最早出勤':'最初の出勤','最晚退勤':'最後の退勤','今天还没有打卡':'本日の打刻はまだありません','打卡后，时间和位置会显示在这里。':'打刻すると、時刻と位置がここに表示されます。','当天没有打卡记录':'この日の打刻はありません','可选择其他日期，或申请补卡。':'別の日を選ぶか、修正打刻を申請できます。','当天动态':'この日の履歴','补卡申请':'修正申請','正在获取位置':'位置情報を取得中','正在保存打卡':'打刻を保存中','请稍候，不要关闭页面':'画面を閉じずにお待ちください','定位成功后自动记录，无需再次确认。':'位置の取得後に自動で記録します。','所有打卡都会保留，汇总取最早出勤、最晚退勤。':'すべての打刻を保存し、最初の出勤・最後の退勤を採用します。','关闭':'閉じる','暂无可用记录，请重试':'記録を確認できません。再試行してください','返回今日打卡':'本日の打刻に戻る','今日出退勤':'本日の出退勤','出退勤记录':'出退勤記録','我的记录':'自分の記録','本队动态':'チームの履歴','出勤打卡':'出勤打刻','退勤打卡':'退勤打刻',
  '出勤':'出勤','退勤':'退勤','未打卡':'未打刻','业务日期':'勤務日','团队':'チーム','全部团队':'すべてのチーム','姓名或编号':'氏名・番号','查询':'検索','刷新':'更新',
@@ -47,7 +47,7 @@ async function reverseAddress(session:Session,language:Language,latitude:number,
   return text?text.slice(0,500):undefined;
  }catch{return;}
 }
-export function Attendance({session,language,mobile=false,compact=false,onSuccess,mobileButton,mobileSheet,mobileDatePicker,detailDrawer}:Props){
+export function Attendance({session,language,mobile=false,compact=false,onSuccess,mobileTabs:MobileTabs,mobileButton,mobileSheet,mobileDatePicker,detailDrawer}:Props){
  const t=(value:string)=>language==='ja'?dictionary[value]??value:value;
  const admin=session.user.role==='admin',leader=session.user.role==='leader';
  const [scope]=useState<'mine'|'team'|'all'>(()=>admin?'all':!compact&&location.pathname.includes('/team-attendance')&&leader?'team':'mine');
@@ -112,17 +112,18 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
  function position(event:AttendanceEvent){return event.source==='makeup'?<span>{t('补卡')} · {t('无现场定位')}</span>:<span>{event.address||'—'} · {gridText(event)} · <a href={'https://www.google.com/maps?q='+event.latitude+','+event.longitude} target="_blank" rel="noopener noreferrer">{t('查看位置')}</a> · {event.latitude?.toFixed(5)}, {event.longitude?.toFixed(5)} · {t('精度约')}{Math.round(event.accuracy!)}{t('米')}</span>;}
  function summaryTime(event:AttendanceEvent|null){if(!data)return <span className="attendance-muted">{t(loading?'正在加载…':'暂无可用记录，请重试')}</span>;return event?<><time dateTime={event.at}>{at(event.at)}</time><small>{event.source==='makeup'?t('补卡'):<>{event.address||'—'} · {gridText(event)} · <a href={'https://www.google.com/maps?q='+event.latitude+','+event.longitude} target="_blank" rel="noopener noreferrer">{t('查看位置')}</a> · {t('精度约')}{Math.round(event.accuracy!)}{t('米')}</>}</small></>:<span className="attendance-muted">{t('未打卡')}</span>;}
  function activity(code:string,expanded=false){
+  if(mobile&&!expanded)return null;
   const events=data!.events.filter(e=>e.code===code),requests=data!.requests.filter(r=>r.code===code),summary=attendanceSummary(events),pending=requests.filter(r=>r.status==='pending').length;
   const Container=expanded?'section':'details';
   return <Container className={expanded?'attendance-feed':'attendance-detail'}>{expanded?<div className="attendance-section-heading"><h2>{t('当天动态')}</h2><span>{events.length}</span></div>:<summary>{t('动态明细')} · {events.length}{requests.length>0&&<span className={pending?'attendance-pending':'attendance-muted'}> · {t(pending?'待审核补卡':'补卡申请')} {pending||requests.length}</span>}</summary>}
    {!events.length&&(expanded?<div className="attendance-empty"><p>{t(isToday?'今天还没有打卡':'当天没有打卡记录')}</p><small>{t(isToday?'打卡后，时间和位置会显示在这里。':'可选择其他日期，或申请补卡。')}</small></div>:!requests.length&&<p>{t('暂无记录')}</p>)}
    <ol className="attendance-activity">{[...events].sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)||b.id-a.id).map(e=><li key={e.id}>
     <div><strong>{t(e.kind==='in'?'出勤':'退勤')}</strong> · <time dateTime={e.at}>{at(e.at)}</time> · {t(e.source==='onsite'?'现场打卡':'补卡')}{(summary.firstIn?.id===e.id||summary.lastOut?.id===e.id)&&<span className="attendance-label">{t('已采用')}</span>}</div>
-    <div>{position(e)}</div><small>{t('保存时间')}：{at(e.createdAt)}</small>
+    {!mobile&&<><div>{position(e)}</div><small>{t('保存时间')}：{at(e.createdAt)}</small></>}
    </li>)}</ol>
    {expanded&&requests.length>0&&<h3 className="attendance-request-heading">{t('补卡申请')} · {requests.length}</h3>}
    {requests.map(r=><section key={r.id} className="attendance-request"><p><strong>{t('补卡')} · {t(r.kind==='in'?'出勤':'退勤')}</strong> · {at(r.at)} · {t(r.status==='pending'?'待处理':r.status==='approved'?'已通过':'已拒绝')}</p>
-    <p className="attendance-prewrap">{r.reason}</p><small>{t('无现场定位')} · {t('保存时间')}：{at(r.createdAt)}</small>
+    <p className="attendance-prewrap">{r.reason}</p>{!mobile&&<small>{t('无现场定位')} · {t('保存时间')}：{at(r.createdAt)}</small>}
     {r.reviewedAt&&<p>{t('处理人')}：{r.reviewer||'—'} · {t('处理时间')}：{at(r.reviewedAt)}</p>}{r.note&&<p className="attendance-prewrap">{t('审核备注')}：{r.note}</p>}
     {admin&&r.status==='pending'&&<form onSubmit={e=>void review(e,r)}><label>{t('审核备注')}<UIInput name="note" maxLength={1000}/></label><div className="attendance-actions"><UIButton name="decision" value="approved" disabled={!!busy}>{t('通过')}</UIButton><UIButton name="decision" value="rejected" disabled={!!busy}>{t('拒绝')}</UIButton></div></form>}
    </section>)}
@@ -159,7 +160,7 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
  const detailPerson=DetailView&&data&&detailCode?data.people.find(person=>person.code===detailCode):undefined;
  const dateTitle=selectedDay?new Intl.DateTimeFormat(language==='ja'?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo',month:'long',day:'numeric',weekday:'short'}).format(new Date(selectedDay+'T12:00:00+09:00')):'—';
  if(mobile&&mine)return <section className={'attendance attendance-mobile attendance-personal'+(compact?' attendance-compact':'')} aria-label={t(compact?'今日出退勤':'出退勤记录')}>
-  {!compact&&leader&&<nav className="attendance-tabs" aria-label={t('出退勤记录')}><a href="/my/attendance" aria-current="page">{t('我的记录')}</a><a href="/my/team-attendance">{t('本队动态')}</a></nav>}
+  {!compact&&leader&&(MobileTabs?<MobileTabs mine language={language}/>:<nav className="attendance-tabs" aria-label={t('出退勤记录')}><a href="/my/attendance" aria-current="page">{t('我的记录')}</a><a href="/my/team-attendance">{t('本队动态')}</a></nav>)}
   <header className="attendance-daybar">
    <div><h2>{isToday?t('今天'):dateTitle}{isToday&&<span>{dateTitle}</span>}</h2><small>{t('日本时间 · 每日05:00换日')}</small></div>
    {!compact&&<div className="attendance-header-actions"><ActionButton type="button" className="attendance-date-button" aria-haspopup="dialog" aria-expanded={dateOpen} onClick={()=>setDateOpen(true)}>{t('历史记录')}</ActionButton><ActionButton type="button" className="attendance-date-button" disabled={loading||!!busy} onClick={()=>{setMakeupError('');setMakeupOpen(true);}}>{t('申请补卡')}</ActionButton></div>}
@@ -197,7 +198,7 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
   {notice&&<UISuccessNotice key={notice.id}>{notice.text}</UISuccessNotice>}
   {compact&&<div className="attendance-heading"><h2>{t('今日出退勤')}</h2><span>{data?.day??'—'}</span></div>}
   {!compact&&<>
-   {leader&&<nav className="attendance-tabs" aria-label={t('出退勤记录')}><a href="/my/attendance" aria-current={mine?'page':undefined}>{t('我的记录')}</a><a href="/my/team-attendance" aria-current={!mine?'page':undefined}>{t('本队动态')}</a></nav>}
+   {leader&&(mobile&&MobileTabs?<MobileTabs mine={mine} language={language}/>: <nav className="attendance-tabs" aria-label={t('出退勤记录')}><a href="/my/attendance" aria-current={mine?'page':undefined}>{t('我的记录')}</a><a href="/my/team-attendance" aria-current={!mine?'page':undefined}>{t('本队动态')}</a></nav>)}
    <form className="attendance-filters" onSubmit={e=>{e.preventDefault();setSearch(q);setPage(1);reload();}}>
     <label>{t('业务日期')}{mobile&&DateSelector?<ActionButton type="button" aria-haspopup="dialog" aria-expanded={dateOpen} onClick={()=>setDateOpen(true)}>{day||data?.day||t('选择日期')}</ActionButton>:<UIInput type="date" value={day||data?.day||''} onChange={e=>{setDay(e.target.value);setPage(1);}}/>}</label>
     {!mine&&<><label>{t('团队')}<UISelect aria-label={t('团队')} value={team} onChange={e=>{setTeam(e.target.value);setPage(1);}}><option value="">{t('全部团队')}</option>{teams.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</UISelect></label><label>{t('姓名或编号')}<UIInput value={q} onChange={e=>setQ(e.target.value)} maxLength={100}/></label><ActionButton type="submit" disabled={loading}>{t('查询')}</ActionButton></>}
