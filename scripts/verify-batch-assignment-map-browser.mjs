@@ -10,7 +10,7 @@ try {
  for(const width of [430,1280]) {
   const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   let calls=[],fail=false,status='active',enabled=true;
-  const regions=[3,4,5].map(id=>({id,teamId:id===3?1:null,leaderId:id===3?10:null,teamName:id===3?'原团队':null,status:id===4?'in_progress':id===5?'completed':'pending',progress:id===3?10:id===4?80:40,revision:7,snapshot:{name:'片区'+id,area_km2:id===5?null:id===3?1.25:0.4},coverage:id===5?{stores:0,visited:null}:id===3?{stores:5,visited:2}:{stores:1,visited:0},canAssign:false,members:[],grids:[{id:id+8,sourceId:id,assigneeId:null,assigneeName:null,status:'pending',progress:0,total:id===3?5:id===4?1:3,completed:0,revision:2,snapshot:{name:'网格'+id}}]}));
+  const regions=[3,4,5].map(id=>({id,teamId:id===3?1:null,leaderId:id===3?10:null,teamName:id===3?'原团队':null,status:id===4?'in_progress':id===5?'completed':'pending',progress:id===3?10:id===4?80:40,revision:7,snapshot:{name:'片区'+id,area_km2:id===5?null:id===3?1.25:0.4},coverage:id===5?{stores:0,visited:null}:id===3?{stores:5,visited:2}:{stores:1,visited:0},canAssign:false,members:[],grids:[{id:id+8,sourceId:id,assigneeId:id===3?21:null,assigneeName:id===3?'网格负责人':null,status:'pending',progress:0,total:id===3?5:id===4?1:3,completed:id===3?2:0,revision:2,snapshot:{name:'网格'+id}}]}));
   await context.route('https://maps.googleapis.com/**',route=>route.fulfill({contentType:'text/javascript',body:googleMapsMock}));
   await context.route('**/api/**',async route=>{
    if(new URL(route.request().url()).hostname==='maps.googleapis.com'){await route.fallback();return;}
@@ -100,6 +100,11 @@ try {
   await page.locator('.batch-assignment-drawer').waitFor();
   const selectedText=async()=>(await page.locator('.batch-assignment-region-list li').allTextContents()).map(value=>value.replace(/\s+/g,''));
   assert.deepEqual(await selectedText(),['片区5未分配—km²·0家·60d—']);
+  await page.getByRole('button',{name:'展开网格',exact:true}).click();
+  await page.locator('.batch-assignment-grid-list [role=listitem]').filter({hasText:'网格5 · 0/3'}).waitFor();
+  await page.locator('.batch-assignment-grid-assignee').filter({hasText:'未分派'}).waitFor();
+  await page.getByRole('button',{name:'展开网格',exact:true}).click();
+  assert.equal(await page.locator('.batch-assignment-grid-list').count(),0);
   await page.locator('.batch-assignment-region-list [data-metric=area]').hover();
   await page.getByRole('tooltip').filter({hasText:'面积未知'}).waitFor();
   await page.locator('.batch-assignment-region-list [data-metric=stores]').hover();
@@ -116,6 +121,11 @@ try {
   const click=id=>page.evaluate(id=>window.__storeDataMock.click(id),id);
   await click(11);await page.getByRole('button',{name:'分配所选片区 (1)',exact:true}).waitFor();
   assert.deepEqual(await selectedText(),['片区3原团队1.25km²·5家·60d40%']);
+  await page.getByRole('button',{name:'展开网格',exact:true}).click();
+  await page.locator('.batch-assignment-grid-list [role=listitem]').filter({hasText:'网格3 · 2/5'}).waitFor();
+  await page.locator('.batch-assignment-grid-assignee').filter({hasText:'网格负责人'}).waitFor();
+  await page.getByRole('button',{name:'展开网格',exact:true}).click();
+  assert.equal(await page.locator('.batch-assignment-grid-list').count(),0);
   await page.locator('.batch-assignment-region-list [data-metric=area]').hover();
   await page.getByRole('tooltip').filter({hasText:'面积 1.25 km²'}).waitFor();
   await page.locator('.batch-assignment-region-list [data-metric=rate]').hover();

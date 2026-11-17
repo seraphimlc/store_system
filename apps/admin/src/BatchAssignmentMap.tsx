@@ -1,6 +1,7 @@
 import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {Tabs,TabsList,TabsTrigger} from '@appica/ui-react/tabs';
 import {Drawer,DrawerContent,DrawerHeader,DrawerTitle,DrawerBody,DrawerFooter} from '@appica/ui-react/drawer';
+import {Collapsible,CollapsibleTrigger,CollapsibleContent} from '@appica/ui-react/collapsible';
 import {Tooltip,TooltipContent,TooltipProvider,TooltipTrigger} from '@appica/ui-react/tooltip';
 import {AdminCheckbox} from './AdminCheckbox';
 import {Button} from '@appica/ui-react/button';
@@ -11,7 +12,7 @@ import './batch-assignment-map.css';
 
 export interface AssignmentMapProps {
  batchId:number;
- regions:{id:number;teamId:number|null;teamName:string|null;snapshot:{name?:string;area_km2?:number|null};coverage?:{stores:number;visited:number|null}}[];
+ regions:{id:number;teamId:number|null;teamName:string|null;snapshot:{name?:string;area_km2?:number|null};coverage?:{stores:number;visited:number|null};grids?:{id:number;assigneeName:string|null;completed:number;total:number;snapshot:{name?:string}}[]}[];
  selectedIds:number[];
  disabled:boolean;
  onChange:(ids:number[])=>void;
@@ -32,7 +33,8 @@ function SelectedRegionItem({region,checked,disabled,onChange,language}:{region:
  const areaTip=area==null?t('面积未知','面積は不明'):t(`面积 ${area.toLocaleString(locale,{maximumFractionDigits:4})} km²`,`面積 ${area.toLocaleString(locale,{maximumFractionDigits:4})} km²`);
  const storeTip=stores==null?t('商户数未知','店舗数は不明'):t(`商户数 ${storeText}`,`店舗数 ${storeText}`);
  const rateTip=percent==null?t('没有商户，无法计算60天巡店率','店舗がないため60日巡回率を計算できません'):t(`60天巡店率 ${percent}%（${visited}/${stores}）`,`60日巡回率 ${percent}%（${visited}/${stores}）`);
- return <li data-selected={checked||undefined}><label><AdminCheckbox aria-label={t('地图选择片区 ','地図の地域を選択 ')+(region.snapshot.name||region.id)} checked={checked} disabled={disabled} onChange={event=>onChange(event.target.checked)}/><span className="batch-assignment-region-copy"><Tooltip><TooltipTrigger delay={200} render={<strong />}>{name}</TooltipTrigger><TipContent>{name}</TipContent></Tooltip><span className="batch-assignment-region-meta"><Tip className="batch-assignment-region-assignee" label={t(`当前分配：${assignee}`,`現在の割当：${assignee}`)}>{assignee}</Tip><span className="batch-assignment-region-metrics"><Tip label={areaTip} metric="area">{areaText}</Tip><span aria-hidden="true"> · </span><Tip label={storeTip} metric="stores">{storeText}</Tip><span aria-hidden="true"> · </span><Tip label={rateTip} metric="rate">{rateText}</Tip></span></span></span></label></li>;
+ const [gridsOpen,setGridsOpen]=useState(false),grids=region.grids??[];
+ return <li data-selected={checked||undefined}><label><AdminCheckbox aria-label={t('地图选择片区 ','地図の地域を選択 ')+(region.snapshot.name||region.id)} checked={checked} disabled={disabled} onChange={event=>onChange(event.target.checked)}/><span className="batch-assignment-region-copy"><Tooltip><TooltipTrigger delay={200} render={<strong />}>{name}</TooltipTrigger><TipContent>{name}</TipContent></Tooltip></span></label><Collapsible className="batch-assignment-grids" open={gridsOpen} onOpenChange={setGridsOpen}><div className="batch-assignment-region-meta"><Tip className="batch-assignment-region-assignee" label={t(`当前分配：${assignee}`,`現在の割当：${assignee}`)}>{assignee}</Tip><span className="batch-assignment-region-side"><span className="batch-assignment-region-metrics"><Tip label={areaTip} metric="area">{areaText}</Tip><span aria-hidden="true"> · </span><Tip label={storeTip} metric="stores">{storeText}</Tip><span aria-hidden="true"> · </span><Tip label={rateTip} metric="rate">{rateText}</Tip></span><CollapsibleTrigger className="batch-assignment-grids-trigger" aria-label={t('展开网格','グリッドを展開')}/></span></div><CollapsibleContent>{gridsOpen&&(grids.length?<div className="batch-assignment-grid-list" role="list">{grids.map(grid=>{const gridName=grid.snapshot.name||'#'+grid.id,who=grid.assigneeName||t('未分派','未割当');return <div role="listitem" key={grid.id}><span className="batch-assignment-grid-name">{gridName} · {grid.completed}/{grid.total}</span><span className="batch-assignment-grid-assignee">{who}</span></div>;})}</div>:<p className="batch-assignment-grid-empty">{t('没有网格','グリッドはありません')}</p>)}</CollapsibleContent></Collapsible></li>;
 }
 export function BatchAssignmentMap({batchId,regions,selectedIds,disabled,onChange,filter,actions,list,session,language}:AssignmentMapProps&{session:Session;language:string}) {
  const t=(zh:string,ja:string)=>language==='ja'?ja:zh;

@@ -10,7 +10,7 @@ export function BatchDetail({session,language,id}:{session:Session;language:stri
  const t=(zh:string,ja:string)=>language==='ja'?ja:zh;
  const [tree,setTree]=useState<Tree|null>(null),[error,setError]=useState(''),[features,setFeatures]=useState<MapFeature[]>([]),[configuration,setConfiguration]=useState<{enabled:boolean;key:string|null}>();
  useEffect(()=>{let live=true;setTree(null);setError('');Promise.all([api<Tree>('/batch-work/batches/'+id+'/mobile',session),api<{features:MapFeature[];enabled:boolean;key:string|null}>('/batch-work/batches/'+id+'/map',session)]).then(([v,map])=>{if(live){setTree(v);setFeatures(map.features);setConfiguration(map);}}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[id,session]);
- usePageHeader(tree?.main.title||t('批次详情','バッチ詳細'),'/my/work');
+ usePageHeader(t('（批次）','（バッチ）')+(tree?.main.title||t('批次详情','バッチ詳細')),'/my/work');
  const list=useProgressiveItems(tree?.regions??[]);
  if(error)return <p className="error" role="alert">{error}</p>;
  if(!tree)return <p role="status">{t('正在读取批次…','バッチを読込中…')}</p>;

@@ -16,7 +16,7 @@ export function RegionDetail({session,language,id}:{session:Session;language:str
  async function load(){const g=++generation.current;const [r,m]=await Promise.all([api<Region>('/batch-work/regions/'+id,session),api<{features:MapFeature[]}>('/batch-work/regions/'+id+'/map',session)]);if(g!==generation.current)return;setRegion(r);setFeatures(m.features);}
  useEffect(()=>{setRegion(null);setError('');setSelected([]);setSelecting(false);setBulk(false);setDrawer(null);void load().catch(e=>setError(e.message));return()=>{generation.current++;};},[id,session]);
  async function write(action:()=>Promise<void>){if(writing.current)return;writing.current=true;setBusy(true);setError('');setNotice('');try{await action();}catch(e){setError((e as Error).message);}finally{writing.current=false;setBusy(false);}}
- usePageHeader(region?.snapshot.name||t('片区详情','地域詳細'),region?.mainId?'/my/work/batches/'+region.mainId:'/my/work');
+ usePageHeader(t('（片区）','（地域）')+(region?.snapshot.name||t('片区详情','地域詳細')),region?.mainId?'/my/work/batches/'+region.mainId:'/my/work');
  const list=useProgressiveItems(region?.grids??[]);
  const status=(s:string)=>({pending:t('未指派','未割当'),assigned:t('已指派','割当済み'),in_progress:t('进行中','進行中'),completed:t('已完成','完了')} as Record<string,string>)[s]??s;
  if(!region)return <div className="work-page work-region-detail work-region-loading"><div className="work-region-map-placeholder" aria-hidden="true"/>{error?<p role="alert" className="error">{error}</p>:<p role="status">{t('正在读取片区…','地域を読込中…')}</p>}{error&&<Button onClick={()=>{setError('');void load().catch(e=>setError(e.message));}}>{t('重试','再試行')}</Button>}</div>;
