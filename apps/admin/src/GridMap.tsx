@@ -12,7 +12,7 @@ type Page={type:'FeatureCollection';features:Feature[];hasMore:boolean;nextCurso
 const centers:Record<string,{lat:number;lng:number}>={tokyo23:{lat:35.68,lng:139.76},tokyo26:{lat:35.69,lng:139.4},kanagawa:{lat:35.45,lng:139.5},saitama:{lat:35.86,lng:139.65},chiba:{lat:35.65,lng:140.1},all:{lat:35.7,lng:139.7}};
 export function GridMap({session,language,filter,selections,onToggle,reload,onFocus,directSelect=false}:{session:Session;language:string;filter:{q:string;region:string;state:string};selections:Record<number,GridSelection>;onToggle:(grid:GridMapProperties)=>void;reload:number;onFocus?:(grid:GridMapProperties)=>void;directSelect?:boolean}){
  const t=(zh:string,jp:string)=>language==='ja'?jp:zh;
- const element=useRef<HTMLDivElement>(null),map=useRef<google.maps.Map|null>(null),layer=useRef<google.maps.Data|null>(null),generation=useRef(0),current=useRef({selections,onToggle,onFocus,directSelect}),request=useRef<()=>void>(()=>{}),loadingMore=useRef(false),handledMore=useRef(0),fittedGrid=useRef('');
+ const element=useRef<HTMLDivElement>(null),map=useRef<google.maps.Map|null>(null),layer=useRef<google.maps.Data|null>(null),generation=useRef(0),current=useRef({selections,onToggle,onFocus,directSelect}),request=useRef<()=>void>(()=>{}),loadingMore=useRef(false),handledMore=useRef(0),fittedGrid=useRef(''),requestedView=useRef('');
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[unconfigured,setUnconfigured]=useState(false),[busy,setBusy]=useState(false),[rows,setRows]=useState<Feature[]>([]),[focus,setFocus]=useState<GridMapProperties>(),[next,setNext]=useState<number|null>(null),[refresh,setRefresh]=useState(0),[more,setMore]=useState(0);
  current.current={selections,onToggle,onFocus,directSelect};
  useEffect(()=>{let cancelled=false;let idle:google.maps.MapsEventListener|undefined,click:google.maps.MapsEventListener|undefined;
@@ -38,13 +38,13 @@ export function GridMap({session,language,filter,selections,onToggle,reload,onFo
    try{const page=await api<Page>('/zone-assets/grid-viewport?'+params,session);if(stopped||version!==generation.current)return;const added=data.addGeoJson({type:'FeatureCollection',features:page.features});
     if(!after&&/^\d+$/.test(filter.q)&&fittedGrid.current!==filter.q&&added.length){const target=added.find(feature=>String(feature.getId())===filter.q),fit=new google.maps.LatLngBounds();target?.getGeometry()?.forEachLatLng(point=>fit.extend(point));if(!fit.isEmpty()){fittedGrid.current=filter.q;instance.fitBounds(fit,{top:120,right:32,bottom:32,left:32});}}
     setRows(previous=>after?[...previous,...page.features]:page.features);setNext(page.hasMore?page.nextCursor:null);}
-   catch(cause){if(!stopped&&version===generation.current){setError((cause as Error).message);setNext(null);}}
+   catch(cause){if(!stopped&&version===generation.current){requestedView.current='';setError((cause as Error).message);setNext(null);}}
    finally{if(!stopped&&version===generation.current){loadingMore.current=false;setBusy(false);}}
   }
-  request.current=()=>{window.clearTimeout(timer);generation.current++;timer=window.setTimeout(()=>void load(),180);};
+  request.current=()=>{const bounds=map.current?.getBounds();if(!bounds)return;const key=JSON.stringify([bounds.toJSON(),filter.q,filter.region,filter.state,reload,refresh]);if(requestedView.current===key)return;requestedView.current=key;window.clearTimeout(timer);generation.current++;timer=window.setTimeout(()=>{timer=undefined;void load();},180);};
   const append=more!==handledMore.current;handledMore.current=more;
   if(append&&next!==null)void load(next);else request.current();
-  return()=>{stopped=true;generation.current++;window.clearTimeout(timer);loadingMore.current=false;};
+  return()=>{stopped=true;generation.current++;if(timer!==undefined)requestedView.current='';window.clearTimeout(timer);loadingMore.current=false;};
  // next is the continuation cursor, not a trigger: each explicit load-more increments more.
  },[ready,filter.q,filter.region,filter.state,reload,more,session]);
  useEffect(()=>{if(!directSelect||busy||next===null)return;const timer=window.setTimeout(()=>setMore(value=>value+1),40);return()=>window.clearTimeout(timer);},[directSelect,busy,next,rows.length]);

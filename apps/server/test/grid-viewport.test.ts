@@ -30,3 +30,32 @@ test('admin viewport bounds geometry payloads, preserves holes, filters/continue
   await assert.rejects(()=>service.viewport(admin,{...view,limit:1}),{code:'MAP_GEOMETRY_TOO_LARGE'});
  }finally{if(f)await clearBatchWork(db,f);await app.close();}
 });
+
+test('viewport warm manifest is one metadata page, reads no geometry and invalidates content without trusting revisions',{skip:!url},async()=>{
+ const app=await createApp({databaseUrl:url!,sessionSecret:'fast-viewport-tests-at-least-40-characters',cookieSecure:false,host:'127.0.0.1',port:0}),db=app.get(Database),service=app.get(ZoneAssetsService);let f:any;
+ try{
+  f=await seedBatchWork(db,'FAST-GV-'+Date.now(),await hash('fast-viewport-fixture'));
+  const geometry={type:'Polygon',coordinates:[[[139,35],[139.01,35],[139.01,35.01],[139,35.01],[139,35]]]};
+  await db.query('UPDATE bd_work_grid SET geometry=$1 WHERE release_id=$2',[JSON.stringify(geometry),f.release]);
+  await db.query(`INSERT INTO bd_work_grid(release_id,source_id,name,stations,keywords,geometry,area_km2,store_count,state,task_state,progress,revision,updated_at)
+   SELECT $1,$2||n::text,$2||n::text,'[]','[]',$3,1,0,'ready','unvisited',0,0,now() FROM generate_series(1,100) n RETURNING id`,[f.release,f.prefix+' extra ',JSON.stringify(geometry)]).then(result=>f.baseGrids.push(...result.rows.map((row:{id:number})=>row.id)));
+  const view={west:138.99,east:139.02,south:34.99,north:35.02,region:'tokyo23',q:f.prefix};
+  const agent=request.agent(app.getHttpServer());await agent.post('/api/auth/login').send({username:f.codes[0],password:'fast-viewport-fixture'}).expect(201);
+  const manifest=(await agent.get('/api/zone-assets/grid-viewport').query(view).set('X-Grid-Geometry-Cache','manifest').expect(200)).body;
+  assert.equal(manifest.features.length,103);assert.equal(manifest.hasMore,false);assert.ok(manifest.features.every((g:{geometry:unknown})=>g.geometry===null));assert.equal(manifest.geometryRefs.length,103);
+  const {gridViewport}=await import('../src/grid-viewport');const sql:string[]=[];
+  await db.transaction(client=>gridViewport({query:async(text:string,args:unknown[])=>{sql.push(text);return client.query(text,args);}} as any,f.users[0],view,'manifest'));
+  assert.equal(sql.some(text=>text.startsWith('SELECT id,geometry')),false,'Warm manifest must not read full geometry');assert.equal(sql.some(text=>text.includes('jsonb_array_elements')),false);
+  const key=manifest.geometryRefs[0].key;
+  const loaded=(await agent.get('/api/zone-assets/grid-viewport').query(view).set('X-Grid-Geometry-Cache','load:'+key).expect(200)).body;
+  assert.deepEqual(loaded.geometries[key],geometry);assert.equal(Object.keys(loaded.geometries).length,1);
+  assert.deepEqual((await service.viewport(f.users[0],{...view,state:'disabled'},'load:'+key)).geometries,{},'Geometry loads must enforce live filters');
+  await assert.rejects(()=>service.viewport(f.users[2],view,'load:'+key),{code:'FORBIDDEN'});
+  const changed={type:'Polygon',coordinates:[[[139,35],[139.005,35],[139.005,35.005],[139,35.005],[139,35]]]};
+  await db.query('UPDATE bd_work_grid SET geometry=$1 WHERE id=$2',[JSON.stringify(changed),f.baseGrids[0]]);
+  const fresh=(await agent.get('/api/zone-assets/grid-viewport').query(view).set('X-Grid-Geometry-Cache','manifest').expect(200)).body;
+  assert.notEqual(fresh.geometryRefs[0].key,key,'Content edit without revision bump must invalidate metadata');
+  assert.deepEqual((await service.viewport(f.users[0],view,'load:'+key)).geometries,{},'Stale content keys must never load');
+  await agent.get('/api/zone-assets/grid-viewport').query(view).expect(200).then(response=>assert.equal(response.body.features.length,100,'Legacy clients keep bounded geometry pages'));
+ }finally{if(f)await clearBatchWork(db,f);await app.close();}
+});

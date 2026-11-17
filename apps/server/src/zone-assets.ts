@@ -14,7 +14,7 @@ function parse<T>(schema:z.ZodType<T>,value:unknown){const result=schema.safePar
 @Injectable()
 export class ZoneAssetsService{
  constructor(@Inject(Database)private readonly db:Database){}
- async viewport(actorId:number,value:unknown){try{return await this.db.transaction(client=>gridViewport(client,actorId,value));}catch(error){if((error as {code?:string}).code==='57014')throw new BusinessError('MAP_QUERY_TIMEOUT','地图读取超时，请放大地图或使用列表',503);throw error;}}
+ async viewport(actorId:number,value:unknown,mode?:string){try{return await this.db.transaction(client=>gridViewport(client,actorId,value,mode));}catch(error){if((error as {code?:string}).code==='57014')throw new BusinessError('MAP_QUERY_TIMEOUT','地图读取超时，请放大地图或使用列表',503);throw error;}}
  async mergePreview(actorId:number,value:unknown){return this.db.transaction(client=>regionMerge(client,actorId,value));}
  async merge(actorId:number,value:unknown){return this.db.transaction(client=>regionMerge(client,actorId,value,true));}
  async splitPreview(actorId:number,id:number,value:unknown){
@@ -143,7 +143,7 @@ export class ZoneAssetsController{
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(ZoneAssetsService)private readonly service:ZoneAssetsService){}
  @Get('map-config')async mapConfig(@Req()req:Request){await this.auth.require(req,{admin:true});const key=process.env.GOOGLE_PUBLIC_API_KEY?.trim()??'';return {provider:'google',enabled:!!key,key:key||null};}
  @Get('region-map')async regionMap(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.regionMap(user.id,query);}
- @Get('grid-viewport')async viewport(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return gridGeometryResponse(req,await this.service.viewport(user.id,query),'current');}
+ @Get('grid-viewport')async viewport(@Req()req:Request,@Query()query:unknown){const {user}=await this.auth.require(req,{admin:true});return this.service.viewport(user.id,query,typeof req.headers['x-grid-geometry-cache']==='string'?req.headers['x-grid-geometry-cache']:undefined);}
  @Post('merge-preview')async mergePreview(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.mergePreview(user.id,body);}
  @Post('merge')async merge(@Req()req:Request,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.merge(user.id,body);}
  @Post('regions/:id/split-preview')async splitPreview(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){const {user}=await this.auth.require(req,{admin:true,write:true});return this.service.splitPreview(user.id,parse(identity,id),body);}
