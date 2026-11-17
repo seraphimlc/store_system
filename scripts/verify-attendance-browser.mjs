@@ -16,6 +16,7 @@ events.push({id:99,code:'attendance-out',kind:'out',at:now,source:'onsite',latit
 let lostResponse=true;
 async function pageFor(role,width=430,language='zh',reminder=false){
  const context=await browser.newContext({viewport:{width,height:932},isMobile:width<600,hasTouch:width<600}),page=await context.newPage();
+ await page.clock.setFixedTime(new Date(now));
  page.on('pageerror',e=>errors.push(e.message));
  if(pinned)await attachPinnedAssets(context,pinned,base);
  if(!reminder)await context.addInitScript(value=>localStorage.setItem('store:daily-login:attendance:1',value),day);
@@ -36,7 +37,7 @@ async function pageFor(role,width=430,language='zh',reminder=false){
   else if(path==='/attendance'){
    if(attendanceUnavailable)return route.fulfill({status:503,json:{code:'INTERNAL',message:'服务暂不可用'}});
    const scope=url.searchParams.get('scope')||'mine',q=url.searchParams.get('q')||'',selected=(scope==='mine'?people.slice(0,1):people).filter(p=>!q||p.name.includes(q)||p.code.includes(q));
-   body={day:url.searchParams.get('day')||responseDay,today:responseDay,scope,page:1,pageSize:30,total:selected.length,people:selected,events:alreadyIn?[{id:777,code:'attendance-fixture',kind:'in',at:now,source:'onsite',latitude:35.68,longitude:139.76,accuracy:10,locatedAt:now,createdAt:now}]:events.filter(e=>selected.some(p=>p.code===e.code)),requests:requests.filter(r=>selected.some(p=>p.code===r.code)),teams:[{id:1,name:'验收队伍'}]};
+   body={day:url.searchParams.get('day')||responseDay,today:responseDay,scope,page:1,pageSize:100,total:selected.length,people:selected,events:alreadyIn?[{id:777,code:'attendance-fixture',kind:'in',at:now,source:'onsite',latitude:35.68,longitude:139.76,accuracy:10,locatedAt:now,createdAt:now}]:events.filter(e=>selected.some(p=>p.code===e.code)),requests:requests.filter(r=>selected.some(p=>p.code===r.code)),teams:[{id:1,name:'验收队伍'}]};
   }else if(path==='/attendance/punch'){
    assert.equal(req.headers()['x-csrf-token'],'attendance-csrf');const payload=req.postDataJSON();punches.push(payload);
    if(!events.some(e=>e.requestKey===payload.requestKey))events.push({...payload,id:events.length+1,code:'attendance-fixture',at:now,source:'onsite',createdAt:now});
@@ -92,4 +93,4 @@ try{
  await noOverflow(admin.page);await admin.page.screenshot({path:'data/refactor/attendance-views/admin-desktop.png',fullPage:true});checks.push('admin search/empty/reset, explicit status and pending indicator, drawer detail, place and grid flag, makeup review and desktop bounds');
  await admin.page.setViewportSize({width:430,height:932});await noOverflow(admin.page);checks.push('admin narrow-screen bounds');await admin.context.close();
  assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,checks,pageErrors:errors},null,2));
-}finally{await browser.close();}
+}catch(error){console.error(JSON.stringify({completedChecks:checks,pageErrors:errors}));throw error;}finally{await browser.close();}
