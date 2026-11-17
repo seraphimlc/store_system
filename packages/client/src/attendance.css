@@ -78,6 +78,7 @@
 .attendance-overview .attendance-request form{display:grid;gap:8px;min-width:220px}
 .attendance-overview .attendance-request .attendance-actions{margin-top:0}
 .attendance-overview.attendance-mobile .attendance-tabs{gap:0;padding:4px;border-radius:var(--radius-sm);background:var(--background-muted);margin-bottom:20px}
+.map-management-drawer .attendance-detail-list{max-height:none;margin-top:0}
 .attendance-overview.attendance-mobile .attendance-tabs a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:14px;color:var(--foreground-muted);border-radius:var(--radius-sm)}
 .attendance-overview.attendance-mobile .attendance-tabs a[aria-current=page]{background:var(--background);color:var(--foreground-intense);font-weight:600}
 .attendance-overview.attendance-mobile .attendance-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end}

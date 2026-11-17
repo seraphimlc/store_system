@@ -10,9 +10,34 @@ import {BusinessError} from './errors';
 
 /** JST 05:00 is UTC 20:00 on the preceding calendar day. */
 export function attendanceDay(at=new Date()){return new Date(at.getTime()+4*3600_000).toISOString().slice(0,10);}
+const pageSize=100;
 const kind=z.enum(['in','out']);
 const instant=z.string().datetime({offset:true});
-const punchSchema=z.object({kind,requestKey:z.uuid(),latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),accuracy:z.number().nonnegative().finite(),locatedAt:instant}).strict();
+const punchSchema=z.object({kind,requestKey:z.uuid(),latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),accuracy:z.number().nonnegative().finite(),locatedAt:instant,address:z.string().trim().min(1).max(500).optional()}).strict();
+type Ring=number[][];
+/** Ray cast. GeoJSON positions are [longitude, latitude]. */
+export function pointInRing(longitude:number,latitude:number,ring:Ring){
+ let inside=false;
+ for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+  const [xi,yi]=ring[i]??[],[xj,yj]=ring[j]??[];
+  if(typeof xi!=='number'||typeof yi!=='number'||typeof xj!=='number'||typeof yj!=='number')continue;
+  if(((yi>latitude)!==(yj>latitude))&&longitude<(xj-xi)*(latitude-yi)/(yj-yi)+xi)inside=!inside;
+ }
+ return inside;
+}
+function polygonContains(longitude:number,latitude:number,coordinates:unknown){
+ if(!Array.isArray(coordinates)||coordinates.length<1)return false;
+ const [outer,...holes]=coordinates as Ring[];
+ if(!Array.isArray(outer)||!pointInRing(longitude,latitude,outer))return false;
+ return !holes.some(hole=>Array.isArray(hole)&&pointInRing(longitude,latitude,hole));
+}
+export function pointInGeometry(longitude:number,latitude:number,geometry:unknown){
+ if(!geometry||typeof geometry!=='object')return false;
+ const value=geometry as {type?:string;coordinates?:unknown};
+ if(value.type==='Polygon')return polygonContains(longitude,latitude,value.coordinates);
+ if(value.type==='MultiPolygon'&&Array.isArray(value.coordinates))return value.coordinates.some(polygon=>polygonContains(longitude,latitude,polygon));
+ return false;
+}
 const makeupSchema=z.object({kind,requestKey:z.uuid(),occurredAt:instant,reason:z.string().trim().min(1).max(1000)}).strict();
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>!Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v);
 const querySchema=z.object({day:date.optional(),scope:z.enum(['mine','team','all']).default('mine'),team:z.coerce.number().int().positive().optional(),q:z.string().trim().max(100).default(''),page:z.coerce.number().int().min(1).max(10000).default(1)}).strict();
@@ -29,12 +54,20 @@ export class AttendanceService {
   await this.actor(client,user);
   const previous=(await client.query('SELECT * FROM bd_attendance_event WHERE person_code=$1 AND request_key=$2',[code,data.requestKey])).rows[0];
   if(previous){this.samePunch(previous,data);return {id:previous.id,day:attendanceDay(new Date(previous.occurred_at))};}
-  const row=(await client.query(`INSERT INTO bd_attendance_event(person_code,kind,source,latitude,longitude,accuracy,located_at,request_key,actor_id)
-   VALUES($1,$2,'onsite',$3,$4,$5,$6,$7,$8) ON CONFLICT(person_code,request_key) DO NOTHING RETURNING *`,[code,data.kind,data.latitude,data.longitude,data.accuracy,data.locatedAt,data.requestKey,user.id])).rows[0]
+  const inside=await this.insideAssignedGrid(client,user.id,data.longitude,data.latitude);
+  const row=(await client.query(`INSERT INTO bd_attendance_event(person_code,kind,source,latitude,longitude,accuracy,located_at,request_key,actor_id,address,inside_grid)
+   VALUES($1,$2,'onsite',$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(person_code,request_key) DO NOTHING RETURNING *`,[code,data.kind,data.latitude,data.longitude,data.accuracy,data.locatedAt,data.requestKey,user.id,data.address??null,inside])).rows[0]
    ??(await client.query('SELECT * FROM bd_attendance_event WHERE person_code=$1 AND request_key=$2',[code,data.requestKey])).rows[0];
   this.samePunch(row,data);return {id:row.id,day:attendanceDay(new Date(row.occurred_at))};
  });}
- private samePunch(row:Record<string,any>,data:z.infer<typeof punchSchema>){if(row.source!=='onsite'||row.kind!==data.kind||row.latitude!==data.latitude||row.longitude!==data.longitude||row.accuracy!==data.accuracy||new Date(row.located_at).getTime()!==Date.parse(data.locatedAt))throw new BusinessError('CONFLICT','同一提交标识不能用于不同打卡',409);}
+ private async insideAssignedGrid(client:PoolClient,userId:number,longitude:number,latitude:number){
+  const rows=(await client.query(`SELECT coalesce(w.geometry, g.snapshot->'geometry') AS geometry
+   FROM bd_grid_task g JOIN bd_region_task r ON r.id=g.region_task_id JOIN bd_main_task m ON m.id=r.main_task_id
+   LEFT JOIN bd_work_grid w ON w.id=g.grid_id
+   WHERE g.assignee_id=$1 AND g.status<>'completed' AND m.status NOT IN ('completed','disabled')`,[userId])).rows;
+  return rows.some(row=>pointInGeometry(longitude,latitude,row.geometry));
+ }
+ private samePunch(row:Record<string,any>,data:z.infer<typeof punchSchema>){if(row.source!=='onsite'||row.kind!==data.kind||row.latitude!==data.latitude||row.longitude!==data.longitude||row.accuracy!==data.accuracy||new Date(row.located_at).getTime()!==Date.parse(data.locatedAt)||(row.address??null)!==(data.address??null))throw new BusinessError('CONFLICT','同一提交标识不能用于不同打卡',409);}
  async makeup(user:CurrentUser,input:unknown){const code=staff(user),data=parse(makeupSchema,input);return this.db.transaction(async client=>{
   await this.actor(client,user);
   const previous=(await client.query('SELECT * FROM bd_attendance_makeup WHERE person_code=$1 AND request_key=$2',[code,data.requestKey])).rows[0];
@@ -66,18 +99,19 @@ export class AttendanceService {
    ($1<>'team' OR EXISTS(SELECT 1 FROM bd_team_member member JOIN bd_team t ON t.id=member.team_id AND t.status='active' JOIN bd_team_member leader ON leader.team_id=member.team_id AND leader.end_date IS NULL AND leader.role='leader' AND leader.person_code=$2 WHERE member.person_code=p.code AND member.end_date IS NULL)) AND
    ($3::int IS NULL OR EXISTS(SELECT 1 FROM bd_team_member m JOIN bd_team t ON t.id=m.team_id AND t.status='active' WHERE m.person_code=p.code AND m.team_id=$3 AND m.end_date IS NULL)) AND
    ($4='' OR p.code ILIKE '%'||$4||'%' OR p.display_name ILIKE '%'||$4||'%') AND
-   (EXISTS(SELECT 1 FROM users u WHERE u.person_code=p.code AND u.role IN ('staff','leader') AND u.status<>'deleted') OR EXISTS(SELECT 1 FROM bd_attendance_event e WHERE e.person_code=p.code AND e.business_date=$5::date) OR EXISTS(SELECT 1 FROM bd_attendance_makeup r WHERE r.person_code=p.code AND r.business_date=$5::date))
-  ), page AS (SELECT * FROM people ORDER BY name,code LIMIT 30 OFFSET $6)
+   ($1='mine' OR EXISTS(SELECT 1 FROM users u WHERE u.person_code=p.code AND u.role IN ('staff','leader') AND u.is_active=true AND u.status IN ('active','leave')))
+  ), page AS (SELECT * FROM people ORDER BY name,code LIMIT ${pageSize} OFFSET $6)
   SELECT (SELECT count(*)::int FROM people) AS total,coalesce((SELECT json_agg(p ORDER BY p.name,p.code) FROM page p),'[]') AS people,
-  coalesce((SELECT json_agg(json_build_object('id',e.id,'code',e.person_code,'kind',e.kind,'at',e.occurred_at,'source',e.source,'latitude',e.latitude,'longitude',e.longitude,'accuracy',e.accuracy,'locatedAt',e.located_at,'createdAt',e.created_at) ORDER BY e.occurred_at,e.id) FROM bd_attendance_event e WHERE e.business_date=$5::date AND e.person_code IN(SELECT code FROM page)),'[]') AS events,
-  coalesce((SELECT json_agg(json_build_object('id',r.id,'code',r.person_code,'kind',r.kind,'at',r.occurred_at,'reason',r.reason,'status',r.status,'note',r.review_note,'createdAt',r.created_at,'reviewedAt',r.reviewed_at,'reviewer',u.display_name) ORDER BY r.created_at DESC,r.id DESC) FROM bd_attendance_makeup r LEFT JOIN users u ON u.id=r.reviewed_by WHERE r.business_date=$5::date AND r.person_code IN(SELECT code FROM page)),'[]') AS requests`,[data.scope,user.personCode,data.team??null,data.q,day,(data.page-1)*30])).rows[0];
-  return {...result,day,today:attendanceDay(),scope:data.scope,page:data.page,pageSize:30,teams:data.scope==='mine'?[]:teams};
+  coalesce((SELECT json_agg(json_build_object('id',e.id,'code',e.person_code,'kind',e.kind,'at',e.occurred_at,'source',e.source,'latitude',e.latitude,'longitude',e.longitude,'accuracy',e.accuracy,'locatedAt',e.located_at,'createdAt',e.created_at,'address',e.address,'insideGrid',e.inside_grid) ORDER BY e.occurred_at,e.id) FROM bd_attendance_event e WHERE e.business_date=$5::date AND e.person_code IN(SELECT code FROM page)),'[]') AS events,
+  coalesce((SELECT json_agg(json_build_object('id',r.id,'code',r.person_code,'kind',r.kind,'at',r.occurred_at,'reason',r.reason,'status',r.status,'note',r.review_note,'createdAt',r.created_at,'reviewedAt',r.reviewed_at,'reviewer',u.display_name) ORDER BY r.created_at DESC,r.id DESC) FROM bd_attendance_makeup r LEFT JOIN users u ON u.id=r.reviewed_by WHERE r.business_date=$5::date AND r.person_code IN(SELECT code FROM page)),'[]') AS requests`,[data.scope,user.personCode,data.team??null,data.q,day,(data.page-1)*pageSize])).rows[0];
+  return {...result,day,today:attendanceDay(),scope:data.scope,page:data.page,pageSize,teams:data.scope==='mine'?[]:teams};
  }
 }
 @Controller('attendance')
 export class AttendanceController {
  constructor(@Inject(AuthService)private readonly auth:AuthService,@Inject(AttendanceService)private readonly service:AttendanceService){}
  @Get()async list(@Req()req:Request,@Query()query:unknown){return this.service.list((await this.auth.require(req)).user,query);}
+ @Get('map-config')async mapConfig(@Req()req:Request){const {user}=await this.auth.require(req);staff(user);const key=process.env.GOOGLE_PUBLIC_API_KEY?.trim()??'';return {enabled:!!key,key:key||null,provider:'google'};}
  @Post('punch')async punch(@Req()req:Request,@Body()body:unknown){return this.service.punch((await this.auth.require(req,{write:true})).user,body);}
  @Post('makeup')async makeup(@Req()req:Request,@Body()body:unknown){return this.service.makeup((await this.auth.require(req,{write:true})).user,body);}
  @Post('makeup/:id/review')async review(@Req()req:Request,@Param('id')id:string,@Body()body:unknown){return this.service.review((await this.auth.require(req,{admin:true,write:true})).user,parse(z.coerce.number().int().positive(),id),body);}

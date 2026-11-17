@@ -3,14 +3,16 @@ import type {Language,Session} from '../../contracts/src';
 import type {AttendanceData,AttendanceEvent,AttendanceKind,AttendanceMakeup} from '../../contracts/src/attendance';
 import {attendanceSummary} from '../../domain/src/attendance';
 import {api} from './request';
+import {googleMaps} from './google-maps';
 import {UIButton,UIInput,UISelect,UITextarea,UISuccessNotice,UITable,UITableHeader,UITableBody,UITableRow,UITableHead,UITableCell} from './ui-controls';
 import './attendance.css';
 
-type Punch={kind:AttendanceKind;requestKey:string;latitude:number;longitude:number;accuracy:number;locatedAt:string};
+type Punch={kind:AttendanceKind;requestKey:string;latitude:number;longitude:number;accuracy:number;locatedAt:string;address?:string};
 type Makeup={kind:AttendanceKind;requestKey:string;occurredAt:string;reason:string};
 export type AttendanceSheetProps={visible:boolean;title:string;busy:boolean;onClose:()=>void;children:ReactNode};
 export type AttendanceDateProps={visible:boolean;value:string;language:Language;onConfirm:(day:string)=>void;onClose:()=>void};
-type Props={session:Session;language:Language;mobile?:boolean;compact?:boolean;onSuccess?:(message:string)=>void;mobileButton?:ComponentType<ComponentPropsWithoutRef<'button'>>;mobileSheet?:ComponentType<AttendanceSheetProps>;mobileDatePicker?:ComponentType<AttendanceDateProps>};
+export type AttendanceDetailDrawerProps={title:string;language:Language;onClose:()=>void;children:ReactNode};
+type Props={session:Session;language:Language;mobile?:boolean;compact?:boolean;onSuccess?:(message:string)=>void;mobileButton?:ComponentType<ComponentPropsWithoutRef<'button'>>;mobileSheet?:ComponentType<AttendanceSheetProps>;mobileDatePicker?:ComponentType<AttendanceDateProps>;detailDrawer?:ComponentType<AttendanceDetailDrawerProps>};
 const dictionary:Record<string,string>={
  '选择日期':'日付を選択','查看记录':'記録を表示','取消':'キャンセル','当天记录':'この日の記録','本页':'このページ','待审核补卡':'承認待ちの修正申請','状态':'状態','已出勤':'出勤済み','今天':'今日','历史记录':'過去の記録','前一天':'前日','后一天':'翌日','打卡规则':'打刻ルール','日本时间 · 每日05:00换日':'日本時間・毎日05:00に日付切替','最早出勤':'最初の出勤','最晚退勤':'最後の退勤','今天还没有打卡':'本日の打刻はまだありません','打卡后，时间和位置会显示在这里。':'打刻すると、時刻と位置がここに表示されます。','当天没有打卡记录':'この日の打刻はありません','可选择其他日期，或申请补卡。':'別の日を選ぶか、修正打刻を申請できます。','当天动态':'この日の履歴','补卡申请':'修正申請','正在获取位置':'位置情報を取得中','正在保存打卡':'打刻を保存中','请稍候，不要关闭页面':'画面を閉じずにお待ちください','定位成功后自动记录，无需再次确认。':'位置の取得後に自動で記録します。','所有打卡都会保留，汇总取最早出勤、最晚退勤。':'すべての打刻を保存し、最初の出勤・最後の退勤を採用します。','关闭':'閉じる','暂无可用记录，请重试':'記録を確認できません。再試行してください','返回今日打卡':'本日の打刻に戻る','今日出退勤':'本日の出退勤','出退勤记录':'出退勤記録','我的记录':'自分の記録','本队动态':'チームの履歴','出勤打卡':'出勤打刻','退勤打卡':'退勤打刻',
  '出勤':'出勤','退勤':'退勤','未打卡':'未打刻','业务日期':'勤務日','团队':'チーム','全部团队':'すべてのチーム','姓名或编号':'氏名・番号','查询':'検索','刷新':'更新',
@@ -22,7 +24,7 @@ const dictionary:Record<string,string>={
  '当前环境不支持定位，不能打卡。请使用支持定位的 HTTPS 浏览器。':'この環境では位置情報を利用できません。位置情報に対応した HTTPS ブラウザをご利用ください。',
  '出勤取最早，退勤取最晚；日本时间每天05:00换日。':'最初の出勤・最後の退勤を採用。日本時間05:00に勤務日が切り替わります。',
  '仅打卡时获取位置，不限制地点，不持续追踪。':'打刻時のみ位置を取得。場所の制限・継続追跡はありません。',
- '仅有退勤，无出勤':'退勤のみ・出勤なし','未退勤':'退勤未打刻','已完成':'出退勤あり','动态明细':'打刻履歴','现场打卡':'現地打刻','补卡':'修正打刻',
+ '仅有退勤，无出勤':'退勤のみ・出勤なし','未退勤':'退勤未打刻','已完成':'出退勤あり','动态明细':'打刻履歴','现场打卡':'現地打刻','补卡':'修正打刻','网格内':'担当グリッド内','网格外':'担当グリッド外',
  '查看位置':'位置を表示','精度约':'精度約','米':'m','无现场定位':'現地の位置情報なし','已采用':'採用','申请补卡':'打刻修正を申請',
  '补卡时间（日本时间）':'修正日時（日本時間）','补卡原因':'修正理由','提交申请':'申請する','补卡申请已提交':'修正申請を送信しました',
  '补卡不含现场定位，须由管理员处理。':'修正打刻には現地の位置情報はなく、管理者の承認が必要です。',
@@ -31,7 +33,21 @@ const dictionary:Record<string,string>={
  '重试上次出勤提交':'前回の出勤送信を再試行','重试上次退勤提交':'前回の退勤送信を再試行','重新定位打卡':'位置を再取得して打刻',
  '上次提交结果待确认，请先重试确认，避免重复打卡。':'前回の送信結果を確認できません。再試行して結果を確認してください。',
 };
-export function Attendance({session,language,mobile=false,compact=false,onSuccess,mobileButton,mobileSheet,mobileDatePicker}:Props){
+async function reverseAddress(session:Session,language:Language,latitude:number,longitude:number){
+ try{
+  const config=await api<{enabled:boolean;key:string|null}>('/attendance/map-config',session);
+  if(!config.enabled||!config.key)return;
+  const maps=await googleMaps(config.key,language);
+  let timer=0;
+  const response=await Promise.race([
+   new maps.Geocoder().geocode({location:{lat:latitude,lng:longitude},language:language==='ja'?'ja':'zh-CN'}).finally(()=>window.clearTimeout(timer)),
+   new Promise<null>(resolve=>{timer=window.setTimeout(()=>resolve(null),8000);}),
+  ]);
+  const text=response&&'results' in response?response.results[0]?.formatted_address?.trim():'';
+  return text?text.slice(0,500):undefined;
+ }catch{return;}
+}
+export function Attendance({session,language,mobile=false,compact=false,onSuccess,mobileButton,mobileSheet,mobileDatePicker,detailDrawer}:Props){
  const t=(value:string)=>language==='ja'?dictionary[value]??value:value;
  const admin=session.user.role==='admin',leader=session.user.role==='leader';
  const [scope]=useState<'mine'|'team'|'all'>(()=>admin?'all':!compact&&location.pathname.includes('/team-attendance')&&leader?'team':'mine');
@@ -43,6 +59,7 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
  const [makeupOpen,setMakeupOpen]=useState(false),[makeupError,setMakeupError]=useState('');
  const ActionButton=mobileButton??UIButton,Sheet=mobileSheet,DateSelector=mobileDatePicker;
  const [retry,setRetry]=useState<Punch|null>(null),[reviewError,setReviewError]=useState('');
+ const [detailCode,setDetailCode]=useState<string|null>(null);
  const pendingPunch=useRef<Punch|null>(null),pendingMakeup=useRef<Makeup|null>(null),lock=useRef(false),serial=useRef(0);
  const mounted=useRef(true);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
@@ -65,6 +82,8 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
     const position=await new Promise<GeolocationPosition>((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,e=>reject(new Error(t(e.code===1?'定位权限被拒绝，未打卡。请在浏览器或系统设置中允许定位。':e.code===3?'定位超时，未打卡。请到信号较好的位置重试。':'定位失败，未打卡。请检查系统定位和网络后重试。'))),{enableHighAccuracy:true,maximumAge:0,timeout:15000}));
     if(!mounted.current)return;
     body={kind,requestKey:crypto.randomUUID(),latitude:position.coords.latitude,longitude:position.coords.longitude,accuracy:position.coords.accuracy,locatedAt:new Date(position.timestamp).toISOString()};
+    const address=await reverseAddress(session,language,body.latitude,body.longitude);
+    if(address)body={...body,address};
    }
    pendingPunch.current=body;setBusy('submit');
    const result=await api<{day:string}>('/attendance/punch',session,body);
@@ -89,8 +108,9 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
   catch(e){setReviewError((e as Error).message);}finally{lock.current=false;setBusy('');}
  }
  function at(value:string){return new Intl.DateTimeFormat(language==='ja'?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(value));}
- function position(event:AttendanceEvent){return event.source==='makeup'?<span>{t('补卡')} · {t('无现场定位')}</span>:<span><a href={'https://www.google.com/maps?q='+event.latitude+','+event.longitude} target="_blank" rel="noopener noreferrer">{t('查看位置')}</a> · {event.latitude?.toFixed(5)}, {event.longitude?.toFixed(5)} · {t('精度约')}{Math.round(event.accuracy!)}{t('米')}</span>;}
- function summaryTime(event:AttendanceEvent|null){if(!data)return <span className="attendance-muted">{t(loading?'正在加载…':'暂无可用记录，请重试')}</span>;return event?<><time dateTime={event.at}>{at(event.at)}</time><small>{event.source==='makeup'?t('补卡'):<><a href={'https://www.google.com/maps?q='+event.latitude+','+event.longitude} target="_blank" rel="noopener noreferrer">{t('查看位置')}</a> · {t('精度约')}{Math.round(event.accuracy!)}{t('米')}</>}</small></>:<span className="attendance-muted">{t('未打卡')}</span>;}
+ function gridText(event:AttendanceEvent){return event.insideGrid==null?'—':t(event.insideGrid?'网格内':'网格外');}
+ function position(event:AttendanceEvent){return event.source==='makeup'?<span>{t('补卡')} · {t('无现场定位')}</span>:<span>{event.address||'—'} · {gridText(event)} · <a href={'https://www.google.com/maps?q='+event.latitude+','+event.longitude} target="_blank" rel="noopener noreferrer">{t('查看位置')}</a> · {event.latitude?.toFixed(5)}, {event.longitude?.toFixed(5)} · {t('精度约')}{Math.round(event.accuracy!)}{t('米')}</span>;}
+ function summaryTime(event:AttendanceEvent|null){if(!data)return <span className="attendance-muted">{t(loading?'正在加载…':'暂无可用记录，请重试')}</span>;return event?<><time dateTime={event.at}>{at(event.at)}</time><small>{event.source==='makeup'?t('补卡'):<>{event.address||'—'} · {gridText(event)} · <a href={'https://www.google.com/maps?q='+event.latitude+','+event.longitude} target="_blank" rel="noopener noreferrer">{t('查看位置')}</a> · {t('精度约')}{Math.round(event.accuracy!)}{t('米')}</>}</small></>:<span className="attendance-muted">{t('未打卡')}</span>;}
  function activity(code:string,expanded=false){
   const events=data!.events.filter(e=>e.code===code),requests=data!.requests.filter(r=>r.code===code),summary=attendanceSummary(events),pending=requests.filter(r=>r.status==='pending').length;
   const Container=expanded?'section':'details';
@@ -108,12 +128,35 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
    </section>)}
   </Container>;
  }
+ function detailBody(code:string){
+  const events=data!.events.filter(e=>e.code===code),requests=data!.requests.filter(r=>r.code===code),summary=attendanceSummary(events);
+  const rows=[...events].sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)||b.id-a.id);
+  return <>
+   {rows.length?<ul className="map-selected-list attendance-detail-list">{rows.map(e=><li className="map-selected-item" key={e.id}>
+    <strong>{t(e.kind==='in'?'出勤':'退勤')} · <time dateTime={e.at}>{at(e.at)}</time> · {t(e.source==='onsite'?'现场打卡':'补卡')}{(summary.firstIn?.id===e.id||summary.lastOut?.id===e.id)&&<span className="attendance-label">{t('已采用')}</span>}</strong>
+    <span>{position(e)}</span>
+    <span>{t('保存时间')}：{at(e.createdAt)}</span>
+   </li>)}</ul>:!requests.length&&<p className="map-drawer-empty">{t('暂无记录')}</p>}
+   {requests.map(r=><section key={r.id} className="attendance-request"><p><strong>{t('补卡')} · {t(r.kind==='in'?'出勤':'退勤')}</strong> · {at(r.at)} · {t(r.status==='pending'?'待处理':r.status==='approved'?'已通过':'已拒绝')}</p>
+    <p className="attendance-prewrap">{r.reason}</p><small>{t('无现场定位')} · {t('保存时间')}：{at(r.createdAt)}</small>
+    {r.reviewedAt&&<p>{t('处理人')}：{r.reviewer||'—'} · {t('处理时间')}：{at(r.reviewedAt)}</p>}{r.note&&<p className="attendance-prewrap">{t('审核备注')}：{r.note}</p>}
+    {admin&&r.status==='pending'&&<form onSubmit={e=>void review(e,r)}><label>{t('审核备注')}<UIInput name="note" maxLength={1000}/></label><div className="attendance-actions"><UIButton name="decision" value="approved" disabled={!!busy}>{t('通过')}</UIButton><UIButton name="decision" value="rejected" disabled={!!busy}>{t('拒绝')}</UIButton></div></form>}
+   </section>)}
+  </>;
+ }
+ function detailEntry(code:string){
+  if(!detailDrawer)return activity(code);
+  const events=data!.events.filter(e=>e.code===code),requests=data!.requests.filter(r=>r.code===code),pending=requests.filter(r=>r.status==='pending').length;
+  return <UIButton type="button" onClick={()=>setDetailCode(code)}>{t('动态明细')} · {events.length}{requests.length>0&&<span className={pending?'attendance-pending':'attendance-muted'}> · {t(pending?'待审核补卡':'补卡申请')} {pending||requests.length}</span>}</UIButton>;
+ }
  const isToday=compact||!day||day===data?.today;
  const mine=scope==='mine',own=attendanceSummary(data?.events.filter(e=>e.code===session.user.personCode)??[]);
  function moveDay(delta:number){const value=day||data?.day||new Date(Date.now()+4*3600_000).toISOString().slice(0,10);setDay(new Date(Date.parse(value+'T12:00:00Z')+delta*86400_000).toISOString().slice(0,10));setPage(1);}
  function recordStatus(code:string){const summary=attendanceSummary(data!.events.filter(e=>e.code===code));return <span className={summary.outWithoutIn?'attendance-state attendance-state-error':'attendance-state'}>{t(summary.outWithoutIn?'仅有退勤，无出勤':summary.firstIn&&summary.lastOut?'已完成':summary.firstIn?'已出勤':'未打卡')}</span>;}
  function clock(value:string){return new Intl.DateTimeFormat(language==='ja'?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));}
  const selectedDay=day||data?.day;
+ const DetailView=detailDrawer;
+ const detailPerson=DetailView&&data&&detailCode?data.people.find(person=>person.code===detailCode):undefined;
  const dateTitle=selectedDay?new Intl.DateTimeFormat(language==='ja'?'ja-JP':'zh-CN',{timeZone:'Asia/Tokyo',month:'long',day:'numeric',weekday:'short'}).format(new Date(selectedDay+'T12:00:00+09:00')):'—';
  if(mobile&&mine)return <section className={'attendance attendance-mobile attendance-personal'+(compact?' attendance-compact':'')} aria-label={t(compact?'今日出退勤':'出退勤记录')}>
   {!compact&&leader&&<nav className="attendance-tabs" aria-label={t('出退勤记录')}><a href="/my/attendance" aria-current="page">{t('我的记录')}</a><a href="/my/team-attendance">{t('本队动态')}</a></nav>}
@@ -186,8 +229,9 @@ export function Attendance({session,language,mobile=false,compact=false,onSucces
   {!mine&&data&&<>
    <div className="attendance-list-heading"><p>{data.day} · {data.total} {t('人')}</p><span>{t('本页')}：{t('仅有退勤，无出勤')} {data.people.filter(p=>attendanceSummary(data.events.filter(e=>e.code===p.code)).outWithoutIn).length} · {t('待审核补卡')} {data.requests.filter(r=>r.status==='pending').length}</span></div>
    {reviewError&&<p role="alert" className="attendance-error">{reviewError}</p>}
-   {!data.people.length?<p>{t('暂无成员')}</p>:mobile?<div className="attendance-members">{data.people.map(person=>{const s=attendanceSummary(data.events.filter(e=>e.code===person.code));return <article key={person.code}><h2>{person.name} <small>{person.code} · {person.team}</small></h2>{recordStatus(person.code)}<dl className="attendance-summary"><div><dt>{t('出勤')}</dt><dd>{summaryTime(s.firstIn)}</dd></div><div><dt>{t('退勤')}</dt><dd>{summaryTime(s.lastOut)}</dd></div></dl>{activity(person.code)}</article>;})}</div>:<div className="attendance-table"><UITable><UITableHeader><UITableRow>{['姓名或编号','团队','出勤','退勤','状态','动态明细'].map(title=><UITableHead key={title}>{t(title)}</UITableHead>)}</UITableRow></UITableHeader><UITableBody>{data.people.map(person=>{const s=attendanceSummary(data.events.filter(e=>e.code===person.code));return <UITableRow key={person.code}><UITableCell><strong>{person.name}</strong><small>{person.code}</small></UITableCell><UITableCell>{person.team||'—'}</UITableCell><UITableCell>{summaryTime(s.firstIn)}</UITableCell><UITableCell>{summaryTime(s.lastOut)}</UITableCell><UITableCell>{recordStatus(person.code)}</UITableCell><UITableCell>{activity(person.code)}</UITableCell></UITableRow>;})}</UITableBody></UITable></div>}
+   {!data.people.length?<p>{t('暂无成员')}</p>:mobile?<div className="attendance-members">{data.people.map(person=>{const s=attendanceSummary(data.events.filter(e=>e.code===person.code));return <article key={person.code}><h2>{person.name} <small>{person.code} · {person.team}</small></h2>{recordStatus(person.code)}<dl className="attendance-summary"><div><dt>{t('出勤')}</dt><dd>{summaryTime(s.firstIn)}</dd></div><div><dt>{t('退勤')}</dt><dd>{summaryTime(s.lastOut)}</dd></div></dl>{activity(person.code)}</article>;})}</div>:<div className="attendance-table"><UITable><UITableHeader><UITableRow>{['姓名或编号','团队','出勤','退勤','状态','动态明细'].map(title=><UITableHead key={title}>{t(title)}</UITableHead>)}</UITableRow></UITableHeader><UITableBody>{data.people.map(person=>{const s=attendanceSummary(data.events.filter(e=>e.code===person.code));return <UITableRow key={person.code}><UITableCell><strong>{person.name}</strong><small>{person.code}</small></UITableCell><UITableCell>{person.team||'—'}</UITableCell><UITableCell>{summaryTime(s.firstIn)}</UITableCell><UITableCell>{summaryTime(s.lastOut)}</UITableCell><UITableCell>{recordStatus(person.code)}</UITableCell><UITableCell>{detailEntry(person.code)}</UITableCell></UITableRow>;})}</UITableBody></UITable></div>}
    {data.total>data.pageSize&&<nav className="attendance-actions" aria-label={t('出退勤记录')}><UIButton disabled={page===1||loading} onClick={()=>setPage(v=>v-1)}>{t('上一页')}</UIButton><span>{page} / {Math.ceil(data.total/data.pageSize)}</span><UIButton disabled={page*data.pageSize>=data.total||loading} onClick={()=>setPage(v=>v+1)}>{t('下一页')}</UIButton></nav>}
   </>}
+  {DetailView&&detailPerson&&<DetailView title={detailPerson.name+' · '+detailPerson.code} language={language} onClose={()=>setDetailCode(null)}>{detailBody(detailPerson.code)}</DetailView>}
  </section>;
 }

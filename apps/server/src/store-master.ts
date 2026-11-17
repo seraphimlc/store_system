@@ -17,14 +17,14 @@ export class StoreMasterService{
   const result=(await this.db.query(`WITH RECURSIVE membership AS(
    SELECT e.id,e.id AS root,ARRAY[e.id] AS visited FROM store_entities e WHERE e.master_id=e.id OR e.master_id IS NULL OR NOT EXISTS(SELECT 1 FROM store_entities p WHERE p.id=e.master_id)
    UNION ALL SELECT c.id,m.root,m.visited||c.id FROM store_entities c JOIN membership m ON c.master_id=m.id WHERE c.id<>m.id AND NOT(c.id=ANY(m.visited))
-  ),matched AS(SELECT DISTINCT m.root FROM membership m JOIN store_entities e ON e.id=m.id WHERE $1='' OR e.store_id_raw ILIKE $1 OR e.name_local ILIKE $1 OR e.name_norm ILIKE $1 OR coalesce(e.city,'') ILIKE $1 OR coalesce(e.address_local,'') ILIKE $1),paged AS(SELECT root FROM matched ORDER BY root LIMIT 30 OFFSET $2),entries AS(
+  ),matched AS(SELECT DISTINCT m.root FROM membership m JOIN store_entities e ON e.id=m.id WHERE $1='' OR e.store_id_raw ILIKE $1 OR e.name_local ILIKE $1 OR e.name_norm ILIKE $1 OR coalesce(e.city,'') ILIKE $1 OR coalesce(e.address_local,'') ILIKE $1),paged AS(SELECT root FROM matched ORDER BY root LIMIT 100 OFFSET $2),entries AS(
    SELECT e.id,e.store_id_raw AS "storeId",e.name_local AS name,e.name_norm AS "nameNorm",e.city,e.address_local AS address,e.master_id AS "masterId",m.root FROM paged p JOIN membership m ON m.root=p.root JOIN store_entities e ON e.id=m.id ORDER BY m.root,e.id)
-   SELECT (SELECT count(*)::int FROM matched) AS total,coalesce((SELECT json_agg(entries) FROM entries),'[]'::json) AS items`,[search?'%'+search+'%':'',(page-1)*30])).rows[0];
-  return {...result,page,pageSize:30};
+   SELECT (SELECT count(*)::int FROM matched) AS total,coalesce((SELECT json_agg(entries) FROM entries),'[]'::json) AS items`,[search?'%'+search+'%':'',(page-1)*100])).rows[0];
+  return {...result,page,pageSize:100};
  }
  async pairs(kind:'exact'|'fuzzy',page=1){const result=(await this.db.query(`WITH matched AS(SELECT p.id,p.kind,p.sim,p.status,p.note,p.ai_decision AS "aiDecision",p.ai_reason AS "aiReason",p.entity_a AS "aId",a.store_id_raw AS "aStoreId",a.name_local AS "aName",a.name_norm AS "nameNorm",a.city AS "aCity",p.entity_b AS "bId",b.store_id_raw AS "bStoreId",b.name_local AS "bName",b.city AS "bCity"
-  FROM store_pairs p JOIN store_entities a ON a.id=p.entity_a JOIN store_entities b ON b.id=p.entity_b WHERE p.kind=$1 AND p.status='pending' AND a.master_id=a.id AND b.master_id=b.id AND a.id<>b.id),paged AS(SELECT * FROM matched ORDER BY id LIMIT 30 OFFSET $2)
-  SELECT (SELECT count(*)::int FROM matched) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items`,[kind,(page-1)*30])).rows[0];return {...result,page,pageSize:30};}
+  FROM store_pairs p JOIN store_entities a ON a.id=p.entity_a JOIN store_entities b ON b.id=p.entity_b WHERE p.kind=$1 AND p.status='pending' AND a.master_id=a.id AND b.master_id=b.id AND a.id<>b.id),paged AS(SELECT * FROM matched ORDER BY id LIMIT 100 OFFSET $2)
+  SELECT (SELECT count(*)::int FROM matched) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items`,[kind,(page-1)*100])).rows[0];return {...result,page,pageSize:100};}
  private async state(client:PoolClient,input:StoreSelection){
   let pair:Pair|undefined,entities:Entity[]=[];
   if('pairId'in input){pair=(await client.query<Pair>('SELECT id,entity_a,entity_b,kind,status,sim,note FROM store_pairs WHERE id=$1',[input.pairId])).rows[0];if(!pair)throw new BusinessError('NOT_FOUND','候选对不存在',404);entities=(await client.query<Entity>(`SELECT ${fields} FROM store_entities WHERE id=ANY($1::int[]) ORDER BY id`,[[pair.entity_a,pair.entity_b]])).rows;if(entities.length!==2)throw new BusinessError('NOT_FOUND','候选店铺不存在',404);if(pair.status!=='pending'||entities.some(e=>e.master_id!==e.id))throw new BusinessError('STORE_PAIR_CHANGED','候选已处理或已并入其他主档，请刷新',409);if(input.action==='merge-pair'&&!entities.some(e=>e.id===input.keepId))throw new BusinessError('KEEP_NOT_IN_PAIR','保留主档必须属于该候选对',400);}

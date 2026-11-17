@@ -44,17 +44,17 @@ export class MessagesService {
   const result=(await this.db.query(`WITH matching AS (
    SELECT m.id,m.title,m.body,m.sender_name AS "senderName",m.sender_kind AS "senderKind",m.scope,m.url,m.created_at AS "createdAt",r.read_at AS "readAt"
    FROM bd_message_recipient r JOIN bd_message m ON m.id=r.message_id WHERE r.person_code=$1 AND (NOT $2::boolean OR r.read_at IS NULL)
-   ),paged AS (SELECT * FROM matching ORDER BY "createdAt" DESC,id DESC LIMIT 30 OFFSET $3)
+   ),paged AS (SELECT * FROM matching ORDER BY "createdAt" DESC,id DESC LIMIT 100 OFFSET $3)
    SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items,
-   (SELECT count(*)::int FROM bd_message_recipient WHERE person_code=$1 AND read_at IS NULL) AS unread`,[code,unread,(page-1)*30])).rows[0];
-  return {...result,page,pageSize:30};
+   (SELECT count(*)::int FROM bd_message_recipient WHERE person_code=$1 AND read_at IS NULL) AS unread`,[code,unread,(page-1)*100])).rows[0];
+  return {...result,page,pageSize:100};
  }
  async sent(user:CurrentUser,page:number){this.canSend(user);const result=(await this.db.query(`WITH matching AS (
    SELECT id,title,body,sender_name AS "senderName",created_at AS "createdAt" FROM bd_message WHERE sender=$1
-   ),paged AS (SELECT * FROM matching ORDER BY "createdAt" DESC,id DESC LIMIT 30 OFFSET $2),enriched AS (
+   ),paged AS (SELECT * FROM matching ORDER BY "createdAt" DESC,id DESC LIMIT 100 OFFSET $2),enriched AS (
    SELECT p.*,(SELECT count(*)::int FROM bd_message_recipient r WHERE r.message_id=p.id) AS recipients,
    (SELECT count(*)::int FROM bd_message_recipient r WHERE r.message_id=p.id AND r.read_at IS NOT NULL) AS "readCount" FROM paged p)
-   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(enriched) FROM enriched),'[]'::json) AS items`,[user.username,(page-1)*30])).rows[0];return {...result,page,pageSize:30};}
+   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(enriched) FROM enriched),'[]'::json) AS items`,[user.username,(page-1)*100])).rows[0];return {...result,page,pageSize:100};}
  async detail(user:CurrentUser,id:number){const {rows:[message]}=await this.db.query(`SELECT m.id,m.title,m.body,m.sender_name AS "senderName",m.created_at AS "createdAt",m.url,(SELECT r.read_at FROM bd_message_recipient r WHERE r.message_id=m.id AND r.person_code=$2 LIMIT 1) AS "readAt" FROM bd_message m WHERE m.id=$1 AND (m.sender=$3 OR EXISTS(SELECT 1 FROM bd_message_recipient r WHERE r.message_id=m.id AND r.person_code=$2))`,[id,user.personCode??'',user.username]);if(!message)throw new BusinessError('NOT_FOUND','消息不存在或没有访问权限',404);return message;}
  async read(code:string,id:number|null){const changed=await this.db.query('UPDATE bd_message_recipient SET read_at=now() WHERE person_code=$1 AND ($2::int IS NULL OR message_id=$2) AND read_at IS NULL RETURNING id',[code,id]);return {count:changed.rowCount};}
 }

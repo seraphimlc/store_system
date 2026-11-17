@@ -18,14 +18,14 @@ export class ImportReportService{
    SELECT r.*,coalesce(p.display_name,nullif(r.submitter_raw,''),'未识别') AS person_name FROM raw_records r LEFT JOIN persons p ON p.code=r.submitter_code
    WHERE r.import_id=$1 AND ($2='' OR ($2='appealing' AND EXISTS(SELECT 1 FROM appeals a WHERE a.raw_record_id=r.id)) OR ($2='blank' AND r.clean_status IN('blank','visible_blank')) OR ($2 NOT IN('appealing','blank') AND r.clean_status=$2))
     AND ($3='' OR r.store_id_raw ILIKE $3 OR r.store_name_local_raw ILIKE $3 OR r.submitter_raw ILIKE $3 OR p.display_name ILIKE $3)
-  ), paged AS(SELECT * FROM matching ORDER BY modified_raw,excel_row,id OFFSET $4 LIMIT 50)
+  ), paged AS(SELECT * FROM matching ORDER BY modified_raw,excel_row,id OFFSET $4 LIMIT 100)
   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(row) FROM(
    SELECT r.id,r.submitter_code AS code,r.person_name AS name,r.store_id_raw AS "storeId",r.store_name_local_raw AS "storeName",left(r.modified_raw,10) AS date,coalesce(r.visible_raw,'') AS visible,coalesce(r.deploy_raw,'') AS deploy,
     CASE WHEN r.clean_status='visible_blank' THEN 'blank' ELSE coalesce(r.clean_status,'') END AS status,r.excel_row AS "excelRow",r.sheet_name AS sheet,
     EXISTS(SELECT 1 FROM formal_records f WHERE f.import_id=$1 AND f.raw_record_id=r.id) AS "inFormal",
     (SELECT json_build_object('status',a.status,'reason',coalesce(a.reason,'')) FROM appeals a WHERE a.raw_record_id=r.id ORDER BY a.id DESC LIMIT 1) AS appeal
-   FROM paged r ORDER BY r.modified_raw,r.excel_row,r.id)row),'[]') AS items`,[id,query.bucket,query.q?'%'+query.q+'%':'',(query.page-1)*50])).rows[0];
-  return {file,summary,...result,page:query.page,pageSize:50,pages:Math.max(1,Math.ceil(result.total/50)),bucket:query.bucket,q:query.q};
+   FROM paged r ORDER BY r.modified_raw,r.excel_row,r.id)row),'[]') AS items`,[id,query.bucket,query.q?'%'+query.q+'%':'',(query.page-1)*100])).rows[0];
+  return {file,summary,...result,page:query.page,pageSize:100,pages:Math.max(1,Math.ceil(result.total/100)),bucket:query.bucket,q:query.q};
  });}
 }
 @Controller('imports')

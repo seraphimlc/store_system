@@ -8,7 +8,7 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   return Number.isFinite(+date) && new Date(+date + 9 * 3600000).toISOString().slice(0, 10) === value;
 });
 const filters = z.object({
-  page: id.default(1), limit: id.max(100).default(50), keyword: z.string().trim().max(120).optional(),
+  page: id.default(1), limit: id.max(100).default(100), keyword: z.string().trim().max(120).optional(),
   actorId: id.optional(), teamId: id.optional(), regionId: id.optional(), gridId: id.optional(),
   eventType: z.string().max(80).optional(), from: day.optional(), to: day.optional(),
 });

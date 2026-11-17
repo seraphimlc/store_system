@@ -24,9 +24,9 @@ export class EmployeesController {
   const result=await this.db.query(`WITH matching AS (
     SELECT id,username,display_name,person_code,role,status,is_active,lang,must_change_password
     FROM users WHERE role IN ('staff','leader') AND status<>'deleted' AND ($1='' OR username ILIKE $1 OR display_name ILIKE $1 OR person_code ILIKE $1) AND ($2::text IS NULL OR status=$2)
-   ), paged AS (SELECT id,username,display_name AS "displayName",person_code AS "personCode",role,status,is_active AS "isActive",lang AS language,must_change_password AS "mustChangePassword" FROM matching ORDER BY ${employeeOrder} LIMIT 30 OFFSET $3)
-   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items`,[search?'%'+search+'%':'',status??null,(page-1)*30]);
-  return {...result.rows[0],page,pageSize:30};
+   ), paged AS (SELECT id,username,display_name AS "displayName",person_code AS "personCode",role,status,is_active AS "isActive",lang AS language,must_change_password AS "mustChangePassword" FROM matching ORDER BY ${employeeOrder} LIMIT 100 OFFSET $3)
+   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items`,[search?'%'+search+'%':'',status??null,(page-1)*100]);
+  return {...result.rows[0],page,pageSize:100};
  }
  @Post('suggest-username') async suggest(@Req() req:Request,@Body() body:unknown){
   await this.auth.require(req,{admin:true,write:true});

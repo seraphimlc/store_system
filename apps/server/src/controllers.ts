@@ -62,7 +62,7 @@ export class ReadController {
       count(DISTINCT r.id)::int AS regions,count(g.id)::int AS grids,
       coalesce(sum(g.total_stores),0)::int AS "totalStores",coalesce(sum(g.completed_stores),0)::int AS "completedStores"
       FROM bd_main_task m JOIN visible_regions r ON r.main_task_id=m.id LEFT JOIN visible_grids g ON g.region_task_id=r.id
-      GROUP BY m.id ORDER BY m.created_at DESC,m.id DESC LIMIT 30`, [user.id, user.role === 'admin', user.personCode]);
+      GROUP BY m.id ORDER BY m.created_at DESC,m.id DESC LIMIT 100`, [user.id, user.role === 'admin', user.personCode]);
     return { items: result.rows };
   }
 }

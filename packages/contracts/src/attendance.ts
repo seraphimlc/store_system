@@ -2,6 +2,7 @@ export type AttendanceKind='in'|'out';
 export interface AttendanceEvent {
  id:number;code:string;kind:AttendanceKind;at:string;source:'onsite'|'makeup';
  latitude:number|null;longitude:number|null;accuracy:number|null;locatedAt:string|null;createdAt:string;
+ address:string|null;insideGrid:boolean|null;
 }
 export interface AttendanceMakeup {
  id:number;code:string;kind:AttendanceKind;at:string;reason:string;status:'pending'|'approved'|'rejected';

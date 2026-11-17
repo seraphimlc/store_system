@@ -53,7 +53,7 @@ export class DailyReportsService {
   if(deleted.rowCount)await this.synchronize(client,code,day,false);
   return {deleted:!!deleted.rowCount};
  });}
- async list(start:string,end:string,code:string,page:number,limit=30){
+ async list(start:string,end:string,code:string,page:number,limit=100){
   const result=await this.db.query(`WITH matching AS (SELECT ${fields},coalesce(p.display_name,r.person_code) AS name FROM staff_daily_reports r LEFT JOIN persons p ON p.code=r.person_code WHERE report_date BETWEEN $1::date AND $2::date AND ($3='' OR r.person_code=$3) AND ${excludeDeletedStaff('r.person_code')}),paged AS (SELECT * FROM matching ORDER BY date DESC,"personCode",id LIMIT $4 OFFSET $5)
    SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items,
    (SELECT json_build_object('p1',coalesce(sum(p1),0),'p2',coalesce(sum(p2),0),'total',coalesce(sum(total),0),'points',coalesce(sum(p1+2*p2),0)) FROM matching) AS summary`,[start,end,code,limit,(page-1)*limit]);

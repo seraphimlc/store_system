@@ -7,7 +7,7 @@ import request from '../node_modules/supertest';
 import {hash} from '@node-rs/argon2';
 import {createApp} from '../src/main';
 import {Database} from '../src/database';
-import {attendanceDay} from '../src/attendance';
+import {attendanceDay,pointInGeometry} from '../src/attendance';
 import {attendanceSummary} from '../../../packages/domain/src/attendance';
 import type {AttendanceEvent} from '../../../packages/contracts/src/attendance';
 
@@ -20,16 +20,25 @@ test('attendance day changes at JST 05:00, including month/year and leap-day bou
  ])assert.equal(attendanceDay(new Date(instant)),day);
 });
 test('attendance summary selects earliest in and latest out with their own positions, retains mistakes and flags out-only',()=>{
- const row=(id:number,kind:'in'|'out',at:string):AttendanceEvent=>({id,code:'test',kind,at,source:'onsite',latitude:id,longitude:id,accuracy:10,locatedAt:at,createdAt:at});
+ const row=(id:number,kind:'in'|'out',at:string):AttendanceEvent=>({id,code:'test',kind,at,source:'onsite',latitude:id,longitude:id,accuracy:10,locatedAt:at,createdAt:at,address:null,insideGrid:null});
  const events=[row(4,'out','2026-11-16T19:00:00+09:00'),row(2,'in','2026-11-16T09:00:00+09:00'),row(1,'in','2026-11-16T08:00:00+09:00'),row(3,'out','2026-11-16T18:00:00+09:00')];
  const summary=attendanceSummary(events);assert.equal(summary.firstIn,events[2]);assert.equal(summary.lastOut,events[0]);assert.equal(summary.outWithoutIn,false);assert.equal(events[0].id,4);assert.equal(events.length,4);
  assert.equal(attendanceSummary([events[0]]).outWithoutIn,true);assert.equal(attendanceSummary([]).outWithoutIn,false);
+});
+test('grid membership uses the outer ring and excludes holes',()=>{
+ const square={type:'Polygon',coordinates:[[[0,0],[2,0],[2,2],[0,2],[0,0]]]};
+ assert.equal(pointInGeometry(1,1,square),true);assert.equal(pointInGeometry(3,1,square),false);
+ const hole={type:'Polygon',coordinates:[[[0,0],[4,0],[4,4],[0,4],[0,0]],[[1,1],[1,3],[3,3],[3,1],[1,1]]]};
+ assert.equal(pointInGeometry(0.5,0.5,hole),true);assert.equal(pointInGeometry(2,2,hole),false);
+ assert.equal(pointInGeometry(1,1,{type:'MultiPolygon',coordinates:[square.coordinates]}),true);
+ assert.equal(pointInGeometry(1,1,null),false);assert.equal(pointInGeometry(1,1,{type:'LineString',coordinates:[[0,0],[1,1]]}),false);
 });
 test('attendance API: mandatory location, server time, retry/concurrency, current-team scope, makeup audit and domain isolation',{skip:!url},async()=>{
  assert.equal(process.env.NEXT_TEST_ISOLATED,'1');assert.match(new URL(url!).pathname,/_refactor_p1$/);
  const app=await createApp({databaseUrl:url!,sessionSecret:'attendance-fixture-secret-at-least-40-characters',cookieSecure:false,port:0,host:'127.0.0.1'}),db=app.get(Database);
  // The migration is replay-safe and only applied inside the runner's disposable schema-only database.
  await db.query(await readFile('deploy-next/migrations/010-attendance.sql','utf8'));
+ await db.query(await readFile('deploy-next/migrations/011-attendance-place.sql','utf8'));
  const codes=['ATT-LEADER-A','ATT-LEADER-B','ATT-MEMBER','ATT-OUTSIDER'],ids:number[]=[],teamIds:number[]=[];
  const snapshot=async()=>JSON.stringify((await db.query(`SELECT
   (SELECT count(*) FROM formal_records) AS formal,(SELECT count(*) FROM month_perf_records) AS monthly,
@@ -56,6 +65,8 @@ test('attendance API: mandatory location, server time, retry/concurrency, curren
   const body=punch(),start=Date.now();
   const posted=await Promise.all([member.post('/api/attendance/punch',body).expect(201),member.post('/api/attendance/punch',body).expect(201)]);
   assert.equal(posted[0].body.id,posted[1].body.id);assert.match(posted[0].body.day,/^\d{4}-\d{2}-\d{2}$/);
+  const stored=(await db.query('SELECT address,inside_grid FROM bd_attendance_event WHERE id=$1',[posted[0].body.id])).rows[0];
+  assert.equal(stored.address,null);assert.equal(stored.inside_grid,false);
   await member.post('/api/attendance/punch',{...body,kind:'out'}).expect(409);
   await member.post('/api/attendance/punch',{...punch(),kind:'out'}).expect(201);
   await member.post('/api/attendance/punch',punch()).expect(201);
@@ -82,6 +93,16 @@ test('attendance API: mandatory location, server time, retry/concurrency, curren
   await db.query("INSERT INTO bd_team_member(team_id,person_code,role,start_date,created_at) VALUES($1,$2,'member',current_date,now())",[teamIds[1],codes[2]]);
   assert.ok(!(await teamA().expect(200)).body.people.some((p:{code:string})=>p.code===codes[2]));
   assert.equal((await leaderB.agent.get('/api/attendance?scope=team').expect(200)).body.events.filter((e:AttendanceEvent)=>e.code===codes[2]).length,3);
+  const located={...punch(),address:'东京都千代田区一丁目'};
+  const placed=(await member.post('/api/attendance/punch',located).expect(201)).body;
+  const placedRow=(await db.query('SELECT address,inside_grid FROM bd_attendance_event WHERE id=$1',[placed.id])).rows[0];
+  assert.equal(placedRow.address,'东京都千代田区一丁目');assert.equal(placedRow.inside_grid,false);
+  await member.post('/api/attendance/punch',{...located,address:'别的地址'}).expect(409);
+  assert.equal((await member.post('/api/attendance/punch',located).expect(201)).body.id,placed.id);
+  await member.post('/api/attendance/punch',{...punch(),address:'  '}).expect(400);
+  const mapConfig=(await member.agent.get('/api/attendance/map-config').expect(200)).body;
+  assert.equal(mapConfig.provider,'google');assert.equal(mapConfig.enabled,!!mapConfig.key);
+  await admin.agent.get('/api/attendance/map-config').expect(403);
   await db.query('UPDATE bd_team_member SET end_date=current_date WHERE person_code=$1 AND end_date IS NULL',[codes[1]]);
   assert.equal((await leaderB.agent.get('/api/attendance?scope=team').expect(200)).body.total,0);
   await member.agent.get('/api/attendance?day=2026-02-30').expect(400);
@@ -103,8 +124,17 @@ test('attendance API: mandatory location, server time, retry/concurrency, curren
   const next=(await member.post('/api/attendance/makeup',{...makeup,requestKey:randomUUID(),occurredAt:'2026-01-02T05:00:00+09:00'}).expect(201)).body;assert.equal(next.day,'2026-01-02');
   await admin.post('/api/attendance/makeup/'+next.id+'/review',{decision:approved?'rejected':'approved'}).expect(201);
   await admin.post('/api/attendance/makeup/'+next.id+'/review',{decision:'approved'}).expect(409);
-  const row=(await db.query('SELECT * FROM bd_attendance_event WHERE source=\'makeup\'')).rows[0];assert.equal(row.latitude,null);assert.equal(row.actor_id,ids[0]);
+  const row=(await db.query('SELECT * FROM bd_attendance_event WHERE source=\'makeup\'')).rows[0];assert.equal(row.latitude,null);assert.equal(row.longitude,null);assert.equal(row.address,null);assert.equal(row.inside_grid,null);assert.equal(row.actor_id,ids[0]);
   assert.equal(await snapshot(),before,'attendance must not alter plan, report, payroll or settlement facts');
+  const roster=()=>admin.agent.get('/api/attendance?scope=all').expect(200);
+  assert.equal((await roster()).body.pageSize,100);
+  assert.equal((await roster()).body.people.some((p:{code:string})=>p.code===codes[3]),true);
+  await db.query("UPDATE users SET status='disabled',is_active=false WHERE id=$1",[ids[4]]);
+  assert.equal((await roster()).body.people.some((p:{code:string})=>p.code===codes[3]),false);
+  await db.query("UPDATE users SET status='leave',is_active=true WHERE id=$1",[ids[4]]);
+  assert.equal((await roster()).body.people.some((p:{code:string})=>p.code===codes[3]),true);
+  await db.query("UPDATE users SET status='resigned',is_active=false WHERE id=$1",[ids[4]]);
+  assert.equal((await roster()).body.people.some((p:{code:string})=>p.code===codes[3]),false);
   await db.query("UPDATE users SET status='disabled',is_active=false WHERE id=$1",[ids[3]]);await member.post('/api/attendance/punch',punch()).expect(401);
  }finally{await app.close();}
 });

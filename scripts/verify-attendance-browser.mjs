@@ -12,13 +12,13 @@ if(pinned)await writeFile(pinned.dir+'/browser-network.json',JSON.stringify({ok:
 const browser=await chromium.launch({headless:true,channel:'chrome'}),errors=[],checks=[];
 const day='2026-11-16',now='2026-11-16T01:00:00Z',events=[],requests=[],punches=[];
 const people=[{code:'attendance-fixture',name:'打卡员工',team:'验收队伍'},{code:'attendance-out',name:'只有退勤员工',team:'验收队伍'}];
-events.push({id:99,code:'attendance-out',kind:'out',at:now,source:'onsite',latitude:35.68,longitude:139.76,accuracy:10,locatedAt:now,createdAt:now});
+events.push({id:99,code:'attendance-out',kind:'out',at:now,source:'onsite',latitude:35.68,longitude:139.76,accuracy:10,locatedAt:now,createdAt:now,address:'东京都千代田区',insideGrid:false});
 let lostResponse=true;
 async function pageFor(role,width=430,language='zh',reminder=false){
  const context=await browser.newContext({viewport:{width,height:932},isMobile:width<600,hasTouch:width<600}),page=await context.newPage();
  page.on('pageerror',e=>errors.push(e.message));
  if(pinned)await attachPinnedAssets(context,pinned,base);
- if(!reminder)await context.addInitScript(()=>localStorage.setItem('store:daily-login:attendance:1',new Date(Date.now()+4*3600_000).toISOString().slice(0,10)));
+ if(!reminder)await context.addInitScript(value=>localStorage.setItem('store:daily-login:attendance:1',value),day);
  let responseDay=day,alreadyIn=false,attendanceUnavailable=false,planPending=null;
  const reminderState={setPlan(value){planPending=value;},setDay(value){responseDay=value;},setAlreadyIn(value){alreadyIn=value;},setUnavailable(value){attendanceUnavailable=value;}};
  await context.addInitScript(()=>{
@@ -85,8 +85,11 @@ try{
  const admin=await pageFor('admin',1280);await admin.page.goto(base+'/admin/attendance');await admin.page.locator('.attendance-state-error').waitFor();assert.equal(await admin.page.locator('.attendance-table tbody tr').count(),2);
  await admin.page.getByLabel('姓名或编号',{exact:true}).fill('只有退勤');await admin.page.getByRole('button',{name:'查询',exact:true}).click();await admin.page.waitForFunction(()=>document.querySelectorAll('.attendance-table tbody tr').length===1);await admin.page.locator('.attendance-state-error').waitFor();
  await admin.page.getByLabel('姓名或编号',{exact:true}).fill('不存在');await admin.page.getByRole('button',{name:'查询',exact:true}).click();await admin.page.getByText('暂无成员',{exact:true}).waitFor();await admin.page.getByLabel('姓名或编号',{exact:true}).fill('');await admin.page.getByRole('button',{name:'查询',exact:true}).click();await admin.page.waitForFunction(()=>document.querySelectorAll('.attendance-table tbody tr').length===2);
- assert.equal(await admin.page.getByRole('columnheader',{name:'状态',exact:true}).count(),1);assert.ok(await admin.page.locator('.attendance-table summary').first().getByText('待审核补卡',{exact:false}).count());
- await admin.page.locator('.attendance-table tbody tr').first().locator('summary').click();await admin.page.getByRole('button',{name:'通过',exact:true}).waitFor();await admin.page.locator('input[name="note"]').fill('核对通过');await admin.page.getByRole('button',{name:'通过',exact:true}).click();await admin.page.getByRole('button',{name:'通过',exact:true}).waitFor({state:'detached'});assert.equal(requests[0].status,'approved');assert.equal(requests[0].note,'核对通过');await noOverflow(admin.page);await admin.page.screenshot({path:'data/refactor/attendance-views/admin-desktop.png',fullPage:true});checks.push('admin search/empty/reset, explicit status and pending indicator, makeup review and desktop bounds');
+ assert.equal(await admin.page.getByRole('columnheader',{name:'状态',exact:true}).count(),1);assert.ok(await admin.page.locator('.attendance-table tbody tr').first().getByText('待审核补卡',{exact:false}).count());
+ await admin.page.locator('.attendance-table tbody tr').first().getByRole('button',{name:/动态明细/}).click();const drawer=admin.page.locator('.map-management-drawer');await drawer.waitFor();await drawer.getByRole('button',{name:'通过',exact:true}).waitFor();await drawer.locator('input[name="note"]').fill('核对通过');await drawer.getByRole('button',{name:'通过',exact:true}).click();await drawer.getByRole('button',{name:'通过',exact:true}).waitFor({state:'detached'});assert.equal(requests[0].status,'approved');assert.equal(requests[0].note,'核对通过');
+ await drawer.getByRole('button',{name:'关闭',exact:true}).click();await drawer.waitFor({state:'detached'});
+ await admin.page.locator('.attendance-table tbody tr').nth(1).getByRole('button',{name:/动态明细/}).click();await drawer.getByText('东京都千代田区',{exact:false}).waitFor();await drawer.getByText('网格外',{exact:false}).waitFor();await drawer.getByRole('button',{name:'关闭',exact:true}).click();await drawer.waitFor({state:'detached'});
+ await noOverflow(admin.page);await admin.page.screenshot({path:'data/refactor/attendance-views/admin-desktop.png',fullPage:true});checks.push('admin search/empty/reset, explicit status and pending indicator, drawer detail, place and grid flag, makeup review and desktop bounds');
  await admin.page.setViewportSize({width:430,height:932});await noOverflow(admin.page);checks.push('admin narrow-screen bounds');await admin.context.close();
  assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,checks,pageErrors:errors},null,2));
 }finally{await browser.close();}

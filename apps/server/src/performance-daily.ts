@@ -16,13 +16,13 @@ export class PerformanceDailyService{
     :`SELECT person_code AS code,japan_date AS date,count(*)::int AS records,(count(*)-count(*) FILTER(WHERE points=2))::int AS p1,count(*) FILTER(WHERE points=2)::int AS p2,(count(*)+count(*) FILTER(WHERE points=2))::int AS points FROM formal_records WHERE japan_date BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR person_code=$3) GROUP BY person_code,japan_date`;
    const sql=`WITH daily AS(${source}),dates AS(SELECT DISTINCT date FROM daily),selected AS(SELECT CASE WHEN $4::text='all' THEN NULL WHEN $4::text IS NOT NULL THEN $4::date WHEN $6::boolean THEN NULL ELSE (SELECT max(date) FROM dates) END AS day),matched AS(
     SELECT d.code,coalesce(p.display_name,d.code) AS name,d.date::text AS date,d.records,d.p1,d.p2,d.points FROM daily d LEFT JOIN persons p ON p.code=d.code WHERE (SELECT day FROM selected) IS NULL OR d.date=(SELECT day FROM selected)
-   ),paged AS(SELECT * FROM matched ORDER BY date,code NULLS LAST LIMIT 30 OFFSET $5),month_totals AS(SELECT coalesce(sum(records),0)::int AS records,coalesce(sum(p1),0)::int AS p1,coalesce(sum(p2),0)::int AS p2,coalesce(sum(points),0)::int AS points FROM daily),totals AS(SELECT coalesce(sum(records),0)::int AS records,coalesce(sum(p1),0)::int AS p1,coalesce(sum(p2),0)::int AS p2,coalesce(sum(points),0)::int AS points FROM matched)
+   ),paged AS(SELECT * FROM matched ORDER BY date,code NULLS LAST LIMIT 100 OFFSET $5),month_totals AS(SELECT coalesce(sum(records),0)::int AS records,coalesce(sum(p1),0)::int AS p1,coalesce(sum(p2),0)::int AS p2,coalesce(sum(points),0)::int AS points FROM daily),totals AS(SELECT coalesce(sum(records),0)::int AS records,coalesce(sum(p1),0)::int AS p1,coalesce(sum(p2),0)::int AS p2,coalesce(sum(points),0)::int AS points FROM matched)
    SELECT (SELECT count(*)::int FROM matched) AS total,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS items,
     (SELECT row_to_json(totals) FROM totals) AS summary,(SELECT row_to_json(month_totals) FROM month_totals) AS "monthSummary",
     coalesce((SELECT json_agg(date::text ORDER BY date DESC) FROM dates),'[]'::json) AS dates,(SELECT day::text FROM selected) AS "selectedDate"`;
-   const result=(await client.query(sql,[start,end,code,date??null,(page-1)*30,personal])).rows[0];
+   const result=(await client.query(sql,[start,end,code,date??null,(page-1)*100,personal])).rows[0];
    const people=personal?[]:(await client.query<{code:string;name:string}>(`SELECT DISTINCT d.code,coalesce(p.display_name,d.code) AS name FROM (${source}) d LEFT JOIN persons p ON p.code=d.code WHERE d.code IS NOT NULL AND ${selectableStaff('d.code')} ORDER BY name,code`,[start,end,null])).rows;
-   return {...result,month,page,pageSize:30,people,source:personal?'person_daily_stats':'formal_records'};
+   return {...result,month,page,pageSize:100,people,source:personal?'person_daily_stats':'formal_records'};
   });
  }
 }

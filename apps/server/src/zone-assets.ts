@@ -34,9 +34,9 @@ export class ZoneAssetsService{
     ${gridAssetsSelect}
     WHERE ($6::int IS NULL OR g.id=$6) AND coalesce(s.source->>'region_code','tokyo23')=ANY($1::text[]) AND ($2='' OR g.state=$2)
      AND ($3='' OR g.name ILIKE $4 OR g.source_id ILIKE $4 OR g.id::text=$3 OR g.stations::text ILIKE $4 OR g.keywords::text ILIKE $4)
-   ), paged AS (SELECT * FROM matching ORDER BY id LIMIT 30 OFFSET $5)
-   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT jsonb_agg(p ORDER BY p.id) FROM paged p),'[]') AS items`,[input.region==='all'?['tokyo23','tokyo26','kanagawa','saitama','chiba']:[input.region],input.state,input.q,term,(input.page-1)*30,input.gridId??null]);
-   return {...result,page:input.page,pageSize:30};
+   ), paged AS (SELECT * FROM matching ORDER BY id LIMIT 100 OFFSET $5)
+   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT jsonb_agg(p ORDER BY p.id) FROM paged p),'[]') AS items`,[input.region==='all'?['tokyo23','tokyo26','kanagawa','saitama','chiba']:[input.region],input.state,input.q,term,(input.page-1)*100,input.gridId??null]);
+   return {...result,page:input.page,pageSize:100};
   });
  }
  async gridBatches(actorId:number,id:number){return this.db.transaction(async client=>{
@@ -90,11 +90,11 @@ export class ZoneAssetsService{
     WHERE r.state<>'archived' AND coalesce(s.source->>'region_code','tokyo23')=ANY($1::text[])
       AND ($2='' OR r.name ILIKE $3 OR r.id::text=$2 OR EXISTS(SELECT 1 FROM bd_work_grid g
        WHERE g.zone_id=r.id AND g.state<>'disabled' AND (g.name ILIKE $3 OR g.source_id ILIKE $3 OR g.id::text=$2 OR g.stations::text ILIKE $3 OR g.keywords::text ILIKE $3)))
-   ), paged AS (SELECT * FROM matching ORDER BY id LIMIT 30 OFFSET $4),
+   ), paged AS (SELECT * FROM matching ORDER BY id LIMIT 100 OFFSET $4),
    enriched AS (SELECT p.*,(SELECT count(*)::int FROM bd_work_grid g WHERE g.zone_id=p.id) AS grids,
      (SELECT count(*)::int FROM bd_grid_store m JOIN bd_work_grid g ON g.id=m.grid_id WHERE g.zone_id=p.id) AS stores FROM paged p)
-   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT jsonb_agg(p ORDER BY p.id) FROM enriched p),'[]') AS items`,[input.region==='all'?['tokyo23','tokyo26','kanagawa','saitama','chiba']:[input.region],input.q,term,(input.page-1)*30]);
-   return {...row,page:input.page,pageSize:30,region:input.region};
+   SELECT (SELECT count(*)::int FROM matching) AS total,coalesce((SELECT jsonb_agg(p ORDER BY p.id) FROM enriched p),'[]') AS items`,[input.region==='all'?['tokyo23','tokyo26','kanagawa','saitama','chiba']:[input.region],input.q,term,(input.page-1)*100]);
+   return {...row,page:input.page,pageSize:100,region:input.region};
   });
  }
  private async admin(client:import('pg').PoolClient,id:number){
