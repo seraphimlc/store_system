@@ -46,7 +46,8 @@ async function build() {
   await writeJson(join(dir, 'building.json'), { commit, dirty });
   progress('applicable tests and type checks');
   run('pnpm', ['install', '--frozen-lockfile']);
-  run('pnpm', ['test']);
+  if(opts['test-files'])for(const file of opts['test-files'].split(','))run('pnpm',['test','--','--file='+file]);
+  else run('pnpm', ['test']);
   run('pnpm', ['typecheck']);
   progress('compile server, worker and contracts');
   for (const name of ['server', 'worker']) run('pnpm', ['--filter', `@store/${name}`, 'build']);
@@ -116,6 +117,7 @@ async function build() {
   const html = {};
   for (const name of ['index.html', 'admin/index.html']) html[name] = digest(await readFile(join(gateway, 'html', name)));
   const manifest = { id, commit, dirty, createdAt: new Date().toISOString(), env: opts.env, assetsMode: opts.assets, platform,
+    verification:{testMode:opts['test-files']?'scoped-retry':'full',testFiles:opts['test-files']?.split(',')??null},
     componentScope:{api:'rebuild',worker:'rebuild-shared-image',admin:'rebuild',gateway:'rebuild',staff:reusedStaff??'rebuild'},supportedTaskKinds:['system.check','report.analysis','dashboard.analysis','settlement.judge','settlement.finalize','settlement.rebuild','import.visit','import.delete','reconciliation.monthly','store.master','reconciliation.insight','store.ai'],zoneEvidence,lockSha256: digest(await readFile('pnpm-lock.yaml')), images, imageDigests, html, assets, staffPwa };
   await writeJson(join(dir, 'manifest.json'), manifest);
   await rm(join(dir, 'building.json'));

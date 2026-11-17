@@ -8,6 +8,9 @@ test('release arguments prevent target confusion and path traversal', () => {
   assert.throws(()=>parseArgs(['rollback']),/required/);
   assert.throws(()=>parseArgs(['build','--assets','remote']),/assets/);
   assert.equal(parseArgs(['build','--reuse-staff','old-release'])['reuse-staff'],'old-release');
+  assert.equal(parseArgs(['build','--test-files','apps/server/test/attendance.test.ts,scripts/release-lib.test.mjs'])['test-files'],'apps/server/test/attendance.test.ts,scripts/release-lib.test.mjs');
+  for(const files of ['../unsafe.test.ts','scripts/missing.mjs','scripts/a.test.mjs,scripts/a.test.mjs'])assert.throws(()=>parseArgs(['build','--test-files',files]));
+  assert.throws(()=>parseArgs(['deploy','--release','r1','--test-files','scripts/a.test.mjs']));
   assert.throws(()=>parseArgs(['build','--reuse-staff','../old']));assert.throws(()=>parseArgs(['deploy','--release','r1','--reuse-staff','old']));
 });
 test('resource base is independent from the application route and frozen by release', () => {

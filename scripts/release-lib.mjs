@@ -5,7 +5,7 @@ export function parseArgs(argv) {
   const command = args.shift();
   if (!['build', 'deploy', 'rollback'].includes(command)) throw new Error('Expected build, deploy or rollback');
   const options = { command, env: 'local', assets: 'local', config: '.env.next.local' };
-  const allowed = new Set(['env', 'assets', 'release', 'config', 'platform', 'reuse-staff']);
+  const allowed = new Set(['env', 'assets', 'release', 'config', 'platform', 'reuse-staff', 'test-files']);
   while (args.length) {
     const key = args.shift()?.replace(/^--/, ''); const value = args.shift();
     if (!allowed.has(key) || !value || value.startsWith('--')) throw new Error('Invalid release arguments');
@@ -17,6 +17,7 @@ export function parseArgs(argv) {
   if (command !== 'build' && !options.release) throw new Error('--release is required');
   if (options.platform && !/^linux\/(arm64|amd64)$/.test(options.platform)) throw new Error('Unsupported platform');
   if(options['reuse-staff']&&(!/^[a-z0-9][a-z0-9-]{0,62}$/.test(options['reuse-staff'])||command!=='build'))throw new Error('--reuse-staff requires build and an existing release ID');
+  if(options['test-files']){const files=options['test-files'].split(',');if(command!=='build'||new Set(files).size!==files.length||files.some(file=>! /^(?:(?:apps\/(?:server|worker)\/test|packages\/domain\/test)\/[a-zA-Z0-9][a-zA-Z0-9.-]*\.test\.ts|scripts\/[a-zA-Z0-9][a-zA-Z0-9.-]*\.test\.mjs)$/.test(file)))throw new Error('--test-files requires build and explicit test file paths');}
   return options;
 }
 export function digest(value) { return createHash('sha256').update(value).digest('hex'); }
