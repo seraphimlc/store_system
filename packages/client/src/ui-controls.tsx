@@ -1,6 +1,6 @@
 import {createContext,createElement,useContext,type ComponentPropsWithRef,type ElementType,type ReactNode} from 'react';
 export type ClientControlTag='fieldset'|'form'|'input'|'select'|'textarea'|'button'|'table'|'thead'|'tbody'|'tr'|'th'|'td';
-export type ClientControls=Partial<Record<ClientControlTag|'pagination'|'successNotice',ElementType>>;
+export type ClientControls=Partial<Record<ClientControlTag|'pagination'|'successNotice'|'badge',ElementType>>;
 const Controls=createContext<ClientControls>({});
 /** H5 renders the original native elements unless its own host explicitly supplies controls. */
 export function ClientControlsProvider({components,children}:{components:ClientControls;children:ReactNode}){return createElement(Controls.Provider,{value:components},children);}
@@ -13,3 +13,4 @@ export function UIPagination(props:ComponentPropsWithRef<'div'>){const component
 
 /** Hosts choose result feedback; H5 retains its existing inline announcement. */
 export function UISuccessNotice(props:ComponentPropsWithRef<'div'>){const components=useContext(Controls);return createElement(components.successNotice??'div',props);}
+export function UIBadge({variant,size,...props}:{variant?:string;size?:string}&ComponentPropsWithRef<'span'>){const components=useContext(Controls);return createElement(components.badge??'span',components.badge?{variant,size,...props}:props);}

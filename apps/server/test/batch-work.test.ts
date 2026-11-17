@@ -2,6 +2,18 @@ import {spawnLegacyPython} from '../../../scripts/legacy-python.mjs';
 import 'reflect-metadata';import test from 'node:test';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {randomUUID} from 'node:crypto';import {hash} from '@node-rs/argon2';import request from '../node_modules/supertest';import {createApp} from '../src/main';import {Database} from '../src/database';import {BatchWorkService} from '../src/batch-work';import {batchProgress} from '../../../packages/domain/src/batch-progress';import {seedBatchWork,clearBatchWork} from '../../../scripts/batch-work-fixture.mjs';
 const url=process.env.NEXT_TEST_DATABASE_URL;
 test('current hierarchical rollup is store weighted, empty branches complete and invalid counters reject',()=>{assert.deepEqual(batchProgress('region',4,1),{progress:25,status:'in_progress'});assert.deepEqual(batchProgress('grid',0,0),{progress:100,status:'completed'});assert.equal(batchProgress('grid',4,0,true).status,'assigned');assert.throws(()=>batchProgress('main',4,5));});
+test('region tree reports snapshot area and the 60-day visited share',{skip:!url},async()=>{
+ assert.match(new URL(url!).pathname,/_refactor_p1$/);const app=await createApp({databaseUrl:url!,sessionSecret:'batch-work-at-least-40-character-secret-value',cookieSecure:false,port:0,host:'127.0.0.1'}),db=app.get(Database),service=app.get(BatchWorkService);let f:any;
+ try{
+  f=await seedBatchWork(db,'P5-COV-'+Date.now().toString(36),await hash('batch-coverage'));
+  await db.query('UPDATE bd_region SET area_km2=99 WHERE id=$1',[f.region]);
+  await db.query("UPDATE bd_region_task SET snapshot=(snapshot::jsonb || jsonb_build_object('area_km2',1.25))::json WHERE id=$1",[f.regions[0]]);
+  const recent=f.stores[0][0][0],stale=f.stores[0][1][0],sources=(await db.query('SELECT id,store_id FROM bd_store_task WHERE id=ANY($1::int[])',[[recent,stale]])).rows,recentSource=sources.find((row:any)=>row.id===recent).store_id,staleSource=sources.find((row:any)=>row.id===stale).store_id;
+  await db.query("INSERT INTO bd_task_event(main_task_id,store_source_id,event_type,old_value,new_value,created_at) VALUES ($1,$2,'complete_store_task','{}','{}',now()),($1,$2,'update_store_result','{}','{}',now()),($1,$3,'complete_store_task','{}','{}',now()-interval '61 days'),($1,$2,'verify_store_location','{}','{}',now()),($1,'outside-region','complete_store_task','{}','{}',now())",[f.mains[1],recentSource,staleSource]);
+  const tree=await service.tree(f.users[0],f.mains[0]);assert.equal(tree.regions[0].snapshot.area_km2,1.25);assert.deepEqual(tree.regions[0].coverage,{stores:4,visited:1});
+  const other=await service.tree(f.users[0],f.mains[1]);assert.equal(other.regions[0].snapshot.area_km2,null);assert.deepEqual(other.regions[0].coverage,{stores:4,visited:1});
+ }finally{if(f)await clearBatchWork(db,f);await app.close();}
+});
 test('four-level completion preserves snapshots/isolation, latest retry, revisions, weighted counters and append-only event semantics',{skip:!url},async()=>{
  assert.match(new URL(url!).pathname,/_refactor_p1$/);const app=await createApp({databaseUrl:url!,sessionSecret:'batch-work-at-least-40-character-secret-value',cookieSecure:false,port:0,host:'127.0.0.1'}),db=app.get(Database),service=app.get(BatchWorkService);let f:any;
  const body=(revision=0,note='first',requestId=randomUUID())=>({revision,requestId,status:'normal',note});

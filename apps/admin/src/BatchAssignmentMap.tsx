@@ -1,6 +1,7 @@
 import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {Tabs,TabsList,TabsTrigger} from '@appica/ui-react/tabs';
 import {Drawer,DrawerContent,DrawerHeader,DrawerTitle,DrawerBody,DrawerFooter} from '@appica/ui-react/drawer';
+import {Tooltip,TooltipContent,TooltipProvider,TooltipTrigger} from '@appica/ui-react/tooltip';
 import {AdminCheckbox} from './AdminCheckbox';
 import {Button} from '@appica/ui-react/button';
 import type {Session} from '../../../packages/contracts/src';
@@ -10,7 +11,7 @@ import './batch-assignment-map.css';
 
 export interface AssignmentMapProps {
  batchId:number;
- regions:{id:number;teamId:number|null;teamName:string|null;snapshot:{name?:string}}[];
+ regions:{id:number;teamId:number|null;teamName:string|null;snapshot:{name?:string;area_km2?:number|null};coverage?:{stores:number;visited:number|null}}[];
  selectedIds:number[];
  disabled:boolean;
  onChange:(ids:number[])=>void;
@@ -19,6 +20,20 @@ export interface AssignmentMapProps {
  list:ReactNode;
 }
 type Feature={type:'Feature';id:number;geometry:unknown;properties:{regionId:number;name?:string}};
+type MapRegion=AssignmentMapProps['regions'][number];
+function finiteNumber(value:unknown){if(typeof value==='number'&&Number.isFinite(value))return value;if(typeof value==='string'&&value.trim()!==''&&Number.isFinite(Number(value)))return Number(value);return null;}
+function TipContent({children}:{children:ReactNode}){return <TooltipContent role="tooltip" positionerProps={{style:{zIndex:80}}}>{children}</TooltipContent>;}
+function Tip({label,children,metric,className}:{label:string;children:ReactNode;metric?:string;className?:string}){return <Tooltip><TooltipTrigger delay={200} className={className} render={metric?<span data-metric={metric}/>:<span />}>{children}</TooltipTrigger><TipContent>{label}</TipContent></Tooltip>;}
+function SelectedRegionItem({region,checked,disabled,onChange,language}:{region:MapRegion;checked:boolean;disabled:boolean;onChange:(checked:boolean)=>void;language:string}){
+ const t=(zh:string,ja:string)=>language==='ja'?ja:zh,locale=language==='ja'?'ja-JP':'zh-CN',name=region.snapshot.name||'#'+region.id,assignee=region.teamName||t('未分配','未割当');
+ const area=finiteNumber(region.snapshot.area_km2),stores=region.coverage?region.coverage.stores:null,visited=region.coverage?.visited??null;
+ const areaText=area==null?'— km²':`${area.toLocaleString(locale,{maximumFractionDigits:2})} km²`,storeText=stores==null?t('— 家','— 店舗'):`${stores.toLocaleString(locale)} ${t('家','店舗')}`;
+ const percent=stores!=null&&stores>0&&visited!=null?Math.round(visited/stores*100):null,rateText=percent==null?'60d —':`60d ${percent}%`;
+ const areaTip=area==null?t('面积未知','面積は不明'):t(`面积 ${area.toLocaleString(locale,{maximumFractionDigits:4})} km²`,`面積 ${area.toLocaleString(locale,{maximumFractionDigits:4})} km²`);
+ const storeTip=stores==null?t('商户数未知','店舗数は不明'):t(`商户数 ${storeText}`,`店舗数 ${storeText}`);
+ const rateTip=percent==null?t('没有商户，无法计算60天巡店率','店舗がないため60日巡回率を計算できません'):t(`60天巡店率 ${percent}%（${visited}/${stores}）`,`60日巡回率 ${percent}%（${visited}/${stores}）`);
+ return <li data-selected={checked||undefined}><label><AdminCheckbox aria-label={t('地图选择片区 ','地図の地域を選択 ')+(region.snapshot.name||region.id)} checked={checked} disabled={disabled} onChange={event=>onChange(event.target.checked)}/><span className="batch-assignment-region-copy"><Tooltip><TooltipTrigger delay={200} render={<strong />}>{name}</TooltipTrigger><TipContent>{name}</TipContent></Tooltip><span className="batch-assignment-region-meta"><Tip className="batch-assignment-region-assignee" label={t(`当前分配：${assignee}`,`現在の割当：${assignee}`)}>{assignee}</Tip><span className="batch-assignment-region-metrics"><Tip label={areaTip} metric="area">{areaText}</Tip><span aria-hidden="true"> · </span><Tip label={storeTip} metric="stores">{storeText}</Tip><span aria-hidden="true"> · </span><Tip label={rateTip} metric="rate">{rateText}</Tip></span></span></span></label></li>;
+}
 export function BatchAssignmentMap({batchId,regions,selectedIds,disabled,onChange,filter,actions,list,session,language}:AssignmentMapProps&{session:Session;language:string}) {
  const t=(zh:string,ja:string)=>language==='ja'?ja:zh;
  const [view,setView]=useState('map'),[drawerOpen,setDrawerOpen]=useState(()=>window.innerWidth>=768),[frame,setFrame]=useState({top:0,left:0,width:0,height:320});
@@ -87,7 +102,7 @@ export function BatchAssignmentMap({batchId,regions,selectedIds,disabled,onChang
   {view==='map'&&<Drawer side="right" open={drawerOpen} modal={false} disablePointerDismissal onOpenChange={setDrawerOpen}><DrawerContent frame={false} backdrop={false} className="batch-assignment-drawer" closeLabel={t('关闭已选片区','選択地域を閉じる')} viewportProps={{className:'batch-assignment-drawer-viewport',style:{top:frame.top,left:frame.left,width:frame.width,height:frame.height}}}>
    <DrawerHeader><DrawerTitle>{t('已选片区','選択地域')} · {selectedRegions.length}</DrawerTitle></DrawerHeader>
    <DrawerBody>
-    <ul className="batch-assignment-region-list" aria-label={t('已选片区列表','選択地域一覧')}>{selectedRegions.map(region=><li key={region.id} data-selected={selectedIds.includes(region.id)||undefined}><label><AdminCheckbox aria-label={t('地图选择片区 ','地図の地域を選択 ')+(region.snapshot.name||region.id)} checked={selectedIds.includes(region.id)} disabled={disabled} onChange={event=>onChange(event.target.checked?[...new Set([...selectedIds,region.id])]:selectedIds.filter(id=>id!==region.id))}/><span><strong>{region.snapshot.name||'#'+region.id}</strong><small>{region.teamName||t('未分配','未割当')}</small></span></label></li>)}</ul>
+    <TooltipProvider><ul className="batch-assignment-region-list" aria-label={t('已选片区列表','選択地域一覧')}>{selectedRegions.map(region=><SelectedRegionItem key={region.id} region={region} checked={selectedIds.includes(region.id)} disabled={disabled} language={language} onChange={next=>onChange(next?[...new Set([...selectedIds,region.id])]:selectedIds.filter(id=>id!==region.id))}/>)}</ul></TooltipProvider>
     {!selectedRegions.length&&<p className="batch-assignment-empty">{t('尚未选择片区','地域が選択されていません')}</p>}
    </DrawerBody>
    <DrawerFooter className="batch-assignment-drawer-footer">{actions}</DrawerFooter>
