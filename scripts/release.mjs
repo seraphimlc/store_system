@@ -7,7 +7,7 @@ import { createWriteStream } from 'node:fs';
 import { resolve, join, relative, isAbsolute } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
-import { parseArgs, localDeploymentDatabase, digest, assetBase, gatewayConfig, edgeConfig, taskCompatibilityProbe, retiredReleaseNetworks, localMcpEnvironment, assertDeployableManifest } from './release-lib.mjs';
+import { parseArgs, releaseTestArguments, localDeploymentDatabase, digest, assetBase, gatewayConfig, edgeConfig, taskCompatibilityProbe, retiredReleaseNetworks, localMcpEnvironment, assertDeployableManifest } from './release-lib.mjs';
 const root = process.cwd();
 const base = resolve(root, '.release');
 const opts = parseArgs(process.argv.slice(2));
@@ -46,8 +46,7 @@ async function build() {
   await writeJson(join(dir, 'building.json'), { commit, dirty });
   progress('applicable tests and type checks');
   run('pnpm', ['install', '--frozen-lockfile']);
-  if(opts['test-files'])for(const file of opts['test-files'].split(','))run('pnpm',['test','--','--file='+file]);
-  else run('pnpm', ['test']);
+  for(const args of releaseTestArguments(opts))run('pnpm',args);
   run('pnpm', ['typecheck']);
   progress('compile server, worker and contracts');
   for (const name of ['server', 'worker']) run('pnpm', ['--filter', `@store/${name}`, 'build']);

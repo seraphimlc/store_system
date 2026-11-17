@@ -20,6 +20,7 @@ export function parseArgs(argv) {
   if(options['test-files']){const files=options['test-files'].split(',');if(command!=='build'||new Set(files).size!==files.length||files.some(file=>! /^(?:(?:apps\/(?:server|worker)\/test|packages\/domain\/test)\/[a-zA-Z0-9][a-zA-Z0-9.-]*\.test\.ts|scripts\/[a-zA-Z0-9][a-zA-Z0-9.-]*\.test\.mjs)$/.test(file)))throw new Error('--test-files requires build and explicit test file paths');}
   return options;
 }
+export function releaseTestArguments(options){return options['test-files']?options['test-files'].split(',').map(file=>['test','--file='+file]):[['test']];}
 export function digest(value) { return createHash('sha256').update(value).digest('hex'); }
 export function assetBase(release, app, mode, env) {
   if (mode === 'local') return `/r/${release}/${app}/`;

@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, assetBase, gatewayConfig, edgeConfig, digest, taskCompatibilityProbe } from './release-lib.mjs';
+import { parseArgs, releaseTestArguments, assetBase, gatewayConfig, edgeConfig, digest, taskCompatibilityProbe } from './release-lib.mjs';
 test('release arguments prevent target confusion and path traversal', () => {
   assert.equal(parseArgs(['deploy','--','--release','r-123']).release,'r-123');
+  assert.deepEqual(releaseTestArguments({}),[['test']]);
+  assert.deepEqual(releaseTestArguments({'test-files':'scripts/release-lib.test.mjs,apps/server/test/attendance.test.ts'}),[['test','--file=scripts/release-lib.test.mjs'],['test','--file=apps/server/test/attendance.test.ts']]);
   assert.throws(()=>parseArgs(['deploy','--release','../../production']));
   assert.throws(()=>parseArgs(['deploy','--release','r1','--env','production']),/P7/);
   assert.throws(()=>parseArgs(['rollback']),/required/);
