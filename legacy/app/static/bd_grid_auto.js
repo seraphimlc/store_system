@@ -1,1 +1,0 @@
-/* Automatic region partitioning was retired. Keep this URL valid for cached pages. */
