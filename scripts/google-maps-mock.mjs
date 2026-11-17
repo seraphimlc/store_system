@@ -25,5 +25,6 @@ export const googleMapsMock=`(()=>{
   click(id){emit(this,'click',{feature:this.features.get(id)});}
  }
  class BoundsMock{isEmpty(){return this.value.west===Infinity;}constructor(){this.value={west:Infinity,east:-Infinity,south:Infinity,north:-Infinity};}extend(p){const lat=typeof p.lat==='function'?p.lat():p.lat,lng=typeof p.lng==='function'?p.lng():p.lng;this.value={west:Math.min(this.value.west,lng),east:Math.max(this.value.east,lng),south:Math.min(this.value.south,lat),north:Math.max(this.value.north,lat)};return this;}toJSON(){return this.value;}}
- window.google={maps:{LatLngBounds:BoundsMock,Map:MapMock,Data:DataMock,event:{clearInstanceListeners:object=>object.listeners?.clear(),trigger:(object,name)=>emit(object,name)}}};const callback=new URL(document.currentScript.src).searchParams.get('callback');window[callback]();
+ class GeocoderMock{geocode(request){(window.__storeGeocodeCalls??=[]).push(request);return Promise.resolve({results:[{formatted_address:'東京都千代田区オフライン1'}]});}}
+ window.google={maps:{LatLngBounds:BoundsMock,Map:MapMock,Data:DataMock,Geocoder:GeocoderMock,event:{clearInstanceListeners:object=>object.listeners?.clear(),trigger:(object,name)=>emit(object,name)}}};const callback=new URL(document.currentScript.src).searchParams.get('callback');window[callback]();
 })();`;

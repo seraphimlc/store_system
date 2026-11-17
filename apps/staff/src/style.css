@@ -314,7 +314,7 @@
 .batch-events-mobile details>summary{min-height:44px;align-content:center}
 .batch-events-mobile .batch-log-entry pre{max-height:200px;overflow:auto;padding:8px;background:var(--background-muted);font-size:12px;margin:0}
 
-.work-proposal-drawer{max-height:85dvh;overflow-y:auto;padding:16px 16px calc(20px + env(safe-area-inset-bottom));background:var(--background)}.work-proposal-drawer>.work-row{margin-bottom:12px}.work-proposal-drawer .store-proposals{border:0;margin:0;padding:0}.work-proposal-drawer .store-proposals>summary{display:none}.work-proposal-drawer :is(form,fieldset){display:grid;gap:16px;min-width:0;border:0;margin:0;padding:0}.work-proposal-drawer input{max-width:100%;background:var(--background);color:var(--foreground-intense);border-color:var(--border-strong)}.work-proposal-drawer .proposal-coordinates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.work-proposal-drawer button{min-height:44px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--background);color:var(--foreground-intense)}.work-proposal-drawer button[type=submit]{background:var(--primary);color:var(--primary-foreground)}
+.work-proposal-drawer{max-height:85dvh;overflow-y:auto;padding:16px 16px calc(20px + env(safe-area-inset-bottom));background:var(--background)}.work-proposal-drawer>.work-row{margin-bottom:12px}.work-proposal-drawer .store-proposals{border:0;margin:0;padding:0}.work-proposal-drawer .store-proposals>summary{display:none}.work-proposal-drawer :is(form,fieldset){display:grid;gap:16px;min-width:0;border:0;margin:0;padding:0}.work-proposal-drawer input{max-width:100%;background:var(--background);color:var(--foreground-intense);border-color:var(--border-strong)}.work-proposal-drawer button{min-height:44px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--background);color:var(--foreground-intense)}.work-proposal-drawer button[type=submit]{background:var(--primary);color:var(--primary-foreground)}
 
 /* Search feedback stays inside the existing map search container. */
 .grid-detail .work-bottom-bar{display:flex;flex-direction:column;gap:0}
@@ -418,3 +418,5 @@
 .work-store-navigation[aria-disabled=true]{opacity:.4;cursor:not-allowed}
 .work-store-navigation svg,.work-upload-label svg{flex-shrink:0}
 .work-upload-label{display:inline-flex;align-items:center;justify-content:center;gap:6px;vertical-align:middle;line-height:22px;white-space:nowrap}
+
+.work-photo-picker,.proposal-photo-field{display:grid;gap:8px;min-width:0}.work-photo-picker .work-photos:empty{display:none}.work-photo-picker .work-photos{display:flex;flex-wrap:wrap;gap:12px}.work-proposal-drawer .work-photo-picker input[hidden]{display:none}

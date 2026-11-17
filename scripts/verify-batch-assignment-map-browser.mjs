@@ -100,6 +100,9 @@ try {
   await page.locator('.batch-assignment-drawer').waitFor();
   const selectedText=async()=>(await page.locator('.batch-assignment-region-list li').allTextContents()).map(value=>value.replace(/\s+/g,''));
   assert.deepEqual(await selectedText(),['片区5未分配—km²·0家·60d—']);
+  const arrowAlign=await page.locator('.batch-assignment-region-metrics').evaluate(metrics=>{const side=metrics.parentElement,trigger=side.querySelector('.batch-assignment-grids-trigger'),text=metrics.getBoundingClientRect(),icon=trigger.getBoundingClientRect();return {center:(icon.top+icon.height/2)-(text.top+text.height/2),right:side.getBoundingClientRect().right-icon.right};});
+  assert.ok(Math.abs(arrowAlign.center)<=1,`chevron vertical offset ${arrowAlign.center}`);
+  assert.ok(Math.abs(arrowAlign.right)<=1,`chevron right offset ${arrowAlign.right}`);
   await page.getByRole('button',{name:'展开网格',exact:true}).click();
   await page.locator('.batch-assignment-grid-list [role=listitem]').filter({hasText:'网格5 · 0/3'}).waitFor();
   await page.locator('.batch-assignment-grid-assignee').filter({hasText:'未分派'}).waitFor();
